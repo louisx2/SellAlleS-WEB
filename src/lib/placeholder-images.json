@@ -1,0 +1,70 @@
+{
+  "placeholderImages": [
+    {
+      "id": "iphone_15_pro",
+      "description": "Latest iPhone 15 Pro",
+      "imageUrl": "https://alephksa.com/cdn/shop/files/iPhone_15_Pro_Natural_Titanium_PDP_Image_Position-1__en-ME.jpg?v=1694758467&width=1445",
+      "imageHint": "smartphone apple"
+    },
+    {
+      "id": "galaxy_s24_ultra",
+      "description": "Samsung Galaxy S24 Ultra smartphone",
+      "imageUrl": "https://cdn.hooli.com.do/wp-content/uploads/2024/10/13235417/front.jpg",
+      "imageHint": "smartphone samsung"
+    },
+    {
+      "id": "pixel_8_pro",
+      "description": "Google Pixel 8 Pro smartphone in black",
+      "imageUrl": "https://m.media-amazon.com/images/I/71XEjCc4yLL.jpg",
+      "imageHint": "smartphone google"
+    },
+    {
+      "id": "airpods_pro_2",
+      "description": "Apple AirPods Pro 2nd generation",
+      "imageUrl": "https://portatilshoprd.com/wp-content/uploads/2024/03/MTJV3.jpg",
+      "imageHint": "earbuds apple"
+    },
+    {
+      "id": "galaxy_buds_fe",
+      "description": "Samsung Galaxy Buds FE in white",
+      "imageUrl": "https://shop.samsung.com/latin/pub/media/catalog/product/cache/a69170b4a4f0666a52473c2224ba9220/s/m/sm-r400_000_black_white_2_1.png",
+      "imageHint": "earbuds samsung"
+    },
+    {
+      "id": "usb_c_charger_30w",
+      "description": "A 30W USB-C fast charger block",
+      "imageUrl": "https://http2.mlstatic.com/D_NQ_NP_851759-MLA91115377714_092025-O.webp",
+      "imageHint": "charger block"
+    },
+    {
+      "id": "iphone_case_clear",
+      "description": "A clear protective case for an iPhone",
+      "imageUrl": "https://lacasadelascarcasas.com.mx/209705-large_default/funda-transparente-logo-compatible-con-magsafe-para-iphone-15-pro-max.jpg",
+      "imageHint": "phone case"
+    },
+    {
+      "id": "screen_protector",
+      "description": "A glass screen protector for a smartphone",
+      "imageUrl": "https://losgyks.com/wp-content/uploads/2024/11/GG14PM01-8.jpg",
+      "imageHint": "screen protector"
+    },
+    {
+      "id": "power_bank_anker",
+      "description": "An Anker power bank",
+      "imageUrl": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTw29zM376cLIpFMp9E2bAsTBVRL1oOYj8shA&s",
+      "imageHint": "power bank"
+    },
+    {
+      "id": "wireless_charger",
+      "description": "A wireless charging pad",
+      "imageUrl": "https://cdnx.jumpseller.com/quintec-distribucion/image/22562061/wmtcl-28.jpeg?1647360818",
+      "imageHint": "wireless charger"
+    },
+    {
+      "id": "placeholder",
+      "description": "Generic placeholder image",
+      "imageUrl": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxwcm9kdWN0fGVufDB8fHx8MTc1OTMwNDc3Nnww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageHint": "product"
+    }
+  ]
+}

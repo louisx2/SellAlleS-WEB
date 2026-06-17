@@ -1,0 +1,60 @@
+'use client';
+
+import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ProductDialog } from './product-dialog';
+import type { Product } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
+
+interface ProductActionsProps {
+  product: Product;
+}
+
+export function ProductActions({ product }: ProductActionsProps) {
+  const { toast } = useToast();
+
+  const handleDelete = () => {
+    // This is a mock action. In a real app, this would call a server action.
+    toast({
+      title: 'Acción no implementada',
+      description: `La eliminación del producto ${product.name} no está disponible en esta demo.`,
+      variant: 'destructive',
+    });
+  };
+
+  return (
+    <ProductDialog product={product}>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" className="h-8 w-8 p-0">
+            <span className="sr-only">Abrir menú</span>
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            {/* The ProductDialog wraps the DropdownMenu and provides the trigger for the edit action */}
+            <div>
+              <Pencil className="mr-2 h-4 w-4" />
+              <span>Editar</span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={handleDelete} className="text-destructive">
+            <Trash2 className="mr-2 h-4 w-4" />
+            <span>Eliminar</span>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </ProductDialog>
+  );
+}
