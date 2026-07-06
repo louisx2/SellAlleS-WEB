@@ -1,5 +1,6 @@
 // Conversión entre filas de Supabase (snake_case) y los tipos de la app (camelCase).
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment } from '@/lib/types';
+import { isUuid } from '@/lib/utils';
 
 // ---------- Product ----------
 export const rowToProduct = (r: any): Product => ({
@@ -70,20 +71,43 @@ export const rowToSale = (r: any): Sale => ({
   paymentReference: r.payment_reference ?? undefined,
   customer: r.customers ? rowToCustomer(r.customers) : undefined,
   customerId: r.customer_id ?? undefined,
-  createdAt: new Date(r.created_at), branchId: r.branch_id ?? '',
+  createdAt: new Date(r.created_at),
+  // La app usa el NOMBRE de la sucursal como identidad (filtros, recibos);
+  // en la base es branch_id uuid — al leer se traduce con el join branches(name).
+  branchId: r.branches?.name ?? '',
   financingDetails: r.financing_details ?? undefined,
   payments: [],
   notes: r.notes ?? undefined, userName: r.user_name ?? undefined, userEmail: r.user_email ?? undefined,
   ncf: r.ncf ?? undefined, ncfType: r.ncf_type,
 });
 
-export const saleToRow = (s: Omit<Sale, 'id'>) => ({
-  branch_id: s.branchId || null, customer_id: s.customerId || null,
+// branchUuid ya resuelto por el provider (nombre → uuid).
+// customer_id '0' = Cliente Genérico (solo existe en el cliente) → NULL.
+export const saleToRow = (s: Omit<Sale, 'id'>, branchUuid: string | null) => ({
+  branch_id: branchUuid,
+  customer_id: isUuid(s.customerId) ? s.customerId : null,
   subtotal: s.subtotal, itbis_amount: s.itbisAmount, total: s.total,
   payment_method: s.paymentMethod, payment_status: s.paymentStatus, amount_paid: s.amountPaid,
   payment_reference: s.paymentReference ?? null, ncf: s.ncf ?? null, ncf_type: s.ncfType,
   notes: s.notes ?? null, financing_details: s.financingDetails ?? null,
   user_name: s.userName ?? null, user_email: s.userEmail ?? null,
+});
+
+// Actualizaciones de una venta existente: solo campos mutables (abonos, estado,
+// notas). Nunca reescribe branch/customer/ncf para no corromper referencias.
+export const saleUpdateToRow = (s: Sale) => ({
+  amount_paid: s.amountPaid,
+  payment_status: s.paymentStatus,
+  financing_details: s.financingDetails ?? null,
+  notes: s.notes ?? null,
+});
+
+export const creditPaymentToRow = (p: Omit<CreditPayment, 'id'>, branchUuid: string | null) => ({
+  sale_id: isUuid(p.saleId) ? p.saleId : null,
+  customer_id: isUuid(p.customerId) ? p.customerId : null,
+  branch_id: branchUuid,
+  amount: p.amount,
+  date: p.date.toISOString(),
 });
 
 export const saleItemToRow = (item: CartItem, saleId: string) => ({

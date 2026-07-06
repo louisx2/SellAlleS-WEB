@@ -94,7 +94,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     }
   };
 
-  const handleConfirmSale = (financingDetails?: FinancingDetails) => {
+  const handleConfirmSale = async (financingDetails?: FinancingDetails) => {
     if (!activeCart || !appUser) return;
 
     const finalPaymentMethod = financingDetails ? 'financing' : paymentMethod;
@@ -109,33 +109,39 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       userName: appUser.name,
       userEmail: appUser.email,
     });
-    
-    // Update stock for each item in the sale
-    sale.items.forEach(item => {
-      updateStock(item.product.id, item.quantity);
-    });
 
-    // Handle credit sales
-    if ((sale.paymentStatus === 'credit' || sale.paymentStatus === 'in_financing') && sale.customer) {
+    try {
+      // Guardar primero en la base; si falla, el carrito queda intacto.
+      const savedSale = await addSaleToContext(sale);
+
+      sale.items.forEach(item => {
+        updateStock(item.product.id, item.quantity);
+      });
+
+      if ((savedSale.paymentStatus === 'credit' || savedSale.paymentStatus === 'in_financing') && savedSale.customer && savedSale.customer.id !== '0') {
         const updatedCustomer = {
-            ...sale.customer,
-            creditBalance: sale.customer.creditBalance + (sale.total - sale.amountPaid)
-        }
-        updateCustomer(updatedCustomer);
-    }
+          ...savedSale.customer,
+          creditBalance: savedSale.customer.creditBalance + (savedSale.total - savedSale.amountPaid),
+        };
+        await updateCustomer(updatedCustomer);
+      }
 
-    addSaleToContext(sale);
-    
-    console.log('Sale completed:', sale);
-    
-    onSaleComplete(sale);
-    completeSale(); // Signal that a sale has been completed, this will clear the active cart
-    onOpenChange(false);
-    
-    toast({
-      title: '¡Venta completada!',
-      description: `Venta ${sale.id} registrada con éxito.`,
-    });
+      onSaleComplete(savedSale);
+      completeSale(); // Signal that a sale has been completed, this will clear the active cart
+      onOpenChange(false);
+
+      toast({
+        title: '¡Venta completada!',
+        description: `Venta registrada con éxito${savedSale.ncf ? ` — NCF ${savedSale.ncf}` : ''}.`,
+      });
+    } catch (e: any) {
+      console.error('Error al registrar la venta:', e);
+      toast({
+        title: 'No se pudo registrar la venta',
+        description: e?.message ?? 'Error de conexión con el servidor. El carrito no se perdió.',
+        variant: 'destructive',
+      });
+    }
   };
 
   const handleOpenFinancing = () => {

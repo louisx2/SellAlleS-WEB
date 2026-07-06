@@ -16,7 +16,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Sale } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { addCreditPayment } from '@/lib/database';
 import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { useSales } from '@/context/sales-provider';
 import { Info } from 'lucide-react';
@@ -28,7 +27,7 @@ interface AddFinancingPaymentDialogProps {
 
 export function AddFinancingPaymentDialog({ sale, children }: AddFinancingPaymentDialogProps) {
   const { toast } = useToast();
-  const { updateSale } = useSales();
+  const { updateSale, addCreditPayment } = useSales();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<number | ''>('');
   const [userBranch, setUserBranch] = useState('Desconocida');
@@ -43,7 +42,7 @@ export function AddFinancingPaymentDialog({ sale, children }: AddFinancingPaymen
     }
   }, [open, status.paymentDue]);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const paymentAmount = Number(amount);
 
@@ -55,33 +54,39 @@ export function AddFinancingPaymentDialog({ sale, children }: AddFinancingPaymen
         });
         return;
     }
-    
+
     const payment = {
-        id: `PAY-${Date.now()}`,
         saleId: sale.id,
         customerId: sale.customerId!,
         amount: paymentAmount,
         date: new Date(),
         branchId: userBranch,
-    }
-    addCreditPayment(payment);
-
-    // Update sale in the context
-    const updatedSale = { 
-        ...sale, 
-        amountPaid: sale.amountPaid + paymentAmount,
-        payments: [...(sale.payments || []), payment]
     };
-    
-    updateSale(updatedSale);
 
-    toast({
-        title: `Abono registrado`,
-        description: `Se registró un abono de ${formatCurrency(paymentAmount)} para ${sale.customer?.name}.`,
-    });
-    
+    try {
+      await addCreditPayment(payment);
 
-    setOpen(false);
+      const updatedSale = {
+          ...sale,
+          amountPaid: sale.amountPaid + paymentAmount,
+          payments: [...(sale.payments || []), { ...payment, id: '' }]
+      };
+
+      await updateSale(updatedSale);
+
+      toast({
+          title: `Abono registrado`,
+          description: `Se registró un abono de ${formatCurrency(paymentAmount)} para ${sale.customer?.name}.`,
+      });
+
+      setOpen(false);
+    } catch (e: any) {
+      toast({
+          title: 'No se pudo registrar el abono',
+          description: e?.message ?? 'Error de conexión con el servidor.',
+          variant: 'destructive',
+      });
+    }
   };
 
   return (

@@ -20,7 +20,8 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const load = useCallback(async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, name, email, role, is_super_admin, branches(name)');
+      // Desambiguado: profiles↔branches tiene dos relaciones (branch_id y profile_branches).
+      .select('id, name, email, role, is_super_admin, branches!profiles_branch_id_fkey(name)');
     if (!error && data) {
       setUsers(
         data.map((d: any) => ({

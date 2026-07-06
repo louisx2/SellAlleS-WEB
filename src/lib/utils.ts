@@ -1,11 +1,25 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import type { Sale } from "./types";
+import type { Customer, Sale } from "./types";
 import { addMonths, isPast } from 'date-fns';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
+
+// Cliente por defecto del POS ("Consumidor Final"). Vive solo en el cliente:
+// las ventas con este cliente se guardan con customer_id NULL en la base.
+export const GENERIC_CUSTOMER: Customer = {
+  id: '0',
+  name: 'Cliente Genérico',
+  phone: '',
+  rnc: '',
+  ncfType: 'consumer',
+  creditBalance: 0,
+};
+
+export const isUuid = (s?: string | null): s is string =>
+  !!s && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 export const ITBIS_RATE = 0.18;
 export const LATE_FEE_RATE = 0.05; // 5% late fee

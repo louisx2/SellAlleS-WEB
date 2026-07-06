@@ -2,8 +2,7 @@
 
 import { createContext, useEffect, ReactNode, useContext } from 'react';
 import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart } from '@/lib/types';
-import { ITBIS_RATE } from '@/lib/utils';
-import { customers } from '@/lib/database';
+import { ITBIS_RATE, GENERIC_CUSTOMER } from '@/lib/utils';
 import { create, useStore } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
@@ -32,7 +31,7 @@ interface CartActions {
   _init: () => void;
 }
 
-export const getGenericCustomer = () => customers.find(c => c.id === '0')!;
+export const getGenericCustomer = (): Customer => GENERIC_CUSTOMER;
 
 const createNewCart = (): Cart => {
   return {
@@ -290,11 +289,13 @@ export const useCart = () => {
     paymentReference?: string;
     financingDetails?: FinancingDetails;
     notes?: string;
-  }): Sale => {
+    userName?: string;
+    userEmail?: string;
+  }): Omit<Sale, 'id'> & { id: string } => {
     if (!activeCart) throw new Error("No active cart to create sale from");
 
     const { paymentMethod, branchId, amountPaid, paymentReference, financingDetails, notes } = options;
-    
+
     let paymentStatus: Sale['paymentStatus'] = 'paid';
     if (paymentMethod === 'credit') {
         paymentStatus = 'credit';
@@ -304,11 +305,11 @@ export const useCart = () => {
         paymentStatus = 'credit';
     }
 
-    const userName = localStorage.getItem('userName') || undefined;
-    const userEmail = localStorage.getItem('userEmail') || undefined;
+    const userName = options.userName ?? localStorage.getItem('userName') ?? undefined;
+    const userEmail = options.userEmail ?? localStorage.getItem('userEmail') ?? undefined;
 
     return {
-      id: `SALE-${Date.now()}`,
+      id: '', // el id real (uuid) lo genera la base al guardar
       items: activeCart.items,
       subtotal,
       itbisAmount,
@@ -326,7 +327,7 @@ export const useCart = () => {
       notes,
       userName,
       userEmail,
-      ncf: 'B0200000001', // Placeholder
+      ncf: undefined, // lo asigna la base desde ncf_sequences (si la empresa emite NCF)
       ncfType: activeCart.selectedCustomer?.ncfType || 'consumer',
     };
   };
@@ -340,5 +341,6 @@ export const useCart = () => {
     totalItems,
     totalDiscount,
     createSale,
+    getGenericCustomer,
   };
 };

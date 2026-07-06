@@ -65,7 +65,7 @@ export function ReceiptItems({ sale }: ReceiptProps) {
               const hasDiscount = item.customPrice !== undefined && item.customPrice < originalPrice;
               const itemSubtotal = price * item.quantity;
               const itemItbis = item.product.itbis ? itemSubtotal * ITBIS_RATE : 0;
-              const itemDiscountAmount = hasDiscount ? (originalPrice - item.customPrice) * item.quantity : 0;
+              const itemDiscountAmount = hasDiscount ? (originalPrice - (item.customPrice ?? 0)) * item.quantity : 0;
 
               return (
                 <div key={item.cartItemId}>

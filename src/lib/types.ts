@@ -102,11 +102,11 @@ export type CompanyProfile = {
 
 export type CreditPayment = {
   id: string;
-  saleId: string;
+  saleId?: string;      // abonos generales a deuda no van ligados a una venta
   customerId: string;
   amount: number;
   date: Date;
-  branchId: string;
+  branchId: string;     // nombre de sucursal a nivel de app; se resuelve a UUID al guardar
 };
 
 export type Supplier = {

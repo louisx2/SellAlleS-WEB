@@ -1,10 +1,12 @@
 # SellAlleS - Sistema de Punto de Venta
 
-POS web moderno para el mercado de República Dominicana, construido con **Next.js 14** y **TypeScript**. En proceso de convertirse en un SaaS multi-empresa sobre **Supabase**.
+POS web moderno para el mercado de República Dominicana, construido con **Next.js 14** y **TypeScript**. SaaS multi-empresa sobre **Supabase**.
 
-## Estado actual
+## Estado actual (2026-07-06)
 
-El proyecto fue limpiado para eliminar Firebase y los servicios de Google (Genkit/Gemini). **Por ahora arranca con datos de demostración en memoria**, sin backend externo, para poder trabajar la UI y la lógica mientras se integra Supabase.
+**La app está conectada a Supabase**: autenticación (Supabase Auth + perfiles con rol y sucursal), productos, clientes, ventas, sucursales, gastos, suplidores, usuarios y roles leen/escriben en la base con RLS multi-empresa. El carrito vive en el navegador (Zustand + localStorage) hasta el cobro; al confirmar, la venta se inserta en `sales`/`sale_items` y el **NCF lo asigna la base** (trigger `set_sale_ncf` sobre `ncf_sequences`, solo si la empresa tiene `ncf_enabled`). Los abonos de crédito/financiamiento se guardan en `credit_payments`.
+
+Nota histórica: versiones anteriores de este README decían "datos de demostración en memoria"; eso ya no aplica (el módulo `src/lib/database.ts` del modo demo fue eliminado).
 
 ## Características Principales
 

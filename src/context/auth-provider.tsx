@@ -39,7 +39,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loadProfile = useCallback(async (userId: string, fallbackEmail?: string) => {
     const { data } = await supabase
       .from('profiles')
-      .select('id, name, email, role, is_super_admin, branches(name)')
+      // branches! desambiguado: profiles se relaciona con branches por branch_id
+      // y también vía profile_branches; sin esto PostgREST devuelve PGRST201.
+      .select('id, name, email, role, is_super_admin, branches!profiles_branch_id_fkey(name)')
       .eq('id', userId)
       .maybeSingle();
 

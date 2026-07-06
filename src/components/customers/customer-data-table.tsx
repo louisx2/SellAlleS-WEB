@@ -12,7 +12,6 @@ import {
   getFilteredRowModel,
   getPaginationRowModel,
   getSortedRowModel,
-  getGlobalFilteredRowModel,
   useReactTable,
 } from '@tanstack/react-table';
 import {
@@ -51,7 +50,6 @@ export function CustomerDataTable<TData, TValue>({
     getFilteredRowModel: getFilteredRowModel(),
     onRowSelectionChange: setRowSelection,
     onGlobalFilterChange: setGlobalFilter,
-    getGlobalFilteredRowModel: getGlobalFilteredRowModel,
     state: {
       sorting,
       columnFilters,

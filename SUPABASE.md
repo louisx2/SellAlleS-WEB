@@ -1,7 +1,7 @@
 # SellAlleS — Backend Supabase (nube)
 
-Proyecto creado en la nube. La app aún usa datos en memoria; el siguiente paso es
-reescribir los providers y la autenticación para usar este backend.
+Proyecto en la nube. **La app ya usa este backend**: auth, providers de datos,
+ventas con NCF automático y abonos de crédito están conectados.
 
 ## Conexión
 
@@ -52,10 +52,22 @@ Quedan 2 avisos WARN: `authenticated` puede ejecutar `current_company_id()` e
 del propio usuario. Si se quiere cero avisos, moverlas a un esquema `private` no
 expuesto por la API.
 
+## Asignación de NCF (migración `ncf_assignment_trigger`)
+
+El trigger `trg_set_sale_ncf` (BEFORE INSERT en `sales`) llama a `assign_ncf`:
+si la empresa tiene `ncf_enabled`, toma con lock (`FOR UPDATE`) la secuencia
+activa de `ncf_sequences` que coincida con `tipo` = `ncf_type` de la venta
+('consumer' o 'fiscal'), arma `prefix + número de 8 dígitos` (p. ej.
+`B0200000001`) e incrementa el contador — todo dentro de la transacción del
+insert, sin saltos ni duplicados. Si `ncf_enabled` es false, la venta queda
+con `ncf` NULL. Para empezar a emitir: activar `ncf_enabled` en la empresa y
+cargar filas en `ncf_sequences` (tipo 'consumer' prefix 'B02', tipo 'fiscal'
+prefix 'B01', con su rango autorizado por DGII).
+
 ## Próximos pasos
 
-1. Reescribir `src/context/*-provider.tsx` para leer/escribir en Supabase (en vez de memoria).
-2. Reemplazar `src/context/auth-provider.tsx` por Supabase Auth (signInWithPassword / signOut / getSession).
-3. Crear el primer super_admin y la primera empresa (onboarding).
-4. Construir el panel de Super Admin (gestión de empresas y suscripciones).
+1. Retirar `src/lib/database.ts` (resto del modo demo, ya sin usos activos).
+2. Onboarding de empresas nuevas + panel Super Admin (suscripciones).
+3. UI para gestionar `ncf_sequences` (hoy se cargan por SQL).
+4. Deploy a Cloudflare (adaptador OpenNext) o Vercel.
 5. Módulo de formalización DGII + e-CF (cuando la empresa lo active).

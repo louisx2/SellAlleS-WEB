@@ -4,6 +4,7 @@ import React, { createContext, useContext, ReactNode, useState, useEffect, useCa
 import type { Customer } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToCustomer, customerToRow } from '@/lib/supabase/mappers';
+import { GENERIC_CUSTOMER } from '@/lib/utils';
 
 interface CustomerContextType {
   customers: Customer[];
@@ -15,7 +16,6 @@ interface CustomerContextType {
 
 const CustomerContext = createContext<CustomerContextType | undefined>(undefined);
 
-const GENERIC: Customer = { id: '0', name: 'Cliente Genérico', phone: '', rnc: '', ncfType: 'consumer', creditBalance: 0 };
 
 export function CustomerProvider({ children }: { children: ReactNode }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -41,7 +41,7 @@ export function CustomerProvider({ children }: { children: ReactNode }) {
     setCustomers((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
   };
 
-  const getGenericCustomer = (): Customer => GENERIC;
+  const getGenericCustomer = (): Customer => GENERIC_CUSTOMER;
 
   return (
     <CustomerContext.Provider value={{ customers, addCustomer, updateCustomer, getGenericCustomer, loading }}>

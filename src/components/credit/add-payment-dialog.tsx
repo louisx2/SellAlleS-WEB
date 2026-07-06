@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label';
 import type { Customer } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useCustomers } from '@/context/customer-provider';
-import { addCreditPayment } from '@/lib/database';
+import { useSales } from '@/context/sales-provider';
 import { formatCurrency } from '@/lib/utils';
 
 interface AddPaymentDialogProps {
@@ -27,6 +27,7 @@ interface AddPaymentDialogProps {
 export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) {
   const { toast } = useToast();
   const { updateCustomer } = useCustomers();
+  const { addCreditPayment } = useSales();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<number | ''>('');
   const [userBranch, setUserBranch] = useState('Desconocida');
@@ -39,7 +40,7 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
     }
   }, [open])
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const paymentAmount = Number(amount);
 
@@ -52,24 +53,29 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
         return;
     }
 
-    addCreditPayment({
-        id: `PAY-${Date.now()}`,
-        saleId: 'N/A', // Not linked to a specific sale in this simplified version
-        customerId: customer.id,
-        amount: paymentAmount,
-        date: new Date(),
-        branchId: userBranch,
-    });
-    
-    // This is a direct mutation for the mock data, in a real app this would be a server action
-    updateCustomer({ ...customer, creditBalance: customer.creditBalance - paymentAmount });
+    try {
+      await addCreditPayment({
+          customerId: customer.id,
+          amount: paymentAmount,
+          date: new Date(),
+          branchId: userBranch,
+      });
 
-    toast({
-        title: `Abono registrado`,
-        description: `Se registró un abono de ${formatCurrency(paymentAmount)} para ${customer.name}.`,
-    });
-    
-    setOpen(false);
+      await updateCustomer({ ...customer, creditBalance: customer.creditBalance - paymentAmount });
+
+      toast({
+          title: `Abono registrado`,
+          description: `Se registró un abono de ${formatCurrency(paymentAmount)} para ${customer.name}.`,
+      });
+
+      setOpen(false);
+    } catch (e: any) {
+      toast({
+          title: 'No se pudo registrar el abono',
+          description: e?.message ?? 'Error de conexión con el servidor.',
+          variant: 'destructive',
+      });
+    }
   };
 
   return (
