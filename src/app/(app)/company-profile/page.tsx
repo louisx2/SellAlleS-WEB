@@ -12,6 +12,7 @@ import type { CompanyProfile } from '@/lib/types';
 import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info } from 'lucide-react';
+import { NcfSettingsCard } from '@/components/company-profile/ncf-settings-card';
 
 export default function CompanyProfilePage() {
   const { profile, updateProfile } = useCompanyProfile();
@@ -44,6 +45,7 @@ export default function CompanyProfilePage() {
   };
 
   return (
+    <>
     <form onSubmit={handleSubmit}>
       <PageHeader title="Perfil de la Empresa">
         <Button type="submit">Guardar Cambios</Button>
@@ -128,5 +130,11 @@ export default function CompanyProfilePage() {
         </Card>
       </div>
     </form>
+    {/* Fuera del form: tiene sus propios controles de guardado y no debe
+        dispararse con el submit de "Guardar Cambios". */}
+    <div className="mt-6">
+      <NcfSettingsCard />
+    </div>
+    </>
   );
 }

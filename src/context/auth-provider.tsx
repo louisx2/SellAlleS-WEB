@@ -6,12 +6,13 @@ import type { Session } from '@supabase/supabase-js';
 import type { User as AppUser } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { AppSkeleton } from '@/components/ui/app-skeleton';
+import { CreateCompanyScreen } from '@/components/auth/create-company-screen';
 
 interface AuthContextType {
   appUser: AppUser | null;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<void>;
-  signUp: (name: string, email: string, pass: string) => Promise<{ needsConfirmation: boolean }>;
+  signUp: (name: string, email: string, pass: string, businessName: string) => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
 }
 
@@ -32,6 +33,7 @@ function clearLocal() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
+  const [needsCompany, setNeedsCompany] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -41,11 +43,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       // branches! desambiguado: profiles se relaciona con branches por branch_id
       // y también vía profile_branches; sin esto PostgREST devuelve PGRST201.
-      .select('id, name, email, role, is_super_admin, branches!profiles_branch_id_fkey(name)')
+      .select('id, name, email, role, is_super_admin, company_id, branches!profiles_branch_id_fkey(name)')
       .eq('id', userId)
       .maybeSingle();
 
     if (data) {
+      // Perfil sin empresa (registro sin nombre de negocio o cuenta antigua):
+      // se muestra la pantalla de creación de empresa en vez de la app.
+      setNeedsCompany(!data.company_id);
       const branchName = Array.isArray((data as any).branches)
         ? (data as any).branches[0]?.name
         : (data as any).branches?.name;
@@ -104,11 +109,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
-  const signUp = async (name: string, email: string, pass: string) => {
+  const signUp = async (name: string, email: string, pass: string, businessName: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password: pass,
-      options: { data: { name } },
+      // company_name lo consume el trigger handle_new_user: crea la empresa,
+      // la sucursal Principal y la suscripción al plan Gratis.
+      options: { data: { name, company_name: businessName } },
     });
     if (error) throw error;
     return { needsConfirmation: !data.session };
@@ -127,6 +134,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isPublic = publicRoutes.includes(pathname);
   if (session && !appUser) return <AppSkeleton />;   // sesión activa, cargando perfil
   if (!session && !isPublic) return <AppSkeleton />;  // sin sesión, redirigiendo a login
+
+  // Cuenta autenticada pero sin empresa: onboarding obligatorio antes de la app.
+  if (session && appUser && needsCompany && !isPublic) {
+    return <CreateCompanyScreen userName={appUser.name} onSignOut={signOut} />;
+  }
 
   return (
     <AuthContext.Provider value={{ appUser, loading, signIn, signUp, signOut }}>

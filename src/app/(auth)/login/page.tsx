@@ -16,6 +16,7 @@ export default function LoginPage() {
   const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<Mode>('login');
   const [name, setName] = useState('');
+  const [businessName, setBusinessName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -28,7 +29,7 @@ export default function LoginPage() {
 
     try {
       if (mode === 'register') {
-        const { needsConfirmation } = await signUp(name, email, password);
+        const { needsConfirmation } = await signUp(name, email, password, businessName);
         if (needsConfirmation) {
           toast({
             title: 'Cuenta creada',
@@ -70,11 +71,18 @@ export default function LoginPage() {
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
             {isRegister && (
-              <div className="space-y-2">
-                <Label htmlFor="name">Nombre</Label>
-                <Input id="name" type="text" placeholder="Tu nombre" value={name}
-                  onChange={(e) => setName(e.target.value)} required disabled={isLoading} />
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="name">Tu nombre</Label>
+                  <Input id="name" type="text" placeholder="Tu nombre" value={name}
+                    onChange={(e) => setName(e.target.value)} required disabled={isLoading} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="business-name">Nombre del negocio</Label>
+                  <Input id="business-name" type="text" placeholder="Ej: Ferretería Don Luis" value={businessName}
+                    onChange={(e) => setBusinessName(e.target.value)} required minLength={2} disabled={isLoading} />
+                </div>
+              </>
             )}
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
