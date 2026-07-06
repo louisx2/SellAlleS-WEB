@@ -13,12 +13,22 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/context/auth-provider';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useModules } from '@/context/modules-provider';
+import { moduleForRoute, type ModuleKey } from '@/lib/modules';
 
+interface NavItem {
+  href: string;
+  icon?: React.ComponentType;
+  label: string;
+  roles: string[];
+  module?: ModuleKey; // si falta, el item es núcleo y siempre se muestra
+}
 
-const navItems = [
+const navItems: NavItem[] = [
   { href: '/dashboard', icon: LayoutGrid, label: 'Dashboard', roles: ['admin', 'cashier'] },
-  { href: '/pos', icon: ShoppingCart, label: 'Punto de Venta', roles: ['admin', 'cashier'] },
-  { href: '/sales', icon: History, label: 'Ventas', roles: ['admin'] },
+  { href: '/pos', icon: ShoppingCart, label: 'Punto de Venta', roles: ['admin', 'cashier'], module: 'pos' },
+  { href: '/quotes', icon: FileText, label: 'Cotizaciones', roles: ['admin', 'cashier'], module: 'quotes' },
+  { href: '/sales', icon: History, label: 'Ventas', roles: ['admin'], module: 'sales' },
 ];
 
 const reportsNavItems = [
@@ -29,13 +39,13 @@ const reportsNavItems = [
     { href: '/reports/taxes', label: 'Impuestos', roles: ['admin']},
 ]
 
-const adminNavItems = [
+const adminNavItems: NavItem[] = [
     { href: '/products', icon: Package, label: 'Productos', roles: ['admin'] },
     { href: '/customers', icon: UsersRound, label: 'Clientes', roles: ['admin'] },
-    { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', roles: ['admin'] },
-    { href: '/financing', icon: Landmark, label: 'Financiamiento', roles: ['admin'] },
-    { href: '/suppliers', icon: Truck, label: 'Proveedores', roles: ['admin'] },
-    { href: '/expenses', icon: Wallet, label: 'Gastos', roles: ['admin'] },
+    { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', roles: ['admin'], module: 'credit' },
+    { href: '/financing', icon: Landmark, label: 'Financiamiento', roles: ['admin'], module: 'financing' },
+    { href: '/suppliers', icon: Truck, label: 'Proveedores', roles: ['admin'], module: 'suppliers' },
+    { href: '/expenses', icon: Wallet, label: 'Gastos', roles: ['admin'], module: 'expenses' },
     { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', roles: ['admin']},
     { href: '/users', icon: Users, label: 'Usuarios', roles: ['admin']},
     { href: '/branches', icon: Store, label: 'Sucursales', roles: ['admin']},
@@ -46,6 +56,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const router = useRouter();
   const pathname = usePathname();
   const { appUser, signOut } = useAuth();
+  const { isModuleEnabled, loading: modulesLoading } = useModules();
   const isMobile = useIsMobile();
   const [openCollapsible, setOpenCollapsible] = useState<string | null>(null);
   
@@ -95,14 +106,21 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   };
   
   if (!appUser) {
-    return null; 
+    return null;
   }
   const { role: userRole, name: userName, branch: userBranch } = appUser;
   const isSuperAdmin = appUser.isSuperAdmin;
 
-  const visibleNavItems = navItems.filter(item => userRole && item.roles.includes(userRole));
+  const moduleOk = (item: NavItem) => !item.module || isModuleEnabled(item.module);
+  const visibleNavItems = navItems.filter(item => userRole && item.roles.includes(userRole) && moduleOk(item));
+  const visibleAdminNavItems = adminNavItems.filter(moduleOk);
   const canViewAdmin = userRole === 'admin';
-  const canViewReports = userRole === 'admin';
+  const canViewReports = userRole === 'admin' && isModuleEnabled('reports');
+
+  // Guard de rutas: si la URL pertenece a un módulo apagado para esta
+  // empresa, no se renderiza el contenido (aunque escriban la URL a mano).
+  const routeModule = moduleForRoute(pathname);
+  const routeBlocked = routeModule !== null && !modulesLoading && !isModuleEnabled(routeModule);
 
   const formatRole = (role: string | null) => {
     if (role === 'admin') return 'Administrador';
@@ -198,7 +216,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
               <SidebarMenuItem key={item.href}>
                 <Link href={item.href} passHref>
                   <SidebarMenuButton isActive={pathname === item.href} tooltip={item.label}>
-                    <item.icon />
+                    {item.icon && <item.icon />}
                     <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
                   </SidebarMenuButton>
                 </Link>
@@ -245,11 +263,11 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </CollapsibleTrigger>
                 <CollapsibleContent className="group-data-[collapsible=icon]:hidden">
                   <SidebarMenu className="pl-6">
-                    {adminNavItems.map(item => (
+                    {visibleAdminNavItems.map(item => (
                       <SidebarMenuItem key={item.href}>
                         <Link href={item.href} passHref>
                           <SidebarMenuButton size="sm" className="h-8" isActive={pathname.startsWith(item.href)}>
-                            <item.icon />
+                            {item.icon && <item.icon />}
                             <span>{item.label}</span>
                           </SidebarMenuButton>
                         </Link>
@@ -272,7 +290,19 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
 
       <div className={cn('transition-all duration-300 ease-in-out pt-14 md:pt-16', state === 'expanded' ? 'md:ml-[var(--sidebar-width)]' : 'md:ml-[var(--sidebar-width-icon)]')}>
         <main className={cn(!isPosPage && "p-4 sm:p-6 lg:p-8")}>
-          {children}
+          {routeBlocked ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
+              <Shield className="h-10 w-10 text-muted-foreground" />
+              <h2 className="text-lg font-semibold">Módulo no disponible</h2>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                Este módulo no está habilitado para tu empresa. Si lo necesitas,
+                contacta al administrador de la plataforma.
+              </p>
+              <Button variant="outline" onClick={() => router.push('/dashboard')}>Volver al Dashboard</Button>
+            </div>
+          ) : (
+            children
+          )}
         </main>
       </div>
     </div>

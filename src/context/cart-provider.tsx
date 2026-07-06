@@ -38,6 +38,7 @@ const createNewCart = (): Cart => {
     id: `cart-${Date.now()}-${Math.random()}`,
     items: [],
     selectedCustomer: getGenericCustomer(),
+    quoteId: undefined,
   };
 };
 
@@ -234,6 +235,33 @@ const cartStore = create<CartStore>()(
   )
 );
 
+// Carga una cotización como carrito activo. Función a nivel de módulo para
+// poder llamarla desde páginas fuera del CartProvider (p. ej. /quotes): actúa
+// sobre el store persistido, y el POS lo lee al navegar.
+// Devuelve false si ya hay MAX_CARTS carritos con artículos.
+export function openQuoteCart(items: CartItem[], customer: Customer | undefined, quoteId: string): boolean {
+  const state = cartStore.getState();
+  const active = state.carts.find(c => c.id === state.activeCartId);
+  const newCart: Cart = {
+    id: `cart-${Date.now()}-${Math.random()}`,
+    items,
+    selectedCustomer: customer ?? getGenericCustomer(),
+    quoteId,
+  };
+  if (active && active.items.length === 0) {
+    cartStore.setState({
+      carts: state.carts.map(c => (c.id === active.id ? newCart : c)),
+      activeCartId: newCart.id,
+    });
+    return true;
+  }
+  if (state.carts.length < MAX_CARTS) {
+    cartStore.setState({ carts: [...state.carts, newCart], activeCartId: newCart.id });
+    return true;
+  }
+  return false;
+}
+
 // This context will provide the store to the components.
 const CartContext = createContext<typeof cartStore | undefined>(undefined);
 
@@ -329,6 +357,7 @@ export const useCart = () => {
       userEmail,
       ncf: undefined, // lo asigna la base desde ncf_sequences (si la empresa emite NCF)
       ncfType: activeCart.selectedCustomer?.ncfType || 'consumer',
+      quoteId: activeCart.quoteId, // si vino de una cotización, se marcará convertida
     };
   };
 

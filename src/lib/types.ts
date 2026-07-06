@@ -55,6 +55,7 @@ export type Cart = {
   id: string;
   items: CartItem[];
   selectedCustomer: Customer;
+  quoteId?: string; // si el carrito viene de una cotización cargada
 }
 
 export type FinancingDetails = {
@@ -85,6 +86,25 @@ export type Sale = {
   userEmail?: string;
   ncf?: string;
   ncfType: 'consumer' | 'fiscal';
+  quoteId?: string; // cotización de origen (se marca convertida al cobrar)
+};
+
+export type QuoteStatus = 'pending' | 'sent' | 'accepted' | 'rejected' | 'converted';
+
+export type Quote = {
+  id: string;
+  items: CartItem[];
+  customer?: Customer;
+  customerId?: string;
+  status: QuoteStatus;
+  validUntil?: string;      // fecha (yyyy-mm-dd)
+  subtotal: number;
+  itbisAmount: number;
+  total: number;
+  notes?: string;
+  userName?: string;
+  branchId: string;         // nombre de sucursal (igual que Sale)
+  createdAt: Date;
 };
 
 export type CompanyProfile = {

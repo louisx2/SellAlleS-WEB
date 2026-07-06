@@ -16,7 +16,7 @@ interface SalesContextType {
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
 // La app identifica sucursales por nombre; la base usa uuid.
-const resolveBranchId = async (branchName?: string): Promise<string | null> => {
+export const resolveBranchId = async (branchName?: string): Promise<string | null> => {
   if (!branchName) return null;
   const { data } = await supabase.from('branches').select('id').eq('name', branchName).maybeSingle();
   return data?.id ?? null;
@@ -51,6 +51,10 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       const rows = saleData.items.map((it) => saleItemToRow(it, sale.id));
       const { error: itemsError } = await supabase.from('sale_items').insert(rows);
       if (itemsError) throw itemsError;
+    }
+    // Venta originada en una cotización: marcarla como convertida.
+    if (saleData.quoteId) {
+      await supabase.from('quotes').update({ status: 'converted' }).eq('id', saleData.quoteId);
     }
     await load();
     // Venta tal como quedó en la base (id y NCF reales) para el recibo.

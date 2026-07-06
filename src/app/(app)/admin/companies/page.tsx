@@ -20,7 +20,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
-import { PlusCircle, Pencil, Building2 } from 'lucide-react';
+import { PlusCircle, Pencil, Building2, Boxes } from 'lucide-react';
+import { CompanyModulesDialog } from '@/components/admin/company-modules-dialog';
 
 interface Company {
   id: string;
@@ -61,6 +62,7 @@ export default function CompaniesAdminPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [modulesFor, setModulesFor] = useState<Company | null>(null);
 
   const load = useCallback(async () => {
     const [{ data: comps }, { data: pls }, { data: ss }] = await Promise.all([
@@ -198,6 +200,9 @@ export default function CompaniesAdminPage() {
                     <TableCell>{c.ncf_enabled ? 'Sí' : 'No'}</TableCell>
                     <TableCell>{planName(c.id)}</TableCell>
                     <TableCell className="text-right">
+                      <Button variant="ghost" size="sm" onClick={() => setModulesFor(c)}>
+                        <Boxes className="mr-2 h-4 w-4" /> Módulos
+                      </Button>
                       <Button variant="ghost" size="sm" onClick={() => openEdit(c)}>
                         <Pencil className="mr-2 h-4 w-4" /> Editar
                       </Button>
@@ -286,6 +291,13 @@ export default function CompaniesAdminPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CompanyModulesDialog
+        companyId={modulesFor?.id ?? null}
+        companyName={modulesFor?.name ?? ''}
+        open={modulesFor !== null}
+        onOpenChange={(o) => { if (!o) setModulesFor(null); }}
+      />
     </div>
   );
 }

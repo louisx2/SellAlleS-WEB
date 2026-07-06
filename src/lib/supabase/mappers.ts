@@ -1,5 +1,5 @@
 // Conversión entre filas de Supabase (snake_case) y los tipos de la app (camelCase).
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, Quote } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 
 // ---------- Product ----------
@@ -79,6 +79,7 @@ export const rowToSale = (r: any): Sale => ({
   payments: [],
   notes: r.notes ?? undefined, userName: r.user_name ?? undefined, userEmail: r.user_email ?? undefined,
   ncf: r.ncf ?? undefined, ncfType: r.ncf_type,
+  quoteId: r.quote_id ?? undefined,
 });
 
 // branchUuid ya resuelto por el provider (nombre → uuid).
@@ -91,6 +92,7 @@ export const saleToRow = (s: Omit<Sale, 'id'>, branchUuid: string | null) => ({
   payment_reference: s.paymentReference ?? null, ncf: s.ncf ?? null, ncf_type: s.ncfType,
   notes: s.notes ?? null, financing_details: s.financingDetails ?? null,
   user_name: s.userName ?? null, user_email: s.userEmail ?? null,
+  quote_id: isUuid(s.quoteId) ? s.quoteId : null,
 });
 
 // Actualizaciones de una venta existente: solo campos mutables (abonos, estado,
@@ -108,6 +110,47 @@ export const creditPaymentToRow = (p: Omit<CreditPayment, 'id'>, branchUuid: str
   branch_id: branchUuid,
   amount: p.amount,
   date: p.date.toISOString(),
+});
+
+// ---------- Quote (con quote_items y customer embebidos) ----------
+const rowToQuoteItem = (i: any): CartItem => ({
+  cartItemId: i.id,
+  quantity: Number(i.quantity),
+  customPrice: i.custom_price != null ? Number(i.custom_price) : undefined,
+  product: {
+    id: i.product_id ?? '', name: i.product_name, price: Number(i.price), cost: 0,
+    itbis: !!i.itbis, image: '', stock: 0, code: '',
+  },
+});
+
+export const rowToQuote = (r: any): Quote => ({
+  id: r.id,
+  items: (r.quote_items ?? []).map(rowToQuoteItem),
+  customer: r.customers ? rowToCustomer(r.customers) : undefined,
+  customerId: r.customer_id ?? undefined,
+  status: r.status,
+  validUntil: r.valid_until ?? undefined,
+  subtotal: Number(r.subtotal), itbisAmount: Number(r.itbis_amount), total: Number(r.total),
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  branchId: r.branches?.name ?? '',
+  createdAt: new Date(r.created_at),
+});
+
+export const quoteToRow = (q: Omit<Quote, 'id' | 'items' | 'createdAt'>, branchUuid: string | null) => ({
+  branch_id: branchUuid,
+  customer_id: isUuid(q.customerId) ? q.customerId : null,
+  status: q.status,
+  valid_until: q.validUntil ?? null,
+  subtotal: q.subtotal, itbis_amount: q.itbisAmount, total: q.total,
+  notes: q.notes ?? null,
+  user_name: q.userName ?? null,
+});
+
+export const quoteItemToRow = (item: CartItem, quoteId: string) => ({
+  quote_id: quoteId, product_id: item.product.id || null, product_name: item.product.name,
+  quantity: item.quantity, price: item.product.price,
+  custom_price: item.customPrice ?? null, itbis: item.product.itbis,
 });
 
 export const saleItemToRow = (item: CartItem, saleId: string) => ({

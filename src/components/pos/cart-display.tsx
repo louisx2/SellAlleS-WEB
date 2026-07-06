@@ -8,8 +8,10 @@ import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { formatCurrency } from '@/lib/utils';
 import { PlaceHolderImages } from '@/lib/placeholder-images';
-import { MinusCircle, PlusCircle, ShoppingCart, Trash2, UserSearch, X, Plus } from 'lucide-react';
+import { MinusCircle, PlusCircle, ShoppingCart, Trash2, UserSearch, X, Plus, FileText } from 'lucide-react';
 import { CheckoutDialog } from './checkout-dialog';
+import { CreateQuoteDialog } from './create-quote-dialog';
+import { useModules } from '@/context/modules-provider';
 import type { Sale, Customer } from '@/lib/types';
 import { ReceiptDialog } from './receipt-dialog';
 import { CustomerSearchDialog } from './customer-search-dialog';
@@ -71,9 +73,11 @@ export function CartDisplay() {
   } = useCart();
   
   const [isCheckoutOpen, setCheckoutOpen] = useState(false);
+  const [isQuoteOpen, setQuoteOpen] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [isCustomerSearchOpen, setCustomerSearchOpen] = useState(false);
   const isMobile = useIsMobile();
+  const { isModuleEnabled } = useModules();
 
   const activeCart = carts.find(cart => cart.id === activeCartId);
   
@@ -270,6 +274,19 @@ export function CartDisplay() {
                 <Button className="w-full" size="lg" onClick={() => setCheckoutOpen(true)}>
                 Proceder al Pago
                 </Button>
+                {isModuleEnabled('quotes') && (
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button variant="outline" size="icon" className="h-11 w-14" onClick={() => setQuoteOpen(true)}>
+                          <FileText className="h-5 w-5" />
+                          <span className="sr-only">Guardar Cotización</span>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Guardar como cotización</TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                )}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <Button variant="destructive" size="icon" className="h-11 w-14">
@@ -295,8 +312,10 @@ export function CartDisplay() {
         )}
       </Card>
       
-      <CheckoutDialog 
-        isOpen={isCheckoutOpen} 
+      <CreateQuoteDialog isOpen={isQuoteOpen} onOpenChange={setQuoteOpen} />
+
+      <CheckoutDialog
+        isOpen={isCheckoutOpen}
         onOpenChange={setCheckoutOpen}
         onSaleComplete={handleSaleComplete}
       />

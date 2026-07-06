@@ -10,10 +10,13 @@ import { CustomerProvider } from '@/context/customer-provider';
 import { SalesProvider } from '@/context/sales-provider';
 import { SupplierProvider } from '@/context/supplier-provider';
 import { ExpenseProvider } from '@/context/expense-provider';
+import { QuotesProvider } from '@/context/quotes-provider';
+import { ModulesProvider } from '@/context/modules-provider';
 import { SidebarProvider } from '@/components/ui/sidebar';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
+    <ModulesProvider>
     <CompanyProfileProvider>
       <BranchProvider>
         <UserProvider>
@@ -22,9 +25,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <SalesProvider>
                 <SupplierProvider>
                   <ExpenseProvider>
-                    <SidebarProvider defaultOpen={true}>
-                      <AuthedLayout>{children}</AuthedLayout>
-                    </SidebarProvider>
+                    <QuotesProvider>
+                      <SidebarProvider defaultOpen={true}>
+                        <AuthedLayout>{children}</AuthedLayout>
+                      </SidebarProvider>
+                    </QuotesProvider>
                   </ExpenseProvider>
                 </SupplierProvider>
               </SalesProvider>
@@ -33,5 +38,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </UserProvider>
       </BranchProvider>
     </CompanyProfileProvider>
+    </ModulesProvider>
   );
 }
