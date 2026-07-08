@@ -1,15 +1,19 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Sale, CreditPayment } from '@/lib/types';
+import type { Sale, PaymentMethod, PaymentResult } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
-import { rowToSale, saleToRow, saleUpdateToRow, saleItemToRow, creditPaymentToRow } from '@/lib/supabase/mappers';
+import { rowToSale, saleToRow, saleItemToRow, rowToPaymentResult } from '@/lib/supabase/mappers';
+import { useAuth } from '@/context/auth-provider';
 
 interface SalesContextType {
   sales: Sale[];
   addSale: (sale: Omit<Sale, 'id'>) => Promise<Sale>;
-  updateSale: (sale: Sale) => Promise<void>;
-  addCreditPayment: (payment: Omit<CreditPayment, 'id'>) => Promise<void>;
+  /** Abono a una venta a crédito o financiada (RPC atómica en la base). */
+  paySale: (saleId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string) => Promise<PaymentResult>;
+  /** Abono a la deuda general del cliente; la base lo aplica FIFO a sus ventas a crédito. */
+  payCustomerDebt: (customerId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string) => Promise<PaymentResult>;
+  reload: () => Promise<void>;
   loading: boolean;
 }
 
@@ -23,13 +27,14 @@ export const resolveBranchId = async (branchName?: string): Promise<string | nul
 };
 
 export function SalesProvider({ children }: { children: ReactNode }) {
+  const { appUser } = useAuth();
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase
       .from('sales')
-      .select('*, sale_items(*), customers(*), branches(name)')
+      .select('*, sale_items(*), customers(*), branches(name), financing_installments(*)')
       .order('created_at', { ascending: false });
     if (!error && data) setSales(data.map(rowToSale));
     setLoading(false);
@@ -38,7 +43,12 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   useEffect(() => { load(); }, [load]);
 
   const addSale = async (saleData: Omit<Sale, 'id'>): Promise<Sale> => {
-    const branchUuid = await resolveBranchId(saleData.branchId);
+    let branchUuid: string | null = null;
+    if (appUser && saleData.branchId === appUser.branch && appUser.activeBranchId) {
+      branchUuid = appUser.activeBranchId;
+    } else {
+      branchUuid = await resolveBranchId(saleData.branchId);
+    }
     // El NCF lo asigna el trigger set_sale_ncf en la base (atómico, desde
     // ncf_sequences y solo si la empresa tiene ncf_enabled).
     const { data: sale, error } = await supabase
@@ -66,20 +76,38 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  const updateSale = async (updated: Sale) => {
-    const { error } = await supabase.from('sales').update(saleUpdateToRow(updated)).eq('id', updated.id);
+  // Toda la contabilidad del abono (cuotas, mora, amount_paid, credit_balance)
+  // ocurre en una sola transacción dentro de la base.
+  const paySale = async (saleId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string): Promise<PaymentResult> => {
+    const branchUuid = await resolveBranchId(branchName);
+    const { data, error } = await supabase.rpc('register_sale_payment', {
+      p_sale_id: saleId,
+      p_amount: amount,
+      p_method: method,
+      p_branch_id: branchUuid,
+      p_notes: notes ?? null,
+    });
     if (error) throw error;
-    setSales((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    await load();
+    return rowToPaymentResult(data);
   };
 
-  const addCreditPayment = async (payment: Omit<CreditPayment, 'id'>) => {
-    const branchUuid = await resolveBranchId(payment.branchId);
-    const { error } = await supabase.from('credit_payments').insert(creditPaymentToRow(payment, branchUuid));
+  const payCustomerDebt = async (customerId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string): Promise<PaymentResult> => {
+    const branchUuid = await resolveBranchId(branchName);
+    const { data, error } = await supabase.rpc('register_customer_payment', {
+      p_customer_id: customerId,
+      p_amount: amount,
+      p_method: method,
+      p_branch_id: branchUuid,
+      p_notes: notes ?? null,
+    });
     if (error) throw error;
+    await load();
+    return rowToPaymentResult(data);
   };
 
   return (
-    <SalesContext.Provider value={{ sales, addSale, updateSale, addCreditPayment, loading }}>
+    <SalesContext.Provider value={{ sales, addSale, paySale, payCustomerDebt, reload: load, loading }}>
       {children}
     </SalesContext.Provider>
   );

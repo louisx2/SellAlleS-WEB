@@ -166,16 +166,31 @@ export function CartDisplay() {
                         <div className="flex justify-between items-center">
                           <div className='max-w-[80%]'>
                             <p className="text-sm text-muted-foreground">Cliente</p>
-                            <p className="font-semibold truncate">{cart.selectedCustomer?.name}</p>
+                            <div className="flex items-center gap-1">
+                              <p className="font-semibold truncate">{cart.selectedCustomer?.name}</p>
+                              {cart.selectedCustomer?.id !== '0' && (
+                                <button 
+                                  onClick={handleRemoveCustomer} 
+                                  className="text-muted-foreground hover:text-destructive p-0.5"
+                                  title="Quitar cliente"
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          {cart.selectedCustomer?.id !== '0' ? (
-                            <Button variant="outline" size="sm" onClick={handleRemoveCustomer}>Cambiar</Button>
-                          ) : (
-                            <Button variant="outline" size="sm" onClick={() => setCustomerSearchOpen(true)}>
-                              <UserSearch className="h-4 w-4 sm:mr-2" />
-                              <span className="hidden sm:inline">Buscar</span>
-                            </Button>
-                          )}
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={() => setCustomerSearchOpen(true)}
+                          >
+                            {cart.selectedCustomer?.id !== '0' ? 'Cambiar' : (
+                              <>
+                                <UserSearch className="h-4 w-4 sm:mr-2" />
+                                <span className="hidden sm:inline">Buscar</span>
+                              </>
+                            )}
+                          </Button>
                         </div>
                         {cart.selectedCustomer?.id !== '0' && cart.selectedCustomer?.creditBalance > 0 && (
                           <Badge variant="destructive" className="mt-2">

@@ -1,15 +1,59 @@
-// Conversión entre filas de Supabase (snake_case) y los tipos de la app (camelCase).
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, Quote } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 
 // ---------- Product ----------
 export const rowToProduct = (r: any): Product => ({
-  id: r.id, name: r.name, price: Number(r.price), cost: Number(r.cost),
-  itbis: !!r.itbis, image: r.image ?? '', stock: Number(r.stock), code: r.code ?? '',
+  id: r.id, 
+  code: r.code ?? '',
+  categoryId: r.category_id ?? undefined,
+  name: r.name, 
+  description: r.description ?? undefined,
+  supplierId: r.supplier_id ?? undefined,
+  price: Number(r.price), 
+  cost: Number(r.cost),
+  itbis: !!r.itbis, 
+  image: r.image ?? '', 
+  stock: Number(r.stock),
+  locationId: r.location_id ?? undefined,
+  entryDate: r.entry_date ?? undefined,
+  modificationDate: r.modification_date ?? undefined,
+  wholesalePrice: r.wholesale_price != null ? Number(r.wholesale_price) : undefined,
+  wholesaleMinQuantity: r.wholesale_min_quantity != null ? Number(r.wholesale_min_quantity) : undefined,
 });
 export const productToRow = (p: Partial<Product>) => ({
-  name: p.name, code: p.code ?? null, price: p.price, cost: p.cost,
-  itbis: p.itbis ?? false, image: p.image ?? null, stock: p.stock ?? 0,
+  code: p.code ?? null, 
+  category_id: p.categoryId ?? null,
+  name: p.name, 
+  description: p.description ?? null,
+  supplier_id: p.supplierId ?? null,
+  price: p.price, 
+  cost: p.cost,
+  itbis: p.itbis ?? false, 
+  image: p.image ?? null, 
+  stock: p.stock ?? 0,
+  location_id: p.locationId ?? null,
+  entry_date: p.entryDate ?? null,
+  modification_date: p.modificationDate ?? null,
+  wholesale_price: p.wholesalePrice ?? null,
+  wholesale_min_quantity: p.wholesaleMinQuantity ?? null,
+});
+
+// ---------- Product Category ----------
+export const rowToProductCategory = (r: any): ProductCategory => ({
+  id: r.id,
+  name: r.name,
+});
+export const productCategoryToRow = (c: Partial<ProductCategory>) => ({
+  name: c.name,
+});
+
+// ---------- Product Location ----------
+export const rowToProductLocation = (r: any): ProductLocation => ({
+  id: r.id,
+  name: r.name,
+});
+export const productLocationToRow = (l: Partial<ProductLocation>) => ({
+  name: l.name,
 });
 
 // ---------- Customer ----------
@@ -17,11 +61,19 @@ export const rowToCustomer = (r: any): Customer => ({
   id: r.id, name: r.name, phone: r.phone ?? '', email: r.email ?? undefined,
   address: r.address ?? undefined, rnc: r.rnc ?? undefined, birthdate: r.birthdate ?? undefined,
   ncfType: r.ncf_type, notes: r.notes ?? undefined, creditBalance: Number(r.credit_balance ?? 0),
+  creditLimit: r.credit_limit != null ? Number(r.credit_limit) : null,
+  createdAt: r.created_at,
+  createdBy: r.created_by,
+  createdByName: r.profiles?.name || undefined,
 });
+// credit_balance NO se manda: solo lo escribe el servidor (triggers de venta y
+// RPCs de abono); en el insert aplica el default 0 de la base.
 export const customerToRow = (c: Partial<Customer>) => ({
   name: c.name, phone: c.phone ?? null, email: c.email ?? null, address: c.address ?? null,
-  rnc: c.rnc ?? null, birthdate: c.birthdate ?? null, ncf_type: c.ncfType ?? 'consumer',
-  notes: c.notes ?? null, credit_balance: c.creditBalance ?? 0,
+  rnc: c.rnc ?? null, 
+  birthdate: c.birthdate && c.birthdate.trim() !== '' ? c.birthdate : null, 
+  ncf_type: c.ncfType ?? 'consumer',
+  notes: c.notes ?? null, credit_limit: c.creditLimit ?? null,
 });
 
 // ---------- Branch ----------
@@ -31,7 +83,15 @@ export const branchToRow = (b: Partial<Branch>) => ({ name: b.name, location: b.
 // ---------- Supplier ----------
 export const rowToSupplier = (r: any): Supplier => ({
   id: r.id, name: r.name, contactPerson: r.contact_person ?? '', phone: r.phone ?? '',
-  email: r.email ?? '', address: r.address ?? '',
+  email: r.email ?? '', address: r.address ?? '', rnc: r.rnc ?? '',
+});
+export const supplierToRow = (s: Partial<Supplier>) => ({
+  name: s.name,
+  contact_person: s.contactPerson ?? null,
+  phone: s.phone ?? null,
+  email: s.email ?? null,
+  address: s.address ?? null,
+  rnc: s.rnc ?? null,
 });
 
 // ---------- Expense ----------
@@ -45,6 +105,8 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   name: r.name ?? '', phone: r.phone ?? '', rnc: r.rnc ?? '', address: r.address ?? '',
   socialMedia: { instagram: r.instagram ?? '', facebook: r.facebook ?? '' },
   logoUrl: r.logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
+  lateFeeRate: Number(r.late_fee_rate ?? 5),
+  defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
 });
 export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   name: p.name, phone: p.phone ?? null, rnc: p.rnc ?? null, address: p.address ?? null,
@@ -63,6 +125,43 @@ const rowToCartItem = (i: any): CartItem => ({
   },
 });
 
+export const rowToFinancingInstallment = (r: any): FinancingInstallment => ({
+  id: r.id,
+  saleId: r.sale_id,
+  number: Number(r.installment_number),
+  dueDate: r.due_date,
+  amount: Number(r.amount),
+  paidAmount: Number(r.paid_amount),
+  lateFeePaid: Number(r.late_fee_paid),
+  status: r.status,
+  paidAt: r.paid_at ?? undefined,
+});
+
+export const rowToCreditPayment = (r: any): CreditPayment => ({
+  id: r.id,
+  saleId: r.sale_id ?? undefined,
+  customerId: r.customer_id ?? '',
+  amount: Number(r.amount),
+  lateFeePaid: Number(r.late_fee_paid ?? 0),
+  method: r.method ?? 'cash',
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  date: new Date(r.date),
+  branchId: r.branches?.name ?? '',
+});
+
+// jsonb devuelto por register_sale_payment / register_customer_payment.
+export const rowToPaymentResult = (r: any): PaymentResult => ({
+  paymentId: r.payment_id,
+  amount: Number(r.amount),
+  lateFeePaid: Number(r.late_fee_paid ?? 0),
+  principalPaid: Number(r.principal_paid ?? 0),
+  remainingBalance: Number(r.remaining_balance ?? 0),
+  installmentsPaid: r.installments_paid != null ? Number(r.installments_paid) : null,
+  installmentsTotal: r.installments_total != null ? Number(r.installments_total) : null,
+  customerBalance: r.customer_balance != null ? Number(r.customer_balance) : null,
+});
+
 export const rowToSale = (r: any): Sale => ({
   id: r.id,
   items: (r.sale_items ?? []).map(rowToCartItem),
@@ -76,6 +175,9 @@ export const rowToSale = (r: any): Sale => ({
   // en la base es branch_id uuid — al leer se traduce con el join branches(name).
   branchId: r.branches?.name ?? '',
   financingDetails: r.financing_details ?? undefined,
+  installments: (r.financing_installments ?? [])
+    .map(rowToFinancingInstallment)
+    .sort((a: FinancingInstallment, b: FinancingInstallment) => a.number - b.number),
   payments: [],
   notes: r.notes ?? undefined, userName: r.user_name ?? undefined, userEmail: r.user_email ?? undefined,
   ncf: r.ncf ?? undefined, ncfType: r.ncf_type,
@@ -93,23 +195,6 @@ export const saleToRow = (s: Omit<Sale, 'id'>, branchUuid: string | null) => ({
   notes: s.notes ?? null, financing_details: s.financingDetails ?? null,
   user_name: s.userName ?? null, user_email: s.userEmail ?? null,
   quote_id: isUuid(s.quoteId) ? s.quoteId : null,
-});
-
-// Actualizaciones de una venta existente: solo campos mutables (abonos, estado,
-// notas). Nunca reescribe branch/customer/ncf para no corromper referencias.
-export const saleUpdateToRow = (s: Sale) => ({
-  amount_paid: s.amountPaid,
-  payment_status: s.paymentStatus,
-  financing_details: s.financingDetails ?? null,
-  notes: s.notes ?? null,
-});
-
-export const creditPaymentToRow = (p: Omit<CreditPayment, 'id'>, branchUuid: string | null) => ({
-  sale_id: isUuid(p.saleId) ? p.saleId : null,
-  customer_id: isUuid(p.customerId) ? p.customerId : null,
-  branch_id: branchUuid,
-  amount: p.amount,
-  date: p.date.toISOString(),
 });
 
 // ---------- Quote (con quote_items y customer embebidos) ----------
@@ -158,3 +243,78 @@ export const saleItemToRow = (item: CartItem, saleId: string) => ({
   quantity: item.quantity, price: item.product.price,
   custom_price: item.customPrice ?? null, itbis: item.product.itbis,
 });
+
+// ---------- Services ----------
+export const rowToServiceType = (r: any): import('@/lib/types').ServiceType => ({
+  id: r.id,
+  name: r.name,
+  description: r.description ?? undefined,
+  basePrice: Number(r.base_price ?? 0),
+});
+
+export const serviceTypeToRow = (s: Partial<import('@/lib/types').ServiceType>) => ({
+  name: s.name,
+  description: s.description ?? null,
+  base_price: s.basePrice ?? 0,
+});
+
+export const rowToServiceItem = (r: any): import('@/lib/types').ServiceItem => ({
+  id: r.id,
+  serviceId: r.service_id,
+  product: r.products ? rowToProduct(r.products) : {} as any,
+  quantity: Number(r.quantity),
+  price: Number(r.price),
+  cost: Number(r.cost),
+});
+
+export const serviceItemToRow = (item: Omit<import('@/lib/types').ServiceItem, 'id' | 'product'>) => ({
+  service_id: item.serviceId,
+  product_id: (item as any).productId || null, // When sending to DB we just need product_id
+  quantity: item.quantity,
+  price: item.price,
+  cost: item.cost,
+});
+
+export const rowToService = (r: any): import('@/lib/types').Service => ({
+  id: r.id,
+  branchId: r.branches?.name ?? '',
+  customerId: r.customer_id ?? undefined,
+  customer: r.customers ? rowToCustomer(r.customers) : undefined,
+  serviceTypeId: r.service_type_id,
+  serviceType: r.service_types ? rowToServiceType(r.service_types) : undefined,
+  assignedTo: r.assigned_to ?? undefined,
+  assignedUser: r.profiles ? {
+    id: r.profiles.id,
+    name: r.profiles.name,
+    email: r.profiles.email,
+    role: r.profiles.role,
+    branch: ''
+  } : undefined,
+  description: r.description,
+  status: r.status,
+  laborPrice: Number(r.labor_price),
+  partsTotal: Number(r.parts_total),
+  total: Number(r.total),
+  paymentStatus: r.payment_status,
+  amountPaid: Number(r.amount_paid),
+  createdAt: new Date(r.created_at),
+  completedAt: r.completed_at ? new Date(r.completed_at) : undefined,
+  items: r.service_items ? r.service_items.map(rowToServiceItem) : undefined,
+});
+
+export const serviceToRow = (s: Partial<import('@/lib/types').Service>, branchUuid?: string) => {
+  const row: any = {
+    customer_id: isUuid(s.customerId) ? s.customerId : null,
+    service_type_id: s.serviceTypeId,
+    assigned_to: isUuid(s.assignedTo) ? s.assignedTo : null,
+    description: s.description,
+    status: s.status,
+    labor_price: s.laborPrice,
+    payment_status: s.paymentStatus,
+    amount_paid: s.amountPaid,
+  };
+  if (branchUuid) row.branch_id = branchUuid;
+  if (s.completedAt) row.completed_at = s.completedAt.toISOString();
+  return row;
+};
+

@@ -13,6 +13,7 @@ import {
 import { ProductDialog } from './product-dialog';
 import type { Product } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useProducts } from '@/context/product-provider';
 
 interface ProductActionsProps {
   product: Product;
@@ -20,14 +21,27 @@ interface ProductActionsProps {
 
 export function ProductActions({ product }: ProductActionsProps) {
   const { toast } = useToast();
+  const { deleteProduct } = useProducts();
 
-  const handleDelete = () => {
-    // This is a mock action. In a real app, this would call a server action.
-    toast({
-      title: 'Acción no implementada',
-      description: `La eliminación del producto ${product.name} no está disponible en esta demo.`,
-      variant: 'destructive',
-    });
+  const handleDelete = async () => {
+    if (!confirm(`¿Estás seguro de que deseas eliminar el producto "${product.name}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      await deleteProduct(product.id);
+      toast({
+        title: 'Producto eliminado',
+        description: `El producto "${product.name}" ha sido eliminado del catálogo.`,
+      });
+    } catch (error) {
+      console.error(error);
+      toast({
+        title: 'Error al eliminar',
+        description: 'No se pudo eliminar el producto. Inténtalo de nuevo.',
+        variant: 'destructive',
+      });
+    }
   };
 
   return (

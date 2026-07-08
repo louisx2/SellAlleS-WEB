@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
@@ -78,7 +79,7 @@ export function CompanyModulesDialog({ companyId, companyName, open, onOpenChang
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
             {APP_MODULES.map((mod) => (
               <div key={mod.key} className="flex items-center justify-between rounded-lg border p-3">
                 <div className="pr-4">
@@ -97,6 +98,12 @@ export function CompanyModulesDialog({ companyId, companyName, open, onOpenChang
             ))}
           </div>
         )}
+
+        <div className="mt-4 flex justify-end">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cerrar
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

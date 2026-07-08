@@ -199,9 +199,14 @@ export function ReceiptContent({ sale }: ReceiptProps) {
         )}
         <p className="text-center mt-3 text-xs font-semibold">{profile.receiptFooter}</p>
         <div className="text-center text-xs mt-1">
-        {profile.socialMedia.instagram && <span>{profile.socialMedia.instagram}</span>}
-        {profile.socialMedia.instagram && profile.socialMedia.facebook && <span> • </span>}
-        {profile.socialMedia.facebook && <span>{profile.socialMedia.facebook}</span>}
+          {profile.socialMedia.instagram && <span>{profile.socialMedia.instagram}</span>}
+          {profile.socialMedia.instagram && profile.socialMedia.facebook && <span> • </span>}
+          {profile.socialMedia.facebook && <span>{profile.socialMedia.facebook}</span>}
+        </div>
+        <div className="text-center mt-6 pt-2 border-t border-dashed">
+          <p className="text-[10px] text-muted-foreground font-mono">
+            SellAlleS Web <span className="opacity-70">by SmatCore</span>
+          </p>
         </div>
     </div>
   );

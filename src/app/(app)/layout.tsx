@@ -6,6 +6,8 @@ import { CompanyProfileProvider } from '@/context/company-profile-provider';
 import { BranchProvider } from '@/context/branch-provider';
 import { UserProvider } from '@/context/user-provider';
 import { ProductProvider } from '@/context/product-provider';
+import { CategoryProvider } from '@/context/category-provider';
+import { LocationProvider } from '@/context/location-provider';
 import { CustomerProvider } from '@/context/customer-provider';
 import { SalesProvider } from '@/context/sales-provider';
 import { SupplierProvider } from '@/context/supplier-provider';
@@ -20,21 +22,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <CompanyProfileProvider>
       <BranchProvider>
         <UserProvider>
-          <ProductProvider>
-            <CustomerProvider>
-              <SalesProvider>
-                <SupplierProvider>
-                  <ExpenseProvider>
-                    <QuotesProvider>
-                      <SidebarProvider defaultOpen={true}>
-                        <AuthedLayout>{children}</AuthedLayout>
-                      </SidebarProvider>
-                    </QuotesProvider>
-                  </ExpenseProvider>
-                </SupplierProvider>
-              </SalesProvider>
-            </CustomerProvider>
-          </ProductProvider>
+          <CategoryProvider>
+            <LocationProvider>
+              <ProductProvider>
+                <CustomerProvider>
+                  <SalesProvider>
+                    <SupplierProvider>
+                      <ExpenseProvider>
+                        <QuotesProvider>
+                          <SidebarProvider defaultOpen={false}>
+                            <AuthedLayout>{children}</AuthedLayout>
+                          </SidebarProvider>
+                        </QuotesProvider>
+                      </ExpenseProvider>
+                    </SupplierProvider>
+                  </SalesProvider>
+                </CustomerProvider>
+              </ProductProvider>
+            </LocationProvider>
+          </CategoryProvider>
         </UserProvider>
       </BranchProvider>
     </CompanyProfileProvider>

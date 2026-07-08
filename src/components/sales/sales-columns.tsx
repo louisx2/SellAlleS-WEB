@@ -78,6 +78,11 @@ export const salesColumns: ColumnDef<Sale>[] = [
     cell: ({ row }) => formatCurrency(row.getValue('total')),
   },
   {
+    accessorKey: 'userName',
+    header: 'Vendedor',
+    cell: ({ getValue }) => getValue<string>() || '—',
+  },
+  {
     id: 'actions',
     cell: ({ row }) => <SalesActions sale={row.original} />,
   },

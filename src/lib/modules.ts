@@ -12,7 +12,8 @@ export type ModuleKey =
   | 'suppliers'
   | 'expenses'
   | 'reports'
-  | 'lavanderia';
+  | 'lavanderia'
+  | 'services';
 
 export interface AppModule {
   key: ModuleKey;
@@ -32,6 +33,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'suppliers',  label: 'Proveedores',        description: 'Directorio de suplidores.',                           defaultEnabled: true },
   { key: 'expenses',   label: 'Gastos',             description: 'Registro de gastos del negocio.',                     defaultEnabled: true },
   { key: 'reports',    label: 'Reportes',           description: 'Resúmenes de ventas, productos e impuestos.',         defaultEnabled: true },
+  { key: 'services',   label: 'Servicios/Reparaciones', description: 'Gestión de órdenes de servicio y uso de repuestos.',  defaultEnabled: true },
   { key: 'lavanderia', label: 'Lavandería',         description: 'Órdenes de servicio de lavandería.',                  defaultEnabled: false, comingSoon: true },
 ];
 
@@ -46,6 +48,8 @@ const ROUTE_MODULE: Array<{ prefix: string; module: ModuleKey }> = [
   { prefix: '/suppliers', module: 'suppliers' },
   { prefix: '/expenses',  module: 'expenses' },
   { prefix: '/reports',   module: 'reports' },
+  { prefix: '/services',  module: 'services' },
+  { prefix: '/service-types', module: 'services' },
 ];
 
 export function moduleForRoute(pathname: string): ModuleKey | null {

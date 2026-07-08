@@ -119,3 +119,49 @@
       border: none;
   }
 }
+
+/* Custom hidden scrollbar to remove scrollbars completely */
+::-webkit-scrollbar {
+  display: none;
+}
+* {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+/* Smooth slide and fade animation for collapsible submenus */
+.collapsible-content-animation {
+  overflow: hidden;
+}
+.collapsible-content-animation[data-state='open'] {
+  animation: collapsible-slide-down-fade 0.35s cubic-bezier(0.87, 0, 0.13, 1);
+}
+.collapsible-content-animation[data-state='closed'] {
+  animation: collapsible-slide-up-fade 0.35s cubic-bezier(0.87, 0, 0.13, 1);
+}
+
+@keyframes collapsible-slide-down-fade {
+  from {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes collapsible-slide-up-fade {
+  from {
+    height: var(--radix-collapsible-content-height);
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    height: 0;
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}

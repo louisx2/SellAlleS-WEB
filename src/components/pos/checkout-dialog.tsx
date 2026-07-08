@@ -25,6 +25,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '../ui/separator';
 import { Textarea } from '../ui/textarea';
 import { useAuth } from '@/context/auth-provider';
+import { useModules } from '@/context/modules-provider';
 
 interface CheckoutDialogProps {
   isOpen: boolean;
@@ -36,8 +37,14 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const { activeCart, total, subtotal, itbisAmount, totalDiscount, createSale, completeSale } = useCart();
   const { updateStock } = useProducts();
   const { addSale: addSaleToContext } = useSales();
-  const { updateCustomer } = useCustomers();
+  const { customers, reload: reloadCustomers } = useCustomers();
   const { appUser } = useAuth();
+  const { isModuleEnabled } = useModules();
+  // Los métodos de venta a plazo solo se ofrecen si la empresa tiene el módulo
+  // activo (se configura en Plataforma → Módulos). Mantiene el checkout
+  // consistente con lo que aparece en el menú.
+  const creditEnabled = isModuleEnabled('credit');
+  const financingEnabled = isModuleEnabled('financing');
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer' | 'credit' | 'financing'>('cash');
   const [amountPaid, setAmountPaid] = useState<number | string>('');
   const [paymentReference, setPaymentReference] = useState('');
@@ -94,7 +101,9 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     }
   };
 
-  const handleConfirmSale = async (financingDetails?: FinancingDetails) => {
+  // downPaymentOverride: el inicial del financiamiento llega como parámetro y
+  // no vía estado (setAmountPaid + llamada síncrona leería el valor anterior).
+  const handleConfirmSale = async (financingDetails?: FinancingDetails, downPaymentOverride?: number) => {
     if (!activeCart || !appUser) return;
 
     const finalPaymentMethod = financingDetails ? 'financing' : paymentMethod;
@@ -102,7 +111,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     const sale = createSale({
       paymentMethod: finalPaymentMethod,
       branchId: appUser.branch,
-      amountPaid: Number(amountPaid),
+      amountPaid: downPaymentOverride !== undefined ? downPaymentOverride : Number(amountPaid),
       paymentReference,
       financingDetails,
       notes: saleNotes,
@@ -112,18 +121,16 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
 
     try {
       // Guardar primero en la base; si falla, el carrito queda intacto.
+      // Los triggers de la base validan el límite de crédito, generan las
+      // cuotas y actualizan el balance del cliente en la misma transacción.
       const savedSale = await addSaleToContext(sale);
 
       sale.items.forEach(item => {
         updateStock(item.product.id, item.quantity);
       });
 
-      if ((savedSale.paymentStatus === 'credit' || savedSale.paymentStatus === 'in_financing') && savedSale.customer && savedSale.customer.id !== '0') {
-        const updatedCustomer = {
-          ...savedSale.customer,
-          creditBalance: savedSale.customer.creditBalance + (savedSale.total - savedSale.amountPaid),
-        };
-        await updateCustomer(updatedCustomer);
+      if (savedSale.paymentStatus === 'credit' || savedSale.paymentStatus === 'in_financing') {
+        await reloadCustomers(); // el balance lo escribió el trigger
       }
 
       onSaleComplete(savedSale);
@@ -151,16 +158,26 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   };
 
   const handleFinancingComplete = (details: { downPayment: number; financingDetails: FinancingDetails }) => {
-    // Set payment details from financing dialog and confirm sale
-    setAmountPaid(details.downPayment);
     setFinancingOpen(false); // Close financing dialog first
-    handleConfirmSale(details.financingDetails); // Then confirm sale, which closes checkout dialog
+    // El inicial va como parámetro: setAmountPaid + llamada síncrona guardaría
+    // la venta con el amountPaid del render anterior (= total).
+    handleConfirmSale(details.financingDetails, details.downPayment);
   };
-  
+
+  // Cliente FRESCO desde el provider: el snapshot del carrito persiste en
+  // localStorage y su creditBalance/creditLimit pueden estar desactualizados.
+  const freshCustomer = customers.find(c => c.id === activeCart?.selectedCustomer?.id);
+  const availableCredit = freshCustomer?.creditLimit != null
+    ? Math.max(freshCustomer.creditLimit - freshCustomer.creditBalance, 0)
+    : null;
+
   const isCashPaymentInvalid = paymentMethod === 'cash' && (Number(amountPaid) < total || amountPaid === '');
   const isRefPaymentInvalid = (paymentMethod === 'card' || paymentMethod === 'transfer') && !paymentReference.trim();
   const isCreditPaymentInvalid = (paymentMethod === 'credit' || paymentMethod === 'financing') && (!activeCart?.selectedCustomer || activeCart?.selectedCustomer.id === '0');
   const isCreditAmountInvalid = paymentMethod === 'credit' && (Number(amountPaid) > total || Number(amountPaid) < 0);
+  // Aviso temprano de límite (el rechazo definitivo lo hace el trigger en la base).
+  const isOverCreditLimit = paymentMethod === 'credit' && availableCredit !== null
+    && (total - Number(amountPaid || 0)) > availableCredit;
 
   const confirmButtonAction = () => {
     if (paymentMethod === 'financing') {
@@ -221,24 +238,28 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                       Transf.
                       </Label>
                   </div>
+                  {creditEnabled && (
                   <div>
                       <RadioGroupItem value="credit" id="credit" className="peer sr-only" disabled={!activeCart.selectedCustomer || activeCart.selectedCustomer.id === '0'} />
-                      <Label 
-                          htmlFor="credit" 
+                      <Label
+                          htmlFor="credit"
                           className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-destructive peer-data-[state=checked]:bg-red-100/30 peer-disabled:opacity-50 peer-disabled:cursor-not-allowed"
                       >
                       Crédito
                       </Label>
                   </div>
+                  )}
+                  {financingEnabled && (
                   <div>
                       <RadioGroupItem value="financing" id="financing" className="peer sr-only" disabled={!activeCart.selectedCustomer || activeCart.selectedCustomer.id === '0'} />
-                      <Label 
-                          htmlFor="financing" 
+                      <Label
+                          htmlFor="financing"
                           className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-purple-600 peer-data-[state=checked]:bg-purple-100/30 peer-disabled:opacity-50 peer-disabled:cursor-not-allowed"
                       >
                       Financiar
                       </Label>
                   </div>
+                  )}
                   </RadioGroup>
                   {isCreditPaymentInvalid && (
                       <p className="text-xs text-destructive mt-2">Debe seleccionar un cliente para vender a crédito o financiar.</p>
@@ -304,6 +325,12 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                         {isCreditAmountInvalid && (
                             <p className="text-xs text-destructive">El abono no puede ser mayor que el total o negativo.</p>
                         )}
+                        {isOverCreditLimit && (
+                            <p className="text-xs text-destructive">
+                                La deuda nueva ({formatCurrency(total - Number(amountPaid || 0))}) excede el crédito
+                                disponible del cliente ({formatCurrency(availableCredit ?? 0)}).
+                            </p>
+                        )}
                     </div>
                 )}
 
@@ -366,7 +393,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button type="button" onClick={confirmButtonAction} disabled={isCashPaymentInvalid || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid}>
+          <Button type="button" onClick={confirmButtonAction} disabled={isCashPaymentInvalid || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit}>
             {paymentMethod === 'financing' ? 'Configurar Plan' : 'Confirmar'}
           </Button>
         </DialogFooter>
@@ -377,6 +404,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
         isOpen={isFinancingOpen}
         onOpenChange={setFinancingOpen}
         totalAmount={total}
+        availableCredit={availableCredit}
         onFinancingComplete={handleFinancingComplete}
     />
     </>

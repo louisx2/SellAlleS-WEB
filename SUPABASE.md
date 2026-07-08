@@ -24,7 +24,8 @@ Funciones helper (SECURITY DEFINER) usadas por las políticas:
 
 Plataforma (SaaS): `plans`, `companies`, `subscriptions`
 Empresa (tenant): `branches`, `profiles`, `roles`, `customers`, `suppliers`,
-`products`, `expenses`, `sales`, `sale_items`, `credit_payments`, `ncf_sequences`
+`products`, `expenses`, `sales`, `sale_items`, `credit_payments`,
+`financing_installments`, `ncf_sequences`
 
 Todas las tablas tenant llevan `company_id` y tienen RLS activado.
 
@@ -63,6 +64,40 @@ insert, sin saltos ni duplicados. Si `ncf_enabled` es false, la venta queda
 con `ncf` NULL. Para empezar a emitir: activar `ncf_enabled` en la empresa y
 cargar filas en `ncf_sequences` (tipo 'consumer' prefix 'B02', tipo 'fiscal'
 prefix 'B01', con su rango autorizado por DGII).
+
+## Motor de crédito y financiamiento (migración `credit_financing_engine`)
+
+Los montos se calculan SIEMPRE en el servidor; el navegador solo propone
+parámetros (tasa y cantidad de cuotas) y muestra estados.
+
+- **`trg_before_sale_credit`** (BEFORE INSERT en `sales`, antes de `trg_set_sale_ncf`
+  por orden alfabético): para ventas `credit`/`in_financing` exige cliente,
+  valida `customers.credit_limit` (NULL = sin límite) con lock del cliente, y
+  para financiamiento **recalcula** `financing_details` con interés simple
+  mensual (`interés = principal × tasa% × cuotas`), guardando también
+  `downPayment`. Si el límite se excede, la venta se rechaza con mensaje en
+  español (llega al toast del POS).
+- **`trg_after_sale_credit`** (AFTER INSERT en `sales`): sube
+  `customers.credit_balance` (deuda = principal + interés para financiamiento;
+  total − inicial para crédito) y genera las cuotas en `financing_installments`
+  (vencimiento mensual desde la fecha de venta; la última cuota absorbe el
+  redondeo para que la suma sea exacta).
+- **RPC `register_sale_payment(sale_id, amount, method, branch_id, notes)`**
+  (SECURITY INVOKER — RLS aplica): abono a una venta. En una transacción cobra
+  primero la **mora** (`companies.late_fee_rate`% por cuota vencida, cargo
+  único por cuota, persistida en `late_fee_paid` de cuota y abono), luego
+  aplica capital FIFO a las cuotas, sube `sales.amount_paid` (solo capital),
+  marca `paid` al saldar y baja `customers.credit_balance`. El usuario se
+  captura en servidor (`auth.uid()`). Devuelve jsonb para el recibo de abono.
+- **RPC `register_customer_payment(customer_id, amount, method, branch_id, notes)`**:
+  abono a la deuda general; se aplica FIFO a las ventas `credit` abiertas del
+  cliente y baja su balance.
+- `companies.late_fee_rate` (default 5) y `companies.default_interest_rate`
+  (default 3.5) se editan en Perfil de Empresa → "Crédito y Financiamiento".
+- La mora exigible NO se materializa: se deriva al leer (cuota vencida ×
+  tasa − ya cobrada), igual en SQL y en `calculateFinancingStatus` del cliente.
+- `customers.credit_balance` solo lo escriben los triggers/RPCs; el mapper
+  `customerToRow` ya no lo envía desde el navegador.
 
 ## Próximos pasos
 

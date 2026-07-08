@@ -7,65 +7,144 @@ import type { User as AppUser } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { AppSkeleton } from '@/components/ui/app-skeleton';
 import { CreateCompanyScreen } from '@/components/auth/create-company-screen';
+import { BranchSelector } from '@/components/auth/branch-selector';
+import { SuspendedScreen } from '@/components/auth/suspended-screen';
 
 interface AuthContextType {
   appUser: AppUser | null;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<void>;
-  signUp: (name: string, email: string, pass: string, businessName: string) => Promise<{ needsConfirmation: boolean }>;
+  signUp: (name: string, email: string, pass: string, businessName: string, planId: string, companyStatus: 'active' | 'suspended') => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
+  setImpersonatedCompany: (companyId: string | null, companyName: string | null) => void;
+  setActiveBranch: (branchId: string, branchName: string) => void;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const publicRoutes = ['/login'];
+const publicRoutes = ['/login', '/reset-password'];
 
-// Varios componentes (carrito, ventas, pagos) leen estos valores de localStorage.
 function persistLocal(user: AppUser) {
   localStorage.setItem('userRole', user.role);
   localStorage.setItem('userBranch', user.branch);
   localStorage.setItem('userName', user.name);
   localStorage.setItem('userEmail', user.email);
+  if (user.companyId) localStorage.setItem('userCompany', user.companyId);
+  if (user.companyStatus) localStorage.setItem('userCompanyStatus', user.companyStatus);
+  if (user.activeBranchId) localStorage.setItem('userBranchId', user.activeBranchId);
+  if (user.impersonatedCompanyId) {
+    localStorage.setItem('userImpersonatedCompany', user.impersonatedCompanyId);
+    localStorage.setItem('userImpersonatedCompanyName', user.impersonatedCompanyName ?? '');
+  }
 }
 function clearLocal() {
-  ['userRole', 'userBranch', 'userName', 'userEmail'].forEach((k) => localStorage.removeItem(k));
+  ['userRole', 'userBranch', 'userName', 'userEmail', 'userCompany', 'userCompanyStatus', 'userBranchId', 'userImpersonatedCompany', 'userImpersonatedCompanyName'].forEach((k) => localStorage.removeItem(k));
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [needsCompany, setNeedsCompany] = useState(false);
+  const [needsBranchSelection, setNeedsBranchSelection] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
 
   const loadProfile = useCallback(async (userId: string, fallbackEmail?: string) => {
-    const { data } = await supabase
+    // También traemos profile_branches y profile_roles para gerentes multi-sucursal
+    const { data, error } = await supabase
       .from('profiles')
-      // branches! desambiguado: profiles se relaciona con branches por branch_id
-      // y también vía profile_branches; sin esto PostgREST devuelve PGRST201.
-      .select('id, name, email, role, is_super_admin, company_id, branches!profiles_branch_id_fkey(name)')
+      .select(`
+        id, name, email, role, is_super_admin, company_id,
+        companies(status),
+        branches!profiles_branch_id_fkey(id, name),
+        profile_branches(branches(id, name)),
+        profile_roles(roles(id, name, description))
+      `)
       .eq('id', userId)
       .maybeSingle();
 
+    if (error || !data) {
+      // Sin perfil no hay app: cerrar la sesión (diferido, nunca en el flujo
+      // de un callback de auth) para caer en /login, en vez de dejar el
+      // skeleton infinito de `session && !appUser`.
+      console.error('No se pudo cargar el perfil:', error?.message ?? 'perfil no encontrado');
+      setAppUser(null);
+      setTimeout(() => { supabase.auth.signOut(); }, 0);
+      return;
+    }
+
     if (data) {
-      // Perfil sin empresa (registro sin nombre de negocio o cuenta antigua):
-      // se muestra la pantalla de creación de empresa en vez de la app.
       setNeedsCompany(!data.company_id);
-      const branchName = Array.isArray((data as any).branches)
-        ? (data as any).branches[0]?.name
-        : (data as any).branches?.name;
+      
+      // Construir la lista de sucursales a las que pertenece
+      const branchList: {id: string, name: string}[] = [];
+      const mainBranch = Array.isArray((data as any).branches) ? (data as any).branches[0] : (data as any).branches;
+      if (mainBranch) branchList.push({ id: mainBranch.id, name: mainBranch.name });
+      
+      if (data.profile_branches && Array.isArray(data.profile_branches)) {
+        data.profile_branches.forEach((pb: any) => {
+          if (pb.branches && !branchList.find(b => b.id === pb.branches.id)) {
+            branchList.push({ id: pb.branches.id, name: pb.branches.name });
+          }
+        });
+      }
+
+      const customRoles = (data.profile_roles ?? [])
+        .map((pr: any) => pr.roles)
+        .filter(Boolean)
+        .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '' }));
+
+      const isManager = customRoles.some((r: any) => r.name.toLowerCase().includes('gerente'));
+      const isAdminOrManager = !data.is_super_admin && (data.role === 'admin' || isManager);
+
+      // Si ya había una sucursal activa seleccionada previamente en esta sesión, mantenerla
+      const savedBranchId = localStorage.getItem('userBranchId');
+      const savedImpersonatedId = localStorage.getItem('userImpersonatedCompany');
+      const savedImpersonatedName = localStorage.getItem('userImpersonatedCompanyName');
+      
+      let activeBranch = branchList.length > 0 ? branchList[0] : { id: '', name: '' };
+      let requireSelection = false;
+
+      if (isAdminOrManager && branchList.length > 1) {
+        const sessionSelected = sessionStorage.getItem('branchSelectedThisSession');
+        if (sessionSelected !== 'true') {
+          requireSelection = true;
+        } else if (savedBranchId && branchList.find(b => b.id === savedBranchId)) {
+          const found = branchList.find(b => b.id === savedBranchId);
+          if (found) activeBranch = found;
+        }
+      } else {
+        if (savedBranchId && branchList.find(b => b.id === savedBranchId)) {
+          const found = branchList.find(b => b.id === savedBranchId);
+          if (found) activeBranch = found;
+        } else if (branchList.length > 1) {
+          // Si no hay branch guardado y tiene más de 1, obligar a seleccionar
+          requireSelection = true;
+        }
+      }
+
+      setNeedsBranchSelection(requireSelection);
+
+      const compStatus = (data as any).companies?.status;
+
       const user: AppUser = {
         id: data.id,
         name: data.name ?? 'Usuario',
         email: data.email ?? fallbackEmail ?? '',
         role: data.is_super_admin ? 'admin' : (data.role as AppUser['role']),
-        branch: branchName ?? '',
+        branch: activeBranch.name,
+        activeBranchId: activeBranch.id,
+        branches: branchList,
+        companyId: data.company_id,
+        companyStatus: compStatus,
+        impersonatedCompanyId: savedImpersonatedId || undefined,
+        impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,
+        customRoles: customRoles,
       };
       setAppUser(user);
-      persistLocal(user);
-    } else {
-      setAppUser(null);
+      if (!requireSelection) persistLocal(user);
     }
   }, []);
 
@@ -76,6 +155,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // así que cubre tanto la carga inicial como los cambios de sesión.
     const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
       if (!active) return;
+      
+      // Sesión "solo esta pestaña" reabierta en un contexto nuevo (el usuario
+      // desmarcó "mantener sesión" y sessionStorage ya no existe): resolver el
+      // estado de inmediato para que el efecto redirija a /login, y diferir el
+      // signOut FUERA del callback — llamarlo dentro de onAuthStateChange
+      // deadlockea el lock de auth de supabase-js (skeleton congelado).
+      if (sess?.user) {
+        const keepSession = localStorage.getItem('keepSession');
+        const tabSession = sessionStorage.getItem('tabSession');
+        if (keepSession === 'false' && tabSession !== 'true') {
+          setSession(null);
+          setAppUser(null);
+          clearLocal();
+          setLoading(false);
+          setTimeout(() => { supabase.auth.signOut(); }, 0);
+          return;
+        }
+      }
+
       setSession(sess);
       if (sess?.user) {
         // Diferir la consulta a la BD fuera del callback de auth (recomendado por Supabase).
@@ -100,22 +198,73 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loading) return;
     const isPublic = publicRoutes.includes(pathname);
-    if (!session && !isPublic) router.replace('/login');
-    else if (session && isPublic) router.replace('/dashboard');
-  }, [session, loading, pathname, router]);
+    if (!session && !isPublic) {
+      router.replace('/login');
+    } else if (session) {
+      if (isPublic) {
+        if (appUser?.isSuperAdmin) {
+          router.replace('/admin/companies');
+        } else {
+          router.replace('/dashboard');
+        }
+      } else {
+        const isImpersonating = !!appUser?.impersonatedCompanyId;
+        const isClientRoute = !pathname.startsWith('/admin');
+        if (appUser?.isSuperAdmin && !isImpersonating && isClientRoute) {
+          router.replace('/admin/companies');
+        }
+      }
+    }
+  }, [session, loading, pathname, router, appUser?.isSuperAdmin, appUser?.impersonatedCompanyId]);
+
+  const setImpersonatedCompany = useCallback((companyId: string | null, companyName: string | null) => {
+    setAppUser((prev) => {
+      if (!prev) return null;
+      const updated = { 
+        ...prev, 
+        impersonatedCompanyId: companyId ?? undefined, 
+        impersonatedCompanyName: companyName ?? undefined 
+      };
+      if (!companyId) {
+        localStorage.removeItem('userImpersonatedCompany');
+        localStorage.removeItem('userImpersonatedCompanyName');
+      }
+      persistLocal(updated);
+      return updated;
+    });
+    // Force a reload so all contexts/providers re-fetch data for the new company
+    setTimeout(() => {
+      window.location.href = companyId ? '/dashboard' : '/admin/companies';
+    }, 100);
+  }, []);
+
+  const setActiveBranch = useCallback((branchId: string, branchName: string) => {
+    setAppUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, activeBranchId: branchId, branch: branchName };
+      persistLocal(updated);
+      return updated;
+    });
+  }, []);
 
   const signIn = async (email: string, pass: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
   };
 
-  const signUp = async (name: string, email: string, pass: string, businessName: string) => {
+  const signUp = async (name: string, email: string, pass: string, businessName: string, planId: string, companyStatus: 'active' | 'suspended') => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password: pass,
-      // company_name lo consume el trigger handle_new_user: crea la empresa,
-      // la sucursal Principal y la suscripción al plan Gratis.
-      options: { data: { name, company_name: businessName } },
+      // Metadata consumida por trigger db
+      options: { 
+        data: { 
+          name, 
+          company_name: businessName,
+          plan_id: planId,
+          company_status: companyStatus
+        } 
+      },
     });
     if (error) throw error;
     return { needsConfirmation: !data.session };
@@ -124,10 +273,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut();
     clearLocal();
+    localStorage.removeItem('keepSession');
+    sessionStorage.removeItem('tabSession');
+    sessionStorage.removeItem('branchSelectedThisSession');
     setAppUser(null);
     setSession(null);
     router.replace('/login');
   };
+
+  const refreshProfile = useCallback(async () => {
+    if (appUser?.id) {
+      await loadProfile(appUser.id, appUser.email);
+    }
+  }, [appUser?.id, appUser?.email, loadProfile]);
 
   // Estado de carga / transición: mostrar el skeleton a pantalla completa.
   if (loading) return <AppSkeleton />;
@@ -140,8 +298,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return <CreateCompanyScreen userName={appUser.name} onSignOut={signOut} />;
   }
 
+  // Cuenta suspendida o pendiente de activación
+  if (session && appUser && appUser.companyStatus === 'suspended' && !appUser.isSuperAdmin && !isPublic) {
+    return <SuspendedScreen userName={appUser.name} onSignOut={signOut} />;
+  }
+
+  // Cuenta autenticada con múltiples sucursales, pero sin seleccionar una aún
+  if (session && appUser && needsBranchSelection && !isPublic) {
+    return (
+      <BranchSelector
+        userName={appUser.name}
+        branches={appUser.branches || []}
+        onSelect={(id, name) => {
+          sessionStorage.setItem('branchSelectedThisSession', 'true');
+          setActiveBranch(id, name);
+          setNeedsBranchSelection(false);
+          // Si es superAdmin (y por alguna razón entró acá), ir a plataforma.
+          if (appUser?.isSuperAdmin) {
+            router.replace('/admin/companies');
+          } else {
+            router.replace('/dashboard');
+          }
+        }}
+        onSignOut={signOut}
+      />
+    );
+  }
+
   return (
-    <AuthContext.Provider value={{ appUser, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ appUser, loading, signIn, signUp, signOut, setImpersonatedCompany, setActiveBranch, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );

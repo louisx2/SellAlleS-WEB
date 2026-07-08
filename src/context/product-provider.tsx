@@ -10,6 +10,7 @@ interface ProductContextType {
   updateStock: (productId: string, quantitySold: number) => Promise<void>;
   addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
   updateProduct: (product: Product) => Promise<void>;
+  deleteProduct: (id: string) => Promise<void>;
   loading: boolean;
 }
 
@@ -39,6 +40,12 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   };
 
+  const deleteProduct = async (id: string) => {
+    const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) throw error;
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+  };
+
   const updateStock = async (productId: string, quantitySold: number) => {
     const current = products.find((p) => p.id === productId);
     const newStock = (current?.stock ?? 0) - quantitySold;
@@ -48,7 +55,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, loading }}>
+    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, loading }}>
       {children}
     </ProductContext.Provider>
   );

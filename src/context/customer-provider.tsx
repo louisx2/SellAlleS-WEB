@@ -8,9 +8,11 @@ import { GENERIC_CUSTOMER } from '@/lib/utils';
 
 interface CustomerContextType {
   customers: Customer[];
-  addCustomer: (customer: Omit<Customer, 'id'>) => Promise<void>;
+  addCustomer: (customer: Omit<Customer, 'id'>, companyId?: string) => Promise<Customer | undefined>;
   updateCustomer: (customer: Customer) => Promise<void>;
   getGenericCustomer: () => Customer;
+  /** Recarga desde la base; el credit_balance lo escribe solo el servidor. */
+  reload: () => Promise<void>;
   loading: boolean;
 }
 
@@ -22,17 +24,32 @@ export function CustomerProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.from('customers').select('*').order('name');
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*, profiles:created_by(name)')
+      .order('name');
     if (!error && data) setCustomers(data.map(rowToCustomer));
     setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  const addCustomer = async (customerData: Omit<Customer, 'id'>) => {
-    const { data, error } = await supabase.from('customers').insert(customerToRow(customerData)).select().single();
+  const addCustomer = async (customerData: Omit<Customer, 'id'>, companyId?: string) => {
+    const row = {
+      ...customerToRow(customerData),
+      ...(companyId ? { company_id: companyId } : {}),
+    };
+    const { data, error } = await supabase
+      .from('customers')
+      .insert(row)
+      .select('*, profiles:created_by(name)')
+      .single();
     if (error) throw error;
-    if (data) setCustomers((prev) => [...prev, rowToCustomer(data)]);
+    if (data) {
+      const mapped = rowToCustomer(data);
+      setCustomers((prev) => [...prev, mapped]);
+      return mapped;
+    }
   };
 
   const updateCustomer = async (updated: Customer) => {
@@ -44,7 +61,7 @@ export function CustomerProvider({ children }: { children: ReactNode }) {
   const getGenericCustomer = (): Customer => GENERIC_CUSTOMER;
 
   return (
-    <CustomerContext.Provider value={{ customers, addCustomer, updateCustomer, getGenericCustomer, loading }}>
+    <CustomerContext.Provider value={{ customers, addCustomer, updateCustomer, getGenericCustomer, reload: load, loading }}>
       {children}
     </CustomerContext.Provider>
   );

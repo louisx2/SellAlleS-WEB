@@ -1,6 +1,7 @@
 'use client';
 
-import { MoreHorizontal, DollarSign } from 'lucide-react';
+import Link from 'next/link';
+import { MoreHorizontal, DollarSign, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -33,6 +34,12 @@ export function CreditActions({ customer }: CreditActionsProps) {
         <DropdownMenuContent align="end">
             <DropdownMenuLabel>Acciones</DropdownMenuLabel>
             <DropdownMenuSeparator />
+            <DropdownMenuItem asChild>
+                <Link href={`/credit/${customer.id}`}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    <span>Estado de cuenta</span>
+                </Link>
+            </DropdownMenuItem>
             <DialogTrigger asChild>
                  <DropdownMenuItem>
                     <DollarSign className="mr-2 h-4 w-4" />

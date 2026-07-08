@@ -13,6 +13,7 @@ import {
 import { BranchDialog } from './branch-dialog';
 import type { Branch } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
 
 interface BranchActionsProps {
   branch: Branch;
@@ -20,6 +21,7 @@ interface BranchActionsProps {
 
 export function BranchActions({ branch }: BranchActionsProps) {
   const { toast } = useToast();
+  const { appUser } = useAuth();
   
   const handleDelete = () => {
     toast({
@@ -47,10 +49,12 @@ export function BranchActions({ branch }: BranchActionsProps) {
               <span>Editar</span>
             </div>
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={handleDelete} className="text-destructive">
-            <Trash2 className="mr-2 h-4 w-4" />
-            <span>Eliminar</span>
-          </DropdownMenuItem>
+          {appUser?.isSuperAdmin && (
+            <DropdownMenuItem onClick={handleDelete} className="text-destructive">
+              <Trash2 className="mr-2 h-4 w-4" />
+              <span>Eliminar</span>
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     </BranchDialog>

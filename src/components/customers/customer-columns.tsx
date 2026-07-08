@@ -2,29 +2,9 @@
 
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Customer } from '@/lib/types';
-import { Checkbox } from '@/components/ui/checkbox';
 import { CustomerActions } from './customer-actions';
 
 export const customerColumns: ColumnDef<Customer>[] = [
-  {
-    id: 'select',
-    header: ({ table }) => (
-      <Checkbox
-        checked={table.getIsAllPageRowsSelected()}
-        onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-        aria-label="Select all"
-      />
-    ),
-    cell: ({ row }) => (
-      <Checkbox
-        checked={row.getIsSelected()}
-        onCheckedChange={(value) => row.toggleSelected(!!value)}
-        aria-label="Select row"
-      />
-    ),
-    enableSorting: false,
-    enableHiding: false,
-  },
   {
     accessorKey: 'name',
     header: 'Nombre',
@@ -40,6 +20,20 @@ export const customerColumns: ColumnDef<Customer>[] = [
   {
     accessorKey: 'address',
     header: 'Dirección',
+  },
+  {
+    accessorKey: 'createdAt',
+    header: 'Cliente Desde',
+    cell: ({ getValue }) => {
+      const val = getValue<string>();
+      if (!val) return '—';
+      return new Date(val).toLocaleDateString('es-DO');
+    }
+  },
+  {
+    accessorKey: 'createdByName',
+    header: 'Registrado Por',
+    cell: ({ getValue }) => getValue<string>() || '—',
   },
   {
     id: 'actions',

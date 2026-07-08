@@ -1,13 +1,30 @@
-
 export type Product = {
   id: string;
+  code: string;
+  categoryId?: string;
   name: string;
+  description?: string;
+  supplierId?: string;
   price: number;
   cost: number;
   itbis: boolean;
   image: string;
   stock: number;
-  code: string;
+  locationId?: string;
+  entryDate?: string;
+  modificationDate?: string;
+  wholesalePrice?: number;
+  wholesaleMinQuantity?: number;
+};
+
+export type ProductCategory = {
+  id: string;
+  name: string;
+};
+
+export type ProductLocation = {
+  id: string;
+  name: string;
 };
 
 export type Customer = {
@@ -21,6 +38,10 @@ export type Customer = {
   ncfType: 'consumer' | 'fiscal';
   notes?: string;
   creditBalance: number;
+  creditLimit?: number | null; // null/undefined = sin límite
+  createdAt?: string;
+  createdBy?: string;
+  createdByName?: string;
 };
 
 export type User = {
@@ -28,8 +49,15 @@ export type User = {
   name: string;
   email: string;
   role: 'admin' | 'cashier';
-  branch: string;
+  branch: string; // Nombre de la sucursal activa
+  activeBranchId?: string; // ID de la sucursal activa
+  branches?: { id: string; name: string }[]; // Lista de sucursales a las que pertenece
+  companyId?: string;
+  companyStatus?: 'trial' | 'active' | 'suspended';
+  impersonatedCompanyId?: string;
+  impersonatedCompanyName?: string;
   isSuperAdmin?: boolean;
+  customRoles?: Role[]; // Roles adicionales asignados al usuario
 };
 
 export type Branch = {
@@ -38,11 +66,24 @@ export type Branch = {
   location: string;
 };
 
+export type Company = {
+  id: string;
+  name: string;
+  rnc: string | null;
+  is_formalized: boolean;
+  ncf_enabled: boolean;
+  phone: string | null;
+  address: string | null;
+  status: 'trial' | 'active' | 'suspended';
+  created_at: string;
+  branches?: { id: string; name: string; location: string | null }[];
+};
+
 export type Role = {
     id: string;
     name: string;
     description: string;
-}
+};
 
 export type CartItem = {
   cartItemId: string; // Unique identifier for the item in the cart
@@ -56,13 +97,28 @@ export type Cart = {
   items: CartItem[];
   selectedCustomer: Customer;
   quoteId?: string; // si el carrito viene de una cotización cargada
-}
+};
 
 export type FinancingDetails = {
   interestRate: number;
   installments: number;
   installmentAmount: number;
   totalWithInterest: number;
+  downPayment?: number;
+};
+
+// Cuota de un plan de financiamiento. La genera y actualiza la base
+// (trigger de la venta + RPC de abonos); el cliente solo la lee.
+export type FinancingInstallment = {
+  id: string;
+  saleId: string;
+  number: number;
+  dueDate: string; // yyyy-mm-dd
+  amount: number;
+  paidAmount: number;
+  lateFeePaid: number;
+  status: 'pending' | 'partial' | 'paid';
+  paidAt?: string;
 };
 
 export type Sale = {
@@ -80,6 +136,7 @@ export type Sale = {
   createdAt: Date;
   branchId: string;
   financingDetails?: FinancingDetails;
+  installments?: FinancingInstallment[];
   payments: CreditPayment[];
   notes?: string;
   userName?: string;
@@ -118,15 +175,35 @@ export type CompanyProfile = {
   };
   logoUrl: string;
   receiptFooter: string;
+  lateFeeRate: number;         // % de mora sobre la cuota vencida
+  defaultInterestRate: number; // % de interés mensual sugerido en el POS
 };
+
+export type PaymentMethod = 'cash' | 'card' | 'transfer';
 
 export type CreditPayment = {
   id: string;
   saleId?: string;      // abonos generales a deuda no van ligados a una venta
   customerId: string;
   amount: number;
+  lateFeePaid: number;  // parte del abono que fue mora
+  method: PaymentMethod;
+  notes?: string;
+  userName?: string;
   date: Date;
   branchId: string;     // nombre de sucursal a nivel de app; se resuelve a UUID al guardar
+};
+
+// Resultado de las RPCs register_sale_payment / register_customer_payment.
+export type PaymentResult = {
+  paymentId: string;
+  amount: number;
+  lateFeePaid: number;
+  principalPaid: number;
+  remainingBalance: number;
+  installmentsPaid: number | null;
+  installmentsTotal: number | null;
+  customerBalance: number | null;
 };
 
 export type Supplier = {
@@ -136,6 +213,7 @@ export type Supplier = {
     phone: string;
     email: string;
     address: string;
+    rnc?: string;
 };
 
 export type Expense = {
@@ -145,4 +223,44 @@ export type Expense = {
     amount: number;
     category: string;
     branchId: string;
-}
+};
+
+export type ServiceType = {
+    id: string;
+    name: string;
+    description?: string;
+    basePrice: number;
+};
+
+export type ServiceStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+export type PaymentStatus = 'pending' | 'paid';
+
+export type ServiceItem = {
+    id: string;
+    serviceId: string;
+    product: Product;
+    quantity: number;
+    price: number;
+    cost: number;
+};
+
+export type Service = {
+    id: string;
+    branchId: string;
+    customerId?: string;
+    customer?: Customer;
+    serviceTypeId: string;
+    serviceType?: ServiceType;
+    assignedTo?: string;
+    assignedUser?: User;
+    description: string;
+    status: ServiceStatus;
+    laborPrice: number;
+    partsTotal: number;
+    total: number;
+    paymentStatus: PaymentStatus;
+    amountPaid: number;
+    createdAt: Date;
+    completedAt?: Date;
+    items?: ServiceItem[];
+};

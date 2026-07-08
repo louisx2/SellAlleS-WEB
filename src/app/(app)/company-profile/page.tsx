@@ -13,6 +13,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info } from 'lucide-react';
 import { NcfSettingsCard } from '@/components/company-profile/ncf-settings-card';
+import { FinancingSettingsCard } from '@/components/company-profile/financing-settings-card';
 
 export default function CompanyProfilePage() {
   const { profile, updateProfile } = useCompanyProfile();
@@ -134,6 +135,9 @@ export default function CompanyProfilePage() {
         dispararse con el submit de "Guardar Cambios". */}
     <div className="mt-6">
       <NcfSettingsCard />
+    </div>
+    <div className="mt-6">
+      <FinancingSettingsCard />
     </div>
     </>
   );

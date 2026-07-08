@@ -1,6 +1,7 @@
 'use client';
 
-import { MoreHorizontal, DollarSign } from 'lucide-react';
+import Link from 'next/link';
+import { MoreHorizontal, DollarSign, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -16,9 +17,10 @@ import { DialogTrigger } from '../ui/dialog';
 
 interface FinancingActionsProps {
   sale: Sale;
+  canPay: boolean;
 }
 
-export function FinancingActions({ sale }: FinancingActionsProps) {
+export function FinancingActions({ sale, canPay }: FinancingActionsProps) {
   return (
     <AddFinancingPaymentDialog sale={sale}>
         <DropdownMenu>
@@ -31,12 +33,20 @@ export function FinancingActions({ sale }: FinancingActionsProps) {
         <DropdownMenuContent align="end">
             <DropdownMenuLabel>Acciones</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DialogTrigger asChild>
-                <DropdownMenuItem>
-                    <DollarSign className="mr-2 h-4 w-4" />
-                    <span>Registrar Abono</span>
-                </DropdownMenuItem>
-            </DialogTrigger>
+            <DropdownMenuItem asChild>
+                <Link href={`/financing/${sale.id}`}>
+                    <FileText className="mr-2 h-4 w-4" />
+                    <span>Ver detalle</span>
+                </Link>
+            </DropdownMenuItem>
+            {canPay && (
+                <DialogTrigger asChild>
+                    <DropdownMenuItem>
+                        <DollarSign className="mr-2 h-4 w-4" />
+                        <span>Registrar Abono</span>
+                    </DropdownMenuItem>
+                </DialogTrigger>
+            )}
         </DropdownMenuContent>
         </DropdownMenu>
     </AddFinancingPaymentDialog>

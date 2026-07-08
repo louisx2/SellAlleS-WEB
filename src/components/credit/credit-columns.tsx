@@ -23,6 +23,21 @@ export const creditColumns: ColumnDef<Customer>[] = [
     },
   },
   {
+    id: 'creditLimit',
+    header: 'Límite de Crédito',
+    cell: ({ row }) => {
+      const limit = row.original.creditLimit;
+      if (limit == null) return <span className="text-muted-foreground">Sin límite</span>;
+      const available = Math.max(limit - row.original.creditBalance, 0);
+      return (
+        <div>
+          <div>{formatCurrency(limit)}</div>
+          <div className="text-xs text-muted-foreground">Disponible: {formatCurrency(available)}</div>
+        </div>
+      );
+    },
+  },
+  {
     id: 'actions',
     cell: ({ row }) => <CreditActions customer={row.original} />,
   },

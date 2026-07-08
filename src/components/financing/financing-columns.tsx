@@ -5,9 +5,9 @@ import type { Sale } from '@/lib/types';
 import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { FinancingActions } from './financing-actions';
 import { Badge } from '../ui/badge';
-import { cn } from '@/lib/utils';
 
-export const financingColumns: ColumnDef<Sale>[] = [
+// Factoría: la tasa de mora viene de companies.late_fee_rate (perfil de empresa).
+export const buildFinancingColumns = (lateFeeRate: number): ColumnDef<Sale>[] => [
   {
     accessorKey: 'customer.name',
     header: 'Cliente',
@@ -24,8 +24,8 @@ export const financingColumns: ColumnDef<Sale>[] = [
     id: 'installments',
     header: 'Cuotas Pagadas',
     cell: ({ row }) => {
-      const status = calculateFinancingStatus(row.original);
-      if (!row.original.financingDetails) return 'N/A';
+      const status = calculateFinancingStatus(row.original, lateFeeRate);
+      if (status.totalInstallments === 0) return 'N/A';
       return (
         <span>
           {status.installmentsPaid} de {status.totalInstallments}
@@ -37,16 +37,17 @@ export const financingColumns: ColumnDef<Sale>[] = [
     id: 'nextDueDate',
     header: 'Próximo Pago',
     cell: ({ row }) => {
-       const status = calculateFinancingStatus(row.original);
-       if (!row.original.financingDetails || status.pendingBalance <= 0) return <Badge variant="secondary">Completado</Badge>;
-       return new Date(status.nextDueDate).toLocaleDateString('es-DO');
+       const status = calculateFinancingStatus(row.original, lateFeeRate);
+       if (status.pendingBalance <= 0) return <Badge variant="secondary">Completado</Badge>;
+       if (!status.nextDueDate) return '—';
+       return status.nextDueDate.toLocaleDateString('es-DO');
     },
   },
   {
     id: 'pendingBalance',
     header: 'Balance Pendiente',
     cell: ({ row }) => {
-      const status = calculateFinancingStatus(row.original);
+      const status = calculateFinancingStatus(row.original, lateFeeRate);
       return <div className="font-medium text-destructive">{formatCurrency(status.pendingBalance)}</div>;
     },
   },
@@ -58,12 +59,12 @@ export const financingColumns: ColumnDef<Sale>[] = [
          return <Badge variant="outline">Crédito Simple</Badge>
       }
 
-      const status = calculateFinancingStatus(row.original);
+      const status = calculateFinancingStatus(row.original, lateFeeRate);
 
       if (status.pendingBalance <= 0) {
         return <Badge variant="default" className="bg-green-600">Pagado</Badge>;
       }
-      
+
       if (status.isOverdue) {
           return (
              <div className="flex flex-col">
@@ -79,9 +80,8 @@ export const financingColumns: ColumnDef<Sale>[] = [
   {
     id: 'actions',
     cell: ({ row }) => {
-      const status = calculateFinancingStatus(row.original);
-      if (status.pendingBalance <= 0) return null;
-      return <FinancingActions sale={row.original} />;
+      const status = calculateFinancingStatus(row.original, lateFeeRate);
+      return <FinancingActions sale={row.original} canPay={status.pendingBalance > 0} />;
     }
   },
 ];

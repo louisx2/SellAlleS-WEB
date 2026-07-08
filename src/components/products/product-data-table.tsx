@@ -26,6 +26,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
@@ -38,6 +40,8 @@ export function ProductDataTable<TData, TValue>({
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [rowSelection, setRowSelection] = useState({});
+  const [filterType, setFilterType] = useState<'name' | 'code'>('name');
+  const [searchValue, setSearchValue] = useState('');
 
   const table = useReactTable({
     data,
@@ -56,17 +60,46 @@ export function ProductDataTable<TData, TValue>({
     },
   });
 
+  const handleSearchChange = (value: string) => {
+    setSearchValue(value);
+    if (filterType === 'name') {
+      table.getColumn('code')?.setFilterValue('');
+      table.getColumn('name')?.setFilterValue(value);
+    } else {
+      table.getColumn('name')?.setFilterValue('');
+      table.getColumn('code')?.setFilterValue(value);
+    }
+  };
+
+  const handleFilterTypeChange = (type: 'name' | 'code') => {
+    setFilterType(type);
+    if (type === 'name') {
+      table.getColumn('code')?.setFilterValue('');
+      table.getColumn('name')?.setFilterValue(searchValue);
+    } else {
+      table.getColumn('name')?.setFilterValue('');
+      table.getColumn('code')?.setFilterValue(searchValue);
+    }
+  };
+
   return (
     <div className="rounded-md border bg-card">
-      <div className="flex items-center p-4">
+      <div className="flex items-center gap-2 p-4 max-w-md">
         <Input
-          placeholder="Filtrar productos..."
-          value={(table.getColumn('name')?.getFilterValue() as string) ?? ''}
-          onChange={(event) =>
-            table.getColumn('name')?.setFilterValue(event.target.value)
-          }
-          className="max-w-sm"
+          placeholder={filterType === 'name' ? 'Buscar por nombre...' : 'Buscar por código...'}
+          value={searchValue}
+          onChange={(event) => handleSearchChange(event.target.value)}
+          className="flex-1"
         />
+        <Select value={filterType} onValueChange={(v) => handleFilterTypeChange(v as 'name' | 'code')}>
+          <SelectTrigger className="w-[140px]">
+            <SelectValue placeholder="Filtrar por" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="name">Nombre</SelectItem>
+            <SelectItem value="code">Código</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
       <Table>
         <TableHeader>

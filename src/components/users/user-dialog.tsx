@@ -19,6 +19,9 @@ import type { User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useUsers } from '@/context/user-provider';
 import { useBranches } from '@/context/branch-provider';
+import { Checkbox } from '@/components/ui/checkbox';
+import { supabase } from '@/lib/supabase/client';
+import { useEffect } from 'react';
 
 interface UserDialogProps {
   user?: User;
@@ -33,6 +36,30 @@ export function UserDialog({ user, children }: UserDialogProps) {
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState(user?.role ?? 'cashier');
   const [branch, setBranch] = useState(user?.branch ?? '');
+  
+  const [availableRoles, setAvailableRoles] = useState<import('@/lib/types').Role[]>([]);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>(
+    user?.customRoles?.map(r => r.id) ?? []
+  );
+
+  useEffect(() => {
+    supabase.from('roles').select('id, name, description').order('name')
+      .then(({ data }) => {
+        if (data) setAvailableRoles(data.map(r => ({ id: r.id, name: r.name, description: r.description ?? '' })));
+      });
+  }, []);
+
+  useEffect(() => {
+    if (open && user) {
+        setSelectedRoles(user.customRoles?.map(r => r.id) ?? []);
+        setRole(user.role);
+        setBranch(user.branch);
+    } else if (open && !user) {
+        setSelectedRoles([]);
+        setRole('cashier');
+        setBranch('');
+    }
+  }, [open, user]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -50,6 +77,7 @@ export function UserDialog({ user, children }: UserDialogProps) {
       email: formData.get('email') as string,
       branch: branch,
       role: role as 'admin' | 'cashier',
+      customRoles: availableRoles.filter(r => selectedRoles.includes(r.id)),
     };
 
     try {
@@ -141,6 +169,31 @@ export function UserDialog({ user, children }: UserDialogProps) {
                 </SelectContent>
             </Select>
             </div>
+            
+            {availableRoles.length > 0 && (
+                <div className="grid grid-cols-4 items-start gap-4 pt-2">
+                    <Label className="text-right mt-1">Roles Adicionales</Label>
+                    <div className="col-span-3 flex flex-col gap-2">
+                        {availableRoles.map(r => (
+                            <div key={r.id} className="flex items-center space-x-2">
+                                <Checkbox 
+                                  id={`role-${r.id}`} 
+                                  checked={selectedRoles.includes(r.id)}
+                                  onCheckedChange={(checked) => {
+                                      if (checked) {
+                                          setSelectedRoles(prev => [...prev, r.id]);
+                                      } else {
+                                          setSelectedRoles(prev => prev.filter(id => id !== r.id));
+                                      }
+                                  }}
+                                />
+                                <Label htmlFor={`role-${r.id}`} className="font-normal cursor-pointer">{r.name}</Label>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+            
           </div>
           <DialogFooter>
              <DialogClose asChild>

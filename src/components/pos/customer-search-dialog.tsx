@@ -28,13 +28,18 @@ export function CustomerSearchDialog({ isOpen, onOpenChange, onCustomerSelected 
   const [searchTerm, setSearchTerm] = useState('');
 
   const filteredCustomers = useMemo(() => {
+    const isGeneric = (c: Customer) => 
+      c.id === '0' || 
+      c.name.toLowerCase() === 'cliente genérico' || 
+      c.name.toLowerCase() === 'cliente generico';
+
     if (!searchTerm) {
       // Exclude generic customer from the list
-      return customers.filter(c => c.id !== '0');
+      return customers.filter(c => !isGeneric(c));
     }
     const term = searchTerm.toLowerCase();
     return customers.filter(customer =>
-      customer.id !== '0' && (
+      !isGeneric(customer) && (
         customer.name.toLowerCase().includes(term) ||
         customer.phone.toLowerCase().includes(term) ||
         (customer.rnc && customer.rnc.toLowerCase().includes(term))
@@ -44,7 +49,7 @@ export function CustomerSearchDialog({ isOpen, onOpenChange, onCustomerSelected 
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Buscar Cliente</DialogTitle>
           <DialogDescription>
@@ -57,7 +62,7 @@ export function CustomerSearchDialog({ isOpen, onOpenChange, onCustomerSelected 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
-           <CustomerDialog>
+           <CustomerDialog onSuccess={(newCust) => onCustomerSelected(newCust)}>
                 <Button variant="outline">
                     <PlusCircle className="mr-2 h-4 w-4" />
                     Nuevo

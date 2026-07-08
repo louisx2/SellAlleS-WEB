@@ -14,52 +14,71 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { formatCurrency } from '@/lib/utils';
+import { useCompanyProfile } from '@/context/company-profile-provider';
 import type { FinancingDetails } from '@/lib/types';
 import { Separator } from '../ui/separator';
+import { addMonths } from 'date-fns';
 
 interface FinancingDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   totalAmount: number;
+  /** Crédito disponible del cliente (null = sin límite). */
+  availableCredit?: number | null;
   onFinancingComplete: (details: { downPayment: number; financingDetails: FinancingDetails }) => void;
 }
 
 const installmentOptions = [3, 6, 9, 12, 18, 24];
 
-export function FinancingDialog({ isOpen, onOpenChange, totalAmount, onFinancingComplete }: FinancingDialogProps) {
+export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCredit, onFinancingComplete }: FinancingDialogProps) {
+  const { profile } = useCompanyProfile();
   const [downPayment, setDownPayment] = useState<number | string>('');
-  const [interestRate, setInterestRate] = useState<number | string>(3.5);
+  const [interestRate, setInterestRate] = useState<number | string>(profile.defaultInterestRate);
   const [installments, setInstallments] = useState<number>(12);
 
   useEffect(() => {
     if (isOpen) {
         setDownPayment('');
-        setInterestRate(3.5);
+        setInterestRate(profile.defaultInterestRate);
         setInstallments(12);
     }
-  }, [isOpen])
+  }, [isOpen, profile.defaultInterestRate]);
 
-  const { amountToFinance, installmentAmount, totalWithInterest } = useMemo(() => {
+  const { amountToFinance, installmentAmount, totalWithInterest, totalFinanced } = useMemo(() => {
     const dp = Number(downPayment) || 0;
     const rate = Number(interestRate) || 0;
-    
-    if (rate <= 0 || installments <= 0) {
-      return { amountToFinance: totalAmount - dp, installmentAmount: 0, totalWithInterest: totalAmount };
+    const principal = totalAmount - dp;
+
+    if (principal <= 0 || installments <= 0) {
+      return { amountToFinance: principal, installmentAmount: 0, totalWithInterest: totalAmount, totalFinanced: 0 };
     }
 
-    const principal = totalAmount - dp;
-    const monthlyRate = (rate / 100); 
-    const simpleInterest = principal * monthlyRate * (installments / 12);
-    const totalFinanced = principal + simpleInterest;
-    
+    // Interés SIMPLE MENSUAL: principal × tasa% × meses.
+    // La base recalcula estos montos al guardar (trigger de la venta);
+    // esto es solo la vista previa.
+    const simpleInterest = principal * (rate / 100) * installments;
+    const financed = principal + simpleInterest;
+
     return {
       amountToFinance: principal,
-      installmentAmount: totalFinanced > 0 && installments > 0 ? totalFinanced / installments : 0,
-      totalWithInterest: totalFinanced + dp,
+      installmentAmount: financed / installments,
+      totalWithInterest: financed + dp,
+      totalFinanced: financed,
     };
   }, [totalAmount, downPayment, interestRate, installments]);
-  
+
+  // Cronograma estimado (fechas definitivas: día de la venta + k meses).
+  const schedule = useMemo(() => {
+    if (installmentAmount <= 0) return [];
+    return Array.from({ length: installments }, (_, i) => ({
+      number: i + 1,
+      dueDate: addMonths(new Date(), i + 1),
+      amount: installmentAmount,
+    }));
+  }, [installments, installmentAmount]);
+
   const handleAmountChange = (setter: React.Dispatch<React.SetStateAction<string | number>>) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     const decimalRegex = /^\d*(\.\d{0,2})?$/;
@@ -70,12 +89,13 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, onFinancing
 
   const handleConfirm = () => {
     const financingDetails: FinancingDetails = {
-      interestRate: Number(interestRate),
+      interestRate: Number(interestRate) || 0,
       installments: installments,
       installmentAmount: installmentAmount,
       totalWithInterest: totalWithInterest,
+      downPayment: Number(downPayment) || 0,
     };
-    
+
     onFinancingComplete({
       downPayment: Number(downPayment) || 0,
       financingDetails,
@@ -83,10 +103,12 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, onFinancing
   };
 
   const isDownPaymentInvalid = Number(downPayment) < 0 || Number(downPayment) >= totalAmount;
+  const isRateInvalid = interestRate === '' || Number(interestRate) < 0;
+  const isOverCreditLimit = availableCredit != null && totalFinanced > availableCredit;
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[95vh] overflow-y-auto [&>button]:hidden">
         <DialogHeader>
           <DialogTitle>Configurar Financiamiento</DialogTitle>
           <DialogDescription>
@@ -114,7 +136,7 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, onFinancing
                     <Input id="amountToFinance" value={formatCurrency(amountToFinance)} readOnly disabled />
                 </div>
             </div>
-           
+
             <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                     <Label htmlFor="interestRate">Tasa de Interés Mensual (%)</Label>
@@ -142,9 +164,9 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, onFinancing
                 </div>
             </div>
         </div>
-        
+
         <Separator />
-        
+
         <div className="space-y-2 text-sm">
             <h4 className="font-semibold text-center mb-4">Resumen del Plan de Pagos</h4>
             <div className="flex justify-between items-center text-lg font-bold bg-secondary p-3 rounded-md">
@@ -163,13 +185,35 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, onFinancing
                 <span>Total a Pagar (con intereses):</span>
                 <span>{formatCurrency(totalWithInterest)}</span>
             </div>
+
+            {schedule.length > 0 && (
+              <ScrollArea className="h-28 rounded-md border mt-2">
+                <div className="p-2 space-y-1">
+                  {schedule.map((cuota) => (
+                    <div key={cuota.number} className="flex justify-between text-xs text-muted-foreground">
+                      <span>Cuota {cuota.number} — {cuota.dueDate.toLocaleDateString('es-DO')}</span>
+                      <span>{formatCurrency(cuota.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              </ScrollArea>
+            )}
+            <p className="text-xs text-muted-foreground text-center">
+              Los montos y fechas definitivos los calcula el servidor al registrar la venta.
+            </p>
+            {isOverCreditLimit && (
+              <p className="text-xs text-destructive text-center font-medium">
+                El monto a financiar ({formatCurrency(totalFinanced)}) excede el crédito disponible
+                del cliente ({formatCurrency(availableCredit ?? 0)}).
+              </p>
+            )}
         </div>
 
         <DialogFooter>
           <DialogClose asChild>
             <Button type="button" variant="secondary">Cancelar</Button>
           </DialogClose>
-          <Button type="button" onClick={handleConfirm} disabled={isDownPaymentInvalid || Number(interestRate) <= 0}>Confirmar Plan</Button>
+          <Button type="button" onClick={handleConfirm} disabled={isDownPaymentInvalid || isRateInvalid || isOverCreditLimit || installmentAmount <= 0}>Confirmar Plan</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -19,26 +19,44 @@ import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { useState } from 'react';
 import { useCustomers } from '@/context/customer-provider';
+import { useAuth } from '@/context/auth-provider';
 
 interface CustomerDialogProps {
   customer?: Customer;
   children: React.ReactNode;
+  onSuccess?: (customer: Customer) => void;
 }
 
-export function CustomerDialog({ customer, children }: CustomerDialogProps) {
+export function CustomerDialog({ customer, children, onSuccess }: CustomerDialogProps) {
   const { toast } = useToast();
   const { addCustomer, updateCustomer } = useCustomers();
+  const { appUser } = useAuth();
   const isEditMode = !!customer;
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     
+    const name = (formData.get('name') as string)?.trim();
+    const phone = (formData.get('phone') as string)?.trim();
+
+    if (!name || !phone) {
+      toast({
+        title: 'Campos requeridos vacíos',
+        description: 'El Nombre y el Teléfono son obligatorios.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const creditLimitRaw = (formData.get('creditLimit') as string)?.trim();
+
     const newCustomerData = {
       id: customer?.id ?? '',
-      name: formData.get('name') as string,
-      phone: formData.get('phone') as string,
+      name: name,
+      phone: phone,
       email: formData.get('email') as string,
       rnc: formData.get('rnc') as string,
       address: formData.get('address') as string,
@@ -46,28 +64,44 @@ export function CustomerDialog({ customer, children }: CustomerDialogProps) {
       birthdate: formData.get('birthdate') as string,
       notes: formData.get('notes') as string,
       creditBalance: customer?.creditBalance ?? 0, // Preserve existing balance
+      creditLimit: creditLimitRaw ? Number(creditLimitRaw) : null, // vacío = sin límite
     }
 
-    if (isEditMode) {
-      updateCustomer(newCustomerData);
+    setSaving(true);
+    try {
+      if (isEditMode) {
+        await updateCustomer(newCustomerData);
+        toast({
+          title: 'Cliente actualizado',
+          description: `La información de '${newCustomerData.name}' ha sido actualizada.`,
+        });
+      } else {
+        const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+        const created = await addCustomer(newCustomerData, activeCompanyId);
+        toast({
+          title: 'Cliente añadido',
+          description: `El cliente '${newCustomerData.name}' ha sido añadido.`,
+        });
+        if (onSuccess && created) {
+          onSuccess(created);
+        }
+      }
+      setOpen(false);
+    } catch (err: any) {
       toast({
-        title: 'Cliente actualizado',
-        description: `La información de '${newCustomerData.name}' ha sido actualizada.`,
+        title: 'Error al guardar',
+        description: err.message || 'Ocurrió un error inesperado al guardar el cliente.',
+        variant: 'destructive',
       });
-    } else {
-      addCustomer(newCustomerData);
-      toast({
-        title: 'Cliente añadido',
-        description: `El cliente '${newCustomerData.name}' ha sido añadido.`,
-      });
+    } finally {
+      setSaving(false);
     }
-    setOpen(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>{children}</DialogTrigger>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditMode ? 'Editar Cliente' : 'Añadir Cliente'}</DialogTitle>
           <DialogDescription>
@@ -78,13 +112,13 @@ export function CustomerDialog({ customer, children }: CustomerDialogProps) {
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="name" className="text-right">
-                Nombre
+                Nombre <span className="text-destructive">*</span>
               </Label>
               <Input id="name" name="name" defaultValue={customer?.name} className="col-span-3" required />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="phone" className="text-right">
-                Teléfono
+                Teléfono <span className="text-destructive">*</span>
               </Label>
               <Input id="phone" name="phone" defaultValue={customer?.phone} className="col-span-3" required/>
             </div>
@@ -126,6 +160,21 @@ export function CustomerDialog({ customer, children }: CustomerDialogProps) {
               </Label>
               <Input id="birthdate" name="birthdate" type="date" defaultValue={customer?.birthdate} className="col-span-3" />
             </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="creditLimit" className="text-right">
+                Límite de Crédito
+              </Label>
+              <Input
+                id="creditLimit"
+                name="creditLimit"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Vacío = sin límite"
+                defaultValue={customer?.creditLimit ?? ''}
+                className="col-span-3"
+              />
+            </div>
              <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="notes" className="text-right pt-2">
                 Notas
@@ -137,7 +186,9 @@ export function CustomerDialog({ customer, children }: CustomerDialogProps) {
             <DialogClose asChild>
                 <Button type="button" variant="secondary">Cancelar</Button>
             </DialogClose>
-            <Button type="submit">Guardar Cambios</Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? 'Guardando...' : 'Guardar Cambios'}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
