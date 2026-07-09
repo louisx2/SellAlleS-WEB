@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { ThemeProvider } from '@/components/theme-provider';
 import AuthedLayout from './authed-layout';
 import { CompanyProfileProvider } from '@/context/company-profile-provider';
 import { BranchProvider } from '@/context/branch-provider';
@@ -18,6 +19,7 @@ import { SidebarProvider } from '@/components/ui/sidebar';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
     <ModulesProvider>
     <CompanyProfileProvider>
       <BranchProvider>
@@ -45,5 +47,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </BranchProvider>
     </CompanyProfileProvider>
     </ModulesProvider>
+    </ThemeProvider>
   );
 }
