@@ -288,10 +288,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [appUser?.id, appUser?.email, loadProfile]);
 
   // Estado de carga / transición: mostrar el skeleton a pantalla completa.
-  if (loading) return <AppSkeleton />;
+  if (loading) return <AppSkeleton message="Cargando plataforma..." />;
   const isPublic = publicRoutes.includes(pathname);
-  if (session && !appUser) return <AppSkeleton />;   // sesión activa, cargando perfil
-  if (!session && !isPublic) return <AppSkeleton />;  // sin sesión, redirigiendo a login
+  if (session && !appUser) return <AppSkeleton message="Cargando datos..." />;   // sesión activa, cargando perfil
+  if (!session && !isPublic) return <AppSkeleton message="Cargando plataforma..." />;  // sin sesión, redirigiendo a login
+  // Sesión activa pero seguimos en una ruta pública (login/reset-password): ya
+  // se disparó el redirect a /dashboard pero el pathname todavía no lo refleja.
+  // Sin este caso, aquí abajo se hace fallthrough a `children` y el formulario
+  // de login remonta de golpe (con su estado en blanco) justo antes de que la
+  // navegación termine — se ve como un parpadeo de vuelta al login.
+  if (session && isPublic) return <AppSkeleton message="Entrando..." />;
 
   // Cuenta autenticada pero sin empresa: onboarding obligatorio antes de la app.
   if (session && appUser && needsCompany && !isPublic) {
