@@ -1,5 +1,6 @@
 import { ThemeProvider } from '@/components/theme-provider';
 import { AuthThemeToggle } from './auth-theme-toggle';
+import { BackToLanding } from './back-to-landing';
 
 // Las páginas públicas (login, recuperar contraseña) usan su propio tema,
 // independiente del que cada usuario configure dentro del SaaS: siempre
@@ -8,6 +9,7 @@ import { AuthThemeToggle } from './auth-theme-toggle';
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} storageKey="auth-theme">
+      <BackToLanding />
       <AuthThemeToggle />
       {children}
     </ThemeProvider>
