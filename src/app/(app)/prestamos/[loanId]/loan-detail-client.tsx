@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
@@ -16,7 +16,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DialogTrigger } from '@/components/ui/dialog';
 import { RegisterLoanPaymentDialog } from '@/components/loans/register-loan-payment-dialog';
-import { ArrowLeft, DollarSign } from 'lucide-react';
+import { LoanTicketDialog } from '@/components/loans/loan-ticket-dialog';
+import { ArrowLeft, DollarSign, Printer } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -38,10 +39,12 @@ const FREQUENCY_LABEL: Record<string, string> = {
 
 export default function LoanDetailClient() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const loanId = params.loanId as string;
   const { loans } = useLoans();
   const { profile } = useCompanyProfile();
   const [payments, setPayments] = useState<LoanPayment[]>([]);
+  const [ticketOpen, setTicketOpen] = useState(false);
 
   const loan = loans.find((l) => l.id === loanId);
 
@@ -56,6 +59,14 @@ export default function LoanDetailClient() {
       if (data) setPayments(data.map(rowToLoanPayment));
     })();
   }, [loanId, loans]);
+
+  // Recién creado (?nuevo=1): abrir el ticket automáticamente una vez que el
+  // préstamo (con su cronograma) ya cargó en el provider.
+  useEffect(() => {
+    if (searchParams.get('nuevo') === '1' && loan?.installments?.length) {
+      setTicketOpen(true);
+    }
+  }, [searchParams, loan?.installments?.length]);
 
   const status = useMemo(
     () => (loan ? calculateLoanStatus(loan, profile.loanLateFeeRate) : null),
@@ -89,6 +100,11 @@ export default function LoanDetailClient() {
             Volver
           </Link>
         </Button>
+        <div className="flex flex-wrap gap-2">
+        <Button variant="outline" onClick={() => setTicketOpen(true)}>
+          <Printer className="mr-2 h-4 w-4" />
+          Imprimir comprobante
+        </Button>
         {status.pendingBalance > 0 && (
           <RegisterLoanPaymentDialog loan={loan}>
             <DialogTrigger asChild>
@@ -99,6 +115,7 @@ export default function LoanDetailClient() {
             </DialogTrigger>
           </RegisterLoanPaymentDialog>
         )}
+        </div>
       </div>
 
       <Card>
@@ -255,6 +272,8 @@ export default function LoanDetailClient() {
           )}
         </CardContent>
       </Card>
+
+      <LoanTicketDialog loan={loan} isOpen={ticketOpen} onOpenChange={setTicketOpen} />
     </div>
   );
 }

@@ -104,7 +104,7 @@ export function LoanDialog({ children }: LoanDialogProps) {
       });
       toast({ title: 'Préstamo creado', description: `${formatCurrency(Number(principal))} a ${customer.name}.` });
       setOpen(false);
-      router.push(`/prestamos/${loan.id}`);
+      router.push(`/prestamos/${loan.id}?nuevo=1`);
     } catch (err: any) {
       toast({ title: 'Error al crear el préstamo', description: err?.message ?? 'Inténtalo de nuevo.', variant: 'destructive' });
     } finally {

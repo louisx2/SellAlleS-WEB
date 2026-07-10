@@ -16,6 +16,7 @@ import { calculateLoanStatus } from '@/lib/loan-utils';
 import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useAuth } from '@/context/auth-provider';
+import { PaymentReceiptDialog, type PaymentReceiptData } from '@/components/credit/payment-receipt-dialog';
 import { Info, Loader2 } from 'lucide-react';
 
 interface RegisterLoanPaymentDialogProps {
@@ -33,6 +34,8 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [receipt, setReceipt] = useState<PaymentReceiptData | null>(null);
+  const [receiptOpen, setReceiptOpen] = useState(false);
 
   const status = useMemo(() => calculateLoanStatus(loan, profile.loanLateFeeRate), [loan, profile.loanLateFeeRate]);
 
@@ -66,7 +69,27 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
         title: 'Abono registrado',
         description: `Se registró un abono de ${formatCurrency(result.amount)} para ${loan.customer?.name ?? 'el cliente'}.`,
       });
+      // Recibo imprimible del abono (mapea LoanPaymentResult al formato del recibo).
+      setReceipt({
+        result: {
+          paymentId: result.paymentId,
+          amount: result.amount,
+          lateFeePaid: result.lateFeePaid,
+          principalPaid: result.principalPaid,
+          remainingBalance: result.remainingBalance,
+          installmentsPaid: result.installmentsPaid,
+          installmentsTotal: result.installmentsTotal,
+          customerBalance: null,
+        },
+        customerName: loan.customer?.name ?? 'Cliente',
+        method,
+        date: new Date(),
+        branchName: (typeof window !== 'undefined' && localStorage.getItem('userBranch')) || 'Sucursal',
+        userName: (typeof window !== 'undefined' && localStorage.getItem('userName')) || undefined,
+        notes: notes.trim() || undefined,
+      });
       setOpen(false);
+      setReceiptOpen(true);
     } catch (e: any) {
       toast({ title: 'No se pudo registrar el abono', description: e?.message ?? 'Error de conexión con el servidor.', variant: 'destructive' });
     } finally {
@@ -75,6 +98,7 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={setOpen}>
       {children}
       <DialogContent className="sm:max-w-md">
@@ -143,5 +167,8 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
         </form>
       </DialogContent>
     </Dialog>
+
+    <PaymentReceiptDialog data={receipt} isOpen={receiptOpen} onOpenChange={setReceiptOpen} />
+    </>
   );
 }

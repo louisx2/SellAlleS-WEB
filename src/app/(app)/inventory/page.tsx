@@ -7,7 +7,10 @@ import { productColumns } from '@/components/products/product-columns';
 import { ProductDialog } from '@/components/products/product-dialog';
 import { ImportProductsDialog } from '@/components/products/import-products-dialog';
 import { Button } from '@/components/ui/button';
-import { PlusCircle, Package, Tag, Coins, Upload, Download } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { PlusCircle, Package, Tag, Coins, Upload, Download, MoreVertical } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useProducts } from '@/context/product-provider';
 import { useCategories } from '@/context/category-provider';
@@ -43,19 +46,41 @@ export default function InventoryPage() {
   return (
     <div>
       <PageHeader title="Administrar Inventario">
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={handleExport}>
-            <Download className="mr-2 h-4 w-4" />
-            Exportar
-          </Button>
-          <Button variant="outline" onClick={() => setImportOpen(true)}>
-            <Upload className="mr-2 h-4 w-4" />
-            Importar
-          </Button>
+        <div className="flex items-center gap-2">
+          {/* En pantalla ancha: botones sueltos. En móvil: colapsados en un menú
+              de 3 puntos para no amontonar la cabecera. */}
+          <div className="hidden sm:flex items-center gap-2">
+            <Button variant="outline" onClick={handleExport}>
+              <Download className="mr-2 h-4 w-4" />
+              Exportar
+            </Button>
+            <Button variant="outline" onClick={() => setImportOpen(true)}>
+              <Upload className="mr-2 h-4 w-4" />
+              Importar
+            </Button>
+          </div>
+          <div className="sm:hidden">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="icon">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={handleExport}>
+                  <Download className="mr-2 h-4 w-4" /> Exportar
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setImportOpen(true)}>
+                  <Upload className="mr-2 h-4 w-4" /> Importar
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
           <ProductDialog>
             <Button>
               <PlusCircle className="mr-2 h-4 w-4" />
-              Añadir Producto
+              <span className="hidden sm:inline">Añadir Producto</span>
+              <span className="sm:hidden">Añadir</span>
             </Button>
           </ProductDialog>
         </div>

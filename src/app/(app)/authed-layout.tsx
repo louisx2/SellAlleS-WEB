@@ -52,6 +52,8 @@ const reportsNavItems = [
     { href: '/reports/user-sales', label: 'Ventas por Usuario', roles: ['admin']},
     { href: '/reports/top-products', label: 'Productos Más Vendidos', roles: ['admin']},
     { href: '/reports/date-range', label: 'Ingresos por Fechas', roles: ['admin']},
+    { href: '/reports/receivables', label: 'Cuentas por Cobrar', roles: ['admin']},
+    { href: '/reports/inventory', label: 'Valorización de Inventario', roles: ['admin']},
     { href: '/reports/taxes', label: 'Impuestos', roles: ['admin']},
 ];
 

@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/utils';
 import { BarChart } from 'lucide-react';
+import { ExportButton } from '@/components/reports/export-button';
+import { SalesChart } from '@/components/reports/sales-chart';
 
 export default function TopProductsReportPage() {
   const { sales } = useSales();
@@ -40,9 +42,32 @@ export default function TopProductsReportPage() {
 
   }, [sales, products]);
 
+  const chartData = topProducts.slice(0, 8).map((p) => ({ name: p.productName, total: p.quantity }));
+
   return (
     <div>
-      <PageHeader title="Reporte de Productos Más Vendidos" />
+      <PageHeader title="Reporte de Productos Más Vendidos">
+        <ExportButton
+          filename="productos_mas_vendidos"
+          rows={topProducts}
+          columns={[
+            { header: 'Producto', value: (p) => p.productName },
+            { header: 'Unidades vendidas', value: (p) => p.quantity },
+            { header: 'Ingresos', value: (p) => p.revenue },
+          ]}
+        />
+      </PageHeader>
+
+      {chartData.length > 0 && (
+        <Card className="mb-6 min-w-0 overflow-hidden">
+          <CardHeader>
+            <CardTitle className="text-base">Top 8 por unidades vendidas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <SalesChart data={chartData} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

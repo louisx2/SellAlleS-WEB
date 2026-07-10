@@ -110,6 +110,8 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
   defaultLoanInterestRate: Number(r.default_loan_interest_rate ?? 5),
 });
+// name se envía siempre; el trigger trg_lock_company_name ignora el cambio si
+// quien actualiza no es super admin (solo él puede renombrar la empresa).
 export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   name: p.name, phone: p.phone ?? null, rnc: p.rnc ?? null, address: p.address ?? null,
   instagram: p.socialMedia?.instagram ?? null, facebook: p.socialMedia?.facebook ?? null,
