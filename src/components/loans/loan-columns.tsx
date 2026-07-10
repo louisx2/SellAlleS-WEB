@@ -74,7 +74,7 @@ export const buildLoanColumns = (loanLateFeeRate: number): ColumnDef<Loan>[] => 
     id: 'actions',
     cell: ({ row }) => (
       <Button variant="ghost" size="sm" asChild>
-        <Link href={`/prestamos/${row.original.id}`}>
+        <Link href={`/prestamos/detalle?id=${row.original.id}`}>
           <FileText className="mr-2 h-4 w-4" /> Ver detalle
         </Link>
       </Button>

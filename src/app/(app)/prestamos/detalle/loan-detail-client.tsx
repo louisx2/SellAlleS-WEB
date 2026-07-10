@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
@@ -38,9 +37,15 @@ const FREQUENCY_LABEL: Record<string, string> = {
 };
 
 export default function LoanDetailClient() {
-  const params = useParams();
-  const searchParams = useSearchParams();
-  const loanId = params.loanId as string;
+  // Ruta estática con query param (?id=): más robusta que una ruta dinámica en
+  // export estático (evita el 404 del payload RSC al navegar). Se lee en el
+  // cliente (guardado por typeof window) porque no hay prerender del id.
+  const [loanId, setLoanId] = useState<string>('');
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setLoanId(new URLSearchParams(window.location.search).get('id') ?? '');
+    }
+  }, []);
   const { loans } = useLoans();
   const { profile } = useCompanyProfile();
   const [payments, setPayments] = useState<LoanPayment[]>([]);
@@ -61,17 +66,25 @@ export default function LoanDetailClient() {
   }, [loanId, loans]);
 
   // Recién creado (?nuevo=1): abrir el ticket automáticamente una vez que el
-  // préstamo (con su cronograma) ya cargó en el provider.
+  // préstamo (con su cronograma) ya cargó en el provider. Se lee la URL en el
+  // cliente (no useSearchParams) para no requerir Suspense en export estático.
   useEffect(() => {
-    if (searchParams.get('nuevo') === '1' && loan?.installments?.length) {
+    if (typeof window === 'undefined') return;
+    const esNuevo = new URLSearchParams(window.location.search).get('nuevo') === '1';
+    if (esNuevo && loan?.installments?.length) {
       setTicketOpen(true);
     }
-  }, [searchParams, loan?.installments?.length]);
+  }, [loan?.installments?.length]);
 
   const status = useMemo(
     () => (loan ? calculateLoanStatus(loan, profile.loanLateFeeRate) : null),
     [loan, profile.loanLateFeeRate],
   );
+
+  // Aún leyendo el id de la URL o cargando la lista: no mostrar "no encontrado".
+  if (!loanId) {
+    return <div className="py-16 text-center text-muted-foreground">Cargando préstamo…</div>;
+  }
 
   if (!loan || !status) {
     return (
