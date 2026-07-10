@@ -1,6 +1,5 @@
-import Image from 'next/image';
 import type { Product } from '@/lib/types';
-import { PlaceHolderImages } from '@/lib/placeholder-images';
+import { ProductImage } from '@/components/products/product-image';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useCart } from '@/context/cart-provider';
@@ -34,20 +33,13 @@ export function ProductGrid({ products }: ProductGridProps) {
       {/* Desktop Grid View */}
       <div className="hidden sm:grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4">
         {products.map((product) => {
-          const placeholder = PlaceHolderImages.find((p) => p.id === product.image);
           return (
             <Tooltip key={product.id}>
               <TooltipTrigger asChild>
                 <Card className="flex flex-col overflow-hidden">
                   <CardHeader className="p-0 hidden sm:block">
                     <div className="aspect-square relative w-full">
-                      <Image
-                        src={placeholder?.imageUrl ?? 'https://picsum.photos/seed/placeholder/400/400'}
-                        alt={product.name}
-                        fill
-                        className="object-cover"
-                        data-ai-hint={placeholder?.imageHint ?? 'product'}
-                      />
+                      <ProductImage image={product.image} alt={product.name} fill />
                     </div>
                   </CardHeader>
                   <CardContent className="p-4 flex-grow">

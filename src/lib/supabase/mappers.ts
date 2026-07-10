@@ -1,4 +1,4 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 
 // ---------- Product ----------
@@ -77,7 +77,7 @@ export const customerToRow = (c: Partial<Customer>) => ({
 });
 
 // ---------- Branch ----------
-export const rowToBranch = (r: any): Branch => ({ id: r.id, name: r.name, location: r.location ?? '' });
+export const rowToBranch = (r: any): Branch => ({ id: r.id, name: r.name, location: r.location ?? '', isActive: r.is_active ?? true });
 export const branchToRow = (b: Partial<Branch>) => ({ name: b.name, location: b.location ?? null });
 
 // ---------- Supplier ----------
@@ -107,6 +107,8 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   logoUrl: r.logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
+  loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
+  defaultLoanInterestRate: Number(r.default_loan_interest_rate ?? 5),
 });
 export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   name: p.name, phone: p.phone ?? null, rnc: p.rnc ?? null, address: p.address ?? null,
@@ -317,4 +319,75 @@ export const serviceToRow = (s: Partial<import('@/lib/types').Service>, branchUu
   if (s.completedAt) row.completed_at = s.completedAt.toISOString();
   return row;
 };
+
+// ---------- Préstamos (dominio independiente de ventas/financiamiento) ----------
+export const rowToLoanInstallment = (r: any): LoanInstallment => ({
+  id: r.id,
+  loanId: r.loan_id,
+  number: Number(r.installment_number),
+  dueDate: r.due_date,
+  amount: Number(r.amount),
+  paidAmount: Number(r.paid_amount),
+  lateFeePaid: Number(r.late_fee_paid),
+  status: r.status,
+  paidAt: r.paid_at ?? undefined,
+});
+
+export const rowToLoanPayment = (r: any): LoanPayment => ({
+  id: r.id,
+  loanId: r.loan_id,
+  customerId: r.customer_id,
+  amount: Number(r.amount),
+  lateFeePaid: Number(r.late_fee_paid ?? 0),
+  method: r.method,
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  date: new Date(r.date),
+  branchId: r.branch_id ?? undefined,
+});
+
+export const rowToLoan = (r: any): Loan => ({
+  id: r.id,
+  companyId: r.company_id,
+  branchId: r.branch_id,
+  customerId: r.customer_id,
+  customer: r.customers ? rowToCustomer(r.customers) : undefined,
+  principal: Number(r.principal),
+  interestRate: Number(r.interest_rate),
+  installmentsCount: Number(r.installments_count),
+  downPayment: Number(r.down_payment),
+  totalWithInterest: Number(r.total_with_interest),
+  amountPaid: Number(r.amount_paid),
+  status: r.status,
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  createdAt: new Date(r.created_at),
+  installments: (r.loan_installments ?? [])
+    .map(rowToLoanInstallment)
+    .sort((a: LoanInstallment, b: LoanInstallment) => a.number - b.number),
+});
+
+export const loanToRow = (l: {
+  branchId: string; customerId: string; principal: number; interestRate: number;
+  installmentsCount: number; downPayment: number; notes?: string; userName?: string;
+}) => ({
+  branch_id: l.branchId,
+  customer_id: l.customerId,
+  principal: l.principal,
+  interest_rate: l.interestRate,
+  installments_count: l.installmentsCount,
+  down_payment: l.downPayment,
+  notes: l.notes ?? null,
+  user_name: l.userName ?? null,
+});
+
+export const rowToLoanPaymentResult = (r: any): LoanPaymentResult => ({
+  paymentId: r.payment_id,
+  amount: Number(r.amount),
+  lateFeePaid: Number(r.late_fee_paid ?? 0),
+  principalPaid: Number(r.principal_paid ?? 0),
+  remainingBalance: Number(r.remaining_balance ?? 0),
+  installmentsPaid: Number(r.installments_paid ?? 0),
+  installmentsTotal: Number(r.installments_total ?? 0),
+});
 

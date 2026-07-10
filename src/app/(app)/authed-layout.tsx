@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter } from '@/components/ui/sidebar';
-import { Building, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon } from 'lucide-react';
+import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -43,6 +43,7 @@ const featuresNavItems: NavItem[] = [
   { href: '/services', icon: Wrench, label: 'Servicios', roles: ['admin', 'cashier'], module: 'services' },
   { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', roles: ['admin'], module: 'credit' },
   { href: '/financing', icon: Landmark, label: 'Financiamientos', roles: ['admin'], module: 'financing' },
+  { href: '/prestamos', icon: HandCoins, label: 'Préstamos', roles: ['admin'], module: 'prestamos' },
   { href: '/expenses', icon: Wallet, label: 'Gastos', roles: ['admin'], module: 'expenses' },
 ];
 
@@ -338,9 +339,29 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
             {isSuperAdmin && (
               <SidebarMenuItem>
                 <Link href="/admin/companies" passHref>
-                  <SidebarMenuButton isActive={pathname.startsWith('/admin')} tooltip="Plataforma">
+                  <SidebarMenuButton isActive={pathname === '/admin/companies'} tooltip="Plataforma">
                     <Building />
                     <span className="group-data-[collapsible=icon]:hidden">Plataforma</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            )}
+            {isSuperAdmin && (
+              <SidebarMenuItem>
+                <Link href="/admin/empresas" passHref>
+                  <SidebarMenuButton isActive={pathname.startsWith('/admin/empresas')} tooltip="Empresas">
+                    <Building2 />
+                    <span className="group-data-[collapsible=icon]:hidden">Empresas</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            )}
+            {isSuperAdmin && (
+              <SidebarMenuItem>
+                <Link href="/admin/users" passHref>
+                  <SidebarMenuButton isActive={pathname.startsWith('/admin/users')} tooltip="Usuarios de la Plataforma">
+                    <UserCog />
+                    <span className="group-data-[collapsible=icon]:hidden">Usuarios (Plataforma)</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>

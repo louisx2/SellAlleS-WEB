@@ -3,25 +3,35 @@
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
 import type { User as AppUser } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
+import { useAuth } from '@/context/auth-provider';
 
 interface UserContextType {
   users: AppUser[];
   addUser: (user: Omit<AppUser, 'id'>, password?: string) => Promise<void>;
   updateUser: (user: AppUser) => Promise<void>;
+  deleteUser: (userId: string) => Promise<void>;
+  setPassword: (userId: string, password: string) => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
   loading: boolean;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
+  const { appUser } = useAuth();
+  // Empresa activa: la impersonada si el super admin entró a un tenant, si no la propia.
+  // Sin este filtro el super admin (que ignora RLS) vería los usuarios de TODAS las empresas.
+  const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    if (!activeCompanyId) { setUsers([]); setLoading(false); return; }
     const { data, error } = await supabase
       .from('profiles')
       // Desambiguado: profiles↔branches tiene dos relaciones (branch_id y profile_branches).
-      .select('id, name, email, role, is_super_admin, branches!profiles_branch_id_fkey(name), profile_roles(roles(id, name, description))');
+      .select('id, name, email, role, is_super_admin, branches!profiles_branch_id_fkey(name), profile_roles(roles(id, name, description))')
+      .eq('company_id', activeCompanyId);
     if (!error && data) {
       setUsers(
         data.map((d: any) => ({
@@ -38,7 +48,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
       );
     }
     setLoading(false);
-  }, []);
+  }, [activeCompanyId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -51,11 +61,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
   const updateUser = async (updated: AppUser) => {
     let branchId = null;
     if (updated.branch) {
-      const { data: branchData } = await supabase
-        .from('branches')
-        .select('id')
-        .eq('name', updated.branch)
-        .single();
+      // Resolver la sucursal por nombre DENTRO de la empresa activa: varios
+      // tenants comparten nombres ("Principal"), así que sin el filtro por
+      // company_id se podría agarrar la sucursal de otra empresa.
+      let branchQuery = supabase.from('branches').select('id').eq('name', updated.branch);
+      if (activeCompanyId) branchQuery = branchQuery.eq('company_id', activeCompanyId);
+      const { data: branchData } = await branchQuery.single();
       if (branchData) branchId = branchData.id;
     }
 
@@ -94,8 +105,39 @@ export function UserProvider({ children }: { children: ReactNode }) {
     await load();
   };
 
+  // Borrado TOTAL: elimina el perfil (cascada a roles/sucursales) y la cuenta de
+  // auth. Requiere la service_role → se hace en la Edge Function admin-user-actions,
+  // que valida que quien llama sea super admin o admin de la misma empresa.
+  const deleteUser = async (userId: string) => {
+    if (userId === appUser?.id) {
+      throw new Error('No puedes eliminar tu propio usuario.');
+    }
+    const { data, error } = await supabase.functions.invoke('admin-user-actions', {
+      body: { action: 'delete', userId },
+    });
+    if (error) throw new Error((data as any)?.error ?? error.message);
+    if ((data as any)?.error) throw new Error((data as any).error);
+    await load();
+  };
+
+  // Fija una contraseña nueva directamente (acción de admin), vía la Edge Function.
+  const setPassword = async (userId: string, password: string) => {
+    const { data, error } = await supabase.functions.invoke('admin-user-actions', {
+      body: { action: 'set_password', userId, password },
+    });
+    if (error) throw new Error((data as any)?.error ?? error.message);
+    if ((data as any)?.error) throw new Error((data as any).error);
+  };
+
+  // Alternativa: enviar al usuario un correo para que él mismo restablezca su clave.
+  const sendPasswordReset = async (email: string) => {
+    const redirectTo = typeof window !== 'undefined' ? `${window.location.origin}/reset-password` : undefined;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined);
+    if (error) throw error;
+  };
+
   return (
-    <UserContext.Provider value={{ users, addUser, updateUser, loading }}>
+    <UserContext.Provider value={{ users, addUser, updateUser, deleteUser, setPassword, sendPasswordReset, loading }}>
       {children}
     </UserContext.Provider>
   );

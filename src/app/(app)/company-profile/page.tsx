@@ -14,9 +14,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Info } from 'lucide-react';
 import { NcfSettingsCard } from '@/components/company-profile/ncf-settings-card';
 import { FinancingSettingsCard } from '@/components/company-profile/financing-settings-card';
+import { LoanSettingsCard } from '@/components/company-profile/loan-settings-card';
+import { BranchSharingCard } from '@/components/company-profile/branch-sharing-card';
+import { useModules } from '@/context/modules-provider';
 
 export default function CompanyProfilePage() {
   const { profile, updateProfile } = useCompanyProfile();
+  const { isModuleEnabled } = useModules();
   const [formData, setFormData] = useState<CompanyProfile>(profile);
   const { toast } = useToast();
 
@@ -138,6 +142,14 @@ export default function CompanyProfilePage() {
     </div>
     <div className="mt-6">
       <FinancingSettingsCard />
+    </div>
+    {isModuleEnabled('prestamos') && (
+      <div className="mt-6">
+        <LoanSettingsCard />
+      </div>
+    )}
+    <div className="mt-6">
+      <BranchSharingCard />
     </div>
     </>
   );

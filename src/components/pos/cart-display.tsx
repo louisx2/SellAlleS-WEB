@@ -1,13 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import Image from 'next/image';
 import { useCart } from '@/context/cart-provider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { formatCurrency } from '@/lib/utils';
-import { PlaceHolderImages } from '@/lib/placeholder-images';
+import { resolveProductImageUrl } from '@/components/products/product-image';
 import { MinusCircle, PlusCircle, ShoppingCart, Trash2, UserSearch, X, Plus, FileText } from 'lucide-react';
 import { CheckoutDialog } from './checkout-dialog';
 import { CreateQuoteDialog } from './create-quote-dialog';
@@ -35,19 +34,20 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Skeleton } from '../ui/skeleton';
 
-function CartItemImage({ src, alt, hint }: { src: string, alt: string, hint?: string }) {
+function CartItemImage({ src, alt }: { src: string, alt: string }) {
     const [imageLoaded, setImageLoaded] = useState(false);
     return (
         <div className="relative h-16 w-16 flex items-center justify-center">
-            {!imageLoaded && <Skeleton className="h-16 w-16 rounded-md" />}
-            <Image
+            {!imageLoaded && <Skeleton className="absolute inset-0 h-16 w-16 rounded-md" />}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
                 src={src}
                 alt={alt}
                 width={64}
                 height={64}
-                className={cn("rounded-md object-cover transition-opacity duration-300", imageLoaded ? "opacity-100" : "opacity-0")}
+                loading="lazy"
+                className={cn("rounded-md object-cover h-16 w-16 transition-opacity duration-300", imageLoaded ? "opacity-100" : "opacity-0")}
                 onLoad={() => setImageLoaded(true)}
-                data-ai-hint={hint}
             />
         </div>
     );
@@ -210,7 +210,6 @@ export function CartDisplay() {
                         ) : (
                           <div className="space-y-4">
                             {cart.items.map((item) => {
-                              const placeholder = PlaceHolderImages.find(p => p.id === item.product.image);
                               const currentPrice = item.customPrice ?? item.product.price;
                               return (
                                 <div key={item.cartItemId} className={cn(
@@ -219,9 +218,8 @@ export function CartDisplay() {
                                 )}>
                                   <div className="hidden sm:block">
                                     <CartItemImage
-                                      src={placeholder?.imageUrl ?? 'https://picsum.photos/seed/item/100/100'}
+                                      src={resolveProductImageUrl(item.product.image)}
                                       alt={item.product.name}
-                                      hint={placeholder?.imageHint}
                                     />
                                   </div>
                                   <div className="flex-grow space-y-2">

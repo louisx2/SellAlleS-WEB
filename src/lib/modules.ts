@@ -13,7 +13,8 @@ export type ModuleKey =
   | 'expenses'
   | 'reports'
   | 'lavanderia'
-  | 'services';
+  | 'services'
+  | 'prestamos';
 
 export interface AppModule {
   key: ModuleKey;
@@ -35,6 +36,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'reports',    label: 'Reportes',           description: 'Resúmenes de ventas, productos e impuestos.',         defaultEnabled: true },
   { key: 'services',   label: 'Servicios/Reparaciones', description: 'Gestión de órdenes de servicio y uso de repuestos.',  defaultEnabled: true },
   { key: 'lavanderia', label: 'Lavandería',         description: 'Órdenes de servicio de lavandería.',                  defaultEnabled: false, comingSoon: true },
+  { key: 'prestamos',  label: 'Préstamos',          description: 'Préstamos de dinero a clientes, con cuotas e interés, independientes de las ventas.', defaultEnabled: false },
 ];
 
 /** Ruta → módulo que la gobierna. Las rutas que no aparecen aquí son núcleo
@@ -50,6 +52,7 @@ const ROUTE_MODULE: Array<{ prefix: string; module: ModuleKey }> = [
   { prefix: '/reports',   module: 'reports' },
   { prefix: '/services',  module: 'services' },
   { prefix: '/service-types', module: 'services' },
+  { prefix: '/prestamos', module: 'prestamos' },
 ];
 
 export function moduleForRoute(pathname: string): ModuleKey | null {

@@ -25,15 +25,20 @@ import { useEffect } from 'react';
 
 interface UserDialogProps {
   user?: User;
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function UserDialog({ user, children }: UserDialogProps) {
+export function UserDialog({ user, children, open: controlledOpen, onOpenChange }: UserDialogProps) {
   const { toast } = useToast();
   const { addUser, updateUser } = useUsers();
   const { branches } = useBranches();
   const isEditMode = !!user;
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = (o: boolean) => { if (isControlled) onOpenChange?.(o); else setInternalOpen(o); };
   const [role, setRole] = useState(user?.role ?? 'cashier');
   const [branch, setBranch] = useState(user?.branch ?? '');
   
@@ -109,7 +114,7 @@ export function UserDialog({ user, children }: UserDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditMode ? 'Editar Usuario' : 'Añadir Usuario'}</DialogTitle>

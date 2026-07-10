@@ -13,4 +13,19 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Impersonación: cuando el super admin "entra" a una empresa, guardamos su id en
+// localStorage y disparamos un reload completo. Al recrearse este módulo, horneamos
+// el id como cabecera x-impersonate-company; RLS la usa (solo si el usuario es un
+// super admin real) para tratar al super admin como miembro de esa empresa, dejando
+// las pantallas del tenant correctamente aisladas. Sin impersonar, no se envía nada
+// y el super admin conserva su acceso de plataforma.
+const impersonatedCompany =
+  typeof window !== 'undefined' ? window.localStorage.getItem('userImpersonatedCompany') : null;
+
+export const supabase = createClient(
+  supabaseUrl,
+  supabaseAnonKey,
+  impersonatedCompany
+    ? { global: { headers: { 'x-impersonate-company': impersonatedCompany } } }
+    : undefined,
+);

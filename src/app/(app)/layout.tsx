@@ -14,6 +14,7 @@ import { SalesProvider } from '@/context/sales-provider';
 import { SupplierProvider } from '@/context/supplier-provider';
 import { ExpenseProvider } from '@/context/expense-provider';
 import { QuotesProvider } from '@/context/quotes-provider';
+import { LoanProvider } from '@/context/loan-provider';
 import { ModulesProvider } from '@/context/modules-provider';
 import { SidebarProvider } from '@/components/ui/sidebar';
 
@@ -32,9 +33,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                     <SupplierProvider>
                       <ExpenseProvider>
                         <QuotesProvider>
-                          <SidebarProvider defaultOpen={false}>
-                            <AuthedLayout>{children}</AuthedLayout>
-                          </SidebarProvider>
+                          <LoanProvider>
+                            <SidebarProvider defaultOpen={false}>
+                              <AuthedLayout>{children}</AuthedLayout>
+                            </SidebarProvider>
+                          </LoanProvider>
                         </QuotesProvider>
                       </ExpenseProvider>
                     </SupplierProvider>

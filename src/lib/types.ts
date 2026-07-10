@@ -64,6 +64,7 @@ export type Branch = {
   id: string;
   name: string;
   location: string;
+  isActive: boolean;
 };
 
 export type Company = {
@@ -76,7 +77,7 @@ export type Company = {
   address: string | null;
   status: 'trial' | 'active' | 'suspended';
   created_at: string;
-  branches?: { id: string; name: string; location: string | null }[];
+  branches?: { id: string; name: string; location: string | null; is_active: boolean }[];
 };
 
 export type Role = {
@@ -177,6 +178,8 @@ export type CompanyProfile = {
   receiptFooter: string;
   lateFeeRate: number;         // % de mora sobre la cuota vencida
   defaultInterestRate: number; // % de interés mensual sugerido en el POS
+  loanLateFeeRate: number;         // % de mora de préstamos (independiente de lateFeeRate)
+  defaultLoanInterestRate: number; // % de interés mensual sugerido para préstamos
 };
 
 export type PaymentMethod = 'cash' | 'card' | 'transfer';
@@ -204,6 +207,63 @@ export type PaymentResult = {
   installmentsPaid: number | null;
   installmentsTotal: number | null;
   customerBalance: number | null;
+};
+
+// ---------- Préstamos (dominio independiente de ventas/financiamiento) ----------
+export type LoanInstallment = {
+  id: string;
+  loanId: string;
+  number: number;
+  dueDate: string; // yyyy-mm-dd
+  amount: number;
+  paidAmount: number;
+  lateFeePaid: number;
+  status: 'pending' | 'partial' | 'paid';
+  paidAt?: string;
+};
+
+export type LoanPayment = {
+  id: string;
+  loanId: string;
+  customerId: string;
+  amount: number;
+  lateFeePaid: number;
+  method: PaymentMethod;
+  notes?: string;
+  userName?: string;
+  date: Date;
+  branchId?: string;
+};
+
+export type Loan = {
+  id: string;
+  companyId?: string;
+  branchId: string;
+  customerId: string;
+  customer?: Customer;
+  principal: number;
+  interestRate: number;
+  installmentsCount: number;
+  downPayment: number;
+  totalWithInterest: number;
+  amountPaid: number;
+  status: 'active' | 'paid' | 'cancelled';
+  notes?: string;
+  userName?: string;
+  createdAt: Date;
+  installments?: LoanInstallment[];
+  payments?: LoanPayment[];
+};
+
+// Resultado de la RPC register_loan_payment.
+export type LoanPaymentResult = {
+  paymentId: string;
+  amount: number;
+  lateFeePaid: number;
+  principalPaid: number;
+  remainingBalance: number;
+  installmentsPaid: number;
+  installmentsTotal: number;
 };
 
 export type Supplier = {
