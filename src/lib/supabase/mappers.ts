@@ -355,7 +355,7 @@ export const rowToLoan = (r: any): Loan => ({
   principal: Number(r.principal),
   interestRate: Number(r.interest_rate),
   installmentsCount: Number(r.installments_count),
-  downPayment: Number(r.down_payment),
+  paymentFrequency: r.payment_frequency ?? 'monthly',
   totalWithInterest: Number(r.total_with_interest),
   amountPaid: Number(r.amount_paid),
   status: r.status,
@@ -369,14 +369,14 @@ export const rowToLoan = (r: any): Loan => ({
 
 export const loanToRow = (l: {
   branchId: string; customerId: string; principal: number; interestRate: number;
-  installmentsCount: number; downPayment: number; notes?: string; userName?: string;
+  installmentsCount: number; paymentFrequency: string; notes?: string; userName?: string;
 }) => ({
   branch_id: l.branchId,
   customer_id: l.customerId,
   principal: l.principal,
   interest_rate: l.interestRate,
   installments_count: l.installmentsCount,
-  down_payment: l.downPayment,
+  payment_frequency: l.paymentFrequency,
   notes: l.notes ?? null,
   user_name: l.userName ?? null,
 });

@@ -23,7 +23,7 @@ interface FinancingActionsProps {
 export function FinancingActions({ sale, canPay }: FinancingActionsProps) {
   return (
     <AddFinancingPaymentDialog sale={sale}>
-        <DropdownMenu>
+        <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="h-8 w-8 p-0">
             <span className="sr-only">Abrir menú</span>

@@ -24,15 +24,16 @@ export const buildLoanColumns = (loanLateFeeRate: number): ColumnDef<Loan>[] => 
   },
   {
     accessorKey: 'principal',
-    header: 'Monto prestado',
+    header: 'Prestado',
     cell: ({ row }) => formatCurrency(row.original.principal),
   },
   {
     id: 'installments',
-    header: 'Cuotas Pagadas',
+    header: 'Cuotas',
     cell: ({ row }) => {
       const status = calculateLoanStatus(row.original, loanLateFeeRate);
-      return <span>{status.installmentsPaid} de {status.totalInstallments}</span>;
+      const freq = { weekly: 'sem.', biweekly: 'quinc.', monthly: 'mens.' }[row.original.paymentFrequency] ?? '';
+      return <span>{status.installmentsPaid} de {status.totalInstallments} <span className="text-muted-foreground text-xs">({freq})</span></span>;
     },
   },
   {

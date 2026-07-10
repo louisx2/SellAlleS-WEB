@@ -235,6 +235,8 @@ export type LoanPayment = {
   branchId?: string;
 };
 
+export type LoanFrequency = 'weekly' | 'biweekly' | 'monthly';
+
 export type Loan = {
   id: string;
   companyId?: string;
@@ -244,7 +246,7 @@ export type Loan = {
   principal: number;
   interestRate: number;
   installmentsCount: number;
-  downPayment: number;
+  paymentFrequency: LoanFrequency;
   totalWithInterest: number;
   amountPaid: number;
   status: 'active' | 'paid' | 'cancelled';

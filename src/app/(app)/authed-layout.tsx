@@ -86,8 +86,15 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     setMounted(true);
   }, []);
   
-  const { state, setOpen } = useSidebar();
+  const { state, setOpen, isMobile: sidebarIsMobile, setOpenMobile } = useSidebar();
   const collapseTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // En móvil el sidebar es un Sheet que tapa la pantalla: al navegar a otra
+  // ruta se cierra solo (cubre links y router.push por igual).
+  useEffect(() => {
+    if (sidebarIsMobile) setOpenMobile(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   const handleCollapsibleToggle = (name: string) => {
     setOpenCollapsible(prev => (prev === name ? null : name));

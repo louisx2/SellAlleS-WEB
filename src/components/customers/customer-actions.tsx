@@ -32,7 +32,7 @@ export function CustomerActions({ customer }: CustomerActionsProps) {
 
   return (
     <CustomerDialog customer={customer}>
-      <DropdownMenu>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="h-8 w-8 p-0">
             <span className="sr-only">Abrir menú</span>

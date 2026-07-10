@@ -19,7 +19,7 @@ interface SalesActionsProps {
 
 export function SalesActions({ sale }: SalesActionsProps) {
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={false}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="h-8 w-8 p-0">
           <span className="sr-only">Abrir menú</span>

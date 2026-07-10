@@ -17,19 +17,27 @@ import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency } from '@/lib/utils';
 import { CustomerSearchDialog } from '@/components/pos/customer-search-dialog';
-import type { Customer } from '@/lib/types';
-import { PlusCircle, User } from 'lucide-react';
+import type { Customer, LoanFrequency } from '@/lib/types';
+import { HandCoins, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 interface LoanDialogProps {
   children?: React.ReactNode;
 }
 
-const installmentOptions = [3, 6, 9, 12, 18, 24];
+const FREQUENCY_LABEL: Record<LoanFrequency, string> = {
+  weekly: 'Semanal',
+  biweekly: 'Quincenal',
+  monthly: 'Mensual',
+};
 
-// Vista previa de interés simple mensual — calcada de FinancingDialog (POS) sin
-// importarlo, a propósito: el módulo de préstamos no depende de financing-dialog.
-// El monto real y el cronograma los calcula el servidor (trg_before_loan_checks).
+// Cuotas por mes según la frecuencia; para prorratear la tasa mensual a la
+// duración real del préstamo (mismo cálculo que trg_before_loan_checks).
+const PER_MONTH: Record<LoanFrequency, number> = { weekly: 4, biweekly: 2, monthly: 1 };
+
+// Diálogo de prestamista: presto RD$X a una tasa mensual y el cliente lo paga
+// en cuotas semanales/quincenales/mensuales. Sin "abono inicial" — el dinero
+// sale hacia el cliente, no al revés. El servidor recalcula todo al guardar.
 export function LoanDialog({ children }: LoanDialogProps) {
   const { toast } = useToast();
   const { addLoan } = useLoans();
@@ -43,9 +51,9 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [branchId, setBranchId] = useState('');
   const [principal, setPrincipal] = useState<string>('');
-  const [downPayment, setDownPayment] = useState<string>('');
   const [interestRate, setInterestRate] = useState<string>(String(profile.defaultLoanInterestRate));
-  const [installments, setInstallments] = useState(12);
+  const [frequency, setFrequency] = useState<LoanFrequency>('monthly');
+  const [installments, setInstallments] = useState<string>('12');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -56,29 +64,30 @@ export function LoanDialog({ children }: LoanDialogProps) {
       setCustomer(null);
       setBranchId(appUser?.activeBranchId ?? '');
       setPrincipal('');
-      setDownPayment('');
       setInterestRate(String(profile.defaultLoanInterestRate));
-      setInstallments(12);
+      setFrequency('monthly');
+      setInstallments('12');
       setNotes('');
     }
   }, [open, appUser?.activeBranchId, profile.defaultLoanInterestRate]);
 
   const preview = useMemo(() => {
     const p = Number(principal) || 0;
-    const dp = Number(downPayment) || 0;
     const rate = Number(interestRate) || 0;
-    const toFinance = p - dp;
-    if (toFinance <= 0 || installments <= 0) {
-      return { toFinance: Math.max(toFinance, 0), installmentAmount: 0, totalWithInterest: p };
+    const n = Number(installments) || 0;
+    if (p <= 0 || n <= 0) {
+      return { interest: 0, total: p, installmentAmount: 0, months: 0 };
     }
-    const interest = toFinance * (rate / 100) * installments;
-    const financed = toFinance + interest;
-    return { toFinance, installmentAmount: financed / installments, totalWithInterest: financed + dp };
-  }, [principal, downPayment, interestRate, installments]);
+    const months = n / PER_MONTH[frequency];
+    const interest = p * (rate / 100) * months;
+    const total = p + interest;
+    return { interest, total, installmentAmount: total / n, months };
+  }, [principal, interestRate, installments, frequency]);
 
+  const nInstallments = Number(installments) || 0;
   const isPrincipalInvalid = !principal || Number(principal) <= 0;
-  const isDownPaymentInvalid = Number(downPayment) < 0 || Number(downPayment) >= (Number(principal) || 0);
-  const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isDownPaymentInvalid && preview.installmentAmount > 0;
+  const isInstallmentsInvalid = nInstallments < 1 || nInstallments > 60;
+  const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isInstallmentsInvalid && preview.installmentAmount > 0;
 
   const handleSubmit = async () => {
     if (!canSubmit || !customer) return;
@@ -89,8 +98,8 @@ export function LoanDialog({ children }: LoanDialogProps) {
         customerId: customer.id,
         principal: Number(principal),
         interestRate: Number(interestRate) || 0,
-        installmentsCount: installments,
-        downPayment: Number(downPayment) || 0,
+        installmentsCount: nInstallments,
+        paymentFrequency: frequency,
         notes: notes.trim() || undefined,
       });
       toast({ title: 'Préstamo creado', description: `${formatCurrency(Number(principal))} a ${customer.name}.` });
@@ -110,7 +119,7 @@ export function LoanDialog({ children }: LoanDialogProps) {
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Nuevo préstamo</DialogTitle>
-            <DialogDescription>Préstamo de dinero a un cliente, con cuotas e interés.</DialogDescription>
+            <DialogDescription>Dinero que entregas al cliente; lo recuperas en cuotas con interés.</DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 py-2">
@@ -148,50 +157,61 @@ export function LoanDialog({ children }: LoanDialogProps) {
                 {isPrincipalInvalid && principal !== '' && <p className="text-xs text-destructive">Debe ser mayor que cero.</p>}
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="downPayment">Abono inicial (opcional)</Label>
-                <Input id="downPayment" type="number" step="0.01" placeholder="0.00" value={downPayment} onChange={(e) => setDownPayment(e.target.value)} />
-                {isDownPaymentInvalid && <p className="text-xs text-destructive">No puede ser negativo ni igual/mayor al monto.</p>}
+                <Label htmlFor="interestRate">Interés mensual (%)</Label>
+                <Input id="interestRate" type="number" step="0.01" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="interestRate">Tasa de interés mensual (%)</Label>
-                <Input id="interestRate" type="number" step="0.01" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} />
-              </div>
-              <div className="grid gap-2">
-                <Label>Cantidad de cuotas</Label>
-                <Select value={String(installments)} onValueChange={(v) => setInstallments(Number(v))}>
+                <Label>Frecuencia de pago</Label>
+                <Select value={frequency} onValueChange={(v) => setFrequency(v as LoanFrequency)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {installmentOptions.map((opt) => <SelectItem key={opt} value={String(opt)}>{opt} cuotas</SelectItem>)}
+                    <SelectItem value="weekly">Semanal</SelectItem>
+                    <SelectItem value="biweekly">Quincenal</SelectItem>
+                    <SelectItem value="monthly">Mensual</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="installments">Cantidad de cuotas</Label>
+                <Input
+                  id="installments" type="number" min="1" max="60" step="1"
+                  value={installments}
+                  onChange={(e) => setInstallments(e.target.value)}
+                />
+                {isInstallmentsInvalid && installments !== '' && <p className="text-xs text-destructive">Entre 1 y 60 cuotas.</p>}
               </div>
             </div>
 
             <div className="grid gap-2">
               <Label htmlFor="notes">Notas (opcional)</Label>
-              <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+              <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Ej: garantía, referencia, acuerdo…" />
             </div>
 
             <Separator />
 
             <div className="space-y-2 text-sm">
               <div className="flex justify-between items-center text-lg font-bold bg-secondary p-3 rounded-md">
-                <span className="text-primary">Cuota mensual:</span>
+                <span className="text-primary">Cuota {FREQUENCY_LABEL[frequency].toLowerCase()}:</span>
                 <span className="text-primary">{formatCurrency(preview.installmentAmount)}</span>
               </div>
-              <div className="flex justify-between"><span>Monto a financiar:</span><span>{formatCurrency(preview.toFinance)}</span></div>
-              <div className="flex justify-between font-semibold"><span>Total a pagar (con intereses):</span><span>{formatCurrency(preview.totalWithInterest)}</span></div>
-              <p className="text-xs text-muted-foreground">Los montos y fechas definitivos los calcula el servidor al crear el préstamo.</p>
+              <div className="flex justify-between"><span>Prestas:</span><span>{formatCurrency(Number(principal) || 0)}</span></div>
+              <div className="flex justify-between text-emerald-600 dark:text-emerald-400 font-semibold">
+                <span>Tu ganancia (interés):</span><span>{formatCurrency(preview.interest)}</span>
+              </div>
+              <div className="flex justify-between font-semibold"><span>Total que te pagarán:</span><span>{formatCurrency(preview.total)}</span></div>
+              <p className="text-xs text-muted-foreground">
+                Duración: ~{preview.months.toFixed(1).replace('.0', '')} {preview.months === 1 ? 'mes' : 'meses'} · Los montos y fechas definitivos los calcula el servidor.
+              </p>
             </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancelar</Button>
             <Button onClick={handleSubmit} disabled={!canSubmit || saving}>
-              {saving ? 'Creando…' : <><PlusCircle className="mr-2 h-4 w-4" /> Crear préstamo</>}
+              {saving ? 'Creando…' : <><HandCoins className="mr-2 h-4 w-4" /> Prestar</>}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -30,6 +30,12 @@ const INSTALLMENT_STATUS: Record<string, { label: string; variant: 'default' | '
   pending: { label: 'Pendiente', variant: 'outline' },
 };
 
+const FREQUENCY_LABEL: Record<string, string> = {
+  weekly: 'Semanal',
+  biweekly: 'Quincenal',
+  monthly: 'Mensual',
+};
+
 export default function LoanDetailClient() {
   const params = useParams();
   const loanId = params.loanId as string;
@@ -118,23 +124,23 @@ export default function LoanDetailClient() {
               <p className="font-semibold">{formatCurrency(loan.principal)}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Abono inicial</p>
-              <p className="font-semibold">{formatCurrency(loan.downPayment)}</p>
-            </div>
-            <div>
               <p className="text-muted-foreground">Tasa mensual / Cuotas</p>
-              <p className="font-semibold">{loan.interestRate}% · {loan.installmentsCount} cuotas</p>
+              <p className="font-semibold">{loan.interestRate}% · {loan.installmentsCount} cuotas ({FREQUENCY_LABEL[loan.paymentFrequency] ?? 'Mensual'})</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Total con intereses</p>
+              <p className="text-muted-foreground">Ganancia (interés)</p>
+              <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(loan.totalWithInterest - loan.principal)}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Total a cobrar</p>
               <p className="font-semibold">{formatCurrency(loan.totalWithInterest)}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Pagado</p>
+              <p className="text-muted-foreground">Cobrado</p>
               <p className="font-semibold text-green-600">{formatCurrency(loan.amountPaid)}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Balance pendiente</p>
+              <p className="text-muted-foreground">Por cobrar</p>
               <p className="font-semibold text-destructive">{formatCurrency(status.pendingBalance)}</p>
             </div>
             <div>

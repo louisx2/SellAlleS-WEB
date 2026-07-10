@@ -158,7 +158,7 @@ export function CompaniesDataTable({
                                 >
                                   <LogIn className="mr-1 h-3 w-3" /> Entrar
                                 </Button>
-                                <DropdownMenu>
+                                <DropdownMenu modal={false}>
                                   <DropdownMenuTrigger asChild>
                                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
                                       <MoreHorizontal className="h-3.5 w-3.5" />
@@ -254,7 +254,7 @@ export function CompaniesDataTable({
                       <Button variant="default" size="sm" className="h-8" onClick={() => onEnterCompany(c)}>
                         <LogIn className="mr-2 h-4 w-4" /> Entrar
                       </Button>
-                      <DropdownMenu>
+                      <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>
                           <Button variant="outline" size="icon" className="h-8 w-8">
                             <MoreHorizontal className="h-4 w-4" />

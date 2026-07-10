@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Loan, LoanPaymentResult, PaymentMethod } from '@/lib/types';
+import type { Loan, LoanFrequency, LoanPaymentResult, PaymentMethod } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToLoan, loanToRow, rowToLoanPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
@@ -12,7 +12,7 @@ interface NewLoanInput {
   principal: number;
   interestRate: number;
   installmentsCount: number;
-  downPayment: number;
+  paymentFrequency: LoanFrequency;
   notes?: string;
 }
 
