@@ -16,6 +16,8 @@ import { calculateLoanStatus } from '@/lib/loan-utils';
 import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useAuth } from '@/context/auth-provider';
+import { useModules } from '@/context/modules-provider';
+import { useCaja } from '@/context/caja-provider';
 import { PaymentReceiptDialog, type PaymentReceiptData } from '@/components/credit/payment-receipt-dialog';
 import { Info, Loader2 } from 'lucide-react';
 
@@ -29,9 +31,13 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
   const { payLoan } = useLoans();
   const { profile } = useCompanyProfile();
   const { appUser } = useAuth();
+  const { isModuleEnabled } = useModules();
+  const { isOpen: isCajaOpen } = useCaja();
+  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<number | ''>('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
+  const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [receipt, setReceipt] = useState<PaymentReceiptData | null>(null);
@@ -42,10 +48,11 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
   useEffect(() => {
     if (open) {
       setAmount(status.paymentDue);
-      setMethod('cash');
+      setMethod(cashBlocked ? 'card' : 'cash');
+      setReference('');
       setNotes('');
     }
-  }, [open, status.paymentDue]);
+  }, [open, status.paymentDue, cashBlocked]);
 
   const maxPayable = status.pendingBalance + status.lateFee;
 
@@ -62,9 +69,18 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
       return;
     }
 
+    if (method === 'cash' && cashBlocked) {
+      toast({ title: 'Caja cerrada', description: 'Abre la caja de esta sucursal para cobrar en efectivo.', variant: 'destructive' });
+      return;
+    }
+    if (method === 'transfer' && !reference.trim()) {
+      toast({ title: 'Falta la referencia', description: 'Indica la referencia de la transferencia.', variant: 'destructive' });
+      return;
+    }
+
     setSaving(true);
     try {
-      const result = await payLoan(loan.id, paymentAmount, method, appUser?.activeBranchId, notes.trim() || undefined);
+      const result = await payLoan(loan.id, paymentAmount, method, appUser?.activeBranchId, notes.trim() || undefined, reference.trim() || undefined);
       toast({
         title: 'Abono registrado',
         description: `Se registró un abono de ${formatCurrency(result.amount)} para ${loan.customer?.name ?? 'el cliente'}.`,
@@ -139,16 +155,25 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
                 <Select value={method} onValueChange={(v: PaymentMethod) => setMethod(v)}>
                   <SelectTrigger id="method"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Efectivo</SelectItem>
+                    <SelectItem value="cash" disabled={cashBlocked}>Efectivo</SelectItem>
                     <SelectItem value="card">Tarjeta</SelectItem>
                     <SelectItem value="transfer">Transferencia</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
+            {cashBlocked && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">No hay caja abierta en esta sucursal: no puedes cobrar en efectivo.</p>
+            )}
+            {(method === 'transfer' || method === 'card') && (
+              <div className="space-y-2">
+                <Label htmlFor="payment-reference">{method === 'transfer' ? 'Referencia de transferencia' : 'Referencia / aprobación'}</Label>
+                <Input id="payment-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === 'transfer' ? 'No. de transferencia' : 'No. de aprobación'} />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="payment-notes">Notas (Opcional)</Label>
-              <Textarea id="payment-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: referencia de transferencia, acuerdo de pago…" />
+              <Textarea id="payment-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: acuerdo de pago…" />
             </div>
             <p className="text-xs text-muted-foreground text-center">
               Monto sugerido: <span className="font-semibold">{formatCurrency(status.paymentDue - status.lateFee)} (cuota)</span>
@@ -159,7 +184,7 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
             <DialogClose asChild>
               <Button type="button" variant="secondary">Cancelar</Button>
             </DialogClose>
-            <Button type="submit" disabled={saving || !amount || Number(amount) <= 0}>
+            <Button type="submit" disabled={saving || !amount || Number(amount) <= 0 || (method === 'cash' && cashBlocked) || (method === 'transfer' && !reference.trim())}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Guardar Abono
             </Button>

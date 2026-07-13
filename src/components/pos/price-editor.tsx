@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useCart } from '@/context/cart-provider';
+import { useCart, getEffectiveUnitPrice } from '@/context/cart-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -21,7 +21,7 @@ interface PriceEditorProps {
 const quickDiscountPercentages = [5, 10, 15, 25];
 
 export function PriceEditor({ cartItem }: PriceEditorProps) {
-  const { setCustomPrice, removeItem, updateQuantity } = useCart();
+  const { setCustomPrice, removeItem, updateQuantity, activeCart } = useCart();
   const { toast } = useToast();
   const [newPrice, setNewPrice] = useState<string | number>('');
   const [newQuantity, setNewQuantity] = useState<string | number>('');
@@ -49,7 +49,7 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
 
   useEffect(() => {
     if (isOpen) {
-      const currentPrice = cartItem.customPrice ?? cartItem.product.price;
+      const currentPrice = getEffectiveUnitPrice(cartItem, activeCart?.selectedCustomer);
       setNewPrice(currentPrice);
       setNewQuantity(cartItem.quantity);
       const discount = calculateDiscount(currentPrice);

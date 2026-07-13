@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter } from '@/components/ui/sidebar';
-import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins } from 'lucide-react';
+import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -44,6 +44,7 @@ const featuresNavItems: NavItem[] = [
   { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', roles: ['admin'], module: 'credit' },
   { href: '/financing', icon: Landmark, label: 'Financiamientos', roles: ['admin'], module: 'financing' },
   { href: '/prestamos', icon: HandCoins, label: 'Préstamos', roles: ['admin'], module: 'prestamos' },
+  { href: '/caja', icon: Coins, label: 'Caja', roles: ['admin', 'cashier'], module: 'caja' },
   { href: '/expenses', icon: Wallet, label: 'Gastos', roles: ['admin'], module: 'expenses' },
 ];
 
@@ -155,6 +156,8 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const { role: userRole, name: userName, branch: userBranch } = appUser;
   const isSuperAdmin = appUser.isSuperAdmin;
   const isImpersonating = !!appUser.impersonatedCompanyId;
+  const isDemoCompany = !!appUser.companyDemoExpiresAt;
+  const hasTopBanner = isImpersonating || isDemoCompany;
   const showOperationalMenus = !isSuperAdmin || isImpersonating;
   const isManager = appUser?.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
   const isAdminOrManager = !isSuperAdmin && (userRole === 'admin' || isManager);
@@ -191,7 +194,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
           <span>
             ⚠️ Modo Soporte: Estás operando como Super Administrador en <strong>{appUser.impersonatedCompanyName}</strong>
           </span>
-          <button 
+          <button
             onClick={() => setImpersonatedCompany(null, null)}
             className="bg-white text-indigo-600 px-3 py-0.5 rounded-full hover:bg-indigo-50 transition-colors"
           >
@@ -199,9 +202,17 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
           </button>
         </div>
       )}
+      {!isImpersonating && isDemoCompany && (
+        <div className="fixed top-0 z-50 w-full bg-amber-500 text-amber-950 px-4 py-1.5 text-xs flex items-center justify-center gap-2 font-medium shadow-md">
+          <span>
+            🧪 Modo Demostración: esta empresa de prueba se borra automáticamente a las{' '}
+            <strong>{new Date(appUser.companyDemoExpiresAt!).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}</strong>
+          </span>
+        </div>
+      )}
       <header className={cn(
         "fixed z-40 flex items-center justify-between h-14 md:h-16 w-full px-4 border-b bg-card transition-all",
-        isImpersonating ? "top-7" : "top-0"
+        hasTopBanner ? "top-7" : "top-0"
       )}>
         <div className="flex items-center gap-4">
           <SidebarTrigger className="md:hidden" />
@@ -338,7 +349,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
         collapsible="icon"
         className={cn(
           "transition-all h-[calc(100vh-3.5rem)] md:h-[calc(100vh-4rem)]",
-          isImpersonating ? "top-[4.25rem] md:top-[4.75rem]" : "top-14 md:top-16"
+          hasTopBanner ? "top-[4.25rem] md:top-[4.75rem]" : "top-14 md:top-16"
         )}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -496,8 +507,8 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
         </SidebarFooter>
       </Sidebar>
 
-      <div className={cn('transition-all duration-300 ease-in-out', 
-        isImpersonating ? 'pt-[4.25rem] md:pt-[4.75rem]' : 'pt-14 md:pt-16',
+      <div className={cn('transition-all duration-300 ease-in-out',
+        hasTopBanner ? 'pt-[4.25rem] md:pt-[4.75rem]' : 'pt-14 md:pt-16',
         state === 'expanded' ? 'md:ml-[var(--sidebar-width)]' : 'md:ml-[var(--sidebar-width-icon)]'
       )}>
         <main className={cn(!isPosPage && "p-4 sm:p-6 lg:p-8")}>

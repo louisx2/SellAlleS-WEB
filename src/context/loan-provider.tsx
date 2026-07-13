@@ -19,7 +19,7 @@ interface NewLoanInput {
 interface LoanContextType {
   loans: Loan[];
   addLoan: (loan: NewLoanInput) => Promise<Loan>;
-  payLoan: (loanId: string, amount: number, method: PaymentMethod, branchId?: string, notes?: string) => Promise<LoanPaymentResult>;
+  payLoan: (loanId: string, amount: number, method: PaymentMethod, branchId?: string, notes?: string, reference?: string) => Promise<LoanPaymentResult>;
   reload: () => Promise<void>;
   loading: boolean;
 }
@@ -68,15 +68,26 @@ export function LoanProvider({ children }: { children: ReactNode }) {
   // Abono a un préstamo: RPC atómica register_loan_payment (mora primero, luego
   // capital a la cuota más antigua), independiente de register_sale_payment.
   const payLoan = async (
-    loanId: string, amount: number, method: PaymentMethod, branchId?: string, notes?: string,
+    loanId: string, amount: number, method: PaymentMethod, branchId?: string, notes?: string, reference?: string,
   ): Promise<LoanPaymentResult> => {
+    const customerId = loans.find((l) => l.id === loanId)?.customerId;
     const { data, error } = await supabase.rpc('register_loan_payment', {
       p_loan_id: loanId, p_amount: amount, p_method: method,
-      p_branch_id: branchId ?? null, p_notes: notes ?? null,
+      p_branch_id: branchId ?? null, p_notes: notes ?? null, p_reference: reference ?? null,
     });
     if (error) throw error;
     await load();
-    return rowToLoanPaymentResult(data);
+    const result = rowToLoanPaymentResult(data);
+    // Recibo por correo, best-effort (no bloquea ni revierte el abono si falla).
+    if (customerId) {
+      supabase.functions.invoke('send-payment-receipt', {
+        body: {
+          customerId, amount, lateFeePaid: result.lateFeePaid,
+          remainingBalance: result.remainingBalance, kind: 'loan',
+        },
+      }).catch(() => {});
+    }
+    return result;
   };
 
   return (

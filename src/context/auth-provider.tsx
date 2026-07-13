@@ -23,7 +23,10 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const publicRoutes = ['/login', '/reset-password'];
+// /mi-prestamo es el portal público de clientes finales (cédula + PIN, sin
+// Supabase Auth de por medio) — debe quedar fuera del guard de sesión igual
+// que /login.
+const publicRoutes = ['/login', '/reset-password', '/mi-prestamo'];
 
 function persistLocal(user: AppUser) {
   localStorage.setItem('userRole', user.role);
@@ -58,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       .select(`
         id, name, email, role, is_super_admin, company_id,
-        companies(status),
+        companies(status, demo_expires_at),
         branches!profiles_branch_id_fkey(id, name, is_active),
         profile_branches(branches(id, name, is_active)),
         profile_roles(roles(id, name, description))
@@ -135,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setNeedsBranchSelection(requireSelection);
 
       const compStatus = (data as any).companies?.status;
+      const demoExpiresAt = (data as any).companies?.demo_expires_at ?? undefined;
 
       const user: AppUser = {
         id: data.id,
@@ -146,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         branches: branchList,
         companyId: data.company_id,
         companyStatus: compStatus,
+        companyDemoExpiresAt: demoExpiresAt,
         impersonatedCompanyId: savedImpersonatedId || undefined,
         impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,

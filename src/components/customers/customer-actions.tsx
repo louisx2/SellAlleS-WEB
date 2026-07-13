@@ -1,6 +1,7 @@
 'use client';
 
-import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import Link from 'next/link';
+import { MoreHorizontal, Pencil, Trash2, History } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -42,6 +43,12 @@ export function CustomerActions({ customer }: CustomerActionsProps) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
           <DropdownMenuSeparator />
+          <DropdownMenuItem asChild>
+            <Link href={`/customers/${customer.id}`}>
+              <History className="mr-2 h-4 w-4" />
+              <span>Ver Historial</span>
+            </Link>
+          </DropdownMenuItem>
           <DialogTrigger asChild>
             <DropdownMenuItem>
                 <Pencil className="mr-2 h-4 w-4" />

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useCart } from '@/context/cart-provider';
+import { useCart, getEffectiveUnitPrice } from '@/context/cart-provider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
@@ -14,6 +14,8 @@ import { useModules } from '@/context/modules-provider';
 import type { Sale, Customer } from '@/lib/types';
 import { ReceiptDialog } from './receipt-dialog';
 import { CustomerSearchDialog } from './customer-search-dialog';
+import { CouponSelectorDialog } from './coupon-selector-dialog';
+import { Ticket } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import {
   AlertDialog,
@@ -69,13 +71,15 @@ export function CartDisplay() {
     totalDiscount,
     updateQuantity,
     setSelectedCustomer,
-    getGenericCustomer 
+    setCoupon,
+    getGenericCustomer
   } = useCart();
-  
+
   const [isCheckoutOpen, setCheckoutOpen] = useState(false);
   const [isQuoteOpen, setQuoteOpen] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
   const [isCustomerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [isCouponSearchOpen, setCouponSearchOpen] = useState(false);
   const isMobile = useIsMobile();
   const { isModuleEnabled } = useModules();
 
@@ -197,6 +201,33 @@ export function CartDisplay() {
                             Deuda: {formatCurrency(cart.selectedCustomer.creditBalance)}
                           </Badge>
                         )}
+                        {isModuleEnabled('loyalty') && cart.selectedCustomer?.id !== '0' && (
+                          cart.coupon ? (
+                            <div className="mt-2 flex items-start justify-between gap-2 rounded-md bg-primary/10 p-2">
+                              <div className="text-xs">
+                                <p className="font-mono font-semibold">{cart.coupon.code}</p>
+                                <p className="text-muted-foreground">{cart.coupon.rewardDescription}</p>
+                              </div>
+                              <button
+                                onClick={() => setCoupon(undefined)}
+                                className="text-muted-foreground hover:text-destructive p-0.5"
+                                title="Quitar cupón"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="mt-2 w-full"
+                              onClick={() => setCouponSearchOpen(true)}
+                            >
+                              <Ticket className="h-4 w-4 mr-2" />
+                              Cupones disponibles
+                            </Button>
+                          )
+                        )}
                       </div>
 
                       {/* Cart Items */}
@@ -210,11 +241,12 @@ export function CartDisplay() {
                         ) : (
                           <div className="space-y-4">
                             {cart.items.map((item) => {
-                              const currentPrice = item.customPrice ?? item.product.price;
+                              const currentPrice = getEffectiveUnitPrice(item, cart.selectedCustomer);
+                              const isDiscounted = currentPrice < item.product.price;
                               return (
                                 <div key={item.cartItemId} className={cn(
                                   "flex items-center gap-4 p-3 rounded-lg",
-                                  item.customPrice !== undefined && "bg-yellow-100/50"
+                                  isDiscounted && "bg-yellow-100/50"
                                 )}>
                                   <div className="hidden sm:block">
                                     <CartItemImage
@@ -234,7 +266,7 @@ export function CartDisplay() {
                                       </Button>
                                     </div>
                                     <div>
-                                      {item.customPrice !== undefined ? (
+                                      {isDiscounted ? (
                                         <div className="block">
                                           <span className="text-xs text-muted-foreground line-through">{formatCurrency(item.product.price)}</span>
                                           <span className="text-xs font-semibold block">{formatCurrency(currentPrice)} c/u</span>
@@ -345,6 +377,14 @@ export function CartDisplay() {
           setCustomerSearchOpen(false);
         }}
       />
+      {activeCart && activeCart.selectedCustomer?.id !== '0' && (
+        <CouponSelectorDialog
+          isOpen={isCouponSearchOpen}
+          onOpenChange={setCouponSearchOpen}
+          customerId={activeCart.selectedCustomer.id}
+          onCouponSelected={setCoupon}
+        />
+      )}
     </>
   );
 }

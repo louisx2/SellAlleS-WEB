@@ -39,9 +39,26 @@ export type Customer = {
   notes?: string;
   creditBalance: number;
   creditLimit?: number | null; // null/undefined = sin límite
+  discountPercentage: number; // % de descuento aplicado automáticamente en el POS
+  loyaltyPurchaseCount: number; // contador de fidelidad; solo lo escribe el servidor
   createdAt?: string;
   createdBy?: string;
   createdByName?: string;
+};
+
+export type CouponStatus = 'active' | 'redeemed' | 'expired';
+
+export type Coupon = {
+  id: string;
+  customerId: string;
+  code: string;
+  rewardDescription: string;
+  milestoneCount: number;
+  status: CouponStatus;
+  issuedAt: string;
+  expiresAt: string;
+  redeemedAt?: string;
+  redeemedSaleId?: string;
 };
 
 export type User = {
@@ -54,6 +71,7 @@ export type User = {
   branches?: { id: string; name: string }[]; // Lista de sucursales a las que pertenece
   companyId?: string;
   companyStatus?: 'trial' | 'active' | 'suspended';
+  companyDemoExpiresAt?: string; // empresa de prueba pública ("Probar Plataforma"); se banea al vencer
   impersonatedCompanyId?: string;
   impersonatedCompanyName?: string;
   isSuperAdmin?: boolean;
@@ -98,6 +116,7 @@ export type Cart = {
   items: CartItem[];
   selectedCustomer: Customer;
   quoteId?: string; // si el carrito viene de una cotización cargada
+  coupon?: Coupon; // cupón de fidelidad seleccionado para esta venta
 };
 
 export type FinancingDetails = {
@@ -132,6 +151,11 @@ export type Sale = {
   paymentStatus: 'paid' | 'credit' | 'in_financing';
   amountPaid: number;
   paymentReference?: string;
+  // Método y referencia del abono inicial de una venta a crédito/financiada
+  // (cómo entró ese dinero). Solo aplican cuando paymentStatus es credit/in_financing
+  // y amountPaid > 0.
+  downPaymentMethod?: PaymentMethod;
+  downPaymentReference?: string;
   customer?: Customer;
   customerId?: string;
   createdAt: Date;
@@ -145,6 +169,8 @@ export type Sale = {
   ncf?: string;
   ncfType: 'consumer' | 'fiscal';
   quoteId?: string; // cotización de origen (se marca convertida al cobrar)
+  couponId?: string; // cupón de fidelidad canjeado en esta venta
+  coupon?: Coupon; // objeto completo, solo para mostrarlo en el recibo (no se persiste aparte de couponId)
 };
 
 export type QuoteStatus = 'pending' | 'sent' | 'accepted' | 'rejected' | 'converted';
@@ -180,6 +206,10 @@ export type CompanyProfile = {
   defaultInterestRate: number; // % de interés mensual sugerido en el POS
   loanLateFeeRate: number;         // % de mora de préstamos (independiente de lateFeeRate)
   defaultLoanInterestRate: number; // % de interés mensual sugerido para préstamos
+  loyaltyEnabled: boolean;
+  loyaltyPurchasesRequired: number | null; // null = sin configurar
+  loyaltyRewardDescription: string;
+  loyaltyCouponValidDays: number;
 };
 
 export type PaymentMethod = 'cash' | 'card' | 'transfer';
@@ -191,6 +221,7 @@ export type CreditPayment = {
   amount: number;
   lateFeePaid: number;  // parte del abono que fue mora
   method: PaymentMethod;
+  reference?: string;   // identificador de transferencia/tarjeta
   notes?: string;
   userName?: string;
   date: Date;
@@ -229,6 +260,7 @@ export type LoanPayment = {
   amount: number;
   lateFeePaid: number;
   method: PaymentMethod;
+  reference?: string;   // identificador de transferencia/tarjeta
   notes?: string;
   userName?: string;
   date: Date;
@@ -266,6 +298,57 @@ export type LoanPaymentResult = {
   remainingBalance: number;
   installmentsPaid: number;
   installmentsTotal: number;
+};
+
+// ---------- Caja (control de efectivo por sucursal) ----------
+export type CajaMovement = {
+  id: string;
+  sessionId: string;
+  type: 'in' | 'out';
+  amount: number;
+  reason?: string;
+  createdByName?: string;
+  createdAt: Date;
+};
+
+// Desglose del efectivo del turno, snapshot guardado al cerrar la caja.
+export type CajaBreakdown = {
+  opening: number;
+  cashSales: number;
+  creditCashPayments: number;
+  loanCashPayments: number;
+  movementsIn: number;
+  movementsOut: number;
+  expected: number;
+  declared: number;
+  difference: number;
+};
+
+export type CajaSession = {
+  id: string;
+  branchId: string;      // uuid de la sucursal
+  branchName?: string;   // nombre, cuando viene del join branches(name)
+  status: 'open' | 'closed';
+  openingAmount: number;
+  openedByName?: string;
+  openedAt: Date;
+  closedByName?: string;
+  closedAt?: Date;
+  closingAmountDeclared?: number;
+  closingAmountExpected?: number;
+  difference?: number;
+  notes?: string;
+  breakdown?: CajaBreakdown;
+  movements?: CajaMovement[];
+};
+
+// Resultado de la RPC close_caja_session.
+export type CajaCloseResult = {
+  sessionId: string;
+  openingAmount: number;
+  expected: number;
+  declared: number;
+  difference: number;
 };
 
 export type Supplier = {

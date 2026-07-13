@@ -15,6 +15,7 @@ const EMPTY: CompanyProfile = {
   socialMedia: { instagram: '', facebook: '' }, logoUrl: '', receiptFooter: '',
   lateFeeRate: 5, defaultInterestRate: 3.5,
   loanLateFeeRate: 5, defaultLoanInterestRate: 5,
+  loyaltyEnabled: false, loyaltyPurchasesRequired: null, loyaltyRewardDescription: '', loyaltyCouponValidDays: 30,
 };
 
 const CompanyProfileContext = createContext<CompanyProfileContextType | undefined>(undefined);

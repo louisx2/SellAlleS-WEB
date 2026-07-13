@@ -15,6 +15,8 @@ import { Info } from 'lucide-react';
 import { NcfSettingsCard } from '@/components/company-profile/ncf-settings-card';
 import { FinancingSettingsCard } from '@/components/company-profile/financing-settings-card';
 import { LoanSettingsCard } from '@/components/company-profile/loan-settings-card';
+import { LoyaltySettingsCard } from '@/components/company-profile/loyalty-settings-card';
+import { CajaEmailSettingsCard } from '@/components/company-profile/caja-email-settings-card';
 import { BranchSharingCard } from '@/components/company-profile/branch-sharing-card';
 import { useModules } from '@/context/modules-provider';
 import { useAuth } from '@/context/auth-provider';
@@ -167,6 +169,16 @@ export default function CompanyProfilePage() {
     {isModuleEnabled('prestamos') && (
       <div className="mt-6">
         <LoanSettingsCard />
+      </div>
+    )}
+    {isModuleEnabled('loyalty') && (
+      <div className="mt-6">
+        <LoyaltySettingsCard />
+      </div>
+    )}
+    {isModuleEnabled('caja') && (
+      <div className="mt-6">
+        <CajaEmailSettingsCard />
       </div>
     )}
     <div className="mt-6">

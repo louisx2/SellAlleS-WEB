@@ -188,6 +188,15 @@ export function ReceiptContent({ sale }: ReceiptProps) {
         <div className="pt-2">
             <ReceiptTotals sale={sale} />
         </div>
+        {sale.coupon && (
+            <>
+                <Separator className="my-2" />
+                <div className="text-sm">
+                    <p className="font-semibold mb-1 uppercase">Cupón Aplicado: {sale.coupon.code}</p>
+                    <p className="text-xs text-muted-foreground">{sale.coupon.rewardDescription}</p>
+                </div>
+            </>
+        )}
         {sale.notes && (
             <>
                 <Separator className="my-2" />
