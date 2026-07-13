@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useSales } from '@/context/sales-provider';
 import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
+import { ExportButton } from '@/components/reports/export-button';
 
 export default function SalesSummaryReportPage() {
   const { sales: allSales } = useSales();
@@ -61,7 +62,23 @@ export default function SalesSummaryReportPage() {
   return (
     <div>
       <div className="mb-6">
-        <PageHeader title="Resumen de Ventas" />
+        <PageHeader title="Resumen de Ventas">
+          <ExportButton
+            filename="resumen_ventas"
+            rows={filteredSales}
+            columns={[
+              { header: 'Fecha', value: (s) => new Date(s.createdAt).toLocaleString('es-DO') },
+              { header: 'Sucursal', value: (s) => s.branchId },
+              { header: 'Cliente', value: (s) => s.customer?.name ?? '' },
+              { header: 'NCF', value: (s) => s.ncf ?? '' },
+              { header: 'Subtotal', value: (s) => s.subtotal },
+              { header: 'ITBIS', value: (s) => s.itbisAmount },
+              { header: 'Total', value: (s) => s.total },
+              { header: 'Método', value: (s) => s.paymentMethod },
+              { header: 'Estado', value: (s) => s.paymentStatus },
+            ]}
+          />
+        </PageHeader>
         {appUser?.role === 'admin' && (
             <Select value={selectedBranch} onValueChange={setSelectedBranch}>
                 <SelectTrigger className="w-full sm:w-[240px]">

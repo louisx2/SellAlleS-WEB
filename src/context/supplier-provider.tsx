@@ -7,7 +7,7 @@ import { rowToSupplier, supplierToRow } from '@/lib/supabase/mappers';
 
 interface SupplierContextType {
   suppliers: Supplier[];
-  addSupplier: (supplier: Omit<Supplier, 'id'>) => Promise<void>;
+  addSupplier: (supplier: Omit<Supplier, 'id'>) => Promise<Supplier>;
   updateSupplier: (supplier: Supplier) => Promise<void>;
   deleteSupplier: (id: string) => Promise<void>;
   loading: boolean;
@@ -30,7 +30,9 @@ export function SupplierProvider({ children }: { children: ReactNode }) {
   const addSupplier = async (supplierData: Omit<Supplier, 'id'>) => {
     const { data, error } = await supabase.from('suppliers').insert(supplierToRow(supplierData)).select().single();
     if (error) throw error;
-    if (data) setSuppliers((prev) => [...prev, rowToSupplier(data)]);
+    const created = rowToSupplier(data);
+    setSuppliers((prev) => [...prev, created]);
+    return created;
   };
 
   const updateSupplier = async (updated: Supplier) => {

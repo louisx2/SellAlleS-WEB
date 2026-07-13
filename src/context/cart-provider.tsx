@@ -1,8 +1,8 @@
 'use client';
 
 import { createContext, useEffect, ReactNode, useContext } from 'react';
-import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart } from '@/lib/types';
-import { ITBIS_RATE, GENERIC_CUSTOMER } from '@/lib/utils';
+import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart, Coupon } from '@/lib/types';
+import { ITBIS_RATE, GENERIC_CUSTOMER, round2 } from '@/lib/utils';
 import { create, useStore } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
@@ -22,16 +22,26 @@ interface CartActions {
   setCustomPrice: (cartItemId: string, price: number | undefined) => void;
   clearCart: () => void;
   completeSale: () => void;
-  
+
   addCart: () => void;
   removeCart: (cartId: string) => void;
   setActiveCart: (cartId: string) => void;
   setSelectedCustomer: (customer: Customer) => void;
+  setCoupon: (coupon: Coupon | undefined) => void;
 
   _init: () => void;
 }
 
 export const getGenericCustomer = (): Customer => GENERIC_CUSTOMER;
+
+// Precio unitario efectivo: el override manual del cajero siempre gana; si no
+// hay override, se aplica el % de descuento del cliente seleccionado.
+export const getEffectiveUnitPrice = (item: CartItem, customer?: Customer): number => {
+  if (item.customPrice !== undefined) return item.customPrice;
+  const discount = customer?.discountPercentage ?? 0;
+  if (discount > 0) return round2(item.product.price * (1 - discount / 100));
+  return item.product.price;
+};
 
 const createNewCart = (): Cart => {
   return {
@@ -159,7 +169,7 @@ const cartStore = create<CartStore>()(
 
       clearCart: () => set(state => ({
         carts: state.carts.map(cart =>
-          cart.id === state.activeCartId ? { ...cart, items: [], selectedCustomer: getGenericCustomer() } : cart
+          cart.id === state.activeCartId ? { ...cart, items: [], selectedCustomer: getGenericCustomer(), coupon: undefined } : cart
         ),
       })),
       
@@ -212,7 +222,14 @@ const cartStore = create<CartStore>()(
       
       setSelectedCustomer: (customer) => set(state => ({
         carts: state.carts.map(cart =>
-          cart.id === state.activeCartId ? { ...cart, selectedCustomer: customer } : cart
+          // Un cupón pertenece a un cliente específico: si cambia el cliente, se descarta.
+          cart.id === state.activeCartId ? { ...cart, selectedCustomer: customer, coupon: undefined } : cart
+        ),
+      })),
+
+      setCoupon: (coupon) => set(state => ({
+        carts: state.carts.map(cart =>
+          cart.id === state.activeCartId ? { ...cart, coupon } : cart
         ),
       })),
     }),
@@ -289,23 +306,26 @@ export const useCart = () => {
   // Derived state calculations
   const activeCart = state.carts.find(cart => cart.id === state.activeCartId);
   
+  const selectedCustomer = activeCart?.selectedCustomer;
+
   const subtotal = activeCart?.items.reduce((acc, item) => {
-    const price = item.customPrice ?? item.product.price;
+    const price = getEffectiveUnitPrice(item, selectedCustomer);
     return acc + price * item.quantity;
   }, 0) || 0;
-  
+
   const itbisAmount = activeCart?.items.reduce((acc, item) => {
-    const price = item.customPrice ?? item.product.price;
+    const price = getEffectiveUnitPrice(item, selectedCustomer);
     return item.product.itbis ? acc + (price * item.quantity * ITBIS_RATE) : acc
   }, 0) || 0;
 
   const total = subtotal + itbisAmount;
-  
+
   const totalItems = activeCart?.items.reduce((acc, item) => acc + item.quantity, 0) || 0;
 
   const totalDiscount = activeCart?.items.reduce((acc, item) => {
-    if (item.customPrice !== undefined && item.customPrice < item.product.price) {
-      return acc + (item.product.price - item.customPrice) * item.quantity;
+    const price = getEffectiveUnitPrice(item, selectedCustomer);
+    if (price < item.product.price) {
+      return acc + (item.product.price - price) * item.quantity;
     }
     return acc;
   }, 0) || 0;
@@ -315,6 +335,8 @@ export const useCart = () => {
     branchId: string;
     amountPaid: number;
     paymentReference?: string;
+    downPaymentMethod?: 'cash' | 'card' | 'transfer';
+    downPaymentReference?: string;
     financingDetails?: FinancingDetails;
     notes?: string;
     userName?: string;
@@ -322,7 +344,7 @@ export const useCart = () => {
   }): Omit<Sale, 'id'> & { id: string } => {
     if (!activeCart) throw new Error("No active cart to create sale from");
 
-    const { paymentMethod, branchId, amountPaid, paymentReference, financingDetails, notes } = options;
+    const { paymentMethod, branchId, amountPaid, paymentReference, downPaymentMethod, downPaymentReference, financingDetails, notes } = options;
 
     let paymentStatus: Sale['paymentStatus'] = 'paid';
     if (paymentMethod === 'credit') {
@@ -336,9 +358,18 @@ export const useCart = () => {
     const userName = options.userName ?? localStorage.getItem('userName') ?? undefined;
     const userEmail = options.userEmail ?? localStorage.getItem('userEmail') ?? undefined;
 
+    // Congela en cada línea el precio realmente cobrado: si el cajero no puso
+    // un precio manual pero el cliente tiene descuento, ese precio pasa a ser
+    // el customPrice guardado (trazabilidad histórica en sale_items).
+    const items = activeCart.items.map((item) => {
+      if (item.customPrice !== undefined) return item;
+      const effectivePrice = getEffectiveUnitPrice(item, activeCart.selectedCustomer);
+      return effectivePrice < item.product.price ? { ...item, customPrice: effectivePrice } : item;
+    });
+
     return {
       id: '', // el id real (uuid) lo genera la base al guardar
-      items: activeCart.items,
+      items,
       subtotal,
       itbisAmount,
       total,
@@ -346,6 +377,9 @@ export const useCart = () => {
       paymentStatus: paymentStatus,
       amountPaid,
       paymentReference,
+      // Solo relevante cuando hay abono inicial en venta a crédito/financiada.
+      downPaymentMethod: amountPaid > 0 && (paymentStatus === 'credit' || paymentStatus === 'in_financing') ? downPaymentMethod : undefined,
+      downPaymentReference: amountPaid > 0 && (paymentStatus === 'credit' || paymentStatus === 'in_financing') ? downPaymentReference : undefined,
       customer: activeCart.selectedCustomer,
       customerId: activeCart.selectedCustomer?.id,
       createdAt: new Date(),
@@ -358,6 +392,8 @@ export const useCart = () => {
       ncf: undefined, // lo asigna la base desde ncf_sequences (si la empresa emite NCF)
       ncfType: activeCart.selectedCustomer?.ncfType || 'consumer',
       quoteId: activeCart.quoteId, // si vino de una cotización, se marcará convertida
+      couponId: activeCart.coupon?.id, // se canjea en el servidor tras crear la venta
+      coupon: activeCart.coupon, // solo para mostrarlo en el recibo
     };
   };
 

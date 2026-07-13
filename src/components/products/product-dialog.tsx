@@ -22,25 +22,77 @@ import { useProducts } from '@/context/product-provider';
 import { useSuppliers } from '@/context/supplier-provider';
 import { useCategories } from '@/context/category-provider';
 import { useLocations } from '@/context/location-provider';
-import { useState } from 'react';
+import { useAuth } from '@/context/auth-provider';
+import { supabase } from '@/lib/supabase/client';
+import { ProductImage } from '@/components/products/product-image';
+import { ImagePlus, Loader2, X } from 'lucide-react';
+import { useRef, useState } from 'react';
 
 interface ProductDialogProps {
   product?: Product;
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function ProductDialog({ product, children }: ProductDialogProps) {
+export function ProductDialog({ product, children, open: openProp, onOpenChange: onOpenChangeProp }: ProductDialogProps) {
   const { toast } = useToast();
   const { addProduct, updateProduct } = useProducts();
   const { suppliers } = useSuppliers();
   const { categories } = useCategories();
   const { locations } = useLocations();
-  
+  const { appUser } = useAuth();
+
   const isEditMode = !!product;
-  const [open, setOpen] = useState(false);
+  // Soporta uso como wrapper con trigger propio (children) o como diálogo
+  // controlado desde fuera (open/onOpenChange), p. ej. desde un menú de acciones.
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = openProp ?? uncontrolledOpen;
+  const setOpen = onOpenChangeProp ?? setUncontrolledOpen;
   const [supplierId, setSupplierId] = useState<string>(product?.supplierId || '');
   const [categoryId, setCategoryId] = useState<string>(product?.categoryId || '');
   const [locationId, setLocationId] = useState<string>(product?.locationId || '');
+
+  // Imagen: solo consideramos "real" una URL http/https/data; 'placeholder' o
+  // ids de demo cuentan como "sin imagen" en el formulario.
+  const initialImage = product?.image && /^(https?:|data:)/i.test(product.image) ? product.image : '';
+  const [imageUrl, setImageUrl] = useState<string>(initialImage);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleUpload = async (file: File) => {
+    const companyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+    if (!companyId) {
+      toast({ title: 'Sin empresa activa', description: 'No se pudo determinar la empresa.', variant: 'destructive' });
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      toast({ title: 'Archivo inválido', description: 'Selecciona una imagen.', variant: 'destructive' });
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: 'Imagen muy grande', description: 'El máximo es 5 MB.', variant: 'destructive' });
+      return;
+    }
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${companyId}/${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage.from('product-images').upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type,
+      });
+      if (error) throw error;
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path);
+      setImageUrl(data.publicUrl);
+      toast({ title: 'Imagen subida' });
+    } catch (err: any) {
+      toast({ title: 'No se pudo subir', description: err?.message ?? 'Error al subir.', variant: 'destructive' });
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -60,7 +112,7 @@ export function ProductDialog({ product, children }: ProductDialogProps) {
       locationId: (locationId && locationId !== 'none') ? locationId : undefined,
       wholesalePrice: formData.get('wholesalePrice') ? parseFloat(formData.get('wholesalePrice') as string) : undefined,
       wholesaleMinQuantity: formData.get('wholesaleMinQuantity') ? parseInt(formData.get('wholesaleMinQuantity') as string, 10) : undefined,
-      image: product?.image ?? 'placeholder',
+      image: imageUrl.trim() || 'placeholder',
     };
 
     try {
@@ -90,7 +142,7 @@ export function ProductDialog({ product, children }: ProductDialogProps) {
   
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEditMode ? 'Editar Producto' : 'Añadir Producto'}</DialogTitle>
@@ -100,6 +152,59 @@ export function ProductDialog({ product, children }: ProductDialogProps) {
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
+            <div className="flex flex-col gap-2 md:col-span-2">
+              <Label>Imagen del producto</Label>
+              <div className="flex items-start gap-4">
+                <div className="relative h-24 w-24 flex-shrink-0 overflow-hidden rounded-md border bg-muted">
+                  {imageUrl ? (
+                    <>
+                      <ProductImage image={imageUrl} alt="Vista previa" fill />
+                      <button
+                        type="button"
+                        onClick={() => setImageUrl('')}
+                        className="absolute right-1 top-1 rounded-full bg-black/60 p-0.5 text-white hover:bg-black/80"
+                        title="Quitar imagen"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                      <ImagePlus className="h-7 w-7" />
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-1 flex-col gap-2">
+                  <Input
+                    type="url"
+                    placeholder="Pega una URL de imagen (https://…)"
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={uploading}
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
+                      {uploading ? 'Subiendo…' : 'Subir archivo'}
+                    </Button>
+                    <span className="text-xs text-muted-foreground">o pega un enlace · máx 5 MB</span>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); e.target.value = ''; }}
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-col gap-2">
               <Label htmlFor="code">Código</Label>
               <Input id="code" name="code" defaultValue={product?.code} required />

@@ -5,6 +5,7 @@ import type { Customer } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToCustomer, customerToRow } from '@/lib/supabase/mappers';
 import { GENERIC_CUSTOMER } from '@/lib/utils';
+import { useAuth } from '@/context/auth-provider';
 
 interface CustomerContextType {
   customers: Customer[];
@@ -20,6 +21,7 @@ const CustomerContext = createContext<CustomerContextType | undefined>(undefined
 
 
 export function CustomerProvider({ children }: { children: ReactNode }) {
+  const { appUser } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -35,9 +37,13 @@ export function CustomerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { load(); }, [load]);
 
   const addCustomer = async (customerData: Omit<Customer, 'id'>, companyId?: string) => {
+    // La sucursal activa determina a qué sucursal pertenece el cliente cuando el
+    // compartir 'clientes' está apagado. Sin sucursal activa queda NULL (global).
+    const activeBranchId = appUser?.activeBranchId || null;
     const row = {
       ...customerToRow(customerData),
       ...(companyId ? { company_id: companyId } : {}),
+      ...(activeBranchId ? { branch_id: activeBranchId } : {}),
     };
     const { data, error } = await supabase
       .from('customers')

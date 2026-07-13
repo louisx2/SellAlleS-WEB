@@ -19,6 +19,8 @@ import type { Customer, PaymentMethod } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useCustomers } from '@/context/customer-provider';
 import { useSales } from '@/context/sales-provider';
+import { useModules } from '@/context/modules-provider';
+import { useCaja } from '@/context/caja-provider';
 import { formatCurrency } from '@/lib/utils';
 import { PaymentReceiptDialog, type PaymentReceiptData } from './payment-receipt-dialog';
 import { Loader2 } from 'lucide-react';
@@ -32,9 +34,13 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
   const { toast } = useToast();
   const { reload: reloadCustomers } = useCustomers();
   const { payCustomerDebt } = useSales();
+  const { isModuleEnabled } = useModules();
+  const { isOpen: isCajaOpen } = useCaja();
+  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<number | ''>('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
+  const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [userBranch, setUserBranch] = useState('Desconocida');
@@ -44,12 +50,13 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
   useEffect(() => {
     if (open) {
         setAmount('');
-        setMethod('cash');
+        setMethod(cashBlocked ? 'card' : 'cash');
+        setReference('');
         setNotes('');
         const branch = localStorage.getItem('userBranch') || 'Desconocida';
         setUserBranch(branch);
     }
-  }, [open])
+  }, [open, cashBlocked])
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -64,11 +71,20 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
         return;
     }
 
+    if (method === 'cash' && cashBlocked) {
+      toast({ title: 'Caja cerrada', description: 'Abre la caja de esta sucursal para cobrar en efectivo.', variant: 'destructive' });
+      return;
+    }
+    if (method === 'transfer' && !reference.trim()) {
+      toast({ title: 'Falta la referencia', description: 'Indica la referencia de la transferencia.', variant: 'destructive' });
+      return;
+    }
+
     setSaving(true);
     try {
       // RPC atómica: registra el abono, lo aplica FIFO a las ventas a crédito
       // abiertas del cliente y actualiza su balance en una sola transacción.
-      const result = await payCustomerDebt(customer.id, paymentAmount, method, userBranch, notes.trim() || undefined);
+      const result = await payCustomerDebt(customer.id, paymentAmount, method, userBranch, notes.trim() || undefined, reference.trim() || undefined);
       await reloadCustomers();
 
       toast({
@@ -131,20 +147,29 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
                 <Select value={method} onValueChange={(v: PaymentMethod) => setMethod(v)}>
                   <SelectTrigger id="method"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Efectivo</SelectItem>
+                    <SelectItem value="cash" disabled={cashBlocked}>Efectivo</SelectItem>
                     <SelectItem value="card">Tarjeta</SelectItem>
                     <SelectItem value="transfer">Transferencia</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
+            {cashBlocked && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">No hay caja abierta en esta sucursal: no puedes cobrar en efectivo.</p>
+            )}
+            {(method === 'transfer' || method === 'card') && (
+              <div className="space-y-2">
+                <Label htmlFor="payment-reference">{method === 'transfer' ? 'Referencia de transferencia' : 'Referencia / aprobación'}</Label>
+                <Input id="payment-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === 'transfer' ? 'No. de transferencia' : 'No. de aprobación'} />
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="payment-notes">Notas (Opcional)</Label>
               <Textarea
                 id="payment-notes"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Ej: referencia de transferencia, acuerdo de pago…"
+                placeholder="Ej: acuerdo de pago…"
               />
             </div>
             <p className="text-xs text-muted-foreground text-center">
@@ -155,7 +180,7 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
              <DialogClose asChild>
                 <Button type="button" variant="secondary">Cancelar</Button>
             </DialogClose>
-            <Button type="submit" disabled={saving || !amount || Number(amount) <= 0}>
+            <Button type="submit" disabled={saving || !amount || Number(amount) <= 0 || (method === 'cash' && cashBlocked) || (method === 'transfer' && !reference.trim())}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Guardar Abono
             </Button>

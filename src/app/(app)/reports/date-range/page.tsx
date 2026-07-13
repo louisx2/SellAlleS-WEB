@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency } from '@/lib/utils';
 import { DollarSign, Hash } from 'lucide-react';
 import { useSales } from '@/context/sales-provider';
+import { ExportButton } from '@/components/reports/export-button';
 
 export default function DateRangeReportPage() {
   const { sales: allSales } = useSales();
@@ -55,7 +56,23 @@ export default function DateRangeReportPage() {
 
   return (
     <div>
-      <PageHeader title="Reporte de Ingresos por Fechas" />
+      <PageHeader title="Reporte de Ingresos por Fechas">
+        {showResults && (
+          <ExportButton
+            filename="ingresos_por_fecha"
+            rows={reportData}
+            columns={[
+              { header: 'Fecha', value: (s) => new Date(s.createdAt).toLocaleString('es-DO') },
+              { header: 'Sucursal', value: (s) => s.branchId },
+              { header: 'Cliente', value: (s) => s.customer?.name ?? '' },
+              { header: 'NCF', value: (s) => s.ncf ?? '' },
+              { header: 'Total', value: (s) => s.total },
+              { header: 'Método', value: (s) => s.paymentMethod },
+              { header: 'Estado', value: (s) => s.paymentStatus },
+            ]}
+          />
+        )}
+      </PageHeader>
       <div className="flex flex-col sm:flex-row gap-4">
         <div className={cn('grid gap-2')}>
           <Popover>

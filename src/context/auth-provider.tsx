@@ -9,6 +9,7 @@ import { AppSkeleton } from '@/components/ui/app-skeleton';
 import { CreateCompanyScreen } from '@/components/auth/create-company-screen';
 import { BranchSelector } from '@/components/auth/branch-selector';
 import { SuspendedScreen } from '@/components/auth/suspended-screen';
+import { BranchInactiveScreen } from '@/components/auth/branch-inactive-screen';
 
 interface AuthContextType {
   appUser: AppUser | null;
@@ -22,7 +23,10 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-const publicRoutes = ['/login', '/reset-password'];
+// /mi-prestamo es el portal público de clientes finales (cédula + PIN, sin
+// Supabase Auth de por medio) — debe quedar fuera del guard de sesión igual
+// que /login.
+const publicRoutes = ['/login', '/reset-password', '/mi-prestamo'];
 
 function persistLocal(user: AppUser) {
   localStorage.setItem('userRole', user.role);
@@ -46,6 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [appUser, setAppUser] = useState<AppUser | null>(null);
   const [needsCompany, setNeedsCompany] = useState(false);
   const [needsBranchSelection, setNeedsBranchSelection] = useState(false);
+  const [noActiveBranches, setNoActiveBranches] = useState(false);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -56,9 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       .select(`
         id, name, email, role, is_super_admin, company_id,
-        companies(status),
-        branches!profiles_branch_id_fkey(id, name),
-        profile_branches(branches(id, name)),
+        companies(status, demo_expires_at),
+        branches!profiles_branch_id_fkey(id, name, is_active),
+        profile_branches(branches(id, name, is_active)),
         profile_roles(roles(id, name, description))
       `)
       .eq('id', userId)
@@ -77,18 +82,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (data) {
       setNeedsCompany(!data.company_id);
       
-      // Construir la lista de sucursales a las que pertenece
-      const branchList: {id: string, name: string}[] = [];
+      // Construir la lista de sucursales a las que pertenece. Las sucursales
+      // desactivadas se excluyen: no se pueden seleccionar ni operar desde ellas.
+      const allBranches: {id: string, name: string, isActive: boolean}[] = [];
       const mainBranch = Array.isArray((data as any).branches) ? (data as any).branches[0] : (data as any).branches;
-      if (mainBranch) branchList.push({ id: mainBranch.id, name: mainBranch.name });
-      
+      if (mainBranch) allBranches.push({ id: mainBranch.id, name: mainBranch.name, isActive: mainBranch.is_active !== false });
+
       if (data.profile_branches && Array.isArray(data.profile_branches)) {
         data.profile_branches.forEach((pb: any) => {
-          if (pb.branches && !branchList.find(b => b.id === pb.branches.id)) {
-            branchList.push({ id: pb.branches.id, name: pb.branches.name });
+          if (pb.branches && !allBranches.find(b => b.id === pb.branches.id)) {
+            allBranches.push({ id: pb.branches.id, name: pb.branches.name, isActive: pb.branches.is_active !== false });
           }
         });
       }
+
+      const branchList = allBranches.filter(b => b.isActive).map(b => ({ id: b.id, name: b.name }));
+      // Tenía sucursal(es) asignadas pero TODAS están desactivadas: bloquear el
+      // acceso (igual que una empresa suspendida), salvo super admin.
+      setNoActiveBranches(allBranches.length > 0 && branchList.length === 0);
 
       const customRoles = (data.profile_roles ?? [])
         .map((pr: any) => pr.roles)
@@ -127,6 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setNeedsBranchSelection(requireSelection);
 
       const compStatus = (data as any).companies?.status;
+      const demoExpiresAt = (data as any).companies?.demo_expires_at ?? undefined;
 
       const user: AppUser = {
         id: data.id,
@@ -138,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         branches: branchList,
         companyId: data.company_id,
         companyStatus: compStatus,
+        companyDemoExpiresAt: demoExpiresAt,
         impersonatedCompanyId: savedImpersonatedId || undefined,
         impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,
@@ -307,6 +320,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Cuenta suspendida o pendiente de activación
   if (session && appUser && appUser.companyStatus === 'suspended' && !appUser.isSuperAdmin && !isPublic) {
     return <SuspendedScreen userName={appUser.name} onSignOut={signOut} />;
+  }
+
+  // Todas las sucursales del usuario están desactivadas: no puede operar.
+  if (session && appUser && noActiveBranches && !appUser.isSuperAdmin && !isPublic) {
+    return <BranchInactiveScreen userName={appUser.name} onSignOut={signOut} />;
   }
 
   // Cuenta autenticada con múltiples sucursales, pero sin seleccionar una aún

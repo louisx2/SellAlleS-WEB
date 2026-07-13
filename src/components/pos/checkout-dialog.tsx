@@ -26,6 +26,8 @@ import { Separator } from '../ui/separator';
 import { Textarea } from '../ui/textarea';
 import { useAuth } from '@/context/auth-provider';
 import { useModules } from '@/context/modules-provider';
+import { useCaja } from '@/context/caja-provider';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface CheckoutDialogProps {
   isOpen: boolean;
@@ -40,14 +42,22 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const { customers, reload: reloadCustomers } = useCustomers();
   const { appUser } = useAuth();
   const { isModuleEnabled } = useModules();
+  const { isOpen: isCajaOpen } = useCaja();
   // Los métodos de venta a plazo solo se ofrecen si la empresa tiene el módulo
   // activo (se configura en Plataforma → Módulos). Mantiene el checkout
   // consistente con lo que aparece en el menú.
   const creditEnabled = isModuleEnabled('credit');
   const financingEnabled = isModuleEnabled('financing');
+  // Si el módulo de caja está activo, no se puede cobrar en efectivo sin una
+  // caja abierta en la sucursal (el bloqueo real lo hace la base; esto es el
+  // aviso inmediato en pantalla).
+  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer' | 'credit' | 'financing'>('cash');
   const [amountPaid, setAmountPaid] = useState<number | string>('');
   const [paymentReference, setPaymentReference] = useState('');
+  // Método y referencia del abono inicial en ventas a crédito.
+  const [downPaymentMethod, setDownPaymentMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
+  const [downPaymentReference, setDownPaymentReference] = useState('');
   const [saleNotes, setSaleNotes] = useState('');
   const [change, setChange] = useState(0);
   const { toast } = useToast();
@@ -56,12 +66,14 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
 
   useEffect(() => {
     if (isOpen) {
-      setPaymentMethod('cash');
+      setPaymentMethod(cashBlocked ? 'card' : 'cash');
       setAmountPaid(total);
       setPaymentReference('');
+      setDownPaymentMethod(cashBlocked ? 'card' : 'cash');
+      setDownPaymentReference('');
       setSaleNotes('');
     }
-  }, [isOpen, total]);
+  }, [isOpen, total, cashBlocked]);
 
   useEffect(() => {
     if (paymentMethod === 'cash') {
@@ -103,16 +115,25 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
 
   // downPaymentOverride: el inicial del financiamiento llega como parámetro y
   // no vía estado (setAmountPaid + llamada síncrona leería el valor anterior).
-  const handleConfirmSale = async (financingDetails?: FinancingDetails, downPaymentOverride?: number) => {
+  const handleConfirmSale = async (
+    financingDetails?: FinancingDetails,
+    downPaymentOverride?: number,
+    downPaymentMethodOverride?: 'cash' | 'card' | 'transfer',
+    downPaymentReferenceOverride?: string,
+  ) => {
     if (!activeCart || !appUser) return;
 
     const finalPaymentMethod = financingDetails ? 'financing' : paymentMethod;
+    const effectiveDownPaymentMethod = downPaymentMethodOverride ?? downPaymentMethod;
+    const effectiveDownPaymentReference = downPaymentReferenceOverride ?? downPaymentReference;
 
     const sale = createSale({
       paymentMethod: finalPaymentMethod,
       branchId: appUser.branch,
       amountPaid: downPaymentOverride !== undefined ? downPaymentOverride : Number(amountPaid),
       paymentReference,
+      downPaymentMethod: effectiveDownPaymentMethod,
+      downPaymentReference: effectiveDownPaymentReference.trim() || undefined,
       financingDetails,
       notes: saleNotes,
       userName: appUser.name,
@@ -157,11 +178,16 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     }
   };
 
-  const handleFinancingComplete = (details: { downPayment: number; financingDetails: FinancingDetails }) => {
+  const handleFinancingComplete = (details: {
+    downPayment: number;
+    financingDetails: FinancingDetails;
+    downPaymentMethod?: 'cash' | 'card' | 'transfer';
+    downPaymentReference?: string;
+  }) => {
     setFinancingOpen(false); // Close financing dialog first
     // El inicial va como parámetro: setAmountPaid + llamada síncrona guardaría
     // la venta con el amountPaid del render anterior (= total).
-    handleConfirmSale(details.financingDetails, details.downPayment);
+    handleConfirmSale(details.financingDetails, details.downPayment, details.downPaymentMethod, details.downPaymentReference);
   };
 
   // Cliente FRESCO desde el provider: el snapshot del carrito persiste en
@@ -172,9 +198,15 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     : null;
 
   const isCashPaymentInvalid = paymentMethod === 'cash' && (Number(amountPaid) < total || amountPaid === '');
+  const isCashBlocked = paymentMethod === 'cash' && cashBlocked;
   const isRefPaymentInvalid = (paymentMethod === 'card' || paymentMethod === 'transfer') && !paymentReference.trim();
   const isCreditPaymentInvalid = (paymentMethod === 'credit' || paymentMethod === 'financing') && (!activeCart?.selectedCustomer || activeCart?.selectedCustomer.id === '0');
   const isCreditAmountInvalid = paymentMethod === 'credit' && (Number(amountPaid) > total || Number(amountPaid) < 0);
+  // Abono inicial de una venta a crédito: si es en efectivo requiere caja abierta,
+  // y si es transferencia requiere identificar la transferencia.
+  const hasDownPayment = paymentMethod === 'credit' && Number(amountPaid) > 0;
+  const isDownPaymentCashBlocked = hasDownPayment && downPaymentMethod === 'cash' && cashBlocked;
+  const isDownPaymentRefInvalid = hasDownPayment && downPaymentMethod === 'transfer' && !downPaymentReference.trim();
   // Aviso temprano de límite (el rechazo definitivo lo hace el trigger en la base).
   const isOverCreditLimit = paymentMethod === 'credit' && availableCredit !== null
     && (total - Number(amountPaid || 0)) > availableCredit;
@@ -212,10 +244,10 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                   className="grid grid-cols-2 sm:grid-cols-3 gap-2"
                   >
                   <div>
-                      <RadioGroupItem value="cash" id="cash" className="peer sr-only" />
-                      <Label 
-                          htmlFor="cash" 
-                          className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-green-600 peer-data-[state=checked]:bg-green-100/30"
+                      <RadioGroupItem value="cash" id="cash" className="peer sr-only" disabled={cashBlocked} />
+                      <Label
+                          htmlFor="cash"
+                          className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-green-600 peer-data-[state=checked]:bg-green-100/30 peer-disabled:opacity-50 peer-disabled:cursor-not-allowed"
                       >
                       Efectivo
                       </Label>
@@ -263,6 +295,9 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                   </RadioGroup>
                   {isCreditPaymentInvalid && (
                       <p className="text-xs text-destructive mt-2">Debe seleccionar un cliente para vender a crédito o financiar.</p>
+                  )}
+                  {cashBlocked && (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">No hay una caja abierta en esta sucursal. Abre caja para poder cobrar en efectivo.</p>
                   )}
                 </div>
 
@@ -324,6 +359,32 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                         </div>
                         {isCreditAmountInvalid && (
                             <p className="text-xs text-destructive">El abono no puede ser mayor que el total o negativo.</p>
+                        )}
+                        {Number(amountPaid) > 0 && (
+                            <div className="space-y-2 border-t pt-3">
+                                <Label htmlFor="down-payment-method">¿Cómo entró el abono inicial?</Label>
+                                <Select value={downPaymentMethod} onValueChange={(v: 'cash' | 'card' | 'transfer') => setDownPaymentMethod(v)}>
+                                    <SelectTrigger id="down-payment-method"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="cash" disabled={cashBlocked}>Efectivo</SelectItem>
+                                        <SelectItem value="card">Tarjeta</SelectItem>
+                                        <SelectItem value="transfer">Transferencia</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                                {(downPaymentMethod === 'transfer' || downPaymentMethod === 'card') && (
+                                    <Input
+                                        placeholder={downPaymentMethod === 'transfer' ? 'No. de transferencia / referencia' : 'No. de aprobación / referencia'}
+                                        value={downPaymentReference}
+                                        onChange={(e) => setDownPaymentReference(e.target.value)}
+                                    />
+                                )}
+                                {isDownPaymentCashBlocked && (
+                                    <p className="text-xs text-amber-600 dark:text-amber-400">No hay caja abierta: no puedes recibir el abono inicial en efectivo.</p>
+                                )}
+                                {isDownPaymentRefInvalid && (
+                                    <p className="text-xs text-destructive">Indica la referencia de la transferencia.</p>
+                                )}
+                            </div>
                         )}
                         {isOverCreditLimit && (
                             <p className="text-xs text-destructive">
@@ -393,7 +454,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
             Cancelar
           </Button>
-          <Button type="button" onClick={confirmButtonAction} disabled={isCashPaymentInvalid || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit}>
+          <Button type="button" onClick={confirmButtonAction} disabled={isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid}>
             {paymentMethod === 'financing' ? 'Configurar Plan' : 'Confirmar'}
           </Button>
         </DialogFooter>

@@ -1,4 +1,4 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 
 // ---------- Product ----------
@@ -62,6 +62,8 @@ export const rowToCustomer = (r: any): Customer => ({
   address: r.address ?? undefined, rnc: r.rnc ?? undefined, birthdate: r.birthdate ?? undefined,
   ncfType: r.ncf_type, notes: r.notes ?? undefined, creditBalance: Number(r.credit_balance ?? 0),
   creditLimit: r.credit_limit != null ? Number(r.credit_limit) : null,
+  discountPercentage: Number(r.discount_percentage ?? 0),
+  loyaltyPurchaseCount: Number(r.loyalty_purchase_count ?? 0),
   createdAt: r.created_at,
   createdBy: r.created_by,
   createdByName: r.profiles?.name || undefined,
@@ -74,10 +76,11 @@ export const customerToRow = (c: Partial<Customer>) => ({
   birthdate: c.birthdate && c.birthdate.trim() !== '' ? c.birthdate : null, 
   ncf_type: c.ncfType ?? 'consumer',
   notes: c.notes ?? null, credit_limit: c.creditLimit ?? null,
+  discount_percentage: c.discountPercentage ?? 0,
 });
 
 // ---------- Branch ----------
-export const rowToBranch = (r: any): Branch => ({ id: r.id, name: r.name, location: r.location ?? '' });
+export const rowToBranch = (r: any): Branch => ({ id: r.id, name: r.name, location: r.location ?? '', isActive: r.is_active ?? true });
 export const branchToRow = (b: Partial<Branch>) => ({ name: b.name, location: b.location ?? null });
 
 // ---------- Supplier ----------
@@ -107,7 +110,15 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   logoUrl: r.logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
+  loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
+  defaultLoanInterestRate: Number(r.default_loan_interest_rate ?? 5),
+  loyaltyEnabled: !!r.loyalty_enabled,
+  loyaltyPurchasesRequired: r.loyalty_purchases_required != null ? Number(r.loyalty_purchases_required) : null,
+  loyaltyRewardDescription: r.loyalty_reward_description ?? '',
+  loyaltyCouponValidDays: Number(r.loyalty_coupon_valid_days ?? 30),
 });
+// name se envía siempre; el trigger trg_lock_company_name ignora el cambio si
+// quien actualiza no es super admin (solo él puede renombrar la empresa).
 export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   name: p.name, phone: p.phone ?? null, rnc: p.rnc ?? null, address: p.address ?? null,
   instagram: p.socialMedia?.instagram ?? null, facebook: p.socialMedia?.facebook ?? null,
@@ -144,6 +155,7 @@ export const rowToCreditPayment = (r: any): CreditPayment => ({
   amount: Number(r.amount),
   lateFeePaid: Number(r.late_fee_paid ?? 0),
   method: r.method ?? 'cash',
+  reference: r.reference ?? undefined,
   notes: r.notes ?? undefined,
   userName: r.user_name ?? undefined,
   date: new Date(r.date),
@@ -182,6 +194,7 @@ export const rowToSale = (r: any): Sale => ({
   notes: r.notes ?? undefined, userName: r.user_name ?? undefined, userEmail: r.user_email ?? undefined,
   ncf: r.ncf ?? undefined, ncfType: r.ncf_type,
   quoteId: r.quote_id ?? undefined,
+  couponId: r.coupon_id ?? undefined,
 });
 
 // branchUuid ya resuelto por el provider (nombre → uuid).
@@ -192,9 +205,26 @@ export const saleToRow = (s: Omit<Sale, 'id'>, branchUuid: string | null) => ({
   subtotal: s.subtotal, itbis_amount: s.itbisAmount, total: s.total,
   payment_method: s.paymentMethod, payment_status: s.paymentStatus, amount_paid: s.amountPaid,
   payment_reference: s.paymentReference ?? null, ncf: s.ncf ?? null, ncf_type: s.ncfType,
+  down_payment_method: s.downPaymentMethod ?? null,
+  down_payment_reference: s.downPaymentReference ?? null,
   notes: s.notes ?? null, financing_details: s.financingDetails ?? null,
   user_name: s.userName ?? null, user_email: s.userEmail ?? null,
   quote_id: isUuid(s.quoteId) ? s.quoteId : null,
+  coupon_id: isUuid(s.couponId) ? s.couponId : null,
+});
+
+// ---------- Coupon (fidelidad) ----------
+export const rowToCoupon = (r: any): Coupon => ({
+  id: r.id,
+  customerId: r.customer_id,
+  code: r.code,
+  rewardDescription: r.reward_description,
+  milestoneCount: Number(r.milestone_count),
+  status: r.status,
+  issuedAt: r.issued_at,
+  expiresAt: r.expires_at,
+  redeemedAt: r.redeemed_at ?? undefined,
+  redeemedSaleId: r.redeemed_sale_id ?? undefined,
 });
 
 // ---------- Quote (con quote_items y customer embebidos) ----------
@@ -317,4 +347,113 @@ export const serviceToRow = (s: Partial<import('@/lib/types').Service>, branchUu
   if (s.completedAt) row.completed_at = s.completedAt.toISOString();
   return row;
 };
+
+// ---------- Préstamos (dominio independiente de ventas/financiamiento) ----------
+export const rowToLoanInstallment = (r: any): LoanInstallment => ({
+  id: r.id,
+  loanId: r.loan_id,
+  number: Number(r.installment_number),
+  dueDate: r.due_date,
+  amount: Number(r.amount),
+  paidAmount: Number(r.paid_amount),
+  lateFeePaid: Number(r.late_fee_paid),
+  status: r.status,
+  paidAt: r.paid_at ?? undefined,
+});
+
+export const rowToLoanPayment = (r: any): LoanPayment => ({
+  id: r.id,
+  loanId: r.loan_id,
+  customerId: r.customer_id,
+  amount: Number(r.amount),
+  lateFeePaid: Number(r.late_fee_paid ?? 0),
+  method: r.method,
+  reference: r.reference ?? undefined,
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  date: new Date(r.date),
+  branchId: r.branch_id ?? undefined,
+});
+
+export const rowToLoan = (r: any): Loan => ({
+  id: r.id,
+  companyId: r.company_id,
+  branchId: r.branch_id,
+  customerId: r.customer_id,
+  customer: r.customers ? rowToCustomer(r.customers) : undefined,
+  principal: Number(r.principal),
+  interestRate: Number(r.interest_rate),
+  installmentsCount: Number(r.installments_count),
+  paymentFrequency: r.payment_frequency ?? 'monthly',
+  totalWithInterest: Number(r.total_with_interest),
+  amountPaid: Number(r.amount_paid),
+  status: r.status,
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  createdAt: new Date(r.created_at),
+  installments: (r.loan_installments ?? [])
+    .map(rowToLoanInstallment)
+    .sort((a: LoanInstallment, b: LoanInstallment) => a.number - b.number),
+});
+
+export const loanToRow = (l: {
+  branchId: string; customerId: string; principal: number; interestRate: number;
+  installmentsCount: number; paymentFrequency: string; notes?: string; userName?: string;
+}) => ({
+  branch_id: l.branchId,
+  customer_id: l.customerId,
+  principal: l.principal,
+  interest_rate: l.interestRate,
+  installments_count: l.installmentsCount,
+  payment_frequency: l.paymentFrequency,
+  notes: l.notes ?? null,
+  user_name: l.userName ?? null,
+});
+
+export const rowToLoanPaymentResult = (r: any): LoanPaymentResult => ({
+  paymentId: r.payment_id,
+  amount: Number(r.amount),
+  lateFeePaid: Number(r.late_fee_paid ?? 0),
+  principalPaid: Number(r.principal_paid ?? 0),
+  remainingBalance: Number(r.remaining_balance ?? 0),
+  installmentsPaid: Number(r.installments_paid ?? 0),
+  installmentsTotal: Number(r.installments_total ?? 0),
+});
+
+// ---------- Caja ----------
+export const rowToCajaMovement = (r: any): CajaMovement => ({
+  id: r.id,
+  sessionId: r.session_id,
+  type: r.type,
+  amount: Number(r.amount),
+  reason: r.reason ?? undefined,
+  createdByName: r.created_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
+});
+
+export const rowToCajaSession = (r: any): CajaSession => ({
+  id: r.id,
+  branchId: r.branch_id,
+  branchName: r.branches?.name ?? undefined,
+  status: r.status,
+  openingAmount: Number(r.opening_amount),
+  openedByName: r.opened_by_name ?? undefined,
+  openedAt: new Date(r.opened_at),
+  closedByName: r.closed_by_name ?? undefined,
+  closedAt: r.closed_at ? new Date(r.closed_at) : undefined,
+  closingAmountDeclared: r.closing_amount_declared != null ? Number(r.closing_amount_declared) : undefined,
+  closingAmountExpected: r.closing_amount_expected != null ? Number(r.closing_amount_expected) : undefined,
+  difference: r.difference != null ? Number(r.difference) : undefined,
+  notes: r.notes ?? undefined,
+  breakdown: r.breakdown ?? undefined,
+  movements: (r.caja_movements ?? []).map(rowToCajaMovement),
+});
+
+export const rowToCajaCloseResult = (r: any): CajaCloseResult => ({
+  sessionId: r.session_id,
+  openingAmount: Number(r.opening_amount ?? 0),
+  expected: Number(r.expected ?? 0),
+  declared: Number(r.declared ?? 0),
+  difference: Number(r.difference ?? 0),
+});
 

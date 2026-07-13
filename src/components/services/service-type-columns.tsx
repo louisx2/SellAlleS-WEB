@@ -7,7 +7,7 @@ import { ServiceTypeDialog } from './service-type-dialog';
 
 export const ServiceTypeActions = ({ serviceType, onUpdate, onDelete }: { serviceType: ServiceType, onUpdate: () => void, onDelete: (id: string) => void }) => {
     return (
-        <DropdownMenu>
+        <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="h-8 w-8 p-0">
                     <span className="sr-only">Abrir menú</span>

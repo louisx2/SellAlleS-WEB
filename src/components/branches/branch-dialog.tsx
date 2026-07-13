@@ -36,6 +36,7 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
       id: branch?.id ?? '',
       name: formData.get('name') as string,
       location: formData.get('location') as string,
+      isActive: branch?.isActive ?? true,
     };
 
     if (isEditMode && branch) {

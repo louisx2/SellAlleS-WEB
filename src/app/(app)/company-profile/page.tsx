@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,11 +14,23 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Info } from 'lucide-react';
 import { NcfSettingsCard } from '@/components/company-profile/ncf-settings-card';
 import { FinancingSettingsCard } from '@/components/company-profile/financing-settings-card';
+import { LoanSettingsCard } from '@/components/company-profile/loan-settings-card';
+import { LoyaltySettingsCard } from '@/components/company-profile/loyalty-settings-card';
+import { CajaEmailSettingsCard } from '@/components/company-profile/caja-email-settings-card';
+import { BranchSharingCard } from '@/components/company-profile/branch-sharing-card';
+import { useModules } from '@/context/modules-provider';
+import { useAuth } from '@/context/auth-provider';
 
 export default function CompanyProfilePage() {
   const { profile, updateProfile } = useCompanyProfile();
+  const { isModuleEnabled } = useModules();
+  const { appUser } = useAuth();
   const [formData, setFormData] = useState<CompanyProfile>(profile);
   const { toast } = useToast();
+
+  // El perfil llega async desde el provider: sincronizar el formulario cuando
+  // cambie (p. ej. carga directa de la página) para no mostrar datos vacíos.
+  useEffect(() => { setFormData(profile); }, [profile]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -59,6 +71,21 @@ export default function CompanyProfilePage() {
             <CardDescription>Datos principales de tu negocio.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Nombre de la empresa</Label>
+              <Input
+                id="name"
+                name="name"
+                value={formData.name}
+                onChange={handleChange}
+                disabled={!appUser?.isSuperAdmin}
+              />
+              {!appUser?.isSuperAdmin && (
+                <p className="text-xs text-muted-foreground">
+                  Solo un super administrador de la plataforma puede cambiar el nombre de la empresa.
+                </p>
+              )}
+            </div>
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="phone">Teléfono</Label>
@@ -138,6 +165,24 @@ export default function CompanyProfilePage() {
     </div>
     <div className="mt-6">
       <FinancingSettingsCard />
+    </div>
+    {isModuleEnabled('prestamos') && (
+      <div className="mt-6">
+        <LoanSettingsCard />
+      </div>
+    )}
+    {isModuleEnabled('loyalty') && (
+      <div className="mt-6">
+        <LoyaltySettingsCard />
+      </div>
+    )}
+    {isModuleEnabled('caja') && (
+      <div className="mt-6">
+        <CajaEmailSettingsCard />
+      </div>
+    )}
+    <div className="mt-6">
+      <BranchSharingCard />
     </div>
     </>
   );

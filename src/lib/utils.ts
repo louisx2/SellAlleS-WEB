@@ -16,6 +16,8 @@ export const GENERIC_CUSTOMER: Customer = {
   rnc: '',
   ncfType: 'consumer',
   creditBalance: 0,
+  discountPercentage: 0,
+  loyaltyPurchaseCount: 0,
 };
 
 export const isUuid = (s?: string | null): s is string =>
@@ -24,7 +26,7 @@ export const isUuid = (s?: string | null): s is string =>
 export const ITBIS_RATE = 0.18;
 export const DEFAULT_LATE_FEE_RATE = 5; // % de mora; el valor real vive en companies.late_fee_rate
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+export const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export function formatCurrency(amount: number) {
   return new Intl.NumberFormat('es-DO', {

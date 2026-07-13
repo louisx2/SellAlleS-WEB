@@ -4,6 +4,7 @@ import React, { createContext, useContext, ReactNode, useState, useEffect, useCa
 import type { Branch } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToBranch, branchToRow } from '@/lib/supabase/mappers';
+import { useAuth } from '@/context/auth-provider';
 
 interface BranchContextType {
   branches: Branch[];
@@ -15,14 +16,24 @@ interface BranchContextType {
 const BranchContext = createContext<BranchContextType | undefined>(undefined);
 
 export function BranchProvider({ children }: { children: ReactNode }) {
+  const { appUser } = useAuth();
+  // Empresa activa: la impersonada si el super admin entró a un tenant, si no la propia.
+  // El super admin ignora RLS (ve todas las empresas), así que sin este filtro el
+  // selector de sucursales mostraría las de TODAS las empresas.
+  const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
   const [branches, setBranches] = useState<Branch[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const { data, error } = await supabase.from('branches').select('*').order('name');
+    if (!activeCompanyId) { setBranches([]); setLoading(false); return; }
+    const { data, error } = await supabase
+      .from('branches')
+      .select('*')
+      .eq('company_id', activeCompanyId)
+      .order('name');
     if (!error && data) setBranches(data.map(rowToBranch));
     setLoading(false);
-  }, []);
+  }, [activeCompanyId]);
 
   useEffect(() => { load(); }, [load]);
 

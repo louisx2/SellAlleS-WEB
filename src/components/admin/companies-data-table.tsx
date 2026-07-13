@@ -8,7 +8,14 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Building2, Store, Pencil, Boxes, LogIn, ChevronDown, ChevronRight, Search, Filter } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Building2, Store, Pencil, Boxes, LogIn, ChevronDown, ChevronRight, Search, Filter,
+  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle,
+} from 'lucide-react';
 import type { Company } from '@/lib/types';
 
 interface CompaniesDataTableProps {
@@ -19,6 +26,12 @@ interface CompaniesDataTableProps {
   onEnterCompany: (c: Company) => void;
   onEnterBranch: (companyId: string, companyName: string, branchId: string, branchName: string) => void;
   onEditBranch: (b: { id: string; name: string; location: string; companyId: string }) => void;
+  onToggleStatus?: (c: Company) => void;
+  onDeleteCompany?: (c: Company) => void;
+  onDeleteBranch?: (b: { id: string; name: string; companyId: string }) => void;
+  onAddBranch?: (c: Company) => void;
+  onManageUsers?: (c: Company) => void;
+  onToggleBranchStatus?: (b: { id: string; name: string; isActive: boolean }) => void;
   getPlanName: (companyId: string) => string;
 }
 
@@ -35,6 +48,12 @@ export function CompaniesDataTable({
   onEnterCompany,
   onEnterBranch,
   onEditBranch,
+  onToggleStatus,
+  onDeleteCompany,
+  onDeleteBranch,
+  onAddBranch,
+  onManageUsers,
+  onToggleBranchStatus,
   getPlanName,
 }: CompaniesDataTableProps) {
   const [expandedCompanies, setExpandedCompanies] = useState<string[]>([]);
@@ -46,7 +65,7 @@ export function CompaniesDataTable({
   };
 
   const filteredCompanies = companies.filter(c => {
-    const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) || 
+    const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
                           (c.rnc && c.rnc.toLowerCase().includes(search.toLowerCase()));
     const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
     return matchesSearch && matchesStatus;
@@ -57,8 +76,8 @@ export function CompaniesDataTable({
       <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-card p-4 rounded-xl border shadow-sm">
         <div className="relative w-full sm:max-w-xs">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input 
-            placeholder="Buscar empresa o RNC..." 
+          <Input
+            placeholder="Buscar empresa o RNC..."
             className="pl-9 bg-muted/50 border-transparent focus-visible:bg-background"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -89,7 +108,7 @@ export function CompaniesDataTable({
               <TableHead>Estado</TableHead>
               <TableHead>Fiscal</TableHead>
               <TableHead>Plan</TableHead>
-              <TableHead className="text-right">Acciones (Empresa)</TableHead>
+              <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -101,8 +120,8 @@ export function CompaniesDataTable({
               filteredCompanies.map((c) => (
                 <TableRow key={c.id} className="group hover:bg-muted/10 transition-colors">
                   <TableCell className="font-medium align-top py-4">
-                    <div 
-                      className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors select-none" 
+                    <div
+                      className="flex items-center gap-2 cursor-pointer hover:text-primary transition-colors select-none"
                       onClick={() => toggleCompany(c.id)}
                     >
                       {expandedCompanies.includes(c.id) ? (
@@ -115,7 +134,7 @@ export function CompaniesDataTable({
                       </div>
                       <span className="text-base">{c.name}</span>
                     </div>
-                    
+
                     {expandedCompanies.includes(c.id) && (
                       <div className="pl-11 mt-3 flex flex-col gap-2 text-xs font-normal">
                         {c.branches && c.branches.length > 0 ? (
@@ -123,33 +142,62 @@ export function CompaniesDataTable({
                             <div key={b.id} className="flex items-center justify-between bg-muted/40 hover:bg-muted/60 transition-colors p-2 rounded-md pr-3 border border-border/50">
                               <div className="flex items-center gap-2">
                                 <Store className="h-4 w-4 text-muted-foreground" />
-                                <span className="font-medium">{b.name === 'Principal' ? 'Sucursal Principal' : `Sucursal ${b.name}`}</span>
+                                <span className={`font-medium ${!b.is_active ? 'text-muted-foreground line-through' : ''}`}>
+                                  {b.name === 'Principal' ? 'Sucursal Principal' : `Sucursal ${b.name}`}
+                                </span>
+                                {!b.is_active && (
+                                  <Badge variant="destructive" className="text-[10px] h-4 px-1">Inactiva</Badge>
+                                )}
                               </div>
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-7 px-2 text-[11px]"
-                                  onClick={(e) => { e.stopPropagation(); onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id }); }}
-                                >
-                                  <Pencil className="mr-1 h-3 w-3" /> Editar
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-7 px-2 text-[11px]"
-                                  onClick={(e) => { e.stopPropagation(); onModulesCompany(c); }}
-                                >
-                                  <Boxes className="mr-1 h-3 w-3" /> Módulos
-                                </Button>
-                                <Button 
-                                  variant="secondary" 
-                                  size="sm" 
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
                                   className="h-7 px-3 text-[11px]"
                                   onClick={(e) => { e.stopPropagation(); onEnterBranch(c.id, c.name, b.id, b.name); }}
                                 >
                                   <LogIn className="mr-1 h-3 w-3" /> Entrar
                                 </Button>
+                                <DropdownMenu modal={false}>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
+                                      <MoreHorizontal className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                                    <DropdownMenuItem onClick={() => onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id })}>
+                                      <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
+                                    </DropdownMenuItem>
+                                    {onManageUsers && (
+                                      <DropdownMenuItem onClick={() => onManageUsers(c)}>
+                                        <Users className="mr-2 h-3.5 w-3.5" /> Gestionar usuarios
+                                      </DropdownMenuItem>
+                                    )}
+                                    <DropdownMenuItem onClick={() => onModulesCompany(c)}>
+                                      <Boxes className="mr-2 h-3.5 w-3.5" /> Módulos
+                                    </DropdownMenuItem>
+                                    {onToggleBranchStatus && (
+                                      <DropdownMenuItem onClick={() => onToggleBranchStatus({ id: b.id, name: b.name, isActive: b.is_active })}>
+                                        {b.is_active ? (
+                                          <><Ban className="mr-2 h-3.5 w-3.5" /> Desactivar sucursal</>
+                                        ) : (
+                                          <><Power className="mr-2 h-3.5 w-3.5" /> Reactivar sucursal</>
+                                        )}
+                                      </DropdownMenuItem>
+                                    )}
+                                    {onDeleteBranch && (
+                                      <>
+                                        <DropdownMenuSeparator />
+                                        <DropdownMenuItem
+                                          className="text-destructive focus:text-destructive"
+                                          onClick={() => onDeleteBranch({ id: b.id, name: b.name, companyId: c.id })}
+                                        >
+                                          <Trash2 className="mr-2 h-3.5 w-3.5" /> Eliminar sucursal
+                                        </DropdownMenuItem>
+                                      </>
+                                    )}
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
                               </div>
                             </div>
                           ))
@@ -157,20 +205,12 @@ export function CompaniesDataTable({
                            <div className="flex items-center justify-between bg-muted/40 hover:bg-muted/60 transition-colors p-2 rounded-md pr-3 border border-border/50">
                               <div className="flex items-center gap-2">
                                 <Store className="h-4 w-4 text-muted-foreground" />
-                                <span className="font-medium">Sucursal Principal</span>
+                                <span className="font-medium">Sin sucursales</span>
                               </div>
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <Button 
-                                  variant="ghost" 
-                                  size="sm" 
-                                  className="h-7 px-2 text-[11px]"
-                                  onClick={(e) => { e.stopPropagation(); onModulesCompany(c); }}
-                                >
-                                  <Boxes className="mr-1 h-3 w-3" /> Módulos
-                                </Button>
-                                <Button 
-                                  variant="secondary" 
-                                  size="sm" 
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
                                   className="h-7 px-3 text-[11px]"
                                   onClick={(e) => { e.stopPropagation(); onEnterCompany(c); }}
                                 >
@@ -178,6 +218,16 @@ export function CompaniesDataTable({
                                 </Button>
                               </div>
                             </div>
+                        )}
+                        {onAddBranch && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-[11px] w-fit text-muted-foreground hover:text-foreground"
+                            onClick={(e) => { e.stopPropagation(); onAddBranch(c); }}
+                          >
+                            <PlusCircle className="mr-1 h-3 w-3" /> Agregar sucursal
+                          </Button>
                         )}
                       </div>
                     )}
@@ -200,16 +250,56 @@ export function CompaniesDataTable({
                   </TableCell>
                   <TableCell className="align-top py-4 text-sm">{getPlanName(c.id)}</TableCell>
                   <TableCell className="text-right align-top py-4">
-                    <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onEditCompany(c)} title="Editar Empresa">
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onModulesCompany(c)} title="Módulos">
-                        <Boxes className="h-4 w-4" />
-                      </Button>
+                    <div className="flex justify-end gap-2">
                       <Button variant="default" size="sm" className="h-8" onClick={() => onEnterCompany(c)}>
                         <LogIn className="mr-2 h-4 w-4" /> Entrar
                       </Button>
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel>{c.name}</DropdownMenuLabel>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onClick={() => onEditCompany(c)}>
+                            <Pencil className="mr-2 h-4 w-4" /> Editar empresa
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => onModulesCompany(c)}>
+                            <Boxes className="mr-2 h-4 w-4" /> Módulos
+                          </DropdownMenuItem>
+                          {onAddBranch && (
+                            <DropdownMenuItem onClick={() => onAddBranch(c)}>
+                              <PlusCircle className="mr-2 h-4 w-4" /> Agregar sucursal
+                            </DropdownMenuItem>
+                          )}
+                          {onManageUsers && (
+                            <DropdownMenuItem onClick={() => onManageUsers(c)}>
+                              <Users className="mr-2 h-4 w-4" /> Gestionar usuarios
+                            </DropdownMenuItem>
+                          )}
+                          {onToggleStatus && (
+                            <>
+                              <DropdownMenuSeparator />
+                              {c.status === 'suspended' ? (
+                                <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-emerald-600 focus:text-emerald-700">
+                                  <Power className="mr-2 h-4 w-4" /> Reactivar empresa
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-destructive focus:text-destructive">
+                                  <Ban className="mr-2 h-4 w-4" /> Desactivar empresa
+                                </DropdownMenuItem>
+                              )}
+                            </>
+                          )}
+                          {onDeleteCompany && (
+                            <DropdownMenuItem onClick={() => onDeleteCompany(c)} className="text-destructive focus:text-destructive">
+                              <Trash2 className="mr-2 h-4 w-4" /> Eliminar empresa
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   </TableCell>
                 </TableRow>

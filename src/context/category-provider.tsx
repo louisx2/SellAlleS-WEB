@@ -8,7 +8,7 @@ import { rowToProductCategory, productCategoryToRow } from '@/lib/supabase/mappe
 interface CategoryContextType {
   categories: ProductCategory[];
   loading: boolean;
-  addCategory: (category: Omit<ProductCategory, 'id'>) => Promise<void>;
+  addCategory: (category: Omit<ProductCategory, 'id'>) => Promise<ProductCategory>;
   updateCategory: (category: ProductCategory) => Promise<void>;
   deleteCategory: (id: string) => Promise<void>;
 }
@@ -38,9 +38,9 @@ export function CategoryProvider({ children }: { children: ReactNode }) {
       .select()
       .single();
     if (error) throw error;
-    if (data) {
-      setCategories((prev) => [...prev, rowToProductCategory(data)].sort((a, b) => a.name.localeCompare(b.name)));
-    }
+    const created = rowToProductCategory(data);
+    setCategories((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+    return created;
   };
 
   const updateCategory = async (updated: ProductCategory) => {

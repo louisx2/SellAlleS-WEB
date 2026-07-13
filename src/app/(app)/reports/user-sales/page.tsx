@@ -9,6 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { formatCurrency } from '@/lib/utils';
 import { Users } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { ExportButton } from '@/components/reports/export-button';
 
 
 export default function UserSalesReportPage() {
@@ -42,7 +43,18 @@ export default function UserSalesReportPage() {
 
   return (
     <div>
-      <PageHeader title="Reporte de Ventas por Usuario" />
+      <PageHeader title="Reporte de Ventas por Usuario">
+        <ExportButton
+          filename="ventas_por_usuario"
+          rows={salesByUser}
+          columns={[
+            { header: 'Usuario', value: (u) => u.userName },
+            { header: 'Email', value: (u) => u.userEmail },
+            { header: 'Ventas realizadas', value: (u) => u.totalSales },
+            { header: 'Ingresos', value: (u) => u.totalRevenue },
+          ]}
+        />
+      </PageHeader>
 
        <Card>
         <CardHeader>

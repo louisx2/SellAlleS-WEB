@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,6 +23,7 @@ interface ProductActionsProps {
 export function ProductActions({ product }: ProductActionsProps) {
   const { toast } = useToast();
   const { deleteProduct } = useProducts();
+  const [editOpen, setEditOpen] = useState(false);
 
   const handleDelete = async () => {
     if (!confirm(`¿Estás seguro de que deseas eliminar el producto "${product.name}"? Esta acción no se puede deshacer.`)) {
@@ -45,8 +47,8 @@ export function ProductActions({ product }: ProductActionsProps) {
   };
 
   return (
-    <ProductDialog product={product}>
-      <DropdownMenu>
+    <>
+      <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="h-8 w-8 p-0">
             <span className="sr-only">Abrir menú</span>
@@ -56,12 +58,9 @@ export function ProductActions({ product }: ProductActionsProps) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            {/* The ProductDialog wraps the DropdownMenu and provides the trigger for the edit action */}
-            <div>
-              <Pencil className="mr-2 h-4 w-4" />
-              <span>Editar</span>
-            </div>
+          <DropdownMenuItem onSelect={() => setTimeout(() => setEditOpen(true), 0)}>
+            <Pencil className="mr-2 h-4 w-4" />
+            <span>Editar</span>
           </DropdownMenuItem>
           <DropdownMenuItem onClick={handleDelete} className="text-destructive">
             <Trash2 className="mr-2 h-4 w-4" />
@@ -69,6 +68,8 @@ export function ProductActions({ product }: ProductActionsProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </ProductDialog>
+
+      <ProductDialog product={product} open={editOpen} onOpenChange={setEditOpen} />
+    </>
   );
 }

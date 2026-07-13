@@ -8,7 +8,7 @@ import { rowToProductLocation, productLocationToRow } from '@/lib/supabase/mappe
 interface LocationContextType {
   locations: ProductLocation[];
   loading: boolean;
-  addLocation: (location: Omit<ProductLocation, 'id'>) => Promise<void>;
+  addLocation: (location: Omit<ProductLocation, 'id'>) => Promise<ProductLocation>;
   updateLocation: (location: ProductLocation) => Promise<void>;
   deleteLocation: (id: string) => Promise<void>;
 }
@@ -38,9 +38,9 @@ export function LocationProvider({ children }: { children: ReactNode }) {
       .select()
       .single();
     if (error) throw error;
-    if (data) {
-      setLocations((prev) => [...prev, rowToProductLocation(data)].sort((a, b) => a.name.localeCompare(b.name)));
-    }
+    const created = rowToProductLocation(data);
+    setLocations((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+    return created;
   };
 
   const updateLocation = async (updated: ProductLocation) => {

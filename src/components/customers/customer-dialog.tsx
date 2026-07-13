@@ -52,6 +52,17 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
     }
 
     const creditLimitRaw = (formData.get('creditLimit') as string)?.trim();
+    const discountRaw = (formData.get('discountPercentage') as string)?.trim();
+    const discountPercentage = discountRaw ? Number(discountRaw) : 0;
+
+    if (isNaN(discountPercentage) || discountPercentage < 0 || discountPercentage > 100) {
+      toast({
+        title: 'Descuento inválido',
+        description: 'El descuento debe ser un porcentaje entre 0 y 100.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     const newCustomerData = {
       id: customer?.id ?? '',
@@ -65,6 +76,8 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
       notes: formData.get('notes') as string,
       creditBalance: customer?.creditBalance ?? 0, // Preserve existing balance
       creditLimit: creditLimitRaw ? Number(creditLimitRaw) : null, // vacío = sin límite
+      discountPercentage,
+      loyaltyPurchaseCount: customer?.loyaltyPurchaseCount ?? 0, // Preserve existing counter
     }
 
     setSaving(true);
@@ -172,6 +185,22 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
                 step="0.01"
                 placeholder="Vacío = sin límite"
                 defaultValue={customer?.creditLimit ?? ''}
+                className="col-span-3"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="discountPercentage" className="text-right">
+                Descuento (%)
+              </Label>
+              <Input
+                id="discountPercentage"
+                name="discountPercentage"
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                placeholder="0 = sin descuento"
+                defaultValue={customer?.discountPercentage || ''}
                 className="col-span-3"
               />
             </div>
