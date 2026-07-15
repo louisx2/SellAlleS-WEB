@@ -15,7 +15,7 @@ interface AuthContextType {
   appUser: AppUser | null;
   loading: boolean;
   signIn: (email: string, pass: string) => Promise<void>;
-  signUp: (name: string, email: string, pass: string, businessName: string, planId: string, companyStatus: 'active' | 'suspended') => Promise<{ needsConfirmation: boolean }>;
+  signUp: (name: string, email: string, pass: string, businessName: string) => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
   setImpersonatedCompany: (companyId: string | null, companyName: string | null) => void;
   setActiveBranch: (branchId: string, branchName: string) => void;
@@ -265,19 +265,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   };
 
-  const signUp = async (name: string, email: string, pass: string, businessName: string, planId: string, companyStatus: 'active' | 'suspended') => {
+  const signUp = async (name: string, email: string, pass: string, businessName: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password: pass,
-      // Metadata consumida por trigger db
-      options: { 
-        data: { 
-          name, 
-          company_name: businessName,
-          plan_id: planId,
-          company_status: companyStatus
-        } 
-      },
+      // Metadata consumida por el trigger handle_new_user: crea la empresa con
+      // este nombre en plan Gratis (trial). El plan/estado ya no se envían: el
+      // registro es siempre prueba gratis; el upgrade se maneja aparte.
+      options: { data: { name, company_name: businessName } },
     });
     if (error) throw error;
     return { needsConfirmation: !data.session };
