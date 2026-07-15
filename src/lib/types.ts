@@ -72,6 +72,9 @@ export type User = {
   companyId?: string;
   companyStatus?: 'trial' | 'active' | 'suspended';
   companyDemoExpiresAt?: string; // empresa de prueba pública ("Probar Plataforma"); se banea al vencer
+  companyTrialEndsAt?: string; // fin de la prueba de 14 días (null en empresas sin límite)
+  companyPaidUntil?: string; // suscripción pagada hasta esta fecha (null = sin vencimiento)
+  isReadOnly?: boolean; // prueba/suscripción vencida: puede entrar y ver, pero no modificar
   impersonatedCompanyId?: string;
   impersonatedCompanyName?: string;
   isSuperAdmin?: boolean;
@@ -94,6 +97,8 @@ export type Company = {
   phone: string | null;
   address: string | null;
   status: 'trial' | 'active' | 'suspended';
+  trial_ends_at?: string | null;
+  paid_until?: string | null;
   created_at: string;
   branches?: { id: string; name: string; location: string | null; is_active: boolean }[];
 };
@@ -349,6 +354,22 @@ export type CajaCloseResult = {
   expected: number;
   declared: number;
   difference: number;
+};
+
+// ---------- Suscripción del SaaS (pagos por transferencia) ----------
+export type SubscriptionPayment = {
+  id: string;
+  companyId: string;
+  amount: number;
+  paidAt: string;   // yyyy-mm-dd
+  method: 'transfer' | 'cash' | 'card' | 'other';
+  reference?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  planName?: string;
+  notes?: string;
+  recordedByName?: string;
+  createdAt: Date;
 };
 
 export type Supplier = {

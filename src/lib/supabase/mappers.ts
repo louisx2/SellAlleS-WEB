@@ -1,4 +1,4 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 
 // ---------- Product ----------
@@ -455,5 +455,21 @@ export const rowToCajaCloseResult = (r: any): CajaCloseResult => ({
   expected: Number(r.expected ?? 0),
   declared: Number(r.declared ?? 0),
   difference: Number(r.difference ?? 0),
+});
+
+// ---------- Suscripción ----------
+export const rowToSubscriptionPayment = (r: any): SubscriptionPayment => ({
+  id: r.id,
+  companyId: r.company_id,
+  amount: Number(r.amount),
+  paidAt: r.paid_at,
+  method: r.method,
+  reference: r.reference ?? undefined,
+  periodStart: r.period_start ?? undefined,
+  periodEnd: r.period_end ?? undefined,
+  planName: r.plan_name ?? undefined,
+  notes: r.notes ?? undefined,
+  recordedByName: r.recorded_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
 });
 

@@ -25,6 +25,7 @@ import { CompanyModulesDialog } from '@/components/admin/company-modules-dialog'
 import { CompaniesDataTable } from '@/components/admin/companies-data-table';
 import { DeleteConfirmDialog } from '@/components/admin/delete-confirm-dialog';
 import { ManageCompanyUsersDialog } from '@/components/admin/manage-company-users-dialog';
+import { SubscriptionPaymentsDialog } from '@/components/admin/subscription-payments-dialog';
 import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
@@ -66,6 +67,7 @@ export default function CompaniesManagementPage() {
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchLocation, setNewBranchLocation] = useState('');
   const [manageUsersFor, setManageUsersFor] = useState<Company | null>(null);
+  const [paymentsFor, setPaymentsFor] = useState<Company | null>(null);
   const [branchStatusTarget, setBranchStatusTarget] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
   // Compartir entre sucursales (por módulo). Default OFF: cada sucursal aislada.
   const [sharing, setSharing] = useState({ clientes: false, credito: false, financiamiento: false, prestamos: false });
@@ -435,8 +437,16 @@ export default function CompaniesManagementPage() {
         onDeleteBranch={setDeleteBranchTarget}
         onAddBranch={(c) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); }}
         onManageUsers={setManageUsersFor}
+        onManagePayments={setPaymentsFor}
         onToggleBranchStatus={setBranchStatusTarget}
         getPlanName={getPlanName}
+      />
+
+      <SubscriptionPaymentsDialog
+        company={paymentsFor}
+        defaultPlanName={paymentsFor ? getPlanName(paymentsFor.id) : undefined}
+        onOpenChange={(o) => { if (!o) setPaymentsFor(null); }}
+        onRecorded={load}
       />
 
       <Dialog open={open} onOpenChange={setOpen}>

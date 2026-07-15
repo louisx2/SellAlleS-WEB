@@ -1,6 +1,6 @@
 import { ArrowLeft } from 'lucide-react';
 
-const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL || 'https://sellalles-landing.loui-s.workers.dev';
+const LANDING_URL = process.env.NEXT_PUBLIC_LANDING_URL || 'https://sellalles.com';
 
 export function BackToLanding() {
   return (

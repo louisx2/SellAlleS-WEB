@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter } from '@/components/ui/sidebar';
-import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins } from 'lucide-react';
+import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -65,6 +65,7 @@ const adminNavItems: NavItem[] = [
     { href: '/customers', icon: UsersRound, label: 'Clientes', roles: ['admin'] },
     { href: '/suppliers', icon: Truck, label: 'Proveedores', roles: ['admin'], module: 'suppliers' },
     { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', roles: ['admin']},
+    { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', roles: ['admin']},
     { href: '/users', icon: Users, label: 'Usuarios', roles: ['admin']},
     { href: '/branches', icon: Store, label: 'Sucursales', roles: ['admin']},
     { href: '/roles', icon: Shield, label: 'Roles', roles: ['admin']},
@@ -157,7 +158,8 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const isSuperAdmin = appUser.isSuperAdmin;
   const isImpersonating = !!appUser.impersonatedCompanyId;
   const isDemoCompany = !!appUser.companyDemoExpiresAt;
-  const hasTopBanner = isImpersonating || isDemoCompany;
+  const isReadOnly = !!appUser.isReadOnly;
+  const hasTopBanner = isImpersonating || isDemoCompany || isReadOnly;
   const showOperationalMenus = !isSuperAdmin || isImpersonating;
   const isManager = appUser?.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
   const isAdminOrManager = !isSuperAdmin && (userRole === 'admin' || isManager);
@@ -208,6 +210,23 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
             🧪 Modo Demostración: esta empresa de prueba se borra automáticamente a las{' '}
             <strong>{new Date(appUser.companyDemoExpiresAt!).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}</strong>
           </span>
+        </div>
+      )}
+      {!isImpersonating && !isDemoCompany && isReadOnly && (
+        <div className="fixed top-0 z-50 w-full bg-red-600 text-white px-4 py-1.5 text-xs flex items-center justify-center gap-3 font-medium shadow-md">
+          <span>
+            {appUser.companyStatus === 'trial'
+              ? '⚠️ Tu prueba gratis de 14 días terminó. Puedes ver tus datos, pero no modificarlos hasta activar tu cuenta.'
+              : '⚠️ Tu suscripción venció. Puedes ver tus datos, pero no modificarlos hasta renovar tu pago.'}
+          </span>
+          <a
+            href="https://wa.me/18299333226?text=Hola,%20quiero%20activar%20mi%20cuenta%20de%20SellAlleS"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="bg-white text-red-600 px-3 py-0.5 rounded-full hover:bg-red-50 transition-colors whitespace-nowrap"
+          >
+            Activar por WhatsApp
+          </a>
         </div>
       )}
       <header className={cn(

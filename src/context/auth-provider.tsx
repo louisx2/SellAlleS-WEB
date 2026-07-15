@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, Rea
 import { useRouter, usePathname } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
 import type { User as AppUser } from '@/lib/types';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, setReadOnlyMode } from '@/lib/supabase/client';
 import { AppSkeleton } from '@/components/ui/app-skeleton';
 import { CreateCompanyScreen } from '@/components/auth/create-company-screen';
 import { BranchSelector } from '@/components/auth/branch-selector';
@@ -61,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       .select(`
         id, name, email, role, is_super_admin, company_id,
-        companies(status, demo_expires_at),
+        companies(status, demo_expires_at, trial_ends_at, paid_until),
         branches!profiles_branch_id_fkey(id, name, is_active),
         profile_branches(branches(id, name, is_active)),
         profile_roles(roles(id, name, description))
@@ -139,6 +139,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const compStatus = (data as any).companies?.status;
       const demoExpiresAt = (data as any).companies?.demo_expires_at ?? undefined;
+      const trialEndsAt = (data as any).companies?.trial_ends_at ?? undefined;
+      const paidUntil = (data as any).companies?.paid_until ?? undefined;
+      // Solo-lectura: puede entrar y ver, pero no modificar. Aplica si la prueba
+      // venció, o si la suscripción pagada venció (paid_until en el pasado). El
+      // super admin nunca queda en solo-lectura (gestiona/reactiva empresas).
+      const trialExpired = compStatus === 'trial' && !!trialEndsAt && new Date(trialEndsAt).getTime() < Date.now();
+      const subLapsed = compStatus === 'active' && !!paidUntil && new Date(paidUntil + 'T23:59:59').getTime() < Date.now();
+      const isReadOnly = !data.is_super_admin && (trialExpired || subLapsed);
+      // Activa/desactiva el bloqueo central de escrituras en el cliente Supabase.
+      setReadOnlyMode(isReadOnly);
 
       const user: AppUser = {
         id: data.id,
@@ -151,6 +161,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         companyId: data.company_id,
         companyStatus: compStatus,
         companyDemoExpiresAt: demoExpiresAt,
+        companyTrialEndsAt: trialEndsAt,
+        companyPaidUntil: paidUntil,
+        isReadOnly,
         impersonatedCompanyId: savedImpersonatedId || undefined,
         impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,
@@ -197,6 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           loadProfile(uid, mail).finally(() => { if (active) setLoading(false); });
         }, 0);
       } else {
+        setReadOnlyMode(false);
         setAppUser(null);
         clearLocal();
         setLoading(false);

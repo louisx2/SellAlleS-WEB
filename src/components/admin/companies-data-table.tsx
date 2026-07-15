@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   Building2, Store, Pencil, Boxes, LogIn, ChevronDown, ChevronRight, Search, Filter,
-  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle,
+  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt,
 } from 'lucide-react';
 import type { Company } from '@/lib/types';
 
@@ -31,6 +31,7 @@ interface CompaniesDataTableProps {
   onDeleteBranch?: (b: { id: string; name: string; companyId: string }) => void;
   onAddBranch?: (c: Company) => void;
   onManageUsers?: (c: Company) => void;
+  onManagePayments?: (c: Company) => void;
   onToggleBranchStatus?: (b: { id: string; name: string; isActive: boolean }) => void;
   getPlanName: (companyId: string) => string;
 }
@@ -53,6 +54,7 @@ export function CompaniesDataTable({
   onDeleteBranch,
   onAddBranch,
   onManageUsers,
+  onManagePayments,
   onToggleBranchStatus,
   getPlanName,
 }: CompaniesDataTableProps) {
@@ -277,6 +279,11 @@ export function CompaniesDataTable({
                           {onManageUsers && (
                             <DropdownMenuItem onClick={() => onManageUsers(c)}>
                               <Users className="mr-2 h-4 w-4" /> Gestionar usuarios
+                            </DropdownMenuItem>
+                          )}
+                          {onManagePayments && (
+                            <DropdownMenuItem onClick={() => onManagePayments(c)}>
+                              <Receipt className="mr-2 h-4 w-4" /> Pagos de suscripción
                             </DropdownMenuItem>
                           )}
                           {onToggleStatus && (
