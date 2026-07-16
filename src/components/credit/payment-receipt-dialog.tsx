@@ -42,6 +42,11 @@ function ReceiptBody({ data }: { data: PaymentReceiptData }) {
 
   return (
     <div className="text-left space-y-1">
+      {profile.ticketLogoUrl && (
+        <div className="flex justify-center pb-1">
+          <img src={profile.ticketLogoUrl} alt="" style={{ maxHeight: 60, maxWidth: '80%', objectFit: 'contain' }} />
+        </div>
+      )}
       <h3 className="text-lg font-semibold text-center">{profile.name}</h3>
       <div className="text-xs text-muted-foreground text-center">
         {profile.address && <p>{profile.address}</p>}

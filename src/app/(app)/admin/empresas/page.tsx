@@ -30,10 +30,11 @@ import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
 
-interface Plan { id: string; name: string; price: number; max_users?: number; }
-interface Sub { id: string; company_id: string; plan_id: string | null; }
+interface Plan { id: string; name: string; price: number; max_users?: number; monthly_price?: number | null; annual_price_per_month?: number | null; }
+interface Sub { id: string; company_id: string; plan_id: string | null; custom_monthly_price?: number | null; }
 
 const NONE = 'none';
+const CUSTOM_PLAN_NAME = 'A medida';
 
 const emptyForm = {
   name: '', rnc: '', phone: '', address: '',
@@ -44,6 +45,7 @@ const emptyForm = {
   businessType: 'tienda' as BusinessType,
   customBusinessType: '',
   maxUsers: 2,
+  customMonthlyPrice: '',
 };
 
 export default function CompaniesManagementPage() {
@@ -100,8 +102,8 @@ export default function CompaniesManagementPage() {
       { data: ss },
     ] = await Promise.all([
       compsQuery,
-      supabase.from('plans').select('id, name, price, max_users').order('sort_order'),
-      supabase.from('subscriptions').select('id, company_id, plan_id'),
+      supabase.from('plans').select('id, name, price, max_users, monthly_price, annual_price_per_month').order('sort_order'),
+      supabase.from('subscriptions').select('id, company_id, plan_id, custom_monthly_price'),
     ]);
 
     if (comps) setCompanies(comps as Company[]);
@@ -136,6 +138,16 @@ export default function CompaniesManagementPage() {
     return plans.find((p) => p.id === sub.plan_id)?.name ?? '—';
   };
 
+  const getPlanRates = (companyId: string) => {
+    const sub = subs[companyId];
+    const plan = plans.find((p) => p.id === sub?.plan_id);
+    return {
+      monthlyPrice: plan?.monthly_price ?? null,
+      annualPricePerMonth: plan?.annual_price_per_month ?? null,
+      customMonthlyPrice: sub?.custom_monthly_price ?? null,
+    };
+  };
+
   const openCreate = () => {
     setEditingId(null); setStep(1); setForm(emptyForm);
     setExtraUsers([]);
@@ -155,6 +167,7 @@ export default function CompaniesManagementPage() {
       businessType: isPreset ? (c.business_type as BusinessType) : 'otro',
       customBusinessType: isPreset ? '' : (c.business_type ?? ''),
       maxUsers: c.max_users ?? 2,
+      customMonthlyPrice: subs[c.id]?.custom_monthly_price != null ? String(subs[c.id].custom_monthly_price) : '',
     });
     setExtraUsers([]);
     // Cargar la config de compartir entre sucursales de esta empresa.
@@ -333,11 +346,15 @@ export default function CompaniesManagementPage() {
       }
 
       if (companyId && form.planId !== NONE) {
+        const selectedPlanName = plans.find((p) => p.id === form.planId)?.name;
+        const customMonthlyPrice = selectedPlanName === CUSTOM_PLAN_NAME && form.customMonthlyPrice.trim()
+          ? Number(form.customMonthlyPrice)
+          : null;
         const existing = subs[companyId];
         if (existing) {
-          await supabase.from('subscriptions').update({ plan_id: form.planId }).eq('id', existing.id);
+          await supabase.from('subscriptions').update({ plan_id: form.planId, custom_monthly_price: customMonthlyPrice }).eq('id', existing.id);
         } else {
-          await supabase.from('subscriptions').insert({ company_id: companyId, plan_id: form.planId, status: 'active' });
+          await supabase.from('subscriptions').insert({ company_id: companyId, plan_id: form.planId, status: 'active', custom_monthly_price: customMonthlyPrice });
         }
       }
 
@@ -612,6 +629,7 @@ export default function CompaniesManagementPage() {
       <SubscriptionPaymentsDialog
         company={paymentsFor}
         defaultPlanName={paymentsFor ? getPlanName(paymentsFor.id) : undefined}
+        planRates={paymentsFor ? getPlanRates(paymentsFor.id) : undefined}
         onOpenChange={(o) => { if (!o) setPaymentsFor(null); }}
         onRecorded={load}
       />
@@ -717,6 +735,23 @@ export default function CompaniesManagementPage() {
                   </Select>
                 </div>
               </div>
+
+              {plans.find((p) => p.id === form.planId)?.name === CUSTOM_PLAN_NAME && (
+                <div className="grid gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                  <Label htmlFor="customMonthlyPrice">Monto mensual acordado (RD$)</Label>
+                  <Input
+                    id="customMonthlyPrice"
+                    type="number"
+                    min={0}
+                    placeholder="Ej: 3500"
+                    value={form.customMonthlyPrice}
+                    onChange={(e) => setForm({ ...form, customMonthlyPrice: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Precio negociado con esta empresa para el plan "A medida". Se usa como referencia en el panel de super admin.
+                  </p>
+                </div>
+              )}
 
               <div className="grid gap-2">
                 <Label htmlFor="maxUsers">Límite de usuarios *</Label>

@@ -30,15 +30,23 @@ function addMonths(dateStr: string, months: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+interface PlanRates {
+  monthlyPrice: number | null;
+  annualPricePerMonth: number | null;
+  customMonthlyPrice: number | null;
+}
+
 interface Props {
   company: Company | null;
   defaultPlanName?: string;
+  /** Tarifas del plan activo de esta empresa, para autocompletar el monto. */
+  planRates?: PlanRates;
   onOpenChange: (open: boolean) => void;
   /** Se llama tras registrar un pago (para refrescar el listado de empresas). */
   onRecorded?: () => void;
 }
 
-export function SubscriptionPaymentsDialog({ company, defaultPlanName, onOpenChange, onRecorded }: Props) {
+export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates, onOpenChange, onRecorded }: Props) {
   const { toast } = useToast();
   const [payments, setPayments] = useState<SubscriptionPayment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,6 +143,52 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, onOpenCha
 
         {showForm && (
           <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border p-4">
+            {(planRates?.monthlyPrice != null || planRates?.customMonthlyPrice != null) && (
+              <div className="space-y-1">
+                <Label>Tarifa del plan</Label>
+                <div className="flex flex-wrap gap-2">
+                  {planRates.customMonthlyPrice != null ? (
+                    <Button
+                      type="button" variant="outline" size="sm"
+                      onClick={() => {
+                        setAmount(planRates.customMonthlyPrice as number);
+                        const base = company?.paid_until && company.paid_until >= today() ? company.paid_until : today();
+                        setPeriodStart(base); setPeriodEnd(addMonths(base, 1));
+                      }}
+                    >
+                      Mensual acordado ({formatCurrency(planRates.customMonthlyPrice)})
+                    </Button>
+                  ) : (
+                    <>
+                      {planRates.monthlyPrice != null && (
+                        <Button
+                          type="button" variant="outline" size="sm"
+                          onClick={() => {
+                            setAmount(planRates.monthlyPrice as number);
+                            const base = company?.paid_until && company.paid_until >= today() ? company.paid_until : today();
+                            setPeriodStart(base); setPeriodEnd(addMonths(base, 1));
+                          }}
+                        >
+                          Mensual ({formatCurrency(planRates.monthlyPrice)})
+                        </Button>
+                      )}
+                      {planRates.annualPricePerMonth != null && (
+                        <Button
+                          type="button" variant="outline" size="sm"
+                          onClick={() => {
+                            setAmount((planRates.annualPricePerMonth as number) * 12);
+                            const base = company?.paid_until && company.paid_until >= today() ? company.paid_until : today();
+                            setPeriodStart(base); setPeriodEnd(addMonths(base, 12));
+                          }}
+                        >
+                          Anual ({formatCurrency(planRates.annualPricePerMonth)}/mes × 12)
+                        </Button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label htmlFor="sp-amount">Monto *</Label>

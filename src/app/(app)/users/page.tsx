@@ -8,10 +8,12 @@ import { Button } from '@/components/ui/button';
 import { PlusCircle, AlertCircle } from 'lucide-react';
 import { useUsers } from '@/context/user-provider';
 import { useAuth } from '@/context/auth-provider';
+import { usePermission } from '@/hooks/use-permission';
 
 export default function UsersPage() {
   const { users } = useUsers();
   const { appUser } = useAuth();
+  const canCreate = usePermission('users', 'create');
 
   const maxUsers = appUser?.companyMaxUsers ?? null;
   const currentUsersCount = users.filter(u => !u.isSuperAdmin).length;
@@ -20,7 +22,7 @@ export default function UsersPage() {
   return (
     <div>
       <PageHeader title="Usuarios">
-        {isLimitReached ? (
+        {!canCreate ? null : isLimitReached ? (
           <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2">
             <span className="text-xs text-destructive bg-destructive/10 border border-destructive/20 px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5">
               <AlertCircle className="h-3.5 w-3.5" />

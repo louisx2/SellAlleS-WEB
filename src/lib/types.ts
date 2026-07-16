@@ -109,10 +109,22 @@ export type Company = {
   branches?: { id: string; name: string; location: string | null; is_active: boolean }[];
 };
 
+export type PermissionAction = 'view' | 'create' | 'edit' | 'delete';
+
+// Un recurso por cada sección de la app gateada a admin (nav de authed-layout).
+export type PermissionResource =
+  | 'dashboard' | 'pos' | 'sales' | 'quotes' | 'services' | 'credit' | 'financing'
+  | 'prestamos' | 'caja' | 'expenses' | 'reports' | 'products' | 'customers'
+  | 'suppliers' | 'company-profile' | 'users' | 'branches' | 'roles' | 'suscripcion'
+  | 'service-types';
+
 export type Role = {
     id: string;
     name: string;
     description: string;
+    key?: string;
+    isSystem?: boolean;
+    permissions?: Partial<Record<PermissionResource, PermissionAction[]>>;
 };
 
 export type CartItem = {
@@ -212,6 +224,7 @@ export type CompanyProfile = {
     facebook: string;
   };
   logoUrl: string;
+  ticketLogoUrl: string;
   receiptFooter: string;
   lateFeeRate: number;         // % de mora sobre la cuota vencida
   defaultInterestRate: number; // % de interés mensual sugerido en el POS

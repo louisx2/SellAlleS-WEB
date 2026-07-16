@@ -16,8 +16,8 @@ import {
 } from '@/components/admin/platform-insights';
 import type { Company } from '@/lib/types';
 
-interface Plan { id: string; name: string; price: number; }
-interface Sub { id: string; company_id: string; plan_id: string | null; }
+interface Plan { id: string; name: string; price: number; monthly_price?: number | null; }
+interface Sub { id: string; company_id: string; plan_id: string | null; custom_monthly_price?: number | null; }
 interface PlatformSale { company_id: string | null; total: number; created_at: string; }
 
 export default function PlatformDashboardPage() {
@@ -44,8 +44,8 @@ export default function PlatformDashboardPage() {
       { data: sls },
     ] = await Promise.all([
       supabase.from('companies').select('*').order('created_at', { ascending: false }),
-      supabase.from('plans').select('id, name, price').order('price'),
-      supabase.from('subscriptions').select('id, company_id, plan_id'),
+      supabase.from('plans').select('id, name, price, monthly_price').order('price'),
+      supabase.from('subscriptions').select('id, company_id, plan_id, custom_monthly_price'),
       supabase.from('profiles').select('id, created_at, company_id'),
       // RLS: el super admin ve las ventas de todos los tenants.
       supabase.from('sales').select('company_id, total, created_at').gte('created_at', thirtyDaysAgo.toISOString()),
@@ -120,8 +120,9 @@ export default function PlatformDashboardPage() {
   let payingCompanies = 0;
   filteredComps.forEach(c => {
     if (c.status === 'active') {
-      const planId = subs[c.id]?.plan_id;
-      const planPrice = plans.find(p => p.id === planId)?.price || 0;
+      const sub = subs[c.id];
+      const plan = plans.find(p => p.id === sub?.plan_id);
+      const planPrice = plan?.monthly_price ?? sub?.custom_monthly_price ?? 0;
       if (planPrice > 0) payingCompanies += 1;
       projectedMRR += planPrice;
     }
@@ -177,7 +178,7 @@ export default function PlatformDashboardPage() {
   // Distribución por plan.
   const planSlices: PlanSlice[] = plans.map((p) => ({
     name: p.name,
-    price: p.price,
+    price: p.monthly_price ?? 0,
     count: filteredComps.filter((c) => subs[c.id]?.plan_id === p.id).length,
   }));
   const withoutPlan = filteredComps.filter((c) => !subs[c.id]?.plan_id).length;

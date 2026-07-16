@@ -135,7 +135,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                   </TableCell>
                   <TableCell className="py-3">
                     <Badge variant={u.role === 'admin' ? 'default' : 'secondary'}>
-                      {u.role === 'admin' ? 'Administrador' : 'Cajero'}
+                      {u.role === 'admin' ? 'Administrador' : (u.customRoles[0]?.name ?? 'Cajero')}
                     </Badge>
                   </TableCell>
                   <TableCell className="py-3">

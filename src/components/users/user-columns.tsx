@@ -51,9 +51,11 @@ export const userColumns: ColumnDef<User>[] = [
     header: 'Rol',
     cell: ({ row }) => {
       const role = row.getValue('role') as string;
+      const customRole = row.original.customRoles?.[0];
+      const label = role === 'admin' ? 'Administrador' : (customRole?.name ?? 'Cajero');
       return (
         <Badge variant={role === 'admin' ? 'default' : 'secondary'}>
-          {role === 'admin' ? 'Administrador' : 'Cajero'}
+          {label}
         </Badge>
       );
     },

@@ -24,6 +24,7 @@ import { UserDialog } from './user-dialog';
 import type { User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useUsers } from '@/context/user-provider';
+import { usePermission } from '@/hooks/use-permission';
 import { supabase } from '@/lib/supabase/client';
 
 interface UserActionsProps {
@@ -33,6 +34,8 @@ interface UserActionsProps {
 export function UserActions({ user }: UserActionsProps) {
   const { toast } = useToast();
   const { deleteUser, setPassword, sendPasswordReset } = useUsers();
+  const canEdit = usePermission('users', 'edit');
+  const canDelete = usePermission('users', 'delete');
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
@@ -143,25 +146,32 @@ export function UserActions({ user }: UserActionsProps) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setTimeout(() => setEditOpen(true), 0)}>
-            <Pencil className="mr-2 h-4 w-4" />
-            <span>Editar</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setTimeout(() => setPwdOpen(true), 0)}>
-            <KeyRound className="mr-2 h-4 w-4" />
-            <span>Fijar contraseña</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setTimeout(handleReset, 0)}>
-            <Mail className="mr-2 h-4 w-4" />
-            <span>Enviar correo de restablecimiento</span>
-          </DropdownMenuItem>
-          {!user.emailConfirmedAt && (
+          {canEdit && (
+            <DropdownMenuItem onSelect={() => setTimeout(() => setEditOpen(true), 0)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              <span>Editar</span>
+            </DropdownMenuItem>
+          )}
+          {canEdit && (
+            <DropdownMenuItem onSelect={() => setTimeout(() => setPwdOpen(true), 0)}>
+              <KeyRound className="mr-2 h-4 w-4" />
+              <span>Fijar contraseña</span>
+            </DropdownMenuItem>
+          )}
+          {canEdit && (
+            <DropdownMenuItem onSelect={() => setTimeout(handleReset, 0)}>
+              <Mail className="mr-2 h-4 w-4" />
+              <span>Enviar correo de restablecimiento</span>
+            </DropdownMenuItem>
+          )}
+          {canEdit && !user.emailConfirmedAt && (
             <DropdownMenuItem onSelect={() => setTimeout(handleResendConfirm, 0)} disabled={working}>
               <Mail className="mr-2 h-4 w-4 text-amber-500" />
               <span className="text-amber-500 font-medium">Reenviar confirmación</span>
             </DropdownMenuItem>
           )}
-          <DropdownMenuSeparator />
+          {canDelete && <DropdownMenuSeparator />}
+          {canDelete && (
           <DropdownMenuItem
             onSelect={() => setTimeout(() => setDeleteOpen(true), 0)}
             className="text-destructive focus:text-destructive"
@@ -169,6 +179,7 @@ export function UserActions({ user }: UserActionsProps) {
             <Trash2 className="mr-2 h-4 w-4" />
             <span>Eliminar</span>
           </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

@@ -64,7 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         companies!profiles_company_id_fkey(status, demo_expires_at, trial_ends_at, paid_until, max_users),
         branches!profiles_branch_id_fkey(id, name, is_active),
         profile_branches(branches(id, name, is_active)),
-        profile_roles(roles(id, name, description)),
+        profile_roles(roles(id, name, description, permissions)),
         profile_companies(companies(id, name, status, is_demo))
       `)
       .eq('id', userId)
@@ -116,7 +116,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const customRoles = (data.profile_roles ?? [])
         .map((pr: any) => pr.roles)
         .filter(Boolean)
-        .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '' }));
+        .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '', permissions: r.permissions ?? {} }));
 
       const isManager = customRoles.some((r: any) => r.name.toLowerCase().includes('gerente'));
       const isAdminOrManager = !data.is_super_admin && (data.role === 'admin' || isManager);

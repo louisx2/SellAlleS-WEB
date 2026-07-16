@@ -1,5 +1,15 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
+
+// ---------- Role ----------
+export const rowToRole = (r: any): Role => ({
+  id: r.id, name: r.name, description: r.description ?? '',
+  key: r.key ?? undefined, isSystem: !!r.is_system,
+  permissions: r.permissions ?? {},
+});
+export const roleToRow = (r: Partial<Role>) => ({
+  name: r.name, description: r.description ?? null, permissions: r.permissions ?? {},
+});
 
 // ---------- Product ----------
 export const rowToProduct = (r: any): Product => ({
@@ -107,7 +117,7 @@ export const rowToExpense = (r: any): Expense => ({
 export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   name: r.name ?? '', phone: r.phone ?? '', rnc: r.rnc ?? '', address: r.address ?? '',
   socialMedia: { instagram: r.instagram ?? '', facebook: r.facebook ?? '' },
-  logoUrl: r.logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
+  logoUrl: r.logo_url ?? '', ticketLogoUrl: r.ticket_logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
   loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
@@ -122,7 +132,7 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
 export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   name: p.name, phone: p.phone ?? null, rnc: p.rnc ?? null, address: p.address ?? null,
   instagram: p.socialMedia?.instagram ?? null, facebook: p.socialMedia?.facebook ?? null,
-  logo_url: p.logoUrl ?? null, receipt_footer: p.receiptFooter ?? null,
+  logo_url: p.logoUrl ?? null, ticket_logo_url: p.ticketLogoUrl ?? null, receipt_footer: p.receiptFooter ?? null,
 });
 
 // ---------- Sale (con sale_items y customer embebidos) ----------

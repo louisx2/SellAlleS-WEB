@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { BranchChecklist } from '@/components/users/branch-checklist';
 import { Mail } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
@@ -27,19 +28,16 @@ interface PlatformUserDialogProps {
 export function PlatformUserDialog({ user, companies, branches, open, onOpenChange, onSaved }: PlatformUserDialogProps) {
   const { toast } = useToast();
   const [role, setRole] = useState<'admin' | 'cashier'>('cashier');
-  const [branchId, setBranchId] = useState<string>('');
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
-  const [allBranchesChecked, setAllBranchesChecked] = useState(false);
   const [resending, setResending] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (!open || !user) return;
     setRole(user.role);
-    setBranchId(user.branchId ?? '');
     setSelectedRoleIds(user.customRoles.map((r) => r.id));
     setSelectedBranchIds(user.branches.map((b) => b.id));
 
@@ -70,29 +68,12 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
     }
   }, [open, user]);
 
-  // La sucursal "todas" reacciona a la empresa principal actualmente seleccionada
-  // (la primera marcada en el multi-empresa), no a la empresa original del perfil:
-  // si el super admin cambia la empresa principal, las sucursales disponibles deben
-  // ser las de esa empresa.
+  // Las sucursales disponibles reaccionan a la empresa principal actualmente
+  // seleccionada (la primera marcada en el multi-empresa), no a la empresa
+  // original del perfil: si el super admin cambia la empresa principal, las
+  // sucursales del checklist deben ser las de esa empresa.
   const effectivePrimaryCompanyId = selectedCompanyIds.length > 0 ? selectedCompanyIds[0] : (user?.companyId ?? null);
   const companyBranches = branches.filter((b) => b.companyId === effectivePrimaryCompanyId);
-
-  useEffect(() => {
-    if (open && companyBranches.length > 0) {
-      const others = companyBranches.filter((b) => b.id !== branchId);
-      const isAll = others.length > 0 && others.every((b) => selectedBranchIds.includes(b.id));
-      setAllBranchesChecked(isAll);
-    }
-  }, [open, branchId, selectedBranchIds, effectivePrimaryCompanyId, branches]);
-
-  const handleAllBranchesToggle = (checked: boolean) => {
-    setAllBranchesChecked(checked);
-    if (checked) {
-      setSelectedBranchIds(companyBranches.filter((b) => b.id !== branchId).map((b) => b.id));
-    } else {
-      setSelectedBranchIds([]);
-    }
-  };
 
   const handleResendConfirm = async () => {
     if (!user) return;
@@ -117,12 +98,16 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
   const company = companies.find((c) => c.id === user.companyId);
 
   const handleSave = async () => {
+    if (selectedBranchIds.length === 0) {
+      toast({ title: 'Selecciona al menos una sucursal', description: 'El usuario necesita acceso a al menos una sucursal.', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
       const primaryCompanyId = selectedCompanyIds.length > 0 ? selectedCompanyIds[0] : null;
-      const finalBranchIds = allBranchesChecked
-        ? companyBranches.map((b) => b.id)
-        : Array.from(new Set([branchId, ...selectedBranchIds].filter(Boolean)));
+      // Sucursal activa: mantiene la que ya tenía si sigue marcada, si no la primera marcada.
+      const activeBranchId = selectedBranchIds.includes(user.branchId ?? '') ? user.branchId : selectedBranchIds[0];
+      const finalBranchIds = selectedBranchIds;
 
       // Insertar primero las asociaciones nuevas en profile_companies: el trigger
       // check_profile_company_access exige que la fila ya exista ahí antes de
@@ -141,7 +126,7 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
         .from('profiles')
         .update({
           role,
-          branch_id: branchId || null,
+          branch_id: activeBranchId || null,
           company_id: primaryCompanyId
         })
         .eq('id', user.id);
@@ -183,8 +168,6 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
     }
   };
 
-  const branchChanged = branchId !== (user.branchId ?? '');
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -221,70 +204,26 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label>Rol</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as 'admin' | 'cashier')}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="admin">Administrador</SelectItem>
-                  <SelectItem value="cashier">Cajero</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label>Sucursal</Label>
-              <Select value={branchId} onValueChange={setBranchId}>
-                <SelectTrigger><SelectValue placeholder="Selecciona una sucursal" /></SelectTrigger>
-                <SelectContent>
-                  {companyBranches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-                  ))}
-                  {companyBranches.length === 0 && (
-                    <p className="p-4 text-sm text-muted-foreground">Esta empresa no tiene sucursales.</p>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
+          <div className="grid gap-2">
+            <Label>Rol</Label>
+            <Select value={role} onValueChange={(v) => setRole(v as 'admin' | 'cashier')}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="admin">Administrador</SelectItem>
+                <SelectItem value="cashier">Cajero</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          {branchChanged && (
-            <p className="text-xs text-amber-600 -mt-2">
-              Se transferirá a este usuario a la sucursal seleccionada al guardar.
-            </p>
-          )}
 
-          {companyBranches.length > 1 && (
-            <div className="grid gap-2">
-              <Label>Sucursales adicionales</Label>
-              <div className="flex items-center space-x-2">
-                <Checkbox
-                  id="platform-all-branches"
-                  checked={allBranchesChecked}
-                  onCheckedChange={handleAllBranchesToggle}
-                />
-                <Label htmlFor="platform-all-branches" className="font-semibold cursor-pointer">
-                  Administrador de todas las sucursales
-                </Label>
-              </div>
-              <div className="pl-6 flex flex-col gap-2 border-l border-border">
-                {companyBranches.filter((b) => b.id !== branchId).map((b) => (
-                  <div key={b.id} className="flex items-center space-x-2">
-                    <Checkbox
-                      id={`platform-branch-${b.id}`}
-                      checked={selectedBranchIds.includes(b.id) || allBranchesChecked}
-                      disabled={allBranchesChecked}
-                      onCheckedChange={(checked) => {
-                        setSelectedBranchIds((prev) =>
-                          checked ? [...prev, b.id] : prev.filter((id) => id !== b.id)
-                        );
-                      }}
-                    />
-                    <Label htmlFor={`platform-branch-${b.id}`} className="font-normal cursor-pointer">{b.name}</Label>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          <div className="grid gap-2">
+            <Label>Sucursales</Label>
+            <BranchChecklist
+              branches={companyBranches}
+              selectedIds={selectedBranchIds}
+              onChange={setSelectedBranchIds}
+              idPrefix="platform-branch"
+            />
+          </div>
 
           <div className="flex items-center justify-between rounded-lg border p-3">
             <div className="space-y-0.5">

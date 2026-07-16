@@ -16,6 +16,8 @@ import { useTheme } from 'next-themes';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useModules } from '@/context/modules-provider';
 import { moduleForRoute, type ModuleKey } from '@/lib/modules';
+import { hasPermission, unionPermissions } from '@/lib/permissions';
+import type { PermissionResource } from '@/lib/types';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -29,23 +31,24 @@ interface NavItem {
   label: string;
   roles: string[];
   module?: ModuleKey; // si falta, el item es núcleo y siempre se muestra
+  permission?: PermissionResource; // gana visibilidad extra a un rol personalizado (ej. Gerente) aunque roles no lo incluya
 }
 
-const dashboardNavItem: NavItem = { href: '/dashboard', icon: LayoutGrid, label: 'Dashboard', roles: ['admin', 'cashier'] };
+const dashboardNavItem: NavItem = { href: '/dashboard', icon: LayoutGrid, label: 'Dashboard', roles: ['admin', 'cashier'], permission: 'dashboard' };
 
 const coreNavItems: NavItem[] = [
-  { href: '/sales', icon: History, label: 'Movimientos', roles: ['admin'], module: 'sales' },
+  { href: '/sales', icon: History, label: 'Movimientos', roles: ['admin'], module: 'sales', permission: 'sales' },
 ];
 
 const featuresNavItems: NavItem[] = [
-  { href: '/pos', icon: ShoppingCart, label: 'Carrito', roles: ['admin', 'cashier'], module: 'pos' },
-  { href: '/quotes', icon: FileText, label: 'Cotizaciones', roles: ['admin', 'cashier'], module: 'quotes' },
-  { href: '/services', icon: Wrench, label: 'Servicios', roles: ['admin', 'cashier'], module: 'services' },
-  { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', roles: ['admin'], module: 'credit' },
-  { href: '/financing', icon: Landmark, label: 'Financiamientos', roles: ['admin'], module: 'financing' },
-  { href: '/prestamos', icon: HandCoins, label: 'Préstamos', roles: ['admin'], module: 'prestamos' },
-  { href: '/caja', icon: Coins, label: 'Caja', roles: ['admin', 'cashier'], module: 'caja' },
-  { href: '/expenses', icon: Wallet, label: 'Gastos', roles: ['admin'], module: 'expenses' },
+  { href: '/pos', icon: ShoppingCart, label: 'Carrito', roles: ['admin', 'cashier'], module: 'pos', permission: 'pos' },
+  { href: '/quotes', icon: FileText, label: 'Cotizaciones', roles: ['admin', 'cashier'], module: 'quotes', permission: 'quotes' },
+  { href: '/services', icon: Wrench, label: 'Servicios', roles: ['admin', 'cashier'], module: 'services', permission: 'services' },
+  { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', roles: ['admin'], module: 'credit', permission: 'credit' },
+  { href: '/financing', icon: Landmark, label: 'Financiamientos', roles: ['admin'], module: 'financing', permission: 'financing' },
+  { href: '/prestamos', icon: HandCoins, label: 'Préstamos', roles: ['admin'], module: 'prestamos', permission: 'prestamos' },
+  { href: '/caja', icon: Coins, label: 'Caja', roles: ['admin', 'cashier'], module: 'caja', permission: 'caja' },
+  { href: '/expenses', icon: Wallet, label: 'Gastos', roles: ['admin'], module: 'expenses', permission: 'expenses' },
 ];
 
 const reportsNavItems = [
@@ -59,17 +62,17 @@ const reportsNavItems = [
 ];
 
 const adminNavItems: NavItem[] = [
-    { href: '/inventory', icon: Package, label: 'Inventario', roles: ['admin'] },
-    { href: '/categories', icon: FolderOpen, label: 'Categorías', roles: ['admin'] },
-    { href: '/locations', icon: MapPin, label: 'Ubicaciones', roles: ['admin'] },
-    { href: '/customers', icon: UsersRound, label: 'Clientes', roles: ['admin'] },
-    { href: '/suppliers', icon: Truck, label: 'Proveedores', roles: ['admin'], module: 'suppliers' },
-    { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', roles: ['admin']},
-    { href: '/users', icon: Users, label: 'Usuarios', roles: ['admin']},
-    { href: '/branches', icon: Store, label: 'Sucursales', roles: ['admin']},
-    { href: '/roles', icon: Shield, label: 'Roles', roles: ['admin']},
-    { href: '/service-types', icon: PenTool, label: 'Tipos de Servicio', roles: ['admin'], module: 'services' },
-    { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', roles: ['admin']},
+    { href: '/inventory', icon: Package, label: 'Inventario', roles: ['admin'], permission: 'products' },
+    { href: '/categories', icon: FolderOpen, label: 'Categorías', roles: ['admin'], permission: 'products' },
+    { href: '/locations', icon: MapPin, label: 'Ubicaciones', roles: ['admin'], permission: 'products' },
+    { href: '/customers', icon: UsersRound, label: 'Clientes', roles: ['admin'], permission: 'customers' },
+    { href: '/suppliers', icon: Truck, label: 'Proveedores', roles: ['admin'], module: 'suppliers', permission: 'suppliers' },
+    { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', roles: ['admin'], permission: 'company-profile' },
+    { href: '/users', icon: Users, label: 'Usuarios', roles: ['admin'], permission: 'users' },
+    { href: '/branches', icon: Store, label: 'Sucursales', roles: ['admin'], permission: 'branches' },
+    { href: '/roles', icon: Shield, label: 'Roles', roles: ['admin'], permission: 'roles' },
+    { href: '/service-types', icon: PenTool, label: 'Tipos de Servicio', roles: ['admin'], module: 'services', permission: 'service-types' },
+    { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', roles: ['admin'], permission: 'suscripcion' },
 ];
 
 export default function AppLayoutContent({ children }: { children: React.ReactNode }) {
@@ -165,18 +168,31 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const isManager = appUser?.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
   const isAdminOrManager = !isSuperAdmin && (userRole === 'admin' || isManager);
 
+  // Permisos de roles personalizados (ej. "Gerente"): dan visibilidad EXTRA
+  // sobre la que ya da el rol base (admin/cajero), nunca la quitan.
+  const effectivePermissions = unionPermissions(appUser.customRoles ?? []);
+  const hasExtra = (resource?: PermissionResource) => !!resource && hasPermission(effectivePermissions, resource, 'view');
+
   const moduleOk = (item: NavItem) => !item.module || isModuleEnabled(item.module);
   const visibleDashboard = showOperationalMenus && userRole && dashboardNavItem.roles.includes(userRole);
-  const visibleCoreNavItems = coreNavItems.filter(item => showOperationalMenus && userRole && item.roles.includes(userRole) && moduleOk(item));
-  const visibleFeaturesNavItems = featuresNavItems.filter(item => showOperationalMenus && userRole && item.roles.includes(userRole) && moduleOk(item));
-  const visibleAdminNavItems = adminNavItems.filter(item => showOperationalMenus && moduleOk(item));
-  const canViewAdmin = userRole === 'admin' && showOperationalMenus;
-  const canViewReports = userRole === 'admin' && showOperationalMenus && isModuleEnabled('reports');
+  const visibleCoreNavItems = coreNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && (item.roles.includes(userRole) || hasExtra(item.permission)));
+  const visibleFeaturesNavItems = featuresNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && (item.roles.includes(userRole) || hasExtra(item.permission)));
+  const visibleAdminNavItems = adminNavItems.filter(item => showOperationalMenus && moduleOk(item) && (userRole === 'admin' || hasExtra(item.permission)));
+  const canViewAdmin = showOperationalMenus && (userRole === 'admin' || visibleAdminNavItems.length > 0);
+  const canViewReports = showOperationalMenus && isModuleEnabled('reports') && (userRole === 'admin' || hasExtra('reports'));
 
   // Guard de rutas: si la URL pertenece a un módulo apagado para esta
   // empresa, no se renderiza el contenido (aunque escriban la URL a mano).
   const routeModule = moduleForRoute(pathname);
   const routeBlocked = routeModule !== null && !modulesLoading && !isModuleEnabled(routeModule);
+
+  // Guard de permisos: mismo criterio que gatea el ítem en el menú, aplicado
+  // también al contenido de la página (si alguien escribe la URL a mano sin
+  // tener el permiso, no ve el contenido igual que no ve el enlace).
+  const allNavItems = [...coreNavItems, ...featuresNavItems, ...adminNavItems];
+  const matchedNavItem = allNavItems.find(item => pathname === item.href || pathname.startsWith(item.href + '/'));
+  const permissionBlocked = !isSuperAdmin && !!matchedNavItem && !!userRole
+    && !(matchedNavItem.roles.includes(userRole) || hasExtra(matchedNavItem.permission));
 
   const formatRole = (role: string | null) => {
     if (role === 'admin') return 'Administrador';
@@ -555,6 +571,15 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
               <p className="text-sm text-muted-foreground max-w-sm">
                 Este módulo no está habilitado para tu empresa. Si lo necesitas,
                 contacta al administrador de la plataforma.
+              </p>
+              <Button variant="outline" onClick={() => router.push('/dashboard')}>Volver al Dashboard</Button>
+            </div>
+          ) : permissionBlocked ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
+              <Shield className="h-10 w-10 text-muted-foreground" />
+              <h2 className="text-lg font-semibold">No tienes permiso para ver esta sección</h2>
+              <p className="text-sm text-muted-foreground max-w-sm">
+                Si necesitas acceso, pídele al administrador de tu empresa que te lo asigne desde Roles.
               </p>
               <Button variant="outline" onClick={() => router.push('/dashboard')}>Volver al Dashboard</Button>
             </div>

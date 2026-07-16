@@ -111,19 +111,35 @@ export default function CompanyProfilePage() {
           <CardContent className="space-y-4">
              <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="logoUrl">URL del Logo</Label>
+                  <Label htmlFor="logoUrl">URL del Logo (app, a color)</Label>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Info className="h-4 w-4 text-muted-foreground cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>Sube tu logo a un servicio como postimages.org.</p>
+                        <p>Sube tu logo a un servicio como postimages.org. Se muestra en el encabezado de la app.</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </div>
                 <Input id="logoUrl" name="logoUrl" value={formData.logoUrl} onChange={handleChange} />
+              </div>
+             <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="ticketLogoUrl">URL del Logo para Tickets/Recibos</Label>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Imagen aparte para impresoras térmicas (recibos, tickets de préstamo, abonos, planes de financiamiento). Usa una versión simple, sin colores.</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                </div>
+                <Input id="ticketLogoUrl" name="ticketLogoUrl" value={formData.ticketLogoUrl} onChange={handleChange} />
               </div>
             <div className="space-y-2">
               <Label htmlFor="receiptFooter">Pie de Página del Recibo</Label>

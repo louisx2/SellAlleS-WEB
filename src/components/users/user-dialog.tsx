@@ -20,6 +20,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useUsers } from '@/context/user-provider';
 import { useBranches } from '@/context/branch-provider';
 import { Checkbox } from '@/components/ui/checkbox';
+import { BranchChecklist } from '@/components/users/branch-checklist';
 import { supabase } from '@/lib/supabase/client';
 import { useEffect } from 'react';
 
@@ -40,17 +41,15 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
   const open = isControlled ? controlledOpen : internalOpen;
   const setOpen = (o: boolean) => { if (isControlled) onOpenChange?.(o); else setInternalOpen(o); };
   const [role, setRole] = useState(user?.role ?? 'cashier');
-  const [branch, setBranch] = useState(user?.branch ?? '');
-  
+
   const [availableRoles, setAvailableRoles] = useState<import('@/lib/types').Role[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<string[]>(
     user?.customRoles?.map(r => r.id) ?? []
   );
-  const [selectedBranches, setSelectedBranches] = useState<string[]>(
+  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(
     user?.branches?.map(b => b.id) ?? []
   );
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [allBranchesChecked, setAllBranchesChecked] = useState(false);
 
   useEffect(() => {
     supabase.from('roles').select('id, name, description').order('name')
@@ -62,37 +61,15 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
   useEffect(() => {
     if (open && user) {
         setSelectedRoles(user.customRoles?.map(r => r.id) ?? []);
-        setSelectedBranches(user.branches?.map(b => b.id) ?? []);
+        setSelectedBranchIds(user.branches?.map(b => b.id) ?? []);
         setRole(user.role);
-        setBranch(user.branch);
     } else if (open && !user) {
         setSelectedRoles([]);
-        setSelectedBranches([]);
+        setSelectedBranchIds([]);
         setRole('cashier');
-        setBranch('');
         setConfirmPassword('');
     }
   }, [open, user]);
-
-  useEffect(() => {
-    if (open && branches.length > 0) {
-      const primaryBranchId = branches.find(b => b.name === branch)?.id;
-      const otherBranches = branches.filter(b => b.id !== primaryBranchId);
-      const isAll = otherBranches.length > 0 && otherBranches.every(b => selectedBranches.includes(b.id));
-      setAllBranchesChecked(isAll);
-    }
-  }, [open, branch, selectedBranches, branches]);
-
-  const handleAllBranchesToggle = (checked: boolean) => {
-    setAllBranchesChecked(checked);
-    if (checked) {
-      const primaryBranchId = branches.find(b => b.name === branch)?.id;
-      const others = branches.filter(b => b.id !== primaryBranchId).map(b => b.id);
-      setSelectedBranches(others);
-    } else {
-      setSelectedBranches([]);
-    }
-  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -130,18 +107,20 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
       }
     }
 
-    const finalBranches = allBranchesChecked
-      ? branches
-      : [
-          ...branches.filter(b => b.name === branch),
-          ...branches.filter(b => selectedBranches.includes(b.id))
-        ];
+    if (selectedBranchIds.length === 0) {
+      toast({ title: 'Selecciona al menos una sucursal', description: 'El usuario necesita acceso a al menos una sucursal.', variant: 'destructive' });
+      return;
+    }
+
+    const finalBranches = branches.filter(b => selectedBranchIds.includes(b.id));
+    // Sucursal activa: mantiene la que ya tenía si sigue marcada, si no la primera marcada.
+    const activeBranch = finalBranches.find(b => b.name === user?.branch) ?? finalBranches[0];
 
     const newUserData = {
       id: user?.id ?? '',
       name: formData.get('name') as string,
       email: formData.get('email') as string,
-      branch: branch,
+      branch: activeBranch.name,
       role: role as 'admin' | 'cashier',
       customRoles: availableRoles.filter(r => selectedRoles.includes(r.id)),
       branches: finalBranches,
@@ -229,63 +208,18 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
               </Select>
             </div>
 
-             {branches.length > 1 && (
-                <div className="grid grid-cols-4 items-start gap-4 pt-2">
-                    <Label className="text-right mt-1">Sucursales</Label>
-                    <div className="col-span-3 flex flex-col gap-3">
-                        <div className="flex items-center space-x-2">
-                            <Checkbox 
-                              id="all-branches" 
-                              checked={allBranchesChecked}
-                              onCheckedChange={handleAllBranchesToggle}
-                            />
-                            <Label htmlFor="all-branches" className="font-semibold cursor-pointer">Asignar todas las sucursales</Label>
-                        </div>
-                        
-                        <div className="pl-6 flex flex-col gap-2 border-l border-border mt-1">
-                            {branches.map(b => {
-                                const isPrimary = b.name === branch;
-                                if (isPrimary) return null;
-
-                                return (
-                                    <div key={b.id} className="flex items-center space-x-2">
-                                        <Checkbox 
-                                          id={`branch-${b.id}`} 
-                                          checked={selectedBranches.includes(b.id) || allBranchesChecked}
-                                          disabled={allBranchesChecked}
-                                          onCheckedChange={(checked) => {
-                                              if (checked) {
-                                                  setSelectedBranches(prev => [...prev, b.id]);
-                                              } else {
-                                                  setSelectedBranches(prev => prev.filter(id => id !== b.id));
-                                              }
-                                          }}
-                                        />
-                                        <Label htmlFor={`branch-${b.id}`} className="font-normal cursor-pointer">{b.name}</Label>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
+            <div className="grid grid-cols-4 items-start gap-4 pt-2">
+                <Label className="text-right mt-1">Sucursales</Label>
+                <div className="col-span-3">
+                  <BranchChecklist
+                    branches={branches}
+                    selectedIds={selectedBranchIds}
+                    onChange={setSelectedBranchIds}
+                    idPrefix="user-branch"
+                  />
                 </div>
-            )}
-            <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="branch" className="text-right">
-                Sucursal
-            </Label>
-            <Select name="branch" value={branch} onValueChange={setBranch} required>
-                <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Selecciona una sucursal" />
-                </SelectTrigger>
-                <SelectContent>
-                {branches.map(b => (
-                    <SelectItem key={b.id} value={b.name}>{b.name}</SelectItem>
-                ))}
-                {branches.length === 0 && <p className="p-4 text-sm text-muted-foreground">Crea una sucursal primero.</p>}
-                </SelectContent>
-            </Select>
             </div>
-            
+
             {availableRoles.length > 0 && (
                 <div className="grid grid-cols-4 items-start gap-4 pt-2">
                     <Label className="text-right mt-1">Roles Adicionales</Label>
