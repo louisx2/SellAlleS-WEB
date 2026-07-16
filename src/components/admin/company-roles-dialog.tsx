@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { PageHeader } from '@/components/page-header';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -12,32 +14,43 @@ import { getRoleColumns } from '@/components/roles/role-columns';
 import { RoleDialog } from '@/components/roles/role-dialog';
 import { supabase } from '@/lib/supabase/client';
 import { rowToRole } from '@/lib/supabase/mappers';
-import { useAuth } from '@/context/auth-provider';
 import { useToast } from '@/hooks/use-toast';
 import type { Role } from '@/lib/types';
 import { PlusCircle } from 'lucide-react';
 
-export default function RolesPage() {
-  const { appUser } = useAuth();
+interface CompanyRolesDialogProps {
+  companyId: string | null;
+  companyName: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}
+
+// Igual que /roles/page.tsx, pero para que el super admin gestione los
+// roles de CUALQUIER empresa directamente, sin necesidad de impersonarla
+// (RLS de `roles` ya permite esto vía is_super_admin()).
+export function CompanyRolesDialog({ companyId, companyName, open, onOpenChange }: CompanyRolesDialogProps) {
   const { toast } = useToast();
-  const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId || null;
 
   const [roles, setRoles] = useState<Role[]>([]);
   const [dialogRole, setDialogRole] = useState<Role | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
   const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
+    if (!companyId) return;
     const { data } = await supabase
       .from('roles')
       .select('id, name, description, key, is_system, permissions')
+      .eq('company_id', companyId)
       .order('is_system', { ascending: false })
       .order('name');
     if (data) setRoles(data.map(rowToRole));
-  }, []);
+  }, [companyId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (open && companyId) load();
+  }, [open, companyId, load]);
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -56,26 +69,35 @@ export default function RolesPage() {
   };
 
   const columns = getRoleColumns({
-    onEdit: (role) => { setDialogRole(role); setDialogOpen(true); },
+    onEdit: (role) => { setDialogRole(role); setRoleDialogOpen(true); },
     onDelete: (role) => setDeleteTarget(role),
   });
 
   return (
-    <div>
-      <PageHeader title="Roles y Permisos">
-        <Button onClick={() => { setDialogRole(null); setDialogOpen(true); }}>
-          <PlusCircle className="mr-2 h-4 w-4" />
-          Nuevo Rol
-        </Button>
-      </PageHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Roles de {companyName}</DialogTitle>
+            <DialogDescription>
+              Crea, edita o elimina roles personalizados para esta empresa (ej. "Técnico"), sin necesidad de entrar a ella.
+            </DialogDescription>
+          </DialogHeader>
 
-      <RoleDataTable columns={columns} data={roles} />
+          <Button variant="outline" size="sm" className="w-fit" onClick={() => { setDialogRole(null); setRoleDialogOpen(true); }}>
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Nuevo Rol
+          </Button>
+
+          <RoleDataTable columns={columns} data={roles} />
+        </DialogContent>
+      </Dialog>
 
       <RoleDialog
         role={dialogRole}
-        companyId={activeCompanyId}
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        companyId={companyId}
+        open={roleDialogOpen}
+        onOpenChange={setRoleDialogOpen}
         onSaved={load}
       />
 
@@ -95,6 +117,6 @@ export default function RolesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

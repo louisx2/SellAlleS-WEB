@@ -6,24 +6,13 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Store, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Store, Loader2, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
 
 type Mode = 'login' | 'register' | 'recover';
-
-interface Plan { id: string; name: string; price: number; }
-
-const MOCK_PLANS: Plan[] = [
-  { id: 'free-fallback', name: 'Plan Gratis', price: 0 },
-  { id: 'basic-fallback', name: 'Plan Básico', price: 1500 },
-  { id: 'premium-fallback', name: 'Plan Premium', price: 3000 },
-];
 
 const AUTH_TRANSLATIONS: Record<string, string> = {
   'Email not confirmed': 'El correo electrónico no ha sido confirmado. Por favor, revisa tu bandeja de entrada o carpeta de spam.',
@@ -50,32 +39,36 @@ function LoginForm() {
   const [businessName, setBusinessName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [selectedPlanId, setSelectedPlanId] = useState<string>('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [keepSession, setKeepSession] = useState(true);
 
+  // Auto-login desde la demo del landing: si llega la sesión en el hash de la
+  // URL (#access_token=...&refresh_token=...), la establecemos y el
+  // AuthProvider redirige solo al dashboard. Los tokens en el hash no viajan al
+  // servidor (patrón estándar de Supabase para handoff de sesión entre dominios).
   useEffect(() => {
-    if (mode === 'register' && plans.length === 0) {
-      (async () => {
-        try {
-          const { data } = await supabase.from('plans').select('id, name, price').order('price');
-          if (data && data.length > 0) {
-            setPlans(data as Plan[]);
-            setSelectedPlanId(data[0].id);
-          } else {
-            setPlans(MOCK_PLANS);
-            setSelectedPlanId(MOCK_PLANS[0].id);
-          }
-        } catch (e) {
-          setPlans(MOCK_PLANS);
-          setSelectedPlanId(MOCK_PLANS[0].id);
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+    if (!hash) return;
+    const params = new URLSearchParams(hash);
+    const access_token = params.get('access_token');
+    const refresh_token = params.get('refresh_token');
+    if (access_token && refresh_token) {
+      setIsLoading(true);
+      // Limpiar el hash para no dejar los tokens en la barra de direcciones.
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      supabase.auth.setSession({ access_token, refresh_token }).then(({ error: sessErr }) => {
+        if (sessErr) {
+          setIsLoading(false);
+          setError('No se pudo iniciar la sesión de prueba. Inicia sesión con las credenciales que te dimos.');
         }
-      })();
+        // Éxito: el AuthProvider detecta la sesión y redirige; mantenemos el overlay.
+      });
     }
-  }, [mode, plans.length]);
+  }, []);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -84,35 +77,36 @@ function LoginForm() {
 
     try {
       if (mode === 'register') {
-        if (!selectedPlanId) {
-          toast({ title: 'Selecciona un plan', description: 'Por favor selecciona un plan de suscripción.', variant: 'destructive' });
+        if (password.length < 8) {
+          throw new Error('La contraseña debe tener al menos 8 caracteres.');
+        }
+        if (!/[A-Z]/.test(password)) {
+          throw new Error('La contraseña debe incluir al menos una letra mayúscula.');
+        }
+        if (!/[a-z]/.test(password)) {
+          throw new Error('La contraseña debe incluir al menos una letra minúscula.');
+        }
+        if (!/\d/.test(password)) {
+          throw new Error('La contraseña debe incluir al menos un número.');
+        }
+        if (!/[@$!%*?&._\-\/#]/.test(password)) {
+          throw new Error('La contraseña debe incluir al menos un carácter especial (ej: @, $, !, %, *, ?, &, ., _, -, /).');
+        }
+        if (password !== confirmPassword) {
+          throw new Error('Las contraseñas no coinciden.');
+        }
+        const { needsConfirmation } = await signUp(name, email, password, businessName);
+        if (needsConfirmation) {
+          toast({
+            title: 'Cuenta creada 🎉',
+            description: 'Te enviamos un correo para confirmar tu cuenta. Revisa tu bandeja (y la carpeta de spam) y luego inicia sesión.',
+          });
+          setMode('login');
           setIsLoading(false);
           return;
         }
-
-        const selectedPlan = plans.find(p => p.id === selectedPlanId);
-        const isPaid = selectedPlan && selectedPlan.price > 0;
-        const companyStatus = isPaid ? 'suspended' : 'active';
-
-        const { needsConfirmation } = await signUp(name, email, password, businessName, selectedPlanId, companyStatus);
-        if (needsConfirmation) {
-          toast({
-            title: 'Cuenta creada',
-            description: isPaid 
-              ? 'Cuenta en espera de pago. Revisa tu correo para confirmarla.' 
-              : 'Revisa tu correo para confirmar la cuenta antes de iniciar sesión.',
-          });
-          setMode('login');
-          setIsLoading(false); // permanece en /login; reactivar el formulario
-          return;
-        }
-        toast({ 
-          title: '¡Bienvenido!', 
-          description: isPaid 
-            ? 'Cuenta creada en espera de activación por pago.' 
-            : 'Cuenta creada e iniciada correctamente.' 
-        });
-        // Hay sesión: NO apagamos el overlay; el AuthProvider mostrará el skeleton y redirige.
+        toast({ title: '¡Bienvenido!', description: 'Tu cuenta fue creada. Empieza tu prueba gratis.' });
+        // Hay sesión: el AuthProvider mostrará el skeleton y redirige.
       } else if (mode === 'recover') {
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/reset-password`,
@@ -152,10 +146,10 @@ function LoginForm() {
             <span className="ml-2 font-bold text-2xl">SellAlleS</span>
           </div>
           <CardTitle>
-            {mode === 'register' ? 'Crear Cuenta' : mode === 'recover' ? 'Recuperar Contraseña' : 'Iniciar Sesión'}
+            {mode === 'register' ? 'Crea tu cuenta gratis' : mode === 'recover' ? 'Recuperar Contraseña' : 'Iniciar Sesión'}
           </CardTitle>
           <CardDescription>
-            {mode === 'register' ? 'Regístrate para empezar a usar el sistema' : mode === 'recover' ? 'Ingresa tu correo para recibir un enlace de recuperación' : 'Accede a tu cuenta para continuar'}
+            {mode === 'register' ? 'Prueba todas las funciones 14 días. Sin tarjeta de crédito.' : mode === 'recover' ? 'Ingresa tu correo para recibir un enlace de recuperación' : 'Accede a tu cuenta para continuar'}
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -171,34 +165,17 @@ function LoginForm() {
                 {isRegister && (
                   <>
                     <div className="space-y-2">
-                  <Label htmlFor="name">Tu nombre</Label>
-                  <Input id="name" type="text" placeholder="Tu nombre" value={name}
-                    onChange={(e) => setName(e.target.value)} required disabled={isLoading} />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="business-name">Nombre del negocio</Label>
-                  <Input id="business-name" type="text" placeholder="Ej: Ferretería Don Luis" value={businessName}
-                    onChange={(e) => setBusinessName(e.target.value)} required minLength={2} disabled={isLoading} />
-                </div>
-                {plans.length > 0 && (
-                  <div className="space-y-2">
-                    <Label htmlFor="plan">Plan de Suscripción</Label>
-                    <Select value={selectedPlanId} onValueChange={setSelectedPlanId} disabled={isLoading}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecciona un plan" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {plans.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name} {p.price > 0 ? `(RD$${p.price}/mes)` : '(Gratis)'}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                      <Label htmlFor="name">Tu nombre</Label>
+                      <Input id="name" type="text" placeholder="Tu nombre" value={name}
+                        onChange={(e) => setName(e.target.value)} required disabled={isLoading} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="business-name">Nombre del negocio</Label>
+                      <Input id="business-name" type="text" placeholder="Ej: Ferretería Don Luis" value={businessName}
+                        onChange={(e) => setBusinessName(e.target.value)} required minLength={2} disabled={isLoading} />
+                    </div>
+                  </>
                 )}
-              </>
-            )}
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <Input id="email" type="email" placeholder="tu@email.com" value={email}
@@ -215,11 +192,12 @@ function LoginForm() {
                   </div>
                   <div className="relative">
                     <Input id="password" type={showPassword ? 'text' : 'password'} value={password}
-                      onChange={(e) => setPassword(e.target.value)} required disabled={isLoading} minLength={6} />
-                    <Button 
-                      type="button" 
-                      variant="ghost" 
-                      size="icon" 
+                      onChange={(e) => setPassword(e.target.value)} required disabled={isLoading}
+                      placeholder={isRegister ? 'Mínimo 8 caracteres' : undefined} />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
                       className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
                       onClick={() => setShowPassword(!showPassword)}
                     >
@@ -227,6 +205,14 @@ function LoginForm() {
                     </Button>
                   </div>
                 </div>
+                {isRegister && (
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword">Confirmar Contraseña</Label>
+                    <Input id="confirmPassword" type="password" value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)} required disabled={isLoading}
+                      placeholder="Repite tu contraseña" />
+                  </div>
+                )}
                 {!isRegister && (
                   <div className="flex items-center space-x-2">
                     <Checkbox id="keepSession" checked={keepSession} onCheckedChange={(c) => setKeepSession(c as boolean)} />
@@ -235,6 +221,12 @@ function LoginForm() {
                     </Label>
                   </div>
                 )}
+                {isRegister && (
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+                    No necesitas RNC ni estar formalizado para empezar.
+                  </p>
+                )}
               </>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
@@ -242,17 +234,17 @@ function LoginForm() {
           <CardFooter className="flex-col gap-4">
             <Button type="submit" className="w-full" disabled={isLoading}>
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {mode === 'register' ? 'Crear cuenta' : mode === 'recover' ? 'Enviar enlace' : 'Entrar'}
+              {mode === 'register' ? 'Crear cuenta gratis' : mode === 'recover' ? 'Enviar enlace' : 'Entrar'}
             </Button>
             {mode === 'recover' ? (
-              <Button type="button" variant="link" size="sm" className="text-muted-foreground"
+              <Button type="button" variant="link" size="sm" className="text-amber-500 hover:text-amber-600 font-semibold"
                 onClick={() => { setError(null); setMode('login'); }}>
                 Volver a Iniciar Sesión
               </Button>
             ) : (
-              <Button type="button" variant="link" size="sm" className="text-muted-foreground"
+              <Button type="button" variant="link" size="sm" className="text-amber-500 hover:text-amber-600 font-semibold"
                 onClick={() => { setError(null); setMode(isRegister ? 'login' : 'register'); }}>
-                {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate'}
+                {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate gratis'}
               </Button>
             )}
           </CardFooter>

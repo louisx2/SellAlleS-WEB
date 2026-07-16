@@ -20,6 +20,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useUsers } from '@/context/user-provider';
 import { useBranches } from '@/context/branch-provider';
 import { Checkbox } from '@/components/ui/checkbox';
+import { BranchChecklist } from '@/components/users/branch-checklist';
 import { supabase } from '@/lib/supabase/client';
 import { useEffect } from 'react';
 
@@ -40,12 +41,15 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
   const open = isControlled ? controlledOpen : internalOpen;
   const setOpen = (o: boolean) => { if (isControlled) onOpenChange?.(o); else setInternalOpen(o); };
   const [role, setRole] = useState(user?.role ?? 'cashier');
-  const [branch, setBranch] = useState(user?.branch ?? '');
-  
+
   const [availableRoles, setAvailableRoles] = useState<import('@/lib/types').Role[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<string[]>(
     user?.customRoles?.map(r => r.id) ?? []
   );
+  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(
+    user?.branches?.map(b => b.id) ?? []
+  );
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => {
     supabase.from('roles').select('id, name, description').order('name')
@@ -57,12 +61,13 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
   useEffect(() => {
     if (open && user) {
         setSelectedRoles(user.customRoles?.map(r => r.id) ?? []);
+        setSelectedBranchIds(user.branches?.map(b => b.id) ?? []);
         setRole(user.role);
-        setBranch(user.branch);
     } else if (open && !user) {
         setSelectedRoles([]);
+        setSelectedBranchIds([]);
         setRole('cashier');
-        setBranch('');
+        setConfirmPassword('');
     }
   }, [open, user]);
 
@@ -71,18 +76,54 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
     const formData = new FormData(event.currentTarget);
     const password = formData.get('password') as string | null;
 
-    if (!isEditMode && !password) {
+    if (!isEditMode) {
+      if (!password) {
         toast({ title: 'Contraseña requerida', description: 'Debes introducir una contraseña para el nuevo usuario.', variant: 'destructive'});
         return;
+      }
+      if (password.length < 8) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe tener al menos 8 caracteres.', variant: 'destructive'});
+        return;
+      }
+      if (!/[A-Z]/.test(password)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra mayúscula.', variant: 'destructive'});
+        return;
+      }
+      if (!/[a-z]/.test(password)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra minúscula.', variant: 'destructive'});
+        return;
+      }
+      if (!/\d/.test(password)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un número.', variant: 'destructive'});
+        return;
+      }
+      if (!/[@$!%*?&._\-\/#]/.test(password)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive'});
+        return;
+      }
+      if (password !== confirmPassword) {
+        toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas ingresadas no son iguales.', variant: 'destructive'});
+        return;
+      }
     }
+
+    if (selectedBranchIds.length === 0) {
+      toast({ title: 'Selecciona al menos una sucursal', description: 'El usuario necesita acceso a al menos una sucursal.', variant: 'destructive' });
+      return;
+    }
+
+    const finalBranches = branches.filter(b => selectedBranchIds.includes(b.id));
+    // Sucursal activa: mantiene la que ya tenía si sigue marcada, si no la primera marcada.
+    const activeBranch = finalBranches.find(b => b.name === user?.branch) ?? finalBranches[0];
 
     const newUserData = {
       id: user?.id ?? '',
       name: formData.get('name') as string,
       email: formData.get('email') as string,
-      branch: branch,
+      branch: activeBranch.name,
       role: role as 'admin' | 'cashier',
       customRoles: availableRoles.filter(r => selectedRoles.includes(r.id)),
+      branches: finalBranches,
     };
 
     try {
@@ -137,12 +178,20 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
               <Input id="email" name="email" type="email" defaultValue={user?.email} className="col-span-3" required />
             </div>
              {!isEditMode && (
-                <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="password" className="text-right">
-                        Contraseña
-                    </Label>
-                    <Input id="password" name="password" type="password" className="col-span-3" required />
-                </div>
+               <>
+                 <div className="grid grid-cols-4 items-center gap-4">
+                     <Label htmlFor="password" className="text-right">
+                         Contraseña
+                     </Label>
+                     <Input id="password" name="password" type="password" placeholder="Mínimo 8 caracteres" className="col-span-3" required />
+                 </div>
+                 <div className="grid grid-cols-4 items-center gap-4">
+                     <Label htmlFor="confirmPassword" className="text-right">
+                         Confirmar
+                     </Label>
+                     <Input id="confirmPassword" name="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" className="col-span-3" required />
+                 </div>
+               </>
             )}
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="role" className="text-right">
@@ -158,23 +207,19 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-            <Label htmlFor="branch" className="text-right">
-                Sucursal
-            </Label>
-            <Select name="branch" value={branch} onValueChange={setBranch} required>
-                <SelectTrigger className="col-span-3">
-                <SelectValue placeholder="Selecciona una sucursal" />
-                </SelectTrigger>
-                <SelectContent>
-                {branches.map(b => (
-                    <SelectItem key={b.id} value={b.name}>{b.name}</SelectItem>
-                ))}
-                {branches.length === 0 && <p className="p-4 text-sm text-muted-foreground">Crea una sucursal primero.</p>}
-                </SelectContent>
-            </Select>
+
+            <div className="grid grid-cols-4 items-start gap-4 pt-2">
+                <Label className="text-right mt-1">Sucursales</Label>
+                <div className="col-span-3">
+                  <BranchChecklist
+                    branches={branches}
+                    selectedIds={selectedBranchIds}
+                    onChange={setSelectedBranchIds}
+                    idPrefix="user-branch"
+                  />
+                </div>
             </div>
-            
+
             {availableRoles.length > 0 && (
                 <div className="grid grid-cols-4 items-start gap-4 pt-2">
                     <Label className="text-right mt-1">Roles Adicionales</Label>

@@ -98,14 +98,15 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
               <TableHead>Sucursal</TableHead>
               <TableHead>Rol</TableHead>
               <TableHead>Roles adicionales</TableHead>
+              <TableHead>Verificación</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">Cargando usuarios...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">Cargando usuarios...</TableCell></TableRow>
             ) : filteredUsers.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No se encontraron usuarios.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={7} className="text-center py-12 text-muted-foreground">No se encontraron usuarios.</TableCell></TableRow>
             ) : (
               filteredUsers.map((u) => (
                 <TableRow key={u.id} className="group hover:bg-muted/10 transition-colors">
@@ -134,7 +135,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                   </TableCell>
                   <TableCell className="py-3">
                     <Badge variant={u.role === 'admin' ? 'default' : 'secondary'}>
-                      {u.role === 'admin' ? 'Administrador' : 'Cajero'}
+                      {u.role === 'admin' ? 'Administrador' : (u.customRoles[0]?.name ?? 'Cajero')}
                     </Badge>
                   </TableCell>
                   <TableCell className="py-3">
@@ -147,6 +148,14 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </div>
+                  </TableCell>
+                  <TableCell className="py-3">
+                    <Badge
+                      variant={u.emailConfirmedAt ? 'outline' : 'destructive'}
+                      className={u.emailConfirmedAt ? 'bg-green-500/10 text-green-500 border-green-500/20' : ''}
+                    >
+                      {u.emailConfirmedAt ? 'Verificado' : 'Pendiente'}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-right py-3">
                     <Button

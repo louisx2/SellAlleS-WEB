@@ -24,6 +24,8 @@ import { UserDialog } from './user-dialog';
 import type { User } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useUsers } from '@/context/user-provider';
+import { usePermission } from '@/hooks/use-permission';
+import { supabase } from '@/lib/supabase/client';
 
 interface UserActionsProps {
   user: User;
@@ -32,23 +34,48 @@ interface UserActionsProps {
 export function UserActions({ user }: UserActionsProps) {
   const { toast } = useToast();
   const { deleteUser, setPassword, sendPasswordReset } = useUsers();
+  const canEdit = usePermission('users', 'edit');
+  const canDelete = usePermission('users', 'delete');
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [pwdOpen, setPwdOpen] = useState(false);
   const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
   const [working, setWorking] = useState(false);
 
   const handleSetPassword = async () => {
-    if (newPwd.length < 6) {
-      toast({ title: 'Contraseña débil', description: 'Debe tener al menos 6 caracteres.', variant: 'destructive' });
+    if (newPwd.length < 8) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe tener al menos 8 caracteres.', variant: 'destructive' });
       return;
     }
+    if (!/[A-Z]/.test(newPwd)) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra mayúscula.', variant: 'destructive' });
+      return;
+    }
+    if (!/[a-z]/.test(newPwd)) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra minúscula.', variant: 'destructive' });
+      return;
+    }
+    if (!/\d/.test(newPwd)) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un número.', variant: 'destructive' });
+      return;
+    }
+    if (!/[@$!%*?&._\-\/#]/.test(newPwd)) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas ingresadas no son iguales.', variant: 'destructive' });
+      return;
+    }
+
     setWorking(true);
     try {
       await setPassword(user.id, newPwd);
       toast({ title: 'Contraseña actualizada', description: `Se fijó una nueva contraseña para ${user.name}.` });
       setPwdOpen(false);
       setNewPwd('');
+      setConfirmPwd('');
     } catch (err: any) {
       toast({ title: 'No se pudo cambiar', description: err?.message ?? 'Error.', variant: 'destructive' });
     } finally {
@@ -65,6 +92,32 @@ export function UserActions({ user }: UserActionsProps) {
       });
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo enviar el correo.', variant: 'destructive' });
+    }
+  };
+
+  const handleResendConfirm = async () => {
+    setWorking(true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: user.email,
+        options: {
+          emailRedirectTo: `${window.location.origin}/login`
+        }
+      });
+      if (error) throw error;
+      toast({
+        title: 'Correo de confirmación enviado',
+        description: `Se ha reenviado el enlace de confirmación a ${user.email}.`,
+      });
+    } catch (err: any) {
+      toast({
+        title: 'Error al enviar',
+        description: err?.message ?? 'No se pudo reenviar el correo de confirmación.',
+        variant: 'destructive',
+      });
+    } finally {
+      setWorking(false);
     }
   };
 
@@ -93,19 +146,32 @@ export function UserActions({ user }: UserActionsProps) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setTimeout(() => setEditOpen(true), 0)}>
-            <Pencil className="mr-2 h-4 w-4" />
-            <span>Editar</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setTimeout(() => setPwdOpen(true), 0)}>
-            <KeyRound className="mr-2 h-4 w-4" />
-            <span>Fijar contraseña</span>
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setTimeout(handleReset, 0)}>
-            <Mail className="mr-2 h-4 w-4" />
-            <span>Enviar correo de restablecimiento</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
+          {canEdit && (
+            <DropdownMenuItem onSelect={() => setTimeout(() => setEditOpen(true), 0)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              <span>Editar</span>
+            </DropdownMenuItem>
+          )}
+          {canEdit && (
+            <DropdownMenuItem onSelect={() => setTimeout(() => setPwdOpen(true), 0)}>
+              <KeyRound className="mr-2 h-4 w-4" />
+              <span>Fijar contraseña</span>
+            </DropdownMenuItem>
+          )}
+          {canEdit && (
+            <DropdownMenuItem onSelect={() => setTimeout(handleReset, 0)}>
+              <Mail className="mr-2 h-4 w-4" />
+              <span>Enviar correo de restablecimiento</span>
+            </DropdownMenuItem>
+          )}
+          {canEdit && !user.emailConfirmedAt && (
+            <DropdownMenuItem onSelect={() => setTimeout(handleResendConfirm, 0)} disabled={working}>
+              <Mail className="mr-2 h-4 w-4 text-amber-500" />
+              <span className="text-amber-500 font-medium">Reenviar confirmación</span>
+            </DropdownMenuItem>
+          )}
+          {canDelete && <DropdownMenuSeparator />}
+          {canDelete && (
           <DropdownMenuItem
             onSelect={() => setTimeout(() => setDeleteOpen(true), 0)}
             className="text-destructive focus:text-destructive"
@@ -113,12 +179,13 @@ export function UserActions({ user }: UserActionsProps) {
             <Trash2 className="mr-2 h-4 w-4" />
             <span>Eliminar</span>
           </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 
       <UserDialog user={user} open={editOpen} onOpenChange={setEditOpen} />
 
-      <Dialog open={pwdOpen} onOpenChange={(o) => { setPwdOpen(o); if (!o) setNewPwd(''); }}>
+      <Dialog open={pwdOpen} onOpenChange={(o) => { setPwdOpen(o); if (!o) { setNewPwd(''); setConfirmPwd(''); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Fijar contraseña</DialogTitle>
@@ -126,16 +193,29 @@ export function UserActions({ user }: UserActionsProps) {
               Escribe la nueva contraseña para {user.name}. El usuario podrá entrar con ella de inmediato.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-2 py-2">
-            <Label htmlFor="newPwd">Nueva contraseña</Label>
-            <Input
-              id="newPwd"
-              type="password"
-              value={newPwd}
-              onChange={(e) => setNewPwd(e.target.value)}
-              placeholder="Mínimo 6 caracteres"
-              autoComplete="new-password"
-            />
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="newPwd">Nueva contraseña</Label>
+              <Input
+                id="newPwd"
+                type="password"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                placeholder="Mínimo 8 caracteres, mayúscula, especial"
+                autoComplete="new-password"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="confirmPwd">Confirmar contraseña</Label>
+              <Input
+                id="confirmPwd"
+                type="password"
+                value={confirmPwd}
+                onChange={(e) => setConfirmPwd(e.target.value)}
+                placeholder="Repite la contraseña"
+                autoComplete="new-password"
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPwdOpen(false)} disabled={working}>Cancelar</Button>

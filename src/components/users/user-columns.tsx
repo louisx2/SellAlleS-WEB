@@ -35,13 +35,27 @@ export const userColumns: ColumnDef<User>[] = [
     header: 'Email',
   },
   {
+    accessorKey: 'emailConfirmedAt',
+    header: 'Verificación',
+    cell: ({ row }) => {
+      const confirmed = !!row.original.emailConfirmedAt;
+      return (
+        <Badge variant={confirmed ? 'outline' : 'destructive'} className={confirmed ? 'bg-green-500/10 text-green-500 border-green-500/20' : ''}>
+          {confirmed ? 'Verificado' : 'Pendiente'}
+        </Badge>
+      );
+    }
+  },
+  {
     accessorKey: 'role',
     header: 'Rol',
     cell: ({ row }) => {
       const role = row.getValue('role') as string;
+      const customRole = row.original.customRoles?.[0];
+      const label = role === 'admin' ? 'Administrador' : (customRole?.name ?? 'Cajero');
       return (
         <Badge variant={role === 'admin' ? 'default' : 'secondary'}>
-          {role === 'admin' ? 'Administrador' : 'Cajero'}
+          {label}
         </Badge>
       );
     },
