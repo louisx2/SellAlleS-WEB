@@ -67,6 +67,7 @@ const adminNavItems: NavItem[] = [
     { href: '/customers', icon: UsersRound, label: 'Clientes', permission: 'customers' },
     { href: '/suppliers', icon: Truck, label: 'Proveedores', module: 'suppliers', permission: 'suppliers' },
     { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', permission: 'company-profile' },
+    { href: '/settings', icon: Settings, label: 'Ajustes', permission: 'company-profile' },
     { href: '/users', icon: Users, label: 'Usuarios', permission: 'users' },
     { href: '/branches', icon: Store, label: 'Sucursales', permission: 'branches' },
     { href: '/roles', icon: Shield, label: 'Roles', permission: 'roles' },
