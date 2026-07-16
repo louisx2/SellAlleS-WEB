@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useCart } from '@/context/cart-provider';
+import { useCart, getEffectiveUnitPrice } from '@/context/cart-provider';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -412,17 +412,29 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                 <h3 className="text-lg font-semibold mb-4 text-center">Resumen del Pedido</h3>
                 <ScrollArea className="h-48 pr-4 -mr-4">
                     <div className="space-y-4">
-                    {activeCart.items.map((item) => (
-                        <div key={item.cartItemId} className="grid grid-cols-[1fr_auto] gap-x-4">
-                            <div>
-                                <p className="font-medium text-sm">{item.product.name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                    {item.quantity} x {formatCurrency(item.customPrice ?? item.product.price)}
-                                </p>
-                            </div>
-                            <p className="font-medium text-right">{formatCurrency((item.customPrice ?? item.product.price) * item.quantity)}</p>
-                        </div>
-                    ))}
+                    {activeCart.items.map((item) => {
+                        const unitPrice = getEffectiveUnitPrice(item, activeCart.selectedCustomer);
+                        const hasDiscount = unitPrice < item.product.price;
+                        const isWholesale = item.product.wholesalePrice === unitPrice;
+                        return (
+                          <div key={item.cartItemId} className="grid grid-cols-[1fr_auto] gap-x-4 items-center">
+                              <div>
+                                  <p className="font-medium text-sm">{item.product.name}</p>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                      <span className="text-xs text-muted-foreground">
+                                          {item.quantity} x {formatCurrency(unitPrice)}
+                                      </span>
+                                      {hasDiscount && (
+                                          <span className="text-[10px] bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1.5 py-0.5 rounded font-medium animate-pulse">
+                                              {isWholesale ? 'Por Mayor' : 'Descuento'}
+                                          </span>
+                                      )}
+                                  </div>
+                              </div>
+                              <p className="font-medium text-right">{formatCurrency(unitPrice * item.quantity)}</p>
+                          </div>
+                        );
+                    })}
                     </div>
                 </ScrollArea>
                 <Separator className="my-4" />
