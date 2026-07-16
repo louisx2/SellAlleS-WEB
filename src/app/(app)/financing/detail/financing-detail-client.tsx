@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useSales } from '@/context/sales-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
@@ -33,8 +33,8 @@ const INSTALLMENT_STATUS: Record<string, { label: string; variant: 'default' | '
 };
 
 export default function FinancingDetailClient() {
-  const params = useParams();
-  const saleId = params.saleId as string;
+  const searchParams = useSearchParams();
+  const saleId = searchParams.get('id') ?? '';
   const { sales } = useSales();
   const { profile } = useCompanyProfile();
   const [payments, setPayments] = useState<CreditPayment[]>([]);

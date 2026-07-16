@@ -16,7 +16,7 @@ import { useTheme } from 'next-themes';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useModules } from '@/context/modules-provider';
 import { moduleForRoute, type ModuleKey } from '@/lib/modules';
-import { hasPermission, unionPermissions } from '@/lib/permissions';
+import { hasPermission, isReportVisible, unionPermissions } from '@/lib/permissions';
 import type { PermissionResource } from '@/lib/types';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import {
@@ -29,50 +29,49 @@ interface NavItem {
   href: string;
   icon?: React.ComponentType;
   label: string;
-  roles: string[];
   module?: ModuleKey; // si falta, el item es núcleo y siempre se muestra
-  permission?: PermissionResource; // gana visibilidad extra a un rol personalizado (ej. Gerente) aunque roles no lo incluya
+  permission: PermissionResource; // visibilidad real: rol base (Administrador/Cajero) + roles personalizados adicionales
 }
 
-const dashboardNavItem: NavItem = { href: '/dashboard', icon: LayoutGrid, label: 'Dashboard', roles: ['admin', 'cashier'], permission: 'dashboard' };
+const dashboardNavItem: NavItem = { href: '/dashboard', icon: LayoutGrid, label: 'Dashboard', permission: 'dashboard' };
 
 const coreNavItems: NavItem[] = [
-  { href: '/sales', icon: History, label: 'Movimientos', roles: ['admin'], module: 'sales', permission: 'sales' },
+  { href: '/sales', icon: History, label: 'Movimientos', module: 'sales', permission: 'sales' },
 ];
 
 const featuresNavItems: NavItem[] = [
-  { href: '/pos', icon: ShoppingCart, label: 'Carrito', roles: ['admin', 'cashier'], module: 'pos', permission: 'pos' },
-  { href: '/quotes', icon: FileText, label: 'Cotizaciones', roles: ['admin', 'cashier'], module: 'quotes', permission: 'quotes' },
-  { href: '/services', icon: Wrench, label: 'Servicios', roles: ['admin', 'cashier'], module: 'services', permission: 'services' },
-  { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', roles: ['admin'], module: 'credit', permission: 'credit' },
-  { href: '/financing', icon: Landmark, label: 'Financiamientos', roles: ['admin'], module: 'financing', permission: 'financing' },
-  { href: '/prestamos', icon: HandCoins, label: 'Préstamos', roles: ['admin'], module: 'prestamos', permission: 'prestamos' },
-  { href: '/caja', icon: Coins, label: 'Caja', roles: ['admin', 'cashier'], module: 'caja', permission: 'caja' },
-  { href: '/expenses', icon: Wallet, label: 'Gastos', roles: ['admin'], module: 'expenses', permission: 'expenses' },
+  { href: '/pos', icon: ShoppingCart, label: 'Carrito', module: 'pos', permission: 'pos' },
+  { href: '/quotes', icon: FileText, label: 'Cotizaciones', module: 'quotes', permission: 'quotes' },
+  { href: '/services', icon: Wrench, label: 'Servicios', module: 'services', permission: 'services' },
+  { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', module: 'credit', permission: 'credit' },
+  { href: '/financing', icon: Landmark, label: 'Financiamientos', module: 'financing', permission: 'financing' },
+  { href: '/prestamos', icon: HandCoins, label: 'Préstamos', module: 'prestamos', permission: 'prestamos' },
+  { href: '/caja', icon: Coins, label: 'Caja', module: 'caja', permission: 'caja' },
+  { href: '/expenses', icon: Wallet, label: 'Gastos', module: 'expenses', permission: 'expenses' },
 ];
 
 const reportsNavItems = [
-    { href: '/reports/sales-summary', label: 'Resumen de Ventas', roles: ['admin']},
-    { href: '/reports/user-sales', label: 'Ventas por Usuario', roles: ['admin']},
-    { href: '/reports/top-products', label: 'Productos Más Vendidos', roles: ['admin']},
-    { href: '/reports/date-range', label: 'Ingresos por Fechas', roles: ['admin']},
-    { href: '/reports/receivables', label: 'Cuentas por Cobrar', roles: ['admin']},
-    { href: '/reports/inventory', label: 'Valorización de Inventario', roles: ['admin']},
-    { href: '/reports/taxes', label: 'Impuestos', roles: ['admin']},
+    { href: '/reports/sales-summary', label: 'Resumen de Ventas' },
+    { href: '/reports/user-sales', label: 'Ventas por Usuario' },
+    { href: '/reports/top-products', label: 'Productos Más Vendidos' },
+    { href: '/reports/date-range', label: 'Ingresos por Fechas' },
+    { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
+    { href: '/reports/inventory', label: 'Valorización de Inventario' },
+    { href: '/reports/taxes', label: 'Impuestos' },
 ];
 
 const adminNavItems: NavItem[] = [
-    { href: '/inventory', icon: Package, label: 'Inventario', roles: ['admin'], permission: 'products' },
-    { href: '/categories', icon: FolderOpen, label: 'Categorías', roles: ['admin'], permission: 'products' },
-    { href: '/locations', icon: MapPin, label: 'Ubicaciones', roles: ['admin'], permission: 'products' },
-    { href: '/customers', icon: UsersRound, label: 'Clientes', roles: ['admin'], permission: 'customers' },
-    { href: '/suppliers', icon: Truck, label: 'Proveedores', roles: ['admin'], module: 'suppliers', permission: 'suppliers' },
-    { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', roles: ['admin'], permission: 'company-profile' },
-    { href: '/users', icon: Users, label: 'Usuarios', roles: ['admin'], permission: 'users' },
-    { href: '/branches', icon: Store, label: 'Sucursales', roles: ['admin'], permission: 'branches' },
-    { href: '/roles', icon: Shield, label: 'Roles', roles: ['admin'], permission: 'roles' },
-    { href: '/service-types', icon: PenTool, label: 'Tipos de Servicio', roles: ['admin'], module: 'services', permission: 'service-types' },
-    { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', roles: ['admin'], permission: 'suscripcion' },
+    { href: '/inventory', icon: Package, label: 'Inventario', permission: 'products' },
+    { href: '/categories', icon: FolderOpen, label: 'Categorías', permission: 'products' },
+    { href: '/locations', icon: MapPin, label: 'Ubicaciones', permission: 'products' },
+    { href: '/customers', icon: UsersRound, label: 'Clientes', permission: 'customers' },
+    { href: '/suppliers', icon: Truck, label: 'Proveedores', module: 'suppliers', permission: 'suppliers' },
+    { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', permission: 'company-profile' },
+    { href: '/users', icon: Users, label: 'Usuarios', permission: 'users' },
+    { href: '/branches', icon: Store, label: 'Sucursales', permission: 'branches' },
+    { href: '/roles', icon: Shield, label: 'Roles', permission: 'roles' },
+    { href: '/service-types', icon: PenTool, label: 'Tipos de Servicio', module: 'services', permission: 'service-types' },
+    { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', permission: 'suscripcion' },
 ];
 
 export default function AppLayoutContent({ children }: { children: React.ReactNode }) {
@@ -168,18 +167,25 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const isManager = appUser?.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
   const isAdminOrManager = !isSuperAdmin && (userRole === 'admin' || isManager);
 
-  // Permisos de roles personalizados (ej. "Gerente"): dan visibilidad EXTRA
-  // sobre la que ya da el rol base (admin/cajero), nunca la quitan.
-  const effectivePermissions = unionPermissions(appUser.customRoles ?? []);
+  // Permisos reales: el rol base de sistema (Administrador/Cajero) da la
+  // visibilidad de partida, y los roles personalizados adicionales (ej.
+  // "Gerente") solo SUMAN sobre eso, nunca restan.
+  const effectivePermissions = unionPermissions([
+    { permissions: appUser.baseRolePermissions },
+    ...(appUser.customRoles ?? []),
+  ]);
   const hasExtra = (resource?: PermissionResource) => !!resource && hasPermission(effectivePermissions, resource, 'view');
 
   const moduleOk = (item: NavItem) => !item.module || isModuleEnabled(item.module);
-  const visibleDashboard = showOperationalMenus && userRole && dashboardNavItem.roles.includes(userRole);
-  const visibleCoreNavItems = coreNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && (item.roles.includes(userRole) || hasExtra(item.permission)));
-  const visibleFeaturesNavItems = featuresNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && (item.roles.includes(userRole) || hasExtra(item.permission)));
-  const visibleAdminNavItems = adminNavItems.filter(item => showOperationalMenus && moduleOk(item) && (userRole === 'admin' || hasExtra(item.permission)));
-  const canViewAdmin = showOperationalMenus && (userRole === 'admin' || visibleAdminNavItems.length > 0);
-  const canViewReports = showOperationalMenus && isModuleEnabled('reports') && (userRole === 'admin' || hasExtra('reports'));
+  const visibleDashboard = showOperationalMenus && userRole && hasExtra(dashboardNavItem.permission);
+  const visibleCoreNavItems = coreNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && hasExtra(item.permission));
+  const visibleFeaturesNavItems = featuresNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && hasExtra(item.permission));
+  const visibleAdminNavItems = adminNavItems.filter(item => showOperationalMenus && moduleOk(item) && hasExtra(item.permission));
+  const canViewAdmin = showOperationalMenus && visibleAdminNavItems.length > 0;
+  const canViewReports = showOperationalMenus && isModuleEnabled('reports') && hasExtra('reports');
+  const visibleReportsNavItems = reportsNavItems.filter(
+    (item) => isReportVisible(effectivePermissions, item.href.split('/').pop()!)
+  );
 
   // Guard de rutas: si la URL pertenece a un módulo apagado para esta
   // empresa, no se renderiza el contenido (aunque escriban la URL a mano).
@@ -191,8 +197,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   // tener el permiso, no ve el contenido igual que no ve el enlace).
   const allNavItems = [...coreNavItems, ...featuresNavItems, ...adminNavItems];
   const matchedNavItem = allNavItems.find(item => pathname === item.href || pathname.startsWith(item.href + '/'));
-  const permissionBlocked = !isSuperAdmin && !!matchedNavItem && !!userRole
-    && !(matchedNavItem.roles.includes(userRole) || hasExtra(matchedNavItem.permission));
+  const permissionBlocked = !isSuperAdmin && !!matchedNavItem && !!userRole && !hasExtra(matchedNavItem.permission);
 
   const formatRole = (role: string | null) => {
     if (role === 'admin') return 'Administrador';
@@ -501,7 +506,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </CollapsibleTrigger>
                 <CollapsibleContent className="group-data-[collapsible=icon]:hidden collapsible-content-animation">
                   <SidebarMenu className="pl-6">
-                    {reportsNavItems.map(item => (
+                    {visibleReportsNavItems.map(item => (
                       <SidebarMenuItem key={item.href}>
                         <Link href={item.href} passHref>
                           <SidebarMenuButton size="sm" className="h-8" isActive={pathname.startsWith(item.href)}>

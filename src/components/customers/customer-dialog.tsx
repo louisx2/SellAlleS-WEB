@@ -17,9 +17,10 @@ import type { Customer } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useCustomers } from '@/context/customer-provider';
 import { useAuth } from '@/context/auth-provider';
+import { formatCedulaOrRnc, formatPhone } from '@/lib/format';
 
 interface CustomerDialogProps {
   customer?: Customer;
@@ -34,15 +35,23 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
   const isEditMode = !!customer;
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [phone, setPhone] = useState(customer?.phone ?? '');
+  const [rnc, setRnc] = useState(customer?.rnc ?? '');
+
+  useEffect(() => {
+    if (!open) return;
+    setPhone(customer?.phone ?? '');
+    setRnc(customer?.rnc ?? '');
+  }, [open, customer]);
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    
-    const name = (formData.get('name') as string)?.trim();
-    const phone = (formData.get('phone') as string)?.trim();
 
-    if (!name || !phone) {
+    const name = (formData.get('name') as string)?.trim();
+    const trimmedPhone = phone.trim();
+
+    if (!name || !trimmedPhone) {
       toast({
         title: 'Campos requeridos vacíos',
         description: 'El Nombre y el Teléfono son obligatorios.',
@@ -67,9 +76,9 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
     const newCustomerData = {
       id: customer?.id ?? '',
       name: name,
-      phone: phone,
+      phone: trimmedPhone,
       email: formData.get('email') as string,
-      rnc: formData.get('rnc') as string,
+      rnc: rnc.trim(),
       address: formData.get('address') as string,
       ncfType: (formData.get('ncfType') ?? 'consumer') as 'consumer' | 'fiscal',
       birthdate: formData.get('birthdate') as string,
@@ -133,7 +142,15 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
               <Label htmlFor="phone" className="text-right">
                 Teléfono <span className="text-destructive">*</span>
               </Label>
-              <Input id="phone" name="phone" defaultValue={customer?.phone} className="col-span-3" required/>
+              <Input
+                id="phone"
+                name="phone"
+                value={phone}
+                onChange={(e) => setPhone(formatPhone(e.target.value))}
+                placeholder="809-000-0000"
+                className="col-span-3"
+                required
+              />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="email" className="text-right">
@@ -145,7 +162,14 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
               <Label htmlFor="rnc" className="text-right">
                 RNC / Cédula
               </Label>
-              <Input id="rnc" name="rnc" defaultValue={customer?.rnc} className="col-span-3" />
+              <Input
+                id="rnc"
+                name="rnc"
+                value={rnc}
+                onChange={(e) => setRnc(formatCedulaOrRnc(e.target.value))}
+                placeholder="000-0000000-0"
+                className="col-span-3"
+              />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="address" className="text-right">

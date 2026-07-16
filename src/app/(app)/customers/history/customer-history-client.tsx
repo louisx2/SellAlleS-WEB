@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useCustomers } from '@/context/customer-provider';
 import { useSales } from '@/context/sales-provider';
@@ -41,8 +41,8 @@ const COUPON_STATUS_BADGE: Record<string, { label: string; variant: 'default' | 
 };
 
 export default function CustomerHistoryClient() {
-  const params = useParams();
-  const customerId = params.customerId as string;
+  const searchParams = useSearchParams();
+  const customerId = searchParams.get('id') ?? '';
   const { customers } = useCustomers();
   const { sales } = useSales();
   const { isModuleEnabled } = useModules();
@@ -268,7 +268,7 @@ export default function CustomerHistoryClient() {
                 {customerSales.map((sale) => (
                   <TableRow key={sale.id}>
                     <TableCell>
-                      <Link href={`/sales/${sale.id}`} className="underline underline-offset-2">
+                      <Link href={`/sales/detail?id=${sale.id}`} className="underline underline-offset-2">
                         {sale.createdAt.toLocaleDateString('es-DO')}
                       </Link>
                     </TableCell>

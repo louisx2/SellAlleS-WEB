@@ -162,7 +162,7 @@ export default function CustomerStatementClient() {
                     return (
                       <TableRow key={sale.id}>
                         <TableCell>
-                          <Link href={`/financing/${sale.id}`} className="underline underline-offset-2 print:no-underline">
+                          <Link href={`/financing/detail?id=${sale.id}`} className="underline underline-offset-2 print:no-underline">
                             {new Date(sale.createdAt).toLocaleDateString('es-DO')}
                           </Link>
                         </TableCell>
@@ -219,7 +219,7 @@ export default function CustomerStatementClient() {
                       <TableCell>{METHOD_LABEL[p.method]}</TableCell>
                       <TableCell>
                         {p.saleId ? (
-                          <Link href={`/financing/${p.saleId}`} className="underline underline-offset-2 print:no-underline">
+                          <Link href={`/financing/detail?id=${p.saleId}`} className="underline underline-offset-2 print:no-underline">
                             Venta específica
                           </Link>
                         ) : (

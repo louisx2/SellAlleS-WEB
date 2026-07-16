@@ -9,9 +9,10 @@ import { Pencil, Trash2 } from 'lucide-react';
 interface RoleColumnsActions {
   onEdit: (role: Role) => void;
   onDelete: (role: Role) => void;
+  isSuperAdmin?: boolean;
 }
 
-export function getRoleColumns({ onEdit, onDelete }: RoleColumnsActions): ColumnDef<Role>[] {
+export function getRoleColumns({ onEdit, onDelete, isSuperAdmin }: RoleColumnsActions): ColumnDef<Role>[] {
   return [
     {
       accessorKey: 'name',
@@ -34,7 +35,7 @@ export function getRoleColumns({ onEdit, onDelete }: RoleColumnsActions): Column
       id: 'actions',
       cell: ({ row }) => (
         <div className="flex justify-end gap-1">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(row.original)} title={row.original.isSystem ? 'Ver permisos' : 'Editar'}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(row.original)} title={row.original.isSystem && !isSuperAdmin ? 'Ver permisos' : 'Editar'}>
             <Pencil className="h-4 w-4" />
           </Button>
           {!row.original.isSystem && (

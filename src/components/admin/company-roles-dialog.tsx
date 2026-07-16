@@ -15,7 +15,9 @@ import { RoleDialog } from '@/components/roles/role-dialog';
 import { supabase } from '@/lib/supabase/client';
 import { rowToRole } from '@/lib/supabase/mappers';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
 import type { Role } from '@/lib/types';
+import { resolveEnabledModules, type ModuleKey } from '@/lib/modules';
 import { PlusCircle } from 'lucide-react';
 
 interface CompanyRolesDialogProps {
@@ -30,8 +32,10 @@ interface CompanyRolesDialogProps {
 // (RLS de `roles` ya permite esto vía is_super_admin()).
 export function CompanyRolesDialog({ companyId, companyName, open, onOpenChange }: CompanyRolesDialogProps) {
   const { toast } = useToast();
+  const { appUser } = useAuth();
 
   const [roles, setRoles] = useState<Role[]>([]);
+  const [enabledModules, setEnabledModules] = useState<Set<ModuleKey>>(() => resolveEnabledModules([]));
   const [dialogRole, setDialogRole] = useState<Role | null>(null);
   const [roleDialogOpen, setRoleDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Role | null>(null);
@@ -48,9 +52,20 @@ export function CompanyRolesDialog({ companyId, companyName, open, onOpenChange 
     if (data) setRoles(data.map(rowToRole));
   }, [companyId]);
 
+  // useModules() está atado a la empresa del super admin, no a la empresa
+  // que se está gestionando aquí sin impersonar — se resuelve aparte.
+  const loadModules = useCallback(async () => {
+    if (!companyId) return;
+    const { data } = await supabase
+      .from('company_modules')
+      .select('module_key, enabled')
+      .eq('company_id', companyId);
+    setEnabledModules(resolveEnabledModules(data ?? []));
+  }, [companyId]);
+
   useEffect(() => {
-    if (open && companyId) load();
-  }, [open, companyId, load]);
+    if (open && companyId) { load(); loadModules(); }
+  }, [open, companyId, load, loadModules]);
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
@@ -71,6 +86,7 @@ export function CompanyRolesDialog({ companyId, companyName, open, onOpenChange 
   const columns = getRoleColumns({
     onEdit: (role) => { setDialogRole(role); setRoleDialogOpen(true); },
     onDelete: (role) => setDeleteTarget(role),
+    isSuperAdmin: appUser?.isSuperAdmin,
   });
 
   return (
@@ -99,6 +115,7 @@ export function CompanyRolesDialog({ companyId, companyName, open, onOpenChange 
         open={roleDialogOpen}
         onOpenChange={setRoleDialogOpen}
         onSaved={load}
+        isModuleEnabled={(key) => enabledModules.has(key)}
       />
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>

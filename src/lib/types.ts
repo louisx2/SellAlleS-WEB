@@ -78,6 +78,7 @@ export type User = {
   impersonatedCompanyId?: string;
   impersonatedCompanyName?: string;
   isSuperAdmin?: boolean;
+  baseRolePermissions?: RolePermissions; // Permisos del rol de sistema (Administrador/Cajero) que corresponde a `role`
   customRoles?: Role[]; // Roles adicionales asignados al usuario
   companies?: { id: string; name: string; status: 'trial' | 'active' | 'suspended'; isDemo: boolean }[];
   emailConfirmedAt?: string | null;
@@ -118,13 +119,19 @@ export type PermissionResource =
   | 'suppliers' | 'company-profile' | 'users' | 'branches' | 'roles' | 'suscripcion'
   | 'service-types';
 
+// reports_visible: slugs de src/lib/permissions.ts#REPORT_ITEMS que este rol
+// puede ver dentro de "Reportes"; ausente = todos visibles.
+export type RolePermissions = Partial<Record<PermissionResource, PermissionAction[]>> & {
+    reports_visible?: string[];
+};
+
 export type Role = {
     id: string;
     name: string;
     description: string;
     key?: string;
     isSystem?: boolean;
-    permissions?: Partial<Record<PermissionResource, PermissionAction[]>>;
+    permissions?: RolePermissions;
 };
 
 export type CartItem = {

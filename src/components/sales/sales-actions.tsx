@@ -30,7 +30,7 @@ export function SalesActions({ sale }: SalesActionsProps) {
         <DropdownMenuLabel>Acciones</DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link href={`/sales/${sale.id}`}>
+          <Link href={`/sales/detail?id=${sale.id}`}>
             <Receipt className="mr-2 h-4 w-4" />
             <span>Ver Recibo</span>
           </Link>

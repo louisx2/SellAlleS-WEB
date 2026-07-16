@@ -34,7 +34,7 @@ export function FinancingActions({ sale, canPay }: FinancingActionsProps) {
             <DropdownMenuLabel>Acciones</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-                <Link href={`/financing/${sale.id}`}>
+                <Link href={`/financing/detail?id=${sale.id}`}>
                     <FileText className="mr-2 h-4 w-4" />
                     <span>Ver detalle</span>
                 </Link>

@@ -3,8 +3,9 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
-import type { User as AppUser } from '@/lib/types';
+import type { User as AppUser, RolePermissions } from '@/lib/types';
 import { supabase, setReadOnlyMode } from '@/lib/supabase/client';
+import { DEFAULT_ADMIN_PERMISSIONS, DEFAULT_CASHIER_PERMISSIONS } from '@/lib/permissions';
 import { AppSkeleton } from '@/components/ui/app-skeleton';
 import { CreateCompanyScreen } from '@/components/auth/create-company-screen';
 import { BranchSelector } from '@/components/auth/branch-selector';
@@ -118,6 +119,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .filter(Boolean)
         .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '', permissions: r.permissions ?? {} }));
 
+      // Permisos del rol base (Administrador/Cajero) de esta empresa: son los
+      // que realmente determinan el acceso ahora (antes admin/cajero se
+      // resolvían por código, ignorando este jsonb). Si por algún motivo no
+      // aparece la fila (dato corrupto/carrera), se usa un default seguro que
+      // reproduce el mismo comportamiento en vez de dejar al usuario sin acceso.
+      let baseRolePermissions: RolePermissions | undefined;
+      if (!data.is_super_admin && data.company_id && data.role) {
+        const { data: baseRoleRow } = await supabase
+          .from('roles')
+          .select('permissions')
+          .eq('company_id', data.company_id)
+          .eq('is_system', true)
+          .eq('key', data.role)
+          .maybeSingle();
+        baseRolePermissions = baseRoleRow?.permissions
+          ?? (data.role === 'admin' ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_CASHIER_PERMISSIONS);
+      }
+
       const isManager = customRoles.some((r: any) => r.name.toLowerCase().includes('gerente'));
       const isAdminOrManager = !data.is_super_admin && (data.role === 'admin' || isManager);
 
@@ -180,6 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         impersonatedCompanyId: savedImpersonatedId || undefined,
         impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,
+        baseRolePermissions,
         customRoles: customRoles,
         companies: companyList,
         companyMaxUsers: maxUsers,

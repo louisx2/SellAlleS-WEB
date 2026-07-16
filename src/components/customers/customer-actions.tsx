@@ -44,7 +44,7 @@ export function CustomerActions({ customer }: CustomerActionsProps) {
           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem asChild>
-            <Link href={`/customers/${customer.id}`}>
+            <Link href={`/customers/history?id=${customer.id}`}>
               <History className="mr-2 h-4 w-4" />
               <span>Ver Historial</span>
             </Link>

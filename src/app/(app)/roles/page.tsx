@@ -13,12 +13,14 @@ import { RoleDialog } from '@/components/roles/role-dialog';
 import { supabase } from '@/lib/supabase/client';
 import { rowToRole } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
+import { useModules } from '@/context/modules-provider';
 import { useToast } from '@/hooks/use-toast';
 import type { Role } from '@/lib/types';
 import { PlusCircle } from 'lucide-react';
 
 export default function RolesPage() {
   const { appUser } = useAuth();
+  const { isModuleEnabled } = useModules();
   const { toast } = useToast();
   const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId || null;
 
@@ -58,6 +60,7 @@ export default function RolesPage() {
   const columns = getRoleColumns({
     onEdit: (role) => { setDialogRole(role); setDialogOpen(true); },
     onDelete: (role) => setDeleteTarget(role),
+    isSuperAdmin: appUser?.isSuperAdmin,
   });
 
   return (
@@ -77,6 +80,7 @@ export default function RolesPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         onSaved={load}
+        isModuleEnabled={isModuleEnabled}
       />
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>

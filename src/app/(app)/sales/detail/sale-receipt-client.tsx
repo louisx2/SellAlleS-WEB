@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useReactToPrint } from 'react-to-print';
 import { useSales } from '@/context/sales-provider';
 import { Button } from '@/components/ui/button';
@@ -11,8 +11,8 @@ import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card'
 import { ReceiptContent } from '@/components/pos/receipt-content';
 
 export default function SaleReceiptClient() {
-  const params = useParams();
-  const saleId = params.saleId as string;
+  const searchParams = useSearchParams();
+  const saleId = searchParams.get('id') ?? '';
   const { sales } = useSales();
   const sale = sales.find(s => s.id === saleId);
   const receiptRef = useRef(null);
