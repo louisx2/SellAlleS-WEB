@@ -35,7 +35,7 @@ export function CreditActions({ customer }: CreditActionsProps) {
             <DropdownMenuLabel>Acciones</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-                <Link href={`/credit/${customer.id}`}>
+                <Link href={`/credit/statement?id=${customer.id}`}>
                     <FileText className="mr-2 h-4 w-4" />
                     <span>Estado de cuenta</span>
                 </Link>

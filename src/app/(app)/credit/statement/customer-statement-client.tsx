@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useReactToPrint } from 'react-to-print';
 import { useCustomers } from '@/context/customer-provider';
@@ -28,8 +28,8 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
 };
 
 export default function CustomerStatementClient() {
-  const params = useParams();
-  const customerId = params.customerId as string;
+  const searchParams = useSearchParams();
+  const customerId = searchParams.get('id') ?? '';
   const { customers } = useCustomers();
   const { sales } = useSales();
   const { profile } = useCompanyProfile();
