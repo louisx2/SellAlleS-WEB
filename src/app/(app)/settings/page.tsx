@@ -7,6 +7,7 @@ import { LoanSettingsCard } from '@/components/company-profile/loan-settings-car
 import { LoyaltySettingsCard } from '@/components/company-profile/loyalty-settings-card';
 import { CajaEmailSettingsCard } from '@/components/company-profile/caja-email-settings-card';
 import { BranchSharingCard } from '@/components/company-profile/branch-sharing-card';
+import { PrintSettingsCard } from '@/components/company-profile/print-settings-card';
 import { useModules } from '@/context/modules-provider';
 
 export default function SettingsPage() {
@@ -40,6 +41,9 @@ export default function SettingsPage() {
         )}
         <div>
           <BranchSharingCard />
+        </div>
+        <div>
+          <PrintSettingsCard />
         </div>
       </div>
     </>

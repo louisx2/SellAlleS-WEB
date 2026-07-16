@@ -6,6 +6,7 @@ import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
+import { useState, useEffect } from 'react';
 
 interface ReceiptProps {
   sale: Sale;
@@ -185,6 +186,15 @@ export function ReceiptTotals({ sale }: ReceiptProps) {
 
 export function ReceiptContent({ sale }: ReceiptProps) {
   const { profile } = useCompanyProfile();
+  const [showBarcode, setShowBarcode] = useState(true);
+  const [barcodeType, setBarcodeType] = useState<'code128' | 'qr'>('code128');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setShowBarcode(localStorage.getItem('showBarcode') !== 'false');
+      setBarcodeType((localStorage.getItem('barcodeType') as any) || 'code128');
+    }
+  }, []);
 
   return (
      <div className="space-y-4">
@@ -217,7 +227,24 @@ export function ReceiptContent({ sale }: ReceiptProps) {
           {profile.socialMedia.instagram && profile.socialMedia.facebook && <span> • </span>}
           {profile.socialMedia.facebook && <span>{profile.socialMedia.facebook}</span>}
         </div>
-        <div className="text-center mt-6 pt-2 border-t border-dashed">
+        {showBarcode && (
+          <div className="flex flex-col items-center justify-center mt-6 pt-4 border-t border-dashed gap-1">
+            {barcodeType === 'code128' ? (
+              <img 
+                src={`https://bwipjs-api.metafloor.com/?bcid=code128&text=${sale.id.slice(0, 8).toUpperCase()}&scale=2&height=10`} 
+                alt="Código de barras"
+                className="h-10 w-auto mix-blend-multiply"
+              />
+            ) : (
+              <img 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${sale.id}`} 
+                alt="Código QR"
+                className="w-20 h-20"
+              />
+            )}
+          </div>
+        )}
+        <div className="text-center mt-4 pt-2 border-t border-dashed">
           <p className="text-[10px] text-muted-foreground font-mono">
             SellAlleS Web <span className="opacity-70">by SmartCore</span>
           </p>
