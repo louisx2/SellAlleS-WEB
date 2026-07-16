@@ -8,9 +8,21 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Building2, Store, Pencil, Search, Filter, UserCog } from 'lucide-react';
+import { Building2, Store, Pencil, Search, Filter, UserCog, MoreHorizontal, KeyRound, Trash2 } from 'lucide-react';
 import type { Company } from '@/lib/types';
 import type { PlatformBranch, PlatformUser } from '@/app/(app)/admin/users/page';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter
+} from '@/components/ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
+} from '@/components/ui/alert-dialog';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/hooks/use-toast';
+import { supabase } from '@/lib/supabase/client';
 
 interface PlatformUsersTableProps {
   users: PlatformUser[];
@@ -18,14 +30,23 @@ interface PlatformUsersTableProps {
   branches: PlatformBranch[];
   loading: boolean;
   onEditUser: (u: PlatformUser) => void;
+  onRefresh: () => void;
 }
 
 const ALL = 'all';
 
-export function PlatformUsersTable({ users, companies, branches, loading, onEditUser }: PlatformUsersTableProps) {
+export function PlatformUsersTable({ users, companies, branches, loading, onEditUser, onRefresh }: PlatformUsersTableProps) {
+  const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [companyFilter, setCompanyFilter] = useState<string>(ALL);
   const [branchFilter, setBranchFilter] = useState<string>(ALL);
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [working, setWorking] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<PlatformUser | null>(null);
 
   const companyName = useMemo(() => {
     const map: Record<string, string> = {};
@@ -46,6 +67,77 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
     const matchesBranch = branchFilter === ALL || u.branchId === branchFilter;
     return matchesSearch && matchesCompany && matchesBranch;
   });
+
+  const handleSetPassword = async () => {
+    if (!selectedUser) return;
+    if (newPwd.length < 8) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe tener al menos 8 caracteres.', variant: 'destructive' });
+      return;
+    }
+    if (!/[A-Z]/.test(newPwd)) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra mayúscula.', variant: 'destructive' });
+      return;
+    }
+    if (!/[a-z]/.test(newPwd)) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra minúscula.', variant: 'destructive' });
+      return;
+    }
+    if (!/\d/.test(newPwd)) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un número.', variant: 'destructive' });
+      return;
+    }
+    if (!/[@$!%*?&._\-\/#]/.test(newPwd)) {
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
+      return;
+    }
+    if (newPwd !== confirmPwd) {
+      toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas ingresadas no son iguales.', variant: 'destructive' });
+      return;
+    }
+
+    setWorking(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-user-actions', {
+        body: { action: 'set_password', userId: selectedUser.id, password: newPwd },
+      });
+      if (error) throw new Error((data as any)?.error ?? error.message);
+      if ((data as any)?.error) throw new Error((data as any).error);
+
+      toast({ title: 'Contraseña actualizada', description: `Se fijó una nueva contraseña para ${selectedUser.name}.` });
+      setPwdOpen(false);
+      setNewPwd('');
+      setConfirmPwd('');
+      
+      // Aplicar regla de recarga nativa para evitar pointer-events congelados
+      setTimeout(() => window.location.reload(), 800);
+    } catch (err: any) {
+      toast({ title: 'No se pudo cambiar', description: err?.message ?? 'Error.', variant: 'destructive' });
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedUser) return;
+    setWorking(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('admin-user-actions', {
+        body: { action: 'delete', userId: selectedUser.id },
+      });
+      if (error) throw new Error((data as any)?.error ?? error.message);
+      if ((data as any)?.error) throw new Error((data as any).error);
+
+      toast({ title: 'Usuario eliminado', description: `${selectedUser.name} fue eliminado de la plataforma.` });
+      setDeleteOpen(false);
+      
+      // Aplicar regla de recarga nativa para evitar pointer-events congelados
+      setTimeout(() => window.location.reload(), 800);
+    } catch (err: any) {
+      toast({ title: 'No se pudo eliminar', description: err?.message ?? 'Error al eliminar.', variant: 'destructive' });
+    } finally {
+      setWorking(false);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -158,14 +250,34 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right py-3">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={() => onEditUser(u)}
-                    >
-                      <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
-                    </Button>
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" className="h-8 w-8 p-0">
+                          <span className="sr-only">Abrir menú</span>
+                          <MoreHorizontal className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuLabel>Acciones</DropdownMenuLabel>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem onSelect={() => onEditUser(u)}>
+                          <Pencil className="mr-2 h-4 w-4" />
+                          <span>Editar</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => { setSelectedUser(u); setPwdOpen(true); }}>
+                          <KeyRound className="mr-2 h-4 w-4" />
+                          <span>Fijar contraseña</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          onSelect={() => { setSelectedUser(u); setDeleteOpen(true); }}
+                          className="text-destructive focus:text-destructive"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          <span>Eliminar</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </TableCell>
                 </TableRow>
               ))
@@ -173,6 +285,66 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={pwdOpen} onOpenChange={(o) => { setPwdOpen(o); if (!o) { setNewPwd(''); setConfirmPwd(''); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Fijar contraseña</DialogTitle>
+            <DialogDescription>
+              Escribe la nueva contraseña para {selectedUser?.name}. El usuario podrá entrar con ella de inmediato.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="newPwd">Nueva contraseña</Label>
+              <Input
+                id="newPwd"
+                type="password"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                placeholder="Mínimo 8 caracteres, mayúscula, especial"
+                autoComplete="new-password"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="confirmPwd">Confirmar contraseña</Label>
+              <Input
+                id="confirmPwd"
+                type="password"
+                value={confirmPwd}
+                onChange={(e) => setConfirmPwd(e.target.value)}
+                placeholder="Repite la contraseña"
+                autoComplete="new-password"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPwdOpen(false)} disabled={working}>Cancelar</Button>
+            <Button onClick={handleSetPassword} disabled={working}>{working ? 'Guardando…' : 'Guardar'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar a {selectedUser?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminará su cuenta por completo (perfil y acceso). Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={working}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleDelete(); }}
+              disabled={working}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {working ? 'Eliminando…' : 'Eliminar'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

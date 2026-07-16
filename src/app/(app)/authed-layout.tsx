@@ -555,7 +555,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
             "text-[10px] text-muted-foreground text-center mt-auto pt-2 pb-1 -mb-4 transition-opacity duration-200",
             state === 'expanded' ? 'opacity-100 delay-150' : 'opacity-0 pointer-events-none'
           )}>
-            SellAlleS Web <span className="opacity-70">by SmatCore</span>
+            SellAlleS Web <span className="opacity-70">by SmartCore</span>
           </div>
         </SidebarContent>
         <Separator />

@@ -40,7 +40,9 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
   const isControlled = controlledOpen !== undefined;
   const open = isControlled ? controlledOpen : internalOpen;
   const setOpen = (o: boolean) => { if (isControlled) onOpenChange?.(o); else setInternalOpen(o); };
-  const [role, setRole] = useState(user?.role ?? 'cashier');
+  const [role, setRole] = useState<'admin' | 'cashier' | 'manager'>(
+    user?.role === 'admin' ? 'admin' : (user?.customRoles?.some(r => r.name.toLowerCase().includes('gerente')) ? 'manager' : 'cashier')
+  );
 
   const [availableRoles, setAvailableRoles] = useState<import('@/lib/types').Role[]>([]);
   const [selectedRoles, setSelectedRoles] = useState<string[]>(
@@ -60,9 +62,12 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
 
   useEffect(() => {
     if (open && user) {
-        setSelectedRoles(user.customRoles?.map(r => r.id) ?? []);
+        const isManager = user.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
+        const managerRoleIds = user.customRoles?.filter(r => r.name.toLowerCase().includes('gerente')).map(r => r.id) ?? [];
+        
+        setSelectedRoles(user.customRoles?.map(r => r.id).filter(id => !managerRoleIds.includes(id)) ?? []);
         setSelectedBranchIds(user.branches?.map(b => b.id) ?? []);
-        setRole(user.role);
+        setRole(user.role === 'admin' ? 'admin' : (isManager ? 'manager' : 'cashier'));
     } else if (open && !user) {
         setSelectedRoles([]);
         setSelectedBranchIds([]);
@@ -121,7 +126,7 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
       name: formData.get('name') as string,
       email: formData.get('email') as string,
       branch: activeBranch.name,
-      role: role as 'admin' | 'cashier',
+      role: role as 'admin' | 'cashier' | 'manager',
       customRoles: availableRoles.filter(r => selectedRoles.includes(r.id)),
       branches: finalBranches,
     };
@@ -197,12 +202,13 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
               <Label htmlFor="role" className="text-right">
                 Rol
               </Label>
-               <Select name="role" value={role} onValueChange={(value) => setRole(value as 'admin' | 'cashier')}>
+               <Select name="role" value={role} onValueChange={(value) => setRole(value as 'admin' | 'cashier' | 'manager')}>
                 <SelectTrigger className="col-span-3">
                   <SelectValue placeholder="Selecciona un rol" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Administrador</SelectItem>
+                  <SelectItem value="manager">Gerente</SelectItem>
                   <SelectItem value="cashier">Cajero</SelectItem>
                 </SelectContent>
               </Select>
@@ -220,11 +226,11 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
                 </div>
             </div>
 
-            {availableRoles.length > 0 && (
+            {availableRoles.filter(r => !r.name.toLowerCase().includes('gerente')).length > 0 && (
                 <div className="grid grid-cols-4 items-start gap-4 pt-2">
                     <Label className="text-right mt-1">Roles Adicionales</Label>
                     <div className="col-span-3 flex flex-col gap-2">
-                        {availableRoles.map(r => (
+                        {availableRoles.filter(r => !r.name.toLowerCase().includes('gerente')).map(r => (
                             <div key={r.id} className="flex items-center space-x-2">
                                 <Checkbox 
                                   id={`role-${r.id}`} 

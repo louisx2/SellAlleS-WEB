@@ -27,7 +27,7 @@ interface PlatformUserDialogProps {
 
 export function PlatformUserDialog({ user, companies, branches, open, onOpenChange, onSaved }: PlatformUserDialogProps) {
   const { toast } = useToast();
-  const [role, setRole] = useState<'admin' | 'cashier'>('cashier');
+  const [role, setRole] = useState<'admin' | 'cashier' | 'manager'>('cashier');
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
@@ -37,8 +37,11 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
 
   useEffect(() => {
     if (!open || !user) return;
-    setRole(user.role);
-    setSelectedRoleIds(user.customRoles.map((r) => r.id));
+    const isManager = user.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
+    const managerRoleIds = user.customRoles?.filter(r => r.name.toLowerCase().includes('gerente')).map(r => r.id) ?? [];
+    
+    setRole(user.role === 'admin' ? 'admin' : (isManager ? 'manager' : 'cashier'));
+    setSelectedRoleIds(user.customRoles.map((r) => r.id).filter(id => !managerRoleIds.includes(id)));
     setSelectedBranchIds(user.branches.map((b) => b.id));
 
     // Cargar las compañías asignadas al perfil
@@ -127,21 +130,38 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
         if (pcError) throw pcError;
       }
 
+      const isManagerRole = role === 'manager';
+      const dbRole = isManagerRole ? 'cashier' : role;
+
       const { error } = await supabase
         .from('profiles')
         .update({
-          role,
+          role: dbRole,
           branch_id: activeBranchId || null,
           company_id: primaryCompanyId
         })
         .eq('id', user.id);
       if (error) throw error;
 
+      const finalRoleIds = [...selectedRoleIds];
+      if (isManagerRole && primaryCompanyId) {
+        const { data: gerenteRole } = await supabase
+          .from('roles')
+          .select('id')
+          .eq('company_id', primaryCompanyId)
+          .ilike('name', '%gerente%')
+          .maybeSingle();
+
+        if (gerenteRole && !finalRoleIds.includes(gerenteRole.id)) {
+          finalRoleIds.push(gerenteRole.id);
+        }
+      }
+
       await supabase.from('profile_roles').delete().eq('profile_id', user.id);
-      if (selectedRoleIds.length > 0) {
+      if (finalRoleIds.length > 0) {
         await supabase
           .from('profile_roles')
-          .insert(selectedRoleIds.map((roleId) => ({ profile_id: user.id, role_id: roleId })));
+          .insert(finalRoleIds.map((roleId) => ({ profile_id: user.id, role_id: roleId })));
       }
 
       // Quitar asociaciones de empresas que quedaron desmarcadas (ya con
@@ -211,10 +231,11 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
 
           <div className="grid gap-2">
             <Label>Rol</Label>
-            <Select value={role} onValueChange={(v) => setRole(v as 'admin' | 'cashier')}>
+            <Select value={role} onValueChange={(v) => setRole(v as 'admin' | 'cashier' | 'manager')}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="admin">Administrador</SelectItem>
+                <SelectItem value="manager">Gerente</SelectItem>
                 <SelectItem value="cashier">Cajero</SelectItem>
               </SelectContent>
             </Select>
@@ -247,11 +268,11 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
             )}
           </div>
 
-          {availableRoles.length > 0 && (
+          {availableRoles.filter(r => !r.name.toLowerCase().includes('gerente')).length > 0 && (
             <div className="grid gap-2 pt-1">
               <Label>Roles adicionales</Label>
               <div className="flex flex-col gap-2">
-                {availableRoles.map((r) => (
+                {availableRoles.filter(r => !r.name.toLowerCase().includes('gerente')).map((r) => (
                   <div key={r.id} className="flex items-center space-x-2">
                     <Checkbox
                       id={`platform-role-${r.id}`}

@@ -13,7 +13,7 @@ export interface PlatformUser {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'cashier';
+  role: 'admin' | 'cashier' | 'manager';
   companyId: string | null;
   branchId: string | null;
   branchName: string;
@@ -111,6 +111,7 @@ export default function PlatformUsersPage() {
         branches={branches}
         loading={loading}
         onEditUser={setEditingUser}
+        onRefresh={load}
       />
 
       <PlatformUserDialog

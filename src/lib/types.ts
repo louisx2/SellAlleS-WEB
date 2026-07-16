@@ -65,7 +65,7 @@ export type User = {
   id: string;
   name: string;
   email: string;
-  role: 'admin' | 'cashier';
+  role: 'admin' | 'cashier' | 'manager';
   branch: string; // Nombre de la sucursal activa
   activeBranchId?: string; // ID de la sucursal activa
   branches?: { id: string; name: string }[]; // Lista de sucursales a las que pertenece

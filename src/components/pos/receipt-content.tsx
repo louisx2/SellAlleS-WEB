@@ -217,9 +217,17 @@ export function ReceiptContent({ sale }: ReceiptProps) {
           {profile.socialMedia.instagram && profile.socialMedia.facebook && <span> • </span>}
           {profile.socialMedia.facebook && <span>{profile.socialMedia.facebook}</span>}
         </div>
-        <div className="text-center mt-6 pt-2 border-t border-dashed">
+        <div className="flex flex-col items-center justify-center mt-6 pt-4 border-t border-dashed gap-1">
+          <img 
+            src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${sale.id}`} 
+            alt="Código QR de la Venta"
+            className="w-24 h-24 print:w-24 print:h-24 mb-1"
+          />
+          <p className="text-[9px] text-muted-foreground font-mono">ID: {sale.id.slice(0, 8).toUpperCase()}</p>
+        </div>
+        <div className="text-center mt-4 pt-2 border-t border-dashed">
           <p className="text-[10px] text-muted-foreground font-mono">
-            SellAlleS Web <span className="opacity-70">by SmatCore</span>
+            SellAlleS Web <span className="opacity-70">by SmartCore</span>
           </p>
         </div>
     </div>

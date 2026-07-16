@@ -116,9 +116,12 @@ export function UserProvider({ children }: { children: ReactNode }) {
       if (branchData) branchId = branchData.id;
     }
 
+    const isManagerRole = updated.role === 'manager';
+    const dbRole = isManagerRole ? 'cashier' : updated.role;
+
     const updatePayload: any = {
       name: updated.name,
-      role: updated.role,
+      role: dbRole,
     };
     
     if (branchId) {
@@ -134,16 +137,33 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     // Update custom roles if provided
     if (updated.customRoles) {
+      const finalCustomRoles = [...updated.customRoles];
+
+      // Si el rol es gerente, buscar y adjuntar el rol personalizado de Gerente si no existe
+      if (isManagerRole) {
+        const { data: gerenteRole } = await supabase
+          .from('roles')
+          .select('id')
+          .eq('company_id', activeCompanyId)
+          .ilike('name', '%gerente%')
+          .maybeSingle();
+
+        if (gerenteRole && !finalCustomRoles.some(r => r.id === gerenteRole.id)) {
+          finalCustomRoles.push({ id: gerenteRole.id, name: 'Gerente', description: '' });
+        }
+      }
+
       // Borrar roles anteriores
       await supabase.from('profile_roles').delete().eq('profile_id', updated.id);
       
       // Insertar nuevos
-      if (updated.customRoles.length > 0) {
-        const insertData = updated.customRoles.map(role => ({
+      if (finalCustomRoles.length > 0) {
+        const insertData = finalCustomRoles.map(role => ({
           profile_id: updated.id,
           role_id: role.id
         }));
-        await supabase.from('profile_roles').insert(insertData);
+        const { error: prError } = await supabase.from('profile_roles').insert(insertData);
+        if (prError) throw prError;
       }
     }
 

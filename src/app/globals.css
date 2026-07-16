@@ -94,10 +94,14 @@
     background: white;
   }
   .receipt-container {
+    page: receipt;
     max-width: 76mm; /* Ajuste para impresora de 80mm */
     font-size: 10px; /* Tamaño de fuente más pequeño para tickets */
     color: black;
     padding: 1rem 0.5rem;
+  }
+  .receipt-container * {
+    color: #000000 !important;
   }
   .print-only {
     display: block;
