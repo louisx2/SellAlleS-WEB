@@ -4,7 +4,6 @@ import React, { createContext, useContext, ReactNode, useState, useEffect, useCa
 import type { User as AppUser } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/context/auth-provider';
-import { createClient } from '@supabase/supabase-js';
 
 interface UserContextType {
   users: AppUser[];
@@ -67,73 +66,40 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // Alta de empleado vía Edge Function (service_role): un signUp público +
+  // upsert desde el cliente se quedaba pegado para siempre, porque la fila
+  // barebones que deja handle_new_user() tiene company_id NULL, y la política
+  // RLS de UPDATE sobre profiles exige que la fila YA pertenezca a la empresa
+  // de quien llama — nunca se puede asignar una empresa por primera vez así.
+  // Además evitaba depender del endpoint público de signup (correo de
+  // confirmación sujeto al rate-limit de Supabase).
   const addUser = async (newUser: Omit<AppUser, 'id'>, password?: string) => {
     if (!activeCompanyId) throw new Error('No hay una empresa activa seleccionada.');
     if (!password) throw new Error('Contraseña requerida.');
 
-    // 1. Crear un cliente temporal de Supabase sin persistencia de sesión
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-    const tempClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
-
-    // 2. Registrar el usuario en auth.users
-    const { data: authData, error: authError } = await tempClient.auth.signUp({
-      email: newUser.email.trim(),
-      password: password,
-      options: { data: { name: newUser.name.trim() } }
-    });
-
-    if (authError) throw authError;
-
-    if (authData.user) {
-      // 3. Crear el perfil en public.profiles
-      let branchId = newUser.activeBranchId;
-      if (!branchId && newUser.branch) {
-        let branchQuery = supabase.from('branches').select('id').eq('name', newUser.branch);
-        if (activeCompanyId) branchQuery = branchQuery.eq('company_id', activeCompanyId);
-        const { data: branchData } = await branchQuery.single();
-        if (branchData) branchId = branchData.id;
-      }
-
-      // upsert, no insert: el trigger handle_new_user ya crea una fila
-      // barebones en profiles apenas se registra el auth.user (por eso un
-      // insert aquí siempre chocaba con "duplicate key" al añadir cualquier
-      // usuario nuevo, sin importar el rol).
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .upsert({
-          id: authData.user.id,
-          email: newUser.email.trim(),
-          name: newUser.name.trim(),
-          role: newUser.role,
-          company_id: activeCompanyId,
-          branch_id: branchId || null,
-          email_confirmed_at: authData.user.email_confirmed_at || null,
-        });
-
-      if (profileError) throw profileError;
-
-      // 4. Guardar las sucursales asignadas en profile_branches
-      if (newUser.branches && newUser.branches.length > 0) {
-        const branchInserts = newUser.branches.map(b => ({
-          profile_id: authData.user!.id,
-          branch_id: b.id,
-          company_id: activeCompanyId
-        }));
-        const { error: pbError } = await supabase.from('profile_branches').insert(branchInserts);
-        if (pbError) throw pbError;
-      }
-
-      // 5. Guardar los roles personalizados
-      if (newUser.customRoles && newUser.customRoles.length > 0) {
-        const roleInserts = newUser.customRoles.map(role => ({
-          profile_id: authData.user!.id,
-          role_id: role.id
-        }));
-        const { error: prError } = await supabase.from('profile_roles').insert(roleInserts);
-        if (prError) throw prError;
-      }
+    let branchId = newUser.activeBranchId;
+    if (!branchId && newUser.branch) {
+      let branchQuery = supabase.from('branches').select('id').eq('name', newUser.branch);
+      if (activeCompanyId) branchQuery = branchQuery.eq('company_id', activeCompanyId);
+      const { data: branchData } = await branchQuery.single();
+      if (branchData) branchId = branchData.id;
     }
+
+    const { data, error } = await supabase.functions.invoke('admin-user-actions', {
+      body: {
+        action: 'create',
+        companyId: activeCompanyId,
+        name: newUser.name.trim(),
+        email: newUser.email.trim(),
+        password,
+        role: newUser.role,
+        branchId: branchId || null,
+        branchIds: (newUser.branches ?? []).map((b) => b.id),
+        roleIds: (newUser.customRoles ?? []).map((r) => r.id),
+      },
+    });
+    if (error) throw new Error((data as any)?.error ?? error.message);
+    if ((data as any)?.error) throw new Error((data as any).error);
 
     await load();
   };

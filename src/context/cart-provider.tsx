@@ -266,6 +266,14 @@ const cartStore = create<CartStore>()(
   )
 );
 
+// Vacía todos los carritos y arranca uno nuevo en blanco. Se llama al
+// cambiar de empresa activa (login, logout, cambio de impersonación) para
+// que el carrito de una empresa nunca se filtre a otra en el mismo navegador.
+export function resetCartStore(): void {
+  const newCart = createNewCart();
+  cartStore.setState({ carts: [newCart], activeCartId: newCart.id, saleCompletionCount: 0, toast: null });
+}
+
 // Carga una cotización como carrito activo. Función a nivel de módulo para
 // poder llamarla desde páginas fuera del CartProvider (p. ej. /quotes): actúa
 // sobre el store persistido, y el POS lo lee al navegar.

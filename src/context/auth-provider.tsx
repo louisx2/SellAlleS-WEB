@@ -6,6 +6,7 @@ import type { Session } from '@supabase/supabase-js';
 import type { User as AppUser, RolePermissions } from '@/lib/types';
 import { supabase, setReadOnlyMode } from '@/lib/supabase/client';
 import { DEFAULT_ADMIN_PERMISSIONS, DEFAULT_CASHIER_PERMISSIONS } from '@/lib/permissions';
+import { resetCartStore } from '@/context/cart-provider';
 import { AppSkeleton } from '@/components/ui/app-skeleton';
 import { CreateCompanyScreen } from '@/components/auth/create-company-screen';
 import { BranchSelector } from '@/components/auth/branch-selector';
@@ -144,7 +145,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const savedBranchId = localStorage.getItem('userBranchId');
       const savedImpersonatedId = localStorage.getItem('userImpersonatedCompany');
       const savedImpersonatedName = localStorage.getItem('userImpersonatedCompanyName');
-      
+
+      // El carrito del POS vive en localStorage sin distinguir empresa: si la
+      // empresa activa cambió desde la última vez (login como otra empresa,
+      // cambio de impersonación, o sesión vieja de otra empresa en este
+      // navegador), hay que vaciarlo para que no se filtre entre empresas.
+      const effectiveCompanyId = savedImpersonatedId || data.company_id || null;
+      const lastCartCompanyId = localStorage.getItem('cartCompanyId');
+      if (effectiveCompanyId && effectiveCompanyId !== lastCartCompanyId) {
+        resetCartStore();
+        localStorage.setItem('cartCompanyId', effectiveCompanyId);
+      } else if (!effectiveCompanyId && lastCartCompanyId) {
+        localStorage.removeItem('cartCompanyId');
+      }
+
       let activeBranch = branchList.length > 0 ? branchList[0] : { id: '', name: '' };
       let requireSelection = false;
 
@@ -378,6 +392,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = async () => {
     await supabase.auth.signOut();
     clearLocal();
+    resetCartStore();
+    localStorage.removeItem('cartCompanyId');
     localStorage.removeItem('keepSession');
     sessionStorage.removeItem('tabSession');
     sessionStorage.removeItem('branchSelectedThisSession');
