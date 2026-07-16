@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   Building2, Store, Pencil, Boxes, LogIn, ChevronDown, ChevronRight, Search, Filter,
-  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt,
+  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt, Shield,
 } from 'lucide-react';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, type BusinessType } from '@/lib/business-types';
@@ -40,6 +40,7 @@ interface CompaniesDataTableProps {
   onAddBranch?: (c: Company) => void;
   onManageUsers?: (c: Company) => void;
   onManagePayments?: (c: Company) => void;
+  onManageRoles?: (c: Company) => void;
   onToggleBranchStatus?: (b: { id: string; name: string; isActive: boolean }) => void;
   getPlanName: (companyId: string) => string;
 }
@@ -63,6 +64,7 @@ export function CompaniesDataTable({
   onAddBranch,
   onManageUsers,
   onManagePayments,
+  onManageRoles,
   onToggleBranchStatus,
   getPlanName,
 }: CompaniesDataTableProps) {
@@ -328,6 +330,11 @@ export function CompaniesDataTable({
                             {onManagePayments && (
                               <DropdownMenuItem onClick={() => onManagePayments(c)}>
                                 <Receipt className="mr-2 h-4 w-4" /> Pagos de suscripción
+                              </DropdownMenuItem>
+                            )}
+                            {onManageRoles && (
+                              <DropdownMenuItem onClick={() => onManageRoles(c)}>
+                                <Shield className="mr-2 h-4 w-4" /> Gestionar roles
                               </DropdownMenuItem>
                             )}
                             {onToggleStatus && (

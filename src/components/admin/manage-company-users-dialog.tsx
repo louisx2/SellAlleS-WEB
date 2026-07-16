@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -20,7 +22,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
-import { PlusCircle, Trash2, ShieldCheck } from 'lucide-react';
+import { PlusCircle, Trash2, ShieldCheck, Shield } from 'lucide-react';
 
 interface CompanyUser {
   id: string;
@@ -29,7 +31,10 @@ interface CompanyUser {
   role: 'admin' | 'cashier';
   isSuperAdmin: boolean;
   branchId: string | null;
+  roleIds: string[];
 }
+
+interface RoleOption { id: string; name: string; }
 
 interface BranchOption { id: string; name: string; }
 
@@ -52,6 +57,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
 
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({});
   const [deleteTarget, setDeleteTarget] = useState<CompanyUser | null>(null);
@@ -63,15 +69,18 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const [{ data: profs }, { data: bs }] = await Promise.all([
-      supabase.from('profiles').select('id, name, email, role, is_super_admin, branch_id').eq('company_id', companyId).order('name'),
+    const [{ data: profs }, { data: bs }, { data: rls }] = await Promise.all([
+      supabase.from('profiles').select('id, name, email, role, is_super_admin, branch_id, profile_roles(role_id)').eq('company_id', companyId).order('name'),
       supabase.from('branches').select('id, name').eq('company_id', companyId).order('name'),
+      supabase.from('roles').select('id, name').eq('company_id', companyId).eq('is_system', false).order('name'),
     ]);
     setUsers((profs ?? []).map((p: any) => ({
       id: p.id, name: p.name ?? 'Usuario', email: p.email ?? '',
       role: p.role, isSuperAdmin: p.is_super_admin === true, branchId: p.branch_id,
+      roleIds: (p.profile_roles ?? []).map((pr: any) => pr.role_id),
     })));
     setBranches((bs ?? []).map((b: any) => ({ id: b.id, name: b.name })));
+    setRoles((rls ?? []).map((r: any) => ({ id: r.id, name: r.name })));
     setLoading(false);
   }, [companyId]);
 
@@ -108,6 +117,23 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       toast({ title: 'Rol actualizado' });
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo cambiar el rol.', variant: 'destructive' });
+    } finally {
+      setBusy(user.id, false);
+    }
+  };
+
+  const handleToggleRole = async (user: CompanyUser, roleId: string, checked: boolean) => {
+    const nextRoleIds = checked ? [...user.roleIds, roleId] : user.roleIds.filter((id) => id !== roleId);
+    setBusy(user.id, true);
+    try {
+      await supabase.from('profile_roles').delete().eq('profile_id', user.id);
+      if (nextRoleIds.length > 0) {
+        const { error } = await supabase.from('profile_roles').insert(nextRoleIds.map((roleId) => ({ profile_id: user.id, role_id: roleId })));
+        if (error) throw error;
+      }
+      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, roleIds: nextRoleIds } : u)));
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message ?? 'No se pudo actualizar el rol.', variant: 'destructive' });
     } finally {
       setBusy(user.id, false);
     }
@@ -253,14 +279,15 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                   <TableHead>Usuario</TableHead>
                   <TableHead>Rol</TableHead>
                   <TableHead>Sucursal</TableHead>
+                  <TableHead>Roles adicionales</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Cargando…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Cargando…</TableCell></TableRow>
                 ) : users.length === 0 ? (
-                  <TableRow><TableCell colSpan={4} className="text-center py-8 text-muted-foreground">Sin usuarios todavía.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Sin usuarios todavía.</TableCell></TableRow>
                 ) : (
                   users.map((u) => (
                     <TableRow key={u.id}>
@@ -288,6 +315,42 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                             {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
+                      </TableCell>
+                      <TableCell>
+                        {u.isSuperAdmin ? (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        ) : (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button variant="outline" size="sm" className="h-8 text-xs" disabled={rowBusy[u.id]}>
+                                <Shield className="mr-1.5 h-3.5 w-3.5" />
+                                {u.roleIds.length > 0 ? `${u.roleIds.length} rol(es)` : 'Sin roles'}
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-56" align="start">
+                              {roles.length === 0 ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Esta empresa no tiene roles personalizados. Créalos desde "Gestionar roles".
+                                </p>
+                              ) : (
+                                <div className="flex flex-col gap-2">
+                                  {roles.map((r) => (
+                                    <div key={r.id} className="flex items-center space-x-2">
+                                      <Checkbox
+                                        id={`mcu-role-${u.id}-${r.id}`}
+                                        checked={u.roleIds.includes(r.id)}
+                                        onCheckedChange={(c) => handleToggleRole(u, r.id, !!c)}
+                                      />
+                                      <Label htmlFor={`mcu-role-${u.id}-${r.id}`} className="font-normal cursor-pointer text-sm">
+                                        {r.name}
+                                      </Label>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </PopoverContent>
+                          </Popover>
+                        )}
                       </TableCell>
                       <TableCell className="text-right">
                         <Button

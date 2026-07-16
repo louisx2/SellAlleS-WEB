@@ -26,6 +26,7 @@ import { CompaniesDataTable } from '@/components/admin/companies-data-table';
 import { DeleteConfirmDialog } from '@/components/admin/delete-confirm-dialog';
 import { ManageCompanyUsersDialog } from '@/components/admin/manage-company-users-dialog';
 import { SubscriptionPaymentsDialog } from '@/components/admin/subscription-payments-dialog';
+import { CompanyRolesDialog } from '@/components/admin/company-roles-dialog';
 import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
@@ -87,6 +88,7 @@ export default function CompaniesManagementPage() {
   const [newBranchLocation, setNewBranchLocation] = useState('');
   const [manageUsersFor, setManageUsersFor] = useState<Company | null>(null);
   const [paymentsFor, setPaymentsFor] = useState<Company | null>(null);
+  const [rolesFor, setRolesFor] = useState<Company | null>(null);
   const [branchStatusTarget, setBranchStatusTarget] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
   // Compartir entre sucursales (por módulo). Default OFF: cada sucursal aislada.
   const [sharing, setSharing] = useState({ clientes: false, credito: false, financiamiento: false, prestamos: false });
@@ -622,6 +624,7 @@ export default function CompaniesManagementPage() {
         onAddBranch={(c) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); }}
         onManageUsers={setManageUsersFor}
         onManagePayments={setPaymentsFor}
+        onManageRoles={setRolesFor}
         onToggleBranchStatus={setBranchStatusTarget}
         getPlanName={getPlanName}
       />
@@ -632,6 +635,13 @@ export default function CompaniesManagementPage() {
         planRates={paymentsFor ? getPlanRates(paymentsFor.id) : undefined}
         onOpenChange={(o) => { if (!o) setPaymentsFor(null); }}
         onRecorded={load}
+      />
+
+      <CompanyRolesDialog
+        companyId={rolesFor?.id ?? null}
+        companyName={rolesFor?.name ?? ''}
+        open={rolesFor !== null}
+        onOpenChange={(o) => { if (!o) setRolesFor(null); }}
       />
 
       <Dialog open={open} onOpenChange={setOpen}>

@@ -54,18 +54,6 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
         }
       });
 
-    if (user.companyId) {
-      supabase
-        .from('roles')
-        .select('id, name, description')
-        .eq('company_id', user.companyId)
-        .order('name')
-        .then(({ data }) => {
-          if (data) setAvailableRoles(data.map((r) => ({ id: r.id, name: r.name, description: r.description ?? '' })));
-        });
-    } else {
-      setAvailableRoles([]);
-    }
   }, [open, user]);
 
   // Las sucursales disponibles reaccionan a la empresa principal actualmente
@@ -74,6 +62,23 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
   // sucursales del checklist deben ser las de esa empresa.
   const effectivePrimaryCompanyId = selectedCompanyIds.length > 0 ? selectedCompanyIds[0] : (user?.companyId ?? null);
   const companyBranches = branches.filter((b) => b.companyId === effectivePrimaryCompanyId);
+
+  // Los roles personalizados disponibles también reaccionan a la empresa
+  // principal seleccionada (no a la empresa original del perfil), y excluyen
+  // los roles de sistema (Administrador/Cajero: esos ya los representa el
+  // selector "Rol" de arriba, no tiene sentido marcarlos como "adicionales").
+  useEffect(() => {
+    if (!open || !effectivePrimaryCompanyId) { setAvailableRoles([]); return; }
+    supabase
+      .from('roles')
+      .select('id, name, description')
+      .eq('company_id', effectivePrimaryCompanyId)
+      .eq('is_system', false)
+      .order('name')
+      .then(({ data }) => {
+        if (data) setAvailableRoles(data.map((r) => ({ id: r.id, name: r.name, description: r.description ?? '' })));
+      });
+  }, [open, effectivePrimaryCompanyId]);
 
   const handleResendConfirm = async () => {
     if (!user) return;
