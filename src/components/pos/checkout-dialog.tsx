@@ -233,7 +233,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid md:grid-cols-2 gap-8 overflow-hidden py-4">
+        <div className="grid md:grid-cols-2 gap-8 md:overflow-hidden overflow-y-auto py-4">
             <ScrollArea className='pr-4 -mr-4'>
             <div className="flex flex-col gap-6">
                 <div>
