@@ -156,11 +156,12 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   }
   const { role: userRole, name: userName, branch: userBranch } = appUser;
   const isSuperAdmin = appUser.isSuperAdmin;
+  const hasMultipleCompanies = !!(appUser.companies && appUser.companies.length > 1);
   const isImpersonating = !!appUser.impersonatedCompanyId;
   const isDemoCompany = !!appUser.companyDemoExpiresAt;
   const isReadOnly = !!appUser.isReadOnly;
   const hasTopBanner = isImpersonating || isDemoCompany || isReadOnly;
-  const showOperationalMenus = !isSuperAdmin || isImpersonating;
+  const showOperationalMenus = (!isSuperAdmin && !hasMultipleCompanies) || isImpersonating;
   const isManager = appUser?.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
   const isAdminOrManager = !isSuperAdmin && (userRole === 'admin' || isManager);
 
@@ -185,22 +186,30 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   
   const isPosPage = pathname === '/pos';
 
-  const logoLink = isSuperAdmin && !isImpersonating ? '/admin/companies' : '/dashboard';
-  const logoName = isSuperAdmin && !isImpersonating ? 'Plataforma SellAlleS' : (profile?.name || 'SellAlleS');
-  const logoImgUrl = isSuperAdmin && !isImpersonating ? null : profile?.logoUrl;
+  const logoLink = isSuperAdmin && !isImpersonating 
+    ? '/admin/companies' 
+    : (hasMultipleCompanies && !isImpersonating ? '/admin/empresas' : '/dashboard');
+  const logoName = isSuperAdmin && !isImpersonating 
+    ? 'Plataforma SellAlleS' 
+    : (hasMultipleCompanies && !isImpersonating ? 'Mis Empresas' : (profile?.name || 'SellAlleS'));
+  const logoImgUrl = (isSuperAdmin && !isImpersonating) || (hasMultipleCompanies && !isImpersonating) ? null : profile?.logoUrl;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {isImpersonating && (
         <div className="fixed top-0 z-50 w-full bg-indigo-600 text-white px-4 py-1.5 text-xs flex items-center justify-center gap-4 font-medium shadow-md">
           <span>
-            ⚠️ Modo Soporte: Estás operando como Super Administrador en <strong>{appUser.impersonatedCompanyName}</strong>
+            {isSuperAdmin ? (
+              <>⚠️ Modo Soporte: Estás operando como Super Administrador en <strong>{appUser.impersonatedCompanyName}</strong></>
+            ) : (
+              <>Estás operando en la empresa <strong>{appUser.impersonatedCompanyName}</strong></>
+            )}
           </span>
           <button
             onClick={() => setImpersonatedCompany(null, null)}
-            className="bg-white text-indigo-600 px-3 py-0.5 rounded-full hover:bg-indigo-50 transition-colors"
+            className="bg-white text-indigo-600 px-3 py-0.5 rounded-full hover:bg-indigo-50 transition-colors font-bold"
           >
-            Volver a Plataforma
+            {isSuperAdmin ? 'Volver a Plataforma' : 'Cambiar Empresa'}
           </button>
         </div>
       )}
@@ -353,8 +362,14 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                     )
                   )}
                 </DropdownMenuGroup>
+                {((isSuperAdmin && isImpersonating) || (!isSuperAdmin && hasMultipleCompanies && isImpersonating)) && (
+                  <DropdownMenuItem onSelect={() => setImpersonatedCompany(null, null)} className="cursor-pointer">
+                    <Building2 className="mr-2 h-4 w-4 text-indigo-500" />
+                    <span>Cambiar Empresa</span>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={() => setTimeout(() => setShowLogoutConfirm(true), 50)} className="cursor-pointer">
+                <DropdownMenuItem onSelect={() => setTimeout(() => setShowLogoutConfirm(true), 55)} className="cursor-pointer">
                     <LogOut className="mr-2 h-4 w-4" />
                     <span>Cerrar Sesión</span>
                 </DropdownMenuItem>
@@ -385,12 +400,14 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-            {isSuperAdmin && (
+             {(isSuperAdmin || hasMultipleCompanies) && (
               <SidebarMenuItem>
                 <Link href="/admin/empresas" passHref>
-                  <SidebarMenuButton isActive={pathname.startsWith('/admin/empresas')} tooltip="Empresas">
+                  <SidebarMenuButton isActive={pathname.startsWith('/admin/empresas')} tooltip={isSuperAdmin ? "Empresas" : "Mis Empresas"}>
                     <Building2 />
-                    <span className="group-data-[collapsible=icon]:hidden">Empresas</span>
+                    <span className="group-data-[collapsible=icon]:hidden">
+                      {isSuperAdmin ? "Empresas" : "Mis Empresas"}
+                    </span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>

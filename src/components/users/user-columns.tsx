@@ -35,6 +35,18 @@ export const userColumns: ColumnDef<User>[] = [
     header: 'Email',
   },
   {
+    accessorKey: 'emailConfirmedAt',
+    header: 'Verificación',
+    cell: ({ row }) => {
+      const confirmed = !!row.original.emailConfirmedAt;
+      return (
+        <Badge variant={confirmed ? 'outline' : 'destructive'} className={confirmed ? 'bg-green-500/10 text-green-500 border-green-500/20' : ''}>
+          {confirmed ? 'Verificado' : 'Pendiente'}
+        </Badge>
+      );
+    }
+  },
+  {
     accessorKey: 'role',
     header: 'Rol',
     cell: ({ row }) => {

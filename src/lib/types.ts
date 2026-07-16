@@ -79,6 +79,9 @@ export type User = {
   impersonatedCompanyName?: string;
   isSuperAdmin?: boolean;
   customRoles?: Role[]; // Roles adicionales asignados al usuario
+  companies?: { id: string; name: string; status: 'trial' | 'active' | 'suspended'; isDemo: boolean }[];
+  emailConfirmedAt?: string | null;
+  companyMaxUsers?: number | null;
 };
 
 export type Branch = {
@@ -100,6 +103,9 @@ export type Company = {
   trial_ends_at?: string | null;
   paid_until?: string | null;
   created_at: string;
+  is_demo: boolean;
+  business_type?: string | null;
+  max_users?: number;
   branches?: { id: string; name: string; location: string | null; is_active: boolean }[];
 };
 

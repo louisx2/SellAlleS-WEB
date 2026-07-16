@@ -4,6 +4,7 @@ import React, { createContext, useContext, ReactNode, useState, useEffect, useCa
 import type { User as AppUser } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/context/auth-provider';
+import { createClient } from '@supabase/supabase-js';
 
 interface UserContextType {
   users: AppUser[];
@@ -29,22 +30,36 @@ export function UserProvider({ children }: { children: ReactNode }) {
     if (!activeCompanyId) { setUsers([]); setLoading(false); return; }
     const { data, error } = await supabase
       .from('profiles')
-      // Desambiguado: profiles↔branches tiene dos relaciones (branch_id y profile_branches).
-      .select('id, name, email, role, is_super_admin, branches!profiles_branch_id_fkey(name), profile_roles(roles(id, name, description))')
+      .select(`
+        id, name, email, role, is_super_admin, branch_id, email_confirmed_at,
+        branches!profiles_branch_id_fkey(id, name),
+        profile_roles(roles(id, name, description)),
+        profile_branches(branches(id, name, is_active))
+      `)
       .eq('company_id', activeCompanyId);
     if (!error && data) {
       setUsers(
-        data.map((d: any) => ({
-          id: d.id,
-          name: d.name ?? 'Usuario',
-          email: d.email ?? '',
-          role: d.is_super_admin ? 'admin' : d.role,
-          branch: Array.isArray(d.branches) ? d.branches[0]?.name ?? '' : d.branches?.name ?? '',
-          customRoles: (d.profile_roles ?? [])
-            .map((pr: any) => pr.roles)
+        data.map((d: any) => {
+          const assignedBranches = (d.profile_branches ?? [])
+            .map((pb: any) => pb.branches)
             .filter(Boolean)
-            .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '' }))
-        }))
+            .map((b: any) => ({ id: b.id, name: b.name }));
+
+          return {
+            id: d.id,
+            name: d.name ?? 'Usuario',
+            email: d.email ?? '',
+            role: d.is_super_admin ? 'admin' : d.role,
+            branch: d.branches?.name ?? '',
+            activeBranchId: d.branch_id,
+            branches: assignedBranches,
+            customRoles: (d.profile_roles ?? [])
+              .map((pr: any) => pr.roles)
+              .filter(Boolean)
+              .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '' })),
+            emailConfirmedAt: d.email_confirmed_at
+          };
+        })
       );
     }
     setLoading(false);
@@ -52,10 +67,71 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { load(); }, [load]);
 
-  // La creación de usuarios con contraseña se hará vía invitaciones de Supabase
-  // (Auth Admin API) en una fase posterior; no se puede crear desde el cliente.
-  const addUser = async (_user: Omit<AppUser, 'id'>, _password?: string) => {
-    throw new Error('La creación de usuarios se implementará con invitaciones de Supabase.');
+  const addUser = async (newUser: Omit<AppUser, 'id'>, password?: string) => {
+    if (!activeCompanyId) throw new Error('No hay una empresa activa seleccionada.');
+    if (!password) throw new Error('Contraseña requerida.');
+
+    // 1. Crear un cliente temporal de Supabase sin persistencia de sesión
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+    const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+    const tempClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
+
+    // 2. Registrar el usuario en auth.users
+    const { data: authData, error: authError } = await tempClient.auth.signUp({
+      email: newUser.email.trim(),
+      password: password,
+      options: { data: { name: newUser.name.trim() } }
+    });
+
+    if (authError) throw authError;
+
+    if (authData.user) {
+      // 3. Crear el perfil en public.profiles
+      let branchId = newUser.activeBranchId;
+      if (!branchId && newUser.branch) {
+        let branchQuery = supabase.from('branches').select('id').eq('name', newUser.branch);
+        if (activeCompanyId) branchQuery = branchQuery.eq('company_id', activeCompanyId);
+        const { data: branchData } = await branchQuery.single();
+        if (branchData) branchId = branchData.id;
+      }
+
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({
+          id: authData.user.id,
+          email: newUser.email.trim(),
+          name: newUser.name.trim(),
+          role: newUser.role,
+          company_id: activeCompanyId,
+          branch_id: branchId || null,
+          email_confirmed_at: authData.user.email_confirmed_at || null,
+        });
+
+      if (profileError) throw profileError;
+
+      // 4. Guardar las sucursales asignadas en profile_branches
+      if (newUser.branches && newUser.branches.length > 0) {
+        const branchInserts = newUser.branches.map(b => ({
+          profile_id: authData.user!.id,
+          branch_id: b.id,
+          company_id: activeCompanyId
+        }));
+        const { error: pbError } = await supabase.from('profile_branches').insert(branchInserts);
+        if (pbError) throw pbError;
+      }
+
+      // 5. Guardar los roles personalizados
+      if (newUser.customRoles && newUser.customRoles.length > 0) {
+        const roleInserts = newUser.customRoles.map(role => ({
+          profile_id: authData.user!.id,
+          role_id: role.id
+        }));
+        const { error: prError } = await supabase.from('profile_roles').insert(roleInserts);
+        if (prError) throw prError;
+      }
+    }
+
+    await load();
   };
 
   const updateUser = async (updated: AppUser) => {
@@ -98,6 +174,22 @@ export function UserProvider({ children }: { children: ReactNode }) {
           role_id: role.id
         }));
         await supabase.from('profile_roles').insert(insertData);
+      }
+    }
+
+    // Update profile branches if provided
+    if (updated.branches) {
+      // Borrar sucursales anteriores
+      await supabase.from('profile_branches').delete().eq('profile_id', updated.id);
+
+      // Insertar nuevas
+      if (updated.branches.length > 0) {
+        const insertData = updated.branches.map(b => ({
+          profile_id: updated.id,
+          branch_id: b.id,
+          company_id: activeCompanyId
+        }));
+        await supabase.from('profile_branches').insert(insertData);
       }
     }
 

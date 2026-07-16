@@ -17,6 +17,14 @@ import {
   Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt,
 } from 'lucide-react';
 import type { Company } from '@/lib/types';
+import { BUSINESS_TYPE_PRESETS, type BusinessType } from '@/lib/business-types';
+import { useAuth } from '@/context/auth-provider';
+
+const getSectorLabel = (type: string | null | undefined): string => {
+  if (!type) return 'No especificado';
+  const preset = BUSINESS_TYPE_PRESETS[type as BusinessType];
+  return preset ? preset.label : type;
+};
 
 interface CompaniesDataTableProps {
   companies: Company[];
@@ -58,19 +66,29 @@ export function CompaniesDataTable({
   onToggleBranchStatus,
   getPlanName,
 }: CompaniesDataTableProps) {
+  const { appUser } = useAuth();
   const [expandedCompanies, setExpandedCompanies] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'real' | 'demo'>('all');
 
   const toggleCompany = (id: string) => {
     setExpandedCompanies(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
   const filteredCompanies = companies.filter(c => {
+    const planName = getPlanName(c.id).toLowerCase();
+    const sectorLabel = getSectorLabel(c.business_type).toLowerCase();
     const matchesSearch = c.name.toLowerCase().includes(search.toLowerCase()) ||
-                          (c.rnc && c.rnc.toLowerCase().includes(search.toLowerCase()));
+                          (c.rnc && c.rnc.toLowerCase().includes(search.toLowerCase())) ||
+                          (c.phone && c.phone.toLowerCase().includes(search.toLowerCase())) ||
+                          sectorLabel.includes(search.toLowerCase()) ||
+                          planName.includes(search.toLowerCase());
     const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
-    return matchesSearch && matchesStatus;
+    const matchesType = typeFilter === 'all' || 
+                        (typeFilter === 'real' && !c.is_demo) || 
+                        (typeFilter === 'demo' && c.is_demo);
+    return matchesSearch && matchesStatus && matchesType;
   });
 
   return (
@@ -85,10 +103,21 @@ export function CompaniesDataTable({
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <Filter className="h-4 w-4 text-muted-foreground hidden sm:block" />
+          <Select value={typeFilter} onValueChange={(v: any) => setTypeFilter(v)}>
+            <SelectTrigger className="w-full sm:w-[150px] bg-muted/50 border-transparent focus:bg-background">
+              <SelectValue placeholder="Tipo" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los tipos</SelectItem>
+              <SelectItem value="real">Solo Reales</SelectItem>
+              <SelectItem value="demo">Solo Demos</SelectItem>
+            </SelectContent>
+          </Select>
+
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-[180px] bg-muted/50 border-transparent focus:bg-background">
+            <SelectTrigger className="w-full sm:w-[150px] bg-muted/50 border-transparent focus:bg-background">
               <SelectValue placeholder="Estado" />
             </SelectTrigger>
             <SelectContent>
@@ -134,7 +163,19 @@ export function CompaniesDataTable({
                       <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-primary/10 text-primary flex-shrink-0">
                         <Building2 className="h-4 w-4" />
                       </div>
-                      <span className="text-base">{c.name}</span>
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base font-semibold">{c.name}</span>
+                          {c.is_demo && (
+                            <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/20 text-[10px] py-0 px-1.5 h-5 font-bold uppercase tracking-wider">
+                              Demo
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-muted-foreground font-normal">
+                          Sector: {getSectorLabel(c.business_type)}
+                        </span>
+                      </div>
                     </div>
 
                     {expandedCompanies.includes(c.id) && (
@@ -160,46 +201,48 @@ export function CompaniesDataTable({
                                 >
                                   <LogIn className="mr-1 h-3 w-3" /> Entrar
                                 </Button>
-                                <DropdownMenu modal={false}>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
-                                      <MoreHorizontal className="h-3.5 w-3.5" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                                    <DropdownMenuItem onClick={() => onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id })}>
-                                      <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
-                                    </DropdownMenuItem>
-                                    {onManageUsers && (
-                                      <DropdownMenuItem onClick={() => onManageUsers(c)}>
-                                        <Users className="mr-2 h-3.5 w-3.5" /> Gestionar usuarios
+                                {appUser?.isSuperAdmin && (
+                                  <DropdownMenu modal={false}>
+                                    <DropdownMenuTrigger asChild>
+                                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
+                                        <MoreHorizontal className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                                      <DropdownMenuItem onClick={() => onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id })}>
+                                        <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
                                       </DropdownMenuItem>
-                                    )}
-                                    <DropdownMenuItem onClick={() => onModulesCompany(c)}>
-                                      <Boxes className="mr-2 h-3.5 w-3.5" /> Módulos
-                                    </DropdownMenuItem>
-                                    {onToggleBranchStatus && (
-                                      <DropdownMenuItem onClick={() => onToggleBranchStatus({ id: b.id, name: b.name, isActive: b.is_active })}>
-                                        {b.is_active ? (
-                                          <><Ban className="mr-2 h-3.5 w-3.5" /> Desactivar sucursal</>
-                                        ) : (
-                                          <><Power className="mr-2 h-3.5 w-3.5" /> Reactivar sucursal</>
-                                        )}
-                                      </DropdownMenuItem>
-                                    )}
-                                    {onDeleteBranch && (
-                                      <>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem
-                                          className="text-destructive focus:text-destructive"
-                                          onClick={() => onDeleteBranch({ id: b.id, name: b.name, companyId: c.id })}
-                                        >
-                                          <Trash2 className="mr-2 h-3.5 w-3.5" /> Eliminar sucursal
+                                      {onManageUsers && (
+                                        <DropdownMenuItem onClick={() => onManageUsers(c)}>
+                                          <Users className="mr-2 h-3.5 w-3.5" /> Gestionar usuarios
                                         </DropdownMenuItem>
-                                      </>
-                                    )}
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
+                                      )}
+                                      <DropdownMenuItem onClick={() => onModulesCompany(c)}>
+                                        <Boxes className="mr-2 h-3.5 w-3.5" /> Módulos
+                                      </DropdownMenuItem>
+                                      {onToggleBranchStatus && (
+                                        <DropdownMenuItem onClick={() => onToggleBranchStatus({ id: b.id, name: b.name, isActive: b.is_active })}>
+                                          {b.is_active ? (
+                                            <><Ban className="mr-2 h-3.5 w-3.5 text-destructive" /> Desactivar sucursal</>
+                                          ) : (
+                                            <><Power className="mr-2 h-3.5 w-3.5 text-emerald-600" /> Reactivar sucursal</>
+                                          )}
+                                        </DropdownMenuItem>
+                                      )}
+                                      {onDeleteBranch && (
+                                        <>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem
+                                            className="text-destructive focus:text-destructive"
+                                            onClick={() => onDeleteBranch({ id: b.id, name: b.name, companyId: c.id })}
+                                          >
+                                            <Trash2 className="mr-2 h-3.5 w-3.5" /> Eliminar sucursal
+                                          </DropdownMenuItem>
+                                        </>
+                                      )}
+                                    </DropdownMenuContent>
+                                  </DropdownMenu>
+                                )}
                               </div>
                             </div>
                           ))
@@ -256,57 +299,59 @@ export function CompaniesDataTable({
                       <Button variant="default" size="sm" className="h-8" onClick={() => onEnterCompany(c)}>
                         <LogIn className="mr-2 h-4 w-4" /> Entrar
                       </Button>
-                      <DropdownMenu modal={false}>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="outline" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuLabel>{c.name}</DropdownMenuLabel>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onClick={() => onEditCompany(c)}>
-                            <Pencil className="mr-2 h-4 w-4" /> Editar empresa
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => onModulesCompany(c)}>
-                            <Boxes className="mr-2 h-4 w-4" /> Módulos
-                          </DropdownMenuItem>
-                          {onAddBranch && (
-                            <DropdownMenuItem onClick={() => onAddBranch(c)}>
-                              <PlusCircle className="mr-2 h-4 w-4" /> Agregar sucursal
+                      {appUser?.isSuperAdmin && (
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="icon" className="h-8 w-8">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>{c.name}</DropdownMenuLabel>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => onEditCompany(c)}>
+                              <Pencil className="mr-2 h-4 w-4" /> Editar empresa
                             </DropdownMenuItem>
-                          )}
-                          {onManageUsers && (
-                            <DropdownMenuItem onClick={() => onManageUsers(c)}>
-                              <Users className="mr-2 h-4 w-4" /> Gestionar usuarios
+                            <DropdownMenuItem onClick={() => onModulesCompany(c)}>
+                              <Boxes className="mr-2 h-4 w-4" /> Módulos
                             </DropdownMenuItem>
-                          )}
-                          {onManagePayments && (
-                            <DropdownMenuItem onClick={() => onManagePayments(c)}>
-                              <Receipt className="mr-2 h-4 w-4" /> Pagos de suscripción
-                            </DropdownMenuItem>
-                          )}
-                          {onToggleStatus && (
-                            <>
-                              <DropdownMenuSeparator />
-                              {c.status === 'suspended' ? (
-                                <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-emerald-600 focus:text-emerald-700">
-                                  <Power className="mr-2 h-4 w-4" /> Reactivar empresa
-                                </DropdownMenuItem>
-                              ) : (
-                                <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-destructive focus:text-destructive">
-                                  <Ban className="mr-2 h-4 w-4" /> Desactivar empresa
-                                </DropdownMenuItem>
-                              )}
-                            </>
-                          )}
-                          {onDeleteCompany && (
-                            <DropdownMenuItem onClick={() => onDeleteCompany(c)} className="text-destructive focus:text-destructive">
-                              <Trash2 className="mr-2 h-4 w-4" /> Eliminar empresa
-                            </DropdownMenuItem>
-                          )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                            {onAddBranch && (
+                              <DropdownMenuItem onClick={() => onAddBranch(c)}>
+                                <PlusCircle className="mr-2 h-4 w-4" /> Agregar sucursal
+                              </DropdownMenuItem>
+                            )}
+                            {onManageUsers && (
+                              <DropdownMenuItem onClick={() => onManageUsers(c)}>
+                                <Users className="mr-2 h-4 w-4" /> Gestionar usuarios
+                              </DropdownMenuItem>
+                            )}
+                            {onManagePayments && (
+                              <DropdownMenuItem onClick={() => onManagePayments(c)}>
+                                <Receipt className="mr-2 h-4 w-4" /> Pagos de suscripción
+                              </DropdownMenuItem>
+                            )}
+                            {onToggleStatus && (
+                              <>
+                                <DropdownMenuSeparator />
+                                {c.status === 'suspended' ? (
+                                  <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-emerald-600 focus:text-emerald-700">
+                                    <Power className="mr-2 h-4 w-4" /> Reactivar empresa
+                                  </DropdownMenuItem>
+                                ) : (
+                                  <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-destructive focus:text-destructive">
+                                    <Ban className="mr-2 h-4 w-4" /> Desactivar empresa
+                                  </DropdownMenuItem>
+                                )}
+                              </>
+                            )}
+                            {onDeleteCompany && (
+                              <DropdownMenuItem onClick={() => onDeleteCompany(c)} className="text-destructive focus:text-destructive">
+                                <Trash2 className="mr-2 h-4 w-4" /> Eliminar empresa
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

@@ -39,6 +39,7 @@ function LoginForm() {
   const [businessName, setBusinessName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -76,6 +77,24 @@ function LoginForm() {
 
     try {
       if (mode === 'register') {
+        if (password.length < 8) {
+          throw new Error('La contraseña debe tener al menos 8 caracteres.');
+        }
+        if (!/[A-Z]/.test(password)) {
+          throw new Error('La contraseña debe incluir al menos una letra mayúscula.');
+        }
+        if (!/[a-z]/.test(password)) {
+          throw new Error('La contraseña debe incluir al menos una letra minúscula.');
+        }
+        if (!/\d/.test(password)) {
+          throw new Error('La contraseña debe incluir al menos un número.');
+        }
+        if (!/[@$!%*?&._\-\/#]/.test(password)) {
+          throw new Error('La contraseña debe incluir al menos un carácter especial (ej: @, $, !, %, *, ?, &, ., _, -, /).');
+        }
+        if (password !== confirmPassword) {
+          throw new Error('Las contraseñas no coinciden.');
+        }
         const { needsConfirmation } = await signUp(name, email, password, businessName);
         if (needsConfirmation) {
           toast({
@@ -173,8 +192,8 @@ function LoginForm() {
                   </div>
                   <div className="relative">
                     <Input id="password" type={showPassword ? 'text' : 'password'} value={password}
-                      onChange={(e) => setPassword(e.target.value)} required disabled={isLoading} minLength={6}
-                      placeholder={isRegister ? 'Mínimo 6 caracteres' : undefined} />
+                      onChange={(e) => setPassword(e.target.value)} required disabled={isLoading}
+                      placeholder={isRegister ? 'Mínimo 8 caracteres' : undefined} />
                     <Button
                       type="button"
                       variant="ghost"
@@ -186,6 +205,14 @@ function LoginForm() {
                     </Button>
                   </div>
                 </div>
+                {isRegister && (
+                  <div className="space-y-2">
+                    <Label htmlFor="confirmPassword">Confirmar Contraseña</Label>
+                    <Input id="confirmPassword" type="password" value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)} required disabled={isLoading}
+                      placeholder="Repite tu contraseña" />
+                  </div>
+                )}
                 {!isRegister && (
                   <div className="flex items-center space-x-2">
                     <Checkbox id="keepSession" checked={keepSession} onCheckedChange={(c) => setKeepSession(c as boolean)} />
@@ -210,12 +237,12 @@ function LoginForm() {
               {mode === 'register' ? 'Crear cuenta gratis' : mode === 'recover' ? 'Enviar enlace' : 'Entrar'}
             </Button>
             {mode === 'recover' ? (
-              <Button type="button" variant="link" size="sm" className="text-muted-foreground"
+              <Button type="button" variant="link" size="sm" className="text-amber-500 hover:text-amber-600 font-semibold"
                 onClick={() => { setError(null); setMode('login'); }}>
                 Volver a Iniciar Sesión
               </Button>
             ) : (
-              <Button type="button" variant="link" size="sm" className="text-muted-foreground"
+              <Button type="button" variant="link" size="sm" className="text-amber-500 hover:text-amber-600 font-semibold"
                 onClick={() => { setError(null); setMode(isRegister ? 'login' : 'register'); }}>
                 {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate gratis'}
               </Button>

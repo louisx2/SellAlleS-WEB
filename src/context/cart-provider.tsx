@@ -38,9 +38,23 @@ export const getGenericCustomer = (): Customer => GENERIC_CUSTOMER;
 // hay override, se aplica el % de descuento del cliente seleccionado.
 export const getEffectiveUnitPrice = (item: CartItem, customer?: Customer): number => {
   if (item.customPrice !== undefined) return item.customPrice;
+  
+  // 1. Determinar precio base (por mayor si cumple la cantidad mínima, si no, al detalle)
+  let basePrice = item.product.price;
+  if (
+    item.product.wholesalePrice !== undefined &&
+    item.product.wholesalePrice !== null &&
+    item.product.wholesaleMinQuantity !== undefined &&
+    item.product.wholesaleMinQuantity !== null &&
+    item.quantity >= item.product.wholesaleMinQuantity
+  ) {
+    basePrice = item.product.wholesalePrice;
+  }
+
+  // 2. Aplicar descuento de cliente si aplica
   const discount = customer?.discountPercentage ?? 0;
-  if (discount > 0) return round2(item.product.price * (1 - discount / 100));
-  return item.product.price;
+  if (discount > 0) return round2(basePrice * (1 - discount / 100));
+  return basePrice;
 };
 
 const createNewCart = (): Cart => {

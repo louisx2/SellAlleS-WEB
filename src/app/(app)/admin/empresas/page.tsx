@@ -30,7 +30,7 @@ import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
 
-interface Plan { id: string; name: string; price: number; }
+interface Plan { id: string; name: string; price: number; max_users?: number; }
 interface Sub { id: string; company_id: string; plan_id: string | null; }
 
 const NONE = 'none';
@@ -38,9 +38,12 @@ const NONE = 'none';
 const emptyForm = {
   name: '', rnc: '', phone: '', address: '',
   status: 'trial' as Company['status'], planId: NONE,
-  isFormalized: false, ncfEnabled: false,
+  isFormalized: false, ncfEnabled: false, isDemo: false,
   adminName: '', adminEmail: '', adminPassword: '',
+  adminConfirmPassword: '',
   businessType: 'tienda' as BusinessType,
+  customBusinessType: '',
+  maxUsers: 2,
 };
 
 export default function CompaniesManagementPage() {
@@ -58,6 +61,20 @@ export default function CompaniesManagementPage() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
+  interface ExtraUser { name: string; email: string; password: string; confirmPassword: string; role: 'admin' | 'cashier'; }
+  const [extraUsers, setExtraUsers] = useState<ExtraUser[]>([]);
+
+  const handlePlanChange = (v: string) => {
+    const selectedPlan = plans.find(p => p.id === v);
+    let defaultMaxUsers = 2;
+    if (v === NONE) {
+      defaultMaxUsers = 2;
+    } else if (selectedPlan) {
+      defaultMaxUsers = selectedPlan.max_users ?? 999999;
+    }
+    setForm({ ...form, planId: v, maxUsers: defaultMaxUsers });
+  };
+
   const [modulesFor, setModulesFor] = useState<Company | null>(null);
   const [editingBranch, setEditingBranch] = useState<{ id: string; name: string; location: string; companyId: string } | null>(null);
   const [statusTarget, setStatusTarget] = useState<Company | null>(null);
@@ -73,13 +90,17 @@ export default function CompaniesManagementPage() {
   const [sharing, setSharing] = useState({ clientes: false, credito: false, financiamiento: false, prestamos: false });
 
   const load = useCallback(async () => {
+    const compsQuery = appUser?.isSuperAdmin
+      ? supabase.from('companies').select('*, branches(id, name, location, is_active)').order('created_at', { ascending: false })
+      : supabase.from('companies').select('*, branches(id, name, location, is_active)').in('id', appUser?.companies?.map((c) => c.id) || []).order('created_at', { ascending: false });
+
     const [
       { data: comps },
       { data: pls },
       { data: ss },
     ] = await Promise.all([
-      supabase.from('companies').select('*, branches(id, name, location, is_active)').order('created_at', { ascending: false }),
-      supabase.from('plans').select('id, name, price').order('price'),
+      compsQuery,
+      supabase.from('plans').select('id, name, price, max_users').order('price'),
       supabase.from('subscriptions').select('id, company_id, plan_id'),
     ]);
 
@@ -93,9 +114,12 @@ export default function CompaniesManagementPage() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { if (appUser?.isSuperAdmin) load(); }, [appUser, load]);
+  const hasMultipleCompanies = !!(appUser?.companies && appUser.companies.length > 1);
 
-  if (!appUser?.isSuperAdmin) {
+  useEffect(() => { if (appUser?.isSuperAdmin || hasMultipleCompanies) load(); }, [appUser, load, hasMultipleCompanies]);
+
+  const canAccess = appUser?.isSuperAdmin || hasMultipleCompanies;
+  if (!canAccess) {
     return (
       <div>
         <PageHeader title="Empresas" />
@@ -114,19 +138,25 @@ export default function CompaniesManagementPage() {
 
   const openCreate = () => {
     setEditingId(null); setStep(1); setForm(emptyForm);
+    setExtraUsers([]);
     setSharing({ clientes: false, credito: false, financiamiento: false, prestamos: false });
     setOpen(true);
   };
   const openEdit = (c: Company) => {
     setEditingId(c.id);
     setStep(1);
+    const isPreset = c.business_type ? (c.business_type in BUSINESS_TYPE_PRESETS) : false;
     setForm({
       name: c.name, rnc: c.rnc ?? '', phone: c.phone ?? '', address: c.address ?? '',
       status: c.status, planId: subs[c.id]?.plan_id ?? NONE,
-      isFormalized: c.is_formalized, ncfEnabled: c.ncf_enabled,
+      isFormalized: c.is_formalized, ncfEnabled: c.ncf_enabled, isDemo: c.is_demo ?? false,
       adminName: '', adminEmail: '', adminPassword: '',
-      businessType: 'tienda',
+      adminConfirmPassword: '',
+      businessType: isPreset ? (c.business_type as BusinessType) : 'otro',
+      customBusinessType: isPreset ? '' : (c.business_type ?? ''),
+      maxUsers: c.max_users ?? 2,
     });
+    setExtraUsers([]);
     // Cargar la config de compartir entre sucursales de esta empresa.
     setSharing({ clientes: false, credito: false, financiamiento: false, prestamos: false });
     supabase
@@ -153,6 +183,10 @@ export default function CompaniesManagementPage() {
     }
 
     if (!editingId && step === 1) {
+      if (form.businessType === 'otro' && !form.customBusinessType.trim()) {
+        toast({ title: 'Especificar sector', description: 'Por favor, escribe a qué se dedica el negocio.', variant: 'destructive' });
+        return;
+      }
       setStep(2);
       return;
     }
@@ -162,8 +196,98 @@ export default function CompaniesManagementPage() {
         toast({ title: 'Datos incompletos', description: 'Por favor completa todos los campos del administrador.', variant: 'destructive' });
         return;
       }
-      if (form.adminPassword.length < 6) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña debe tener al menos 6 caracteres.', variant: 'destructive' });
+      if (form.adminPassword.length < 8) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe tener al menos 8 caracteres.', variant: 'destructive' });
+        return;
+      }
+      if (!/[A-Z]/.test(form.adminPassword)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe incluir al menos una letra mayúscula.', variant: 'destructive' });
+        return;
+      }
+      if (!/[a-z]/.test(form.adminPassword)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe incluir al menos una letra minúscula.', variant: 'destructive' });
+        return;
+      }
+      if (!/\d/.test(form.adminPassword)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe incluir al menos un número.', variant: 'destructive' });
+        return;
+      }
+      if (!/[@$!%*?&._\-\/#]/.test(form.adminPassword)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
+        return;
+      }
+      if (form.adminPassword !== form.adminConfirmPassword) {
+        toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas del administrador no coinciden.', variant: 'destructive' });
+        return;
+      }
+
+      setSaving(true);
+      try {
+        const { data: existingUser } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('email', form.adminEmail.trim())
+          .maybeSingle();
+
+        if (existingUser) {
+          toast({ title: 'Correo en uso', description: 'El correo electrónico del administrador ya está registrado.', variant: 'destructive' });
+          setSaving(false);
+          return;
+        }
+      } catch (err: any) {
+        toast({ title: 'Error', description: err.message, variant: 'destructive' });
+        setSaving(false);
+        return;
+      } finally {
+        setSaving(false);
+      }
+
+      setStep(3);
+      return;
+    }
+
+    if (!editingId && step === 3) {
+      for (const u of extraUsers) {
+        if (!u.name.trim() || !u.email.trim() || !u.password.trim()) {
+          toast({ title: 'Datos incompletos', description: `Por favor completa todos los campos del usuario ${u.email || u.name}.`, variant: 'destructive' });
+          return;
+        }
+        if (u.password.length < 8) {
+          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe tener al menos 8 caracteres.`, variant: 'destructive' });
+          return;
+        }
+        if (!/[A-Z]/.test(u.password)) {
+          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe incluir al menos una letra mayúscula.`, variant: 'destructive' });
+          return;
+        }
+        if (!/[a-z]/.test(u.password)) {
+          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe incluir al menos una letra minúscula.`, variant: 'destructive' });
+          return;
+        }
+        if (!/\d/.test(u.password)) {
+          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe incluir al menos un número.`, variant: 'destructive' });
+          return;
+        }
+        if (!/[@$!%*?&._\-\/#]/.test(u.password)) {
+          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).`, variant: 'destructive' });
+          return;
+        }
+        if (u.password !== u.confirmPassword) {
+          toast({ title: 'Contraseñas no coinciden', description: `Las contraseñas para ${u.email} no coinciden.`, variant: 'destructive' });
+          return;
+        }
+
+        const { data: existingUser } = await supabase.from('profiles').select('id').eq('email', u.email.trim()).maybeSingle();
+        if (existingUser) {
+          toast({ title: 'Correo en uso', description: `El correo ${u.email} ya está registrado en la plataforma.`, variant: 'destructive' });
+          return;
+        }
+      }
+
+      const totalNewUsers = 1 + extraUsers.length;
+      const maxUsersLimit = form.maxUsers;
+      if (maxUsersLimit !== null && totalNewUsers > maxUsersLimit) {
+        toast({ title: 'Límite superado', description: `No puedes crear ${totalNewUsers} usuarios. El límite de la empresa es de ${maxUsersLimit} usuarios.`, variant: 'destructive' });
         return;
       }
     }
@@ -178,6 +302,9 @@ export default function CompaniesManagementPage() {
         status: form.status,
         is_formalized: form.isFormalized,
         ncf_enabled: form.ncfEnabled,
+        is_demo: form.isDemo,
+        business_type: form.businessType === 'otro' ? form.customBusinessType.trim() : form.businessType,
+        max_users: form.maxUsers,
       };
 
       let companyId = editingId;
@@ -190,7 +317,6 @@ export default function CompaniesManagementPage() {
         companyId = data.id;
       }
 
-      // Guardar config de compartir entre sucursales (solo al editar una existente).
       if (editingId) {
         const { error: sharingError } = await supabase
           .from('company_branch_sharing')
@@ -243,13 +369,14 @@ export default function CompaniesManagementPage() {
         if (authData.user) {
           const { error: profileError } = await supabase
             .from('profiles')
-            .upsert({
+            .insert({
               id: authData.user.id,
               email: form.adminEmail.trim(),
               name: form.adminName.trim(),
               role: 'admin',
               company_id: companyId,
               branch_id: branchData.id,
+              email_confirmed_at: authData.user.email_confirmed_at || null,
             });
 
           if (profileError) throw profileError;
@@ -257,6 +384,36 @@ export default function CompaniesManagementPage() {
           await supabase
             .from('profile_branches')
             .insert({ profile_id: authData.user.id, branch_id: branchData.id });
+        }
+
+        for (const u of extraUsers) {
+          const { data: extAuthData, error: extAuthError } = await tempClient.auth.signUp({
+            email: u.email.trim(),
+            password: u.password,
+            options: { data: { name: u.name.trim() } }
+          });
+
+          if (extAuthError) throw extAuthError;
+
+          if (extAuthData.user) {
+            const { error: extProfileError } = await supabase
+              .from('profiles')
+              .insert({
+                id: extAuthData.user.id,
+                email: u.email.trim(),
+                name: u.name.trim(),
+                role: u.role,
+                company_id: companyId,
+                branch_id: branchData.id,
+                email_confirmed_at: extAuthData.user.email_confirmed_at || null,
+              });
+
+            if (extProfileError) throw extProfileError;
+
+            await supabase
+              .from('profile_branches')
+              .insert({ profile_id: extAuthData.user.id, branch_id: branchData.id });
+          }
         }
 
         // Preset por tipo de negocio: enciende/apaga los módulos verticales
@@ -412,13 +569,21 @@ export default function CompaniesManagementPage() {
     <div className="space-y-6 max-w-[1400px] mx-auto">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Empresas</h1>
-          <p className="text-muted-foreground mt-1">Administra todas las empresas registradas, sus sucursales y su estado.</p>
+          <h1 className="text-3xl font-bold tracking-tight">
+            {appUser?.isSuperAdmin ? 'Empresas' : 'Mis Empresas'}
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            {appUser?.isSuperAdmin 
+              ? 'Administra todas las empresas registradas, sus sucursales y su estado.' 
+              : 'Administra tus empresas registradas y sus sucursales.'}
+          </p>
         </div>
-        <Button onClick={openCreate} className="w-full sm:w-auto shadow-sm">
-          <PlusCircle className="mr-2 h-4 w-4" />
-          Nueva empresa
-        </Button>
+        {appUser?.isSuperAdmin && (
+          <Button onClick={openCreate} className="w-full sm:w-auto shadow-sm">
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Nueva empresa
+          </Button>
+        )}
       </div>
 
       <CompaniesDataTable
@@ -471,19 +636,44 @@ export default function CompaniesManagementPage() {
                 <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               {!editingId && (
-                <div className="grid gap-2">
-                  <Label>Tipo de negocio</Label>
-                  <Select value={form.businessType} onValueChange={(v) => setForm({ ...form, businessType: v as BusinessType })}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(BUSINESS_TYPE_PRESETS).map(([key, preset]) => (
-                        <SelectItem key={key} value={key}>{preset.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    {BUSINESS_TYPE_PRESETS[form.businessType].description}
-                  </p>
+                <>
+                  <div className="grid gap-2">
+                    <Label>Tipo de negocio</Label>
+                    <Select value={form.businessType} onValueChange={(v) => setForm({ ...form, businessType: v as BusinessType })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {Object.entries(BUSINESS_TYPE_PRESETS).map(([key, preset]) => (
+                          <SelectItem key={key} value={key}>{preset.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      {BUSINESS_TYPE_PRESETS[form.businessType].description}
+                    </p>
+                  </div>
+                  {form.businessType === 'otro' && (
+                    <div className="grid gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <Label htmlFor="custom-business-type">Especificar sector *</Label>
+                      <Input
+                        id="custom-business-type"
+                        placeholder="Ej: Peluquería, Gimnasio, etc."
+                        value={form.customBusinessType}
+                        onChange={(e) => setForm({ ...form, customBusinessType: e.target.value })}
+                        required
+                      />
+                    </div>
+                  )}
+                </>
+              )}
+              {editingId && form.businessType === 'otro' && (
+                <div className="grid gap-2 animate-in fade-in duration-200">
+                  <Label htmlFor="custom-business-type">Sector / Rubro</Label>
+                  <Input
+                    id="custom-business-type"
+                    placeholder="Ej: Peluquería, Gimnasio, etc."
+                    value={form.customBusinessType}
+                    onChange={(e) => setForm({ ...form, customBusinessType: e.target.value })}
+                  />
                 </div>
               )}
               <div className="grid grid-cols-2 gap-4">
@@ -514,16 +704,35 @@ export default function CompaniesManagementPage() {
                 </div>
                 <div className="grid gap-2">
                   <Label>Plan</Label>
-                  <Select value={form.planId} onValueChange={(v) => setForm({ ...form, planId: v })}>
+                  <Select value={form.planId} onValueChange={handlePlanChange}>
                     <SelectTrigger><SelectValue placeholder="Sin plan" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NONE}>Sin plan</SelectItem>
                       {plans.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name} (RD${p.price})</SelectItem>
+                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="maxUsers">Límite de usuarios *</Label>
+                <Input
+                  id="maxUsers"
+                  type="number"
+                  min={1}
+                  value={form.maxUsers}
+                  onChange={(e) => setForm({ ...form, maxUsers: parseInt(e.target.value) || 1 })}
+                />
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border p-3 bg-amber-500/5 border-amber-500/20">
+                <div>
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">¿Es empresa Demo?</p>
+                  <p className="text-xs text-muted-foreground font-normal">Excluye esta empresa de estadísticas y reportes reales.</p>
+                </div>
+                <Switch checked={form.isDemo} onCheckedChange={(v) => setForm({ ...form, isDemo: v })} />
               </div>
 
               <div className="flex items-center justify-between rounded-lg border p-3">
@@ -575,7 +784,7 @@ export default function CompaniesManagementPage() {
                 </>
               )}
             </div>
-          ) : (
+          ) : step === 2 ? (
             <div className="grid gap-4 py-2">
               <div className="grid gap-2">
                 <Label htmlFor="adminName">Nombre del Administrador *</Label>
@@ -596,16 +805,142 @@ export default function CompaniesManagementPage() {
                   placeholder="admin@empresa.com"
                 />
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="adminPassword">Contraseña de Acceso *</Label>
-                <Input
-                  id="adminPassword"
-                  type="password"
-                  value={form.adminPassword}
-                  onChange={(e) => setForm({ ...form, adminPassword: e.target.value })}
-                  placeholder="Mínimo 6 caracteres"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="adminPassword">Contraseña *</Label>
+                  <Input
+                    id="adminPassword"
+                    type="password"
+                    value={form.adminPassword}
+                    onChange={(e) => setForm({ ...form, adminPassword: e.target.value })}
+                    placeholder="Mínimo 8 caracteres"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="adminConfirmPassword">Confirmar Contraseña *</Label>
+                  <Input
+                    id="adminConfirmPassword"
+                    type="password"
+                    value={form.adminConfirmPassword}
+                    onChange={(e) => setForm({ ...form, adminConfirmPassword: e.target.value })}
+                    placeholder="Repite la contraseña"
+                  />
+                </div>
               </div>
+            </div>
+          ) : (
+            <div className="grid gap-4 py-2 max-h-[400px] overflow-y-auto pr-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold">Usuarios Adicionales (Opcional)</p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setExtraUsers([...extraUsers, { name: '', email: '', password: '', confirmPassword: '', role: 'cashier' }])}
+                >
+                  <PlusCircle className="mr-1 h-3.5 w-3.5" /> Agregar usuario
+                </Button>
+              </div>
+
+              {extraUsers.map((u, idx) => (
+                <div key={idx} className="relative border p-3 rounded-lg bg-muted/20 space-y-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-2 top-2 h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                    onClick={() => setExtraUsers(extraUsers.filter((_, i) => i !== idx))}
+                  >
+                    ×
+                  </Button>
+                  <p className="text-xs font-bold text-muted-foreground uppercase">Usuario #{idx + 1}</p>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-1">
+                      <Label className="text-xs">Nombre *</Label>
+                      <Input
+                        value={u.name}
+                        onChange={(e) => {
+                          const updated = [...extraUsers];
+                          updated[idx].name = e.target.value;
+                          setExtraUsers(updated);
+                        }}
+                        placeholder="Nombre completo"
+                        required
+                      />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label className="text-xs">Email *</Label>
+                      <Input
+                        type="email"
+                        value={u.email}
+                        onChange={(e) => {
+                          const updated = [...extraUsers];
+                          updated[idx].email = e.target.value;
+                          setExtraUsers(updated);
+                        }}
+                        placeholder="correo@empresa.com"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="grid gap-1">
+                      <Label className="text-xs">Contraseña *</Label>
+                      <Input
+                        type="password"
+                        value={u.password}
+                        onChange={(e) => {
+                          const updated = [...extraUsers];
+                          updated[idx].password = e.target.value;
+                          setExtraUsers(updated);
+                        }}
+                        placeholder="Mínimo 8 caracteres"
+                        required
+                      />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label className="text-xs">Confirmar Contraseña *</Label>
+                      <Input
+                        type="password"
+                        value={u.confirmPassword}
+                        onChange={(e) => {
+                          const updated = [...extraUsers];
+                          updated[idx].confirmPassword = e.target.value;
+                          setExtraUsers(updated);
+                        }}
+                        placeholder="Repite la contraseña"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid gap-1">
+                    <Label className="text-xs">Rol *</Label>
+                    <Select
+                      value={u.role}
+                      onValueChange={(val) => {
+                        const updated = [...extraUsers];
+                        updated[idx].role = val as 'admin' | 'cashier';
+                        setExtraUsers(updated);
+                      }}
+                    >
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="admin">Administrador</SelectItem>
+                        <SelectItem value="cashier">Cajero</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ))}
+
+              {extraUsers.length === 0 && (
+                <div className="text-center py-6 text-xs text-muted-foreground border border-dashed rounded-lg">
+                  No has agregado ningún usuario adicional. Haz clic en "Agregar usuario" para registrar más accesos.
+                </div>
+              )}
             </div>
           )}
 
@@ -622,9 +957,18 @@ export default function CompaniesManagementPage() {
                   Siguiente <ArrowRight className="ml-2 h-4 w-4" />
                 </Button>
               </>
-            ) : (
+            ) : step === 2 ? (
               <>
                 <Button variant="outline" onClick={() => setStep(1)} disabled={saving}>
+                  <ArrowLeft className="mr-2 h-4 w-4" /> Atrás
+                </Button>
+                <Button onClick={handleSave} disabled={saving}>
+                  Siguiente <ArrowRight className="ml-2 h-4 w-4" />
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setStep(2)} disabled={saving}>
                   <ArrowLeft className="mr-2 h-4 w-4" /> Atrás
                 </Button>
                 <Button onClick={handleSave} disabled={saving}>

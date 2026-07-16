@@ -61,10 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from('profiles')
       .select(`
         id, name, email, role, is_super_admin, company_id,
-        companies(status, demo_expires_at, trial_ends_at, paid_until),
+        companies!profiles_company_id_fkey(status, demo_expires_at, trial_ends_at, paid_until, max_users),
         branches!profiles_branch_id_fkey(id, name, is_active),
         profile_branches(branches(id, name, is_active)),
-        profile_roles(roles(id, name, description))
+        profile_roles(roles(id, name, description)),
+        profile_companies(companies(id, name, status, is_demo))
       `)
       .eq('id', userId)
       .maybeSingle();
@@ -80,7 +81,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (data) {
-      setNeedsCompany(!data.company_id);
+      const companyList = ((data as any).profile_companies ?? [])
+        .map((pc: any) => pc.companies)
+        .filter(Boolean)
+        .map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          status: c.status,
+          isDemo: c.is_demo ?? false
+        }));
+
+      setNeedsCompany(!data.company_id && companyList.length === 0);
       
       // Construir la lista de sucursales a las que pertenece. Las sucursales
       // desactivadas se excluyen: no se pueden seleccionar ni operar desde ellas.
@@ -97,6 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const branchList = allBranches.filter(b => b.isActive).map(b => ({ id: b.id, name: b.name }));
+
       // Tenía sucursal(es) asignadas pero TODAS están desactivadas: bloquear el
       // acceso (igual que una empresa suspendida), salvo super admin.
       setNoActiveBranches(allBranches.length > 0 && branchList.length === 0);
@@ -141,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const demoExpiresAt = (data as any).companies?.demo_expires_at ?? undefined;
       const trialEndsAt = (data as any).companies?.trial_ends_at ?? undefined;
       const paidUntil = (data as any).companies?.paid_until ?? undefined;
+      const maxUsers = (data as any).companies?.max_users ?? null;
       // Solo-lectura: puede entrar y ver, pero no modificar. Aplica si la prueba
       // venció, o si la suscripción pagada venció (paid_until en el pasado). El
       // super admin nunca queda en solo-lectura (gestiona/reactiva empresas).
@@ -168,6 +181,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,
         customRoles: customRoles,
+        companies: companyList,
+        companyMaxUsers: maxUsers,
       };
       setAppUser(user);
       if (!requireSelection) persistLocal(user);
@@ -228,23 +243,66 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!session && !isPublic) {
       router.replace('/login');
     } else if (session) {
+      const hasMultipleCompanies = !!(appUser?.companies && appUser.companies.length > 1);
+      const isImpersonating = !!appUser?.impersonatedCompanyId;
+      const isClientRoute = !pathname.startsWith('/admin');
+
       if (isPublic) {
         if (appUser?.isSuperAdmin) {
           router.replace('/admin/companies');
+        } else if (hasMultipleCompanies && !isImpersonating) {
+          router.replace('/admin/empresas');
         } else {
           router.replace('/dashboard');
         }
       } else {
-        const isImpersonating = !!appUser?.impersonatedCompanyId;
-        const isClientRoute = !pathname.startsWith('/admin');
         if (appUser?.isSuperAdmin && !isImpersonating && isClientRoute) {
           router.replace('/admin/companies');
+        } else if (hasMultipleCompanies && !isImpersonating && isClientRoute) {
+          router.replace('/admin/empresas');
         }
       }
     }
-  }, [session, loading, pathname, router, appUser?.isSuperAdmin, appUser?.impersonatedCompanyId]);
+  }, [session, loading, pathname, router, appUser]);
 
-  const setImpersonatedCompany = useCallback((companyId: string | null, companyName: string | null) => {
+  const setImpersonatedCompany = useCallback(async (companyId: string | null, companyName: string | null) => {
+    // Si no es super admin pero tiene múltiples compañías, actualizar su profiles.company_id en la base de datos
+    if (appUser && !appUser.isSuperAdmin && appUser.companies && appUser.companies.length > 1) {
+      let nextBranchId = null;
+      if (companyId) {
+        // Encontrar una sucursal por defecto para esa compañía
+        const { data: branchData } = await supabase
+          .from('branches')
+          .select('id, name')
+          .eq('company_id', companyId)
+          .eq('is_active', true)
+          .limit(1);
+        
+        if (branchData && branchData[0]) {
+          nextBranchId = branchData[0].id;
+          localStorage.setItem('userBranchId', nextBranchId);
+        } else {
+          localStorage.removeItem('userBranchId');
+        }
+      } else {
+        localStorage.removeItem('userBranchId');
+      }
+
+      // Actualizar la compañía y sucursal del perfil en la base de datos
+      const { error } = await supabase
+        .from('profiles')
+        .update({ 
+          company_id: companyId,
+          branch_id: nextBranchId
+        })
+        .eq('id', appUser.id);
+
+      if (error) {
+        console.error('Error switching company:', error.message);
+        return;
+      }
+    }
+
     setAppUser((prev) => {
       if (!prev) return null;
       const updated = { 
@@ -259,11 +317,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       persistLocal(updated);
       return updated;
     });
+
     // Force a reload so all contexts/providers re-fetch data for the new company
     setTimeout(() => {
-      window.location.href = companyId ? '/dashboard' : '/admin/companies';
+      if (companyId) {
+        window.location.href = '/dashboard';
+      } else {
+        window.location.href = appUser?.isSuperAdmin ? '/admin/companies' : '/admin/empresas';
+      }
     }, 100);
-  }, []);
+  }, [appUser]);
 
   const setActiveBranch = useCallback((branchId: string, branchName: string) => {
     setAppUser((prev) => {

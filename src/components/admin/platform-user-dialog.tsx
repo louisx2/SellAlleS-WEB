@@ -29,6 +29,7 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
   const [branchId, setBranchId] = useState<string>('');
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -36,6 +37,19 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
     setRole(user.role);
     setBranchId(user.branchId ?? '');
     setSelectedRoleIds(user.customRoles.map((r) => r.id));
+
+    // Cargar las compañías asignadas al perfil
+    supabase
+      .from('profile_companies')
+      .select('company_id')
+      .eq('profile_id', user.id)
+      .then(({ data }) => {
+        if (data) {
+          setSelectedCompanyIds(data.map((pc: any) => pc.company_id));
+        } else {
+          setSelectedCompanyIds([]);
+        }
+      });
 
     if (user.companyId) {
       supabase
@@ -59,9 +73,14 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
   const handleSave = async () => {
     setSaving(true);
     try {
+      const primaryCompanyId = selectedCompanyIds.length > 0 ? selectedCompanyIds[0] : null;
       const { error } = await supabase
         .from('profiles')
-        .update({ role, branch_id: branchId || null })
+        .update({ 
+          role, 
+          branch_id: branchId || null,
+          company_id: primaryCompanyId
+        })
         .eq('id', user.id);
       if (error) throw error;
 
@@ -70,6 +89,13 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
         await supabase
           .from('profile_roles')
           .insert(selectedRoleIds.map((roleId) => ({ profile_id: user.id, role_id: roleId })));
+      }
+
+      await supabase.from('profile_companies').delete().eq('profile_id', user.id);
+      if (selectedCompanyIds.length > 0) {
+        await supabase
+          .from('profile_companies')
+          .insert(selectedCompanyIds.map((compId) => ({ profile_id: user.id, company_id: compId })));
       }
 
       toast({ title: 'Usuario actualizado', description: `${user.name} se actualizó correctamente.` });
@@ -96,10 +122,28 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-2">
-            <Label>Empresa</Label>
-            <div className="flex items-center h-10 px-3 rounded-md border bg-muted/40 text-sm">
-              {company?.name ?? '—'}
+            <Label>Empresas Asignadas (Multi-Empresa)</Label>
+            <div className="border rounded-md p-3 max-h-[160px] overflow-y-auto space-y-2">
+              {companies.map((c) => (
+                <div key={c.id} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`company-checkbox-${c.id}`}
+                    checked={selectedCompanyIds.includes(c.id)}
+                    onCheckedChange={(checked) => {
+                      setSelectedCompanyIds((prev) =>
+                        checked ? [...prev, c.id] : prev.filter((id) => id !== c.id)
+                      );
+                    }}
+                  />
+                  <Label htmlFor={`company-checkbox-${c.id}`} className="font-normal cursor-pointer text-sm">
+                    {c.name}
+                  </Label>
+                </div>
+              ))}
             </div>
+            <p className="text-xs text-muted-foreground">
+              El usuario podrá gestionar todas las empresas seleccionadas. La primera seleccionada será su empresa principal por defecto.
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

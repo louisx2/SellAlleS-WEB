@@ -46,6 +46,11 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
   const [selectedRoles, setSelectedRoles] = useState<string[]>(
     user?.customRoles?.map(r => r.id) ?? []
   );
+  const [selectedBranches, setSelectedBranches] = useState<string[]>(
+    user?.branches?.map(b => b.id) ?? []
+  );
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [allBranchesChecked, setAllBranchesChecked] = useState(false);
 
   useEffect(() => {
     supabase.from('roles').select('id, name, description').order('name')
@@ -57,24 +62,80 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
   useEffect(() => {
     if (open && user) {
         setSelectedRoles(user.customRoles?.map(r => r.id) ?? []);
+        setSelectedBranches(user.branches?.map(b => b.id) ?? []);
         setRole(user.role);
         setBranch(user.branch);
     } else if (open && !user) {
         setSelectedRoles([]);
+        setSelectedBranches([]);
         setRole('cashier');
         setBranch('');
+        setConfirmPassword('');
     }
   }, [open, user]);
+
+  useEffect(() => {
+    if (open && branches.length > 0) {
+      const primaryBranchId = branches.find(b => b.name === branch)?.id;
+      const otherBranches = branches.filter(b => b.id !== primaryBranchId);
+      const isAll = otherBranches.length > 0 && otherBranches.every(b => selectedBranches.includes(b.id));
+      setAllBranchesChecked(isAll);
+    }
+  }, [open, branch, selectedBranches, branches]);
+
+  const handleAllBranchesToggle = (checked: boolean) => {
+    setAllBranchesChecked(checked);
+    if (checked) {
+      const primaryBranchId = branches.find(b => b.name === branch)?.id;
+      const others = branches.filter(b => b.id !== primaryBranchId).map(b => b.id);
+      setSelectedBranches(others);
+    } else {
+      setSelectedBranches([]);
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
     const password = formData.get('password') as string | null;
 
-    if (!isEditMode && !password) {
+    if (!isEditMode) {
+      if (!password) {
         toast({ title: 'Contraseña requerida', description: 'Debes introducir una contraseña para el nuevo usuario.', variant: 'destructive'});
         return;
+      }
+      if (password.length < 8) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe tener al menos 8 caracteres.', variant: 'destructive'});
+        return;
+      }
+      if (!/[A-Z]/.test(password)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra mayúscula.', variant: 'destructive'});
+        return;
+      }
+      if (!/[a-z]/.test(password)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra minúscula.', variant: 'destructive'});
+        return;
+      }
+      if (!/\d/.test(password)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un número.', variant: 'destructive'});
+        return;
+      }
+      if (!/[@$!%*?&._\-\/#]/.test(password)) {
+        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive'});
+        return;
+      }
+      if (password !== confirmPassword) {
+        toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas ingresadas no son iguales.', variant: 'destructive'});
+        return;
+      }
     }
+
+    const finalBranches = allBranchesChecked
+      ? branches
+      : [
+          ...branches.filter(b => b.name === branch),
+          ...branches.filter(b => selectedBranches.includes(b.id))
+        ];
 
     const newUserData = {
       id: user?.id ?? '',
@@ -83,6 +144,7 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
       branch: branch,
       role: role as 'admin' | 'cashier',
       customRoles: availableRoles.filter(r => selectedRoles.includes(r.id)),
+      branches: finalBranches,
     };
 
     try {
@@ -137,12 +199,20 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
               <Input id="email" name="email" type="email" defaultValue={user?.email} className="col-span-3" required />
             </div>
              {!isEditMode && (
-                <div className="grid grid-cols-4 items-center gap-4">
-                    <Label htmlFor="password" className="text-right">
-                        Contraseña
-                    </Label>
-                    <Input id="password" name="password" type="password" className="col-span-3" required />
-                </div>
+               <>
+                 <div className="grid grid-cols-4 items-center gap-4">
+                     <Label htmlFor="password" className="text-right">
+                         Contraseña
+                     </Label>
+                     <Input id="password" name="password" type="password" placeholder="Mínimo 8 caracteres" className="col-span-3" required />
+                 </div>
+                 <div className="grid grid-cols-4 items-center gap-4">
+                     <Label htmlFor="confirmPassword" className="text-right">
+                         Confirmar
+                     </Label>
+                     <Input id="confirmPassword" name="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" className="col-span-3" required />
+                 </div>
+               </>
             )}
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="role" className="text-right">
@@ -158,6 +228,47 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
                 </SelectContent>
               </Select>
             </div>
+
+             {branches.length > 1 && (
+                <div className="grid grid-cols-4 items-start gap-4 pt-2">
+                    <Label className="text-right mt-1">Sucursales</Label>
+                    <div className="col-span-3 flex flex-col gap-3">
+                        <div className="flex items-center space-x-2">
+                            <Checkbox 
+                              id="all-branches" 
+                              checked={allBranchesChecked}
+                              onCheckedChange={handleAllBranchesToggle}
+                            />
+                            <Label htmlFor="all-branches" className="font-semibold cursor-pointer">Asignar todas las sucursales</Label>
+                        </div>
+                        
+                        <div className="pl-6 flex flex-col gap-2 border-l border-border mt-1">
+                            {branches.map(b => {
+                                const isPrimary = b.name === branch;
+                                if (isPrimary) return null;
+
+                                return (
+                                    <div key={b.id} className="flex items-center space-x-2">
+                                        <Checkbox 
+                                          id={`branch-${b.id}`} 
+                                          checked={selectedBranches.includes(b.id) || allBranchesChecked}
+                                          disabled={allBranchesChecked}
+                                          onCheckedChange={(checked) => {
+                                              if (checked) {
+                                                  setSelectedBranches(prev => [...prev, b.id]);
+                                              } else {
+                                                  setSelectedBranches(prev => prev.filter(id => id !== b.id));
+                                              }
+                                          }}
+                                        />
+                                        <Label htmlFor={`branch-${b.id}`} className="font-normal cursor-pointer">{b.name}</Label>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            )}
             <div className="grid grid-cols-4 items-center gap-4">
             <Label htmlFor="branch" className="text-right">
                 Sucursal
