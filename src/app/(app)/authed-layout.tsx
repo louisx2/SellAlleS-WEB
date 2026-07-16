@@ -174,7 +174,10 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     { permissions: appUser.baseRolePermissions },
     ...(appUser.customRoles ?? []),
   ]);
-  const hasExtra = (resource?: PermissionResource) => !!resource && hasPermission(effectivePermissions, resource, 'view');
+  // El super admin ve todo (impersonando o no) — antes lo cubría el atajo
+  // userRole === 'admin' (su role siempre se fuerza a 'admin'), que se quitó
+  // al pasar a permisos reales; sin este bypass se quedaba sin nav alguno.
+  const hasExtra = (resource?: PermissionResource) => !!resource && (isSuperAdmin || hasPermission(effectivePermissions, resource, 'view'));
 
   const moduleOk = (item: NavItem) => !item.module || isModuleEnabled(item.module);
   const visibleDashboard = showOperationalMenus && userRole && hasExtra(dashboardNavItem.permission);
