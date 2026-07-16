@@ -95,9 +95,13 @@ export function UserProvider({ children }: { children: ReactNode }) {
         if (branchData) branchId = branchData.id;
       }
 
+      // upsert, no insert: el trigger handle_new_user ya crea una fila
+      // barebones en profiles apenas se registra el auth.user (por eso un
+      // insert aquí siempre chocaba con "duplicate key" al añadir cualquier
+      // usuario nuevo, sin importar el rol).
       const { error: profileError } = await supabase
         .from('profiles')
-        .insert({
+        .upsert({
           id: authData.user.id,
           email: newUser.email.trim(),
           name: newUser.name.trim(),

@@ -100,7 +100,7 @@ export default function CompaniesManagementPage() {
       { data: ss },
     ] = await Promise.all([
       compsQuery,
-      supabase.from('plans').select('id, name, price, max_users').order('price'),
+      supabase.from('plans').select('id, name, price, max_users').order('sort_order'),
       supabase.from('subscriptions').select('id, company_id, plan_id'),
     ]);
 
@@ -367,9 +367,11 @@ export default function CompaniesManagementPage() {
         if (authError) throw authError;
 
         if (authData.user) {
+          // upsert, no insert: el trigger handle_new_user ya crea una fila
+          // barebones en profiles apenas se registra el auth.user.
           const { error: profileError } = await supabase
             .from('profiles')
-            .insert({
+            .upsert({
               id: authData.user.id,
               email: form.adminEmail.trim(),
               name: form.adminName.trim(),
@@ -398,7 +400,7 @@ export default function CompaniesManagementPage() {
           if (extAuthData.user) {
             const { error: extProfileError } = await supabase
               .from('profiles')
-              .insert({
+              .upsert({
                 id: extAuthData.user.id,
                 email: u.email.trim(),
                 name: u.name.trim(),

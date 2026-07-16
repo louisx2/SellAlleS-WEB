@@ -17,7 +17,9 @@ export interface PlatformUser {
   companyId: string | null;
   branchId: string | null;
   branchName: string;
+  branches: { id: string; name: string }[];
   customRoles: { id: string; name: string; description: string }[];
+  emailConfirmedAt: string | null;
 }
 
 export interface PlatformBranch {
@@ -42,7 +44,12 @@ export default function PlatformUsersPage() {
       // RLS: el super admin ve los perfiles de todos los tenants.
       supabase
         .from('profiles')
-        .select('id, name, email, role, is_super_admin, company_id, branch_id, branches!profiles_branch_id_fkey(name), profile_roles(roles(id, name, description))'),
+        .select(`
+          id, name, email, role, is_super_admin, company_id, branch_id, email_confirmed_at,
+          branches!profiles_branch_id_fkey(name),
+          profile_roles(roles(id, name, description)),
+          profile_branches(branches(id, name))
+        `),
     ]);
 
     if (comps) setCompanies(comps as Company[]);
@@ -61,10 +68,15 @@ export default function PlatformUsersPage() {
             companyId: p.company_id,
             branchId: p.branch_id,
             branchName: Array.isArray(p.branches) ? p.branches[0]?.name ?? '' : p.branches?.name ?? '',
+            branches: (p.profile_branches ?? [])
+              .map((pb: any) => pb.branches)
+              .filter(Boolean)
+              .map((b: any) => ({ id: b.id, name: b.name })),
             customRoles: (p.profile_roles ?? [])
               .map((pr: any) => pr.roles)
               .filter(Boolean)
               .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '' })),
+            emailConfirmedAt: p.email_confirmed_at,
           }))
       );
     }

@@ -65,11 +65,11 @@ const adminNavItems: NavItem[] = [
     { href: '/customers', icon: UsersRound, label: 'Clientes', roles: ['admin'] },
     { href: '/suppliers', icon: Truck, label: 'Proveedores', roles: ['admin'], module: 'suppliers' },
     { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', roles: ['admin']},
-    { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', roles: ['admin']},
     { href: '/users', icon: Users, label: 'Usuarios', roles: ['admin']},
     { href: '/branches', icon: Store, label: 'Sucursales', roles: ['admin']},
     { href: '/roles', icon: Shield, label: 'Roles', roles: ['admin']},
     { href: '/service-types', icon: PenTool, label: 'Tipos de Servicio', roles: ['admin'], module: 'services' },
+    { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', roles: ['admin']},
 ];
 
 export default function AppLayoutContent({ children }: { children: React.ReactNode }) {
@@ -433,6 +433,17 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
               </SidebarMenuItem>
             )}
 
+            {visibleCoreNavItems.map((item) => (
+              <SidebarMenuItem key={item.href}>
+                <Link href={item.href} passHref>
+                  <SidebarMenuButton isActive={pathname === item.href} tooltip={item.label}>
+                    {item.icon && <item.icon />}
+                    <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            ))}
+
             {visibleFeaturesNavItems.length > 0 && (
               <Collapsible open={openCollapsible === 'features'} onOpenChange={() => handleCollapsibleToggle('features')}>
                 <CollapsibleTrigger asChild>
@@ -460,17 +471,6 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </CollapsibleContent>
               </Collapsible>
             )}
-
-            {visibleCoreNavItems.map((item) => (
-              <SidebarMenuItem key={item.href}>
-                <Link href={item.href} passHref>
-                  <SidebarMenuButton isActive={pathname === item.href} tooltip={item.label}>
-                    {item.icon && <item.icon />}
-                    <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
-                  </SidebarMenuButton>
-                </Link>
-              </SidebarMenuItem>
-            ))}
 
             {canViewReports && (
               <Collapsible open={openCollapsible === 'reports'} onOpenChange={() => handleCollapsibleToggle('reports')}>
