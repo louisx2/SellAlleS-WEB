@@ -8,9 +8,11 @@ import { useCart } from '@/context/cart-provider';
 import { useToast } from '@/hooks/use-toast';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
-import { Search, SlidersHorizontal } from 'lucide-react';
+import { Search, SlidersHorizontal, List, LayoutGrid } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { useAuth } from '@/context/auth-provider';
 
 export function ProductSearch() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -18,6 +20,8 @@ export function ProductSearch() {
   const { products: allProducts } = useProducts();
   const { addItem, saleCompletionCount } = useCart();
   const { toast } = useToast();
+  const { appUser, setInventoryView } = useAuth();
+  const inventoryView = appUser?.inventoryView ?? 'grid';
   const prevSaleCompletionCount = useRef(saleCompletionCount);
 
   const filteredProducts = useMemo(() => {
@@ -98,10 +102,38 @@ export function ProductSearch() {
                 </div>
             </PopoverContent>
         </Popover>
+        <TooltipProvider>
+            <div className="flex items-center rounded-md border p-0.5 shrink-0">
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            size="icon" variant={inventoryView === 'list' ? 'secondary' : 'ghost'}
+                            className="h-11 w-11" onClick={() => setInventoryView('list')}
+                        >
+                            <List className="h-5 w-5" />
+                            <span className="sr-only">Vista de lista</span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Vista de lista (sin imágenes)</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            size="icon" variant={inventoryView === 'grid' ? 'secondary' : 'ghost'}
+                            className="h-11 w-11" onClick={() => setInventoryView('grid')}
+                        >
+                            <LayoutGrid className="h-5 w-5" />
+                            <span className="sr-only">Vista con imágenes</span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Vista con imágenes</TooltipContent>
+                </Tooltip>
+            </div>
+        </TooltipProvider>
       </div>
 
       <div className="flex-grow overflow-y-auto">
-        <ProductGrid products={filteredProducts} />
+        <ProductGrid products={filteredProducts} view={inventoryView} />
       </div>
     </div>
   );

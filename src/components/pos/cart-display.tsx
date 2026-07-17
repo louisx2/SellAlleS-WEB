@@ -7,9 +7,7 @@ import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { formatCurrency } from '@/lib/utils';
 import { resolveProductImageUrl } from '@/components/products/product-image';
-import { MinusCircle, PlusCircle, ShoppingCart, Trash2, UserSearch, X, Plus, FileText, List, LayoutGrid } from 'lucide-react';
-import { useAuth } from '@/context/auth-provider';
-import { CartItemDetailButton } from './cart-item-detail-popover';
+import { MinusCircle, PlusCircle, ShoppingCart, Trash2, UserSearch, X, Plus, FileText } from 'lucide-react';
 import { CheckoutDialog } from './checkout-dialog';
 import { CreateQuoteDialog } from './create-quote-dialog';
 import { useModules } from '@/context/modules-provider';
@@ -84,8 +82,6 @@ export function CartDisplay() {
   const [isCouponSearchOpen, setCouponSearchOpen] = useState(false);
   const isMobile = useIsMobile();
   const { isModuleEnabled } = useModules();
-  const { appUser, setCartView } = useAuth();
-  const cartView = appUser?.cartView ?? 'grid';
 
   const activeCart = carts.find(cart => cart.id === activeCartId);
   
@@ -106,34 +102,6 @@ export function CartDisplay() {
                   <div className="flex justify-between items-center gap-2 min-h-[44px]">
                       {toast && <p className="text-sm text-destructive font-medium">{toast}</p>}
                       <div className="flex items-center gap-2 ml-auto">
-                          <TooltipProvider>
-                              <div className="flex items-center rounded-md border p-0.5">
-                                  <Tooltip>
-                                      <TooltipTrigger asChild>
-                                          <Button
-                                              size="icon" variant={cartView === 'list' ? 'secondary' : 'ghost'}
-                                              className="h-7 w-7" onClick={() => setCartView('list')}
-                                          >
-                                              <List className="h-4 w-4" />
-                                              <span className="sr-only">Vista de lista</span>
-                                          </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>Vista de lista (sin imágenes)</TooltipContent>
-                                  </Tooltip>
-                                  <Tooltip>
-                                      <TooltipTrigger asChild>
-                                          <Button
-                                              size="icon" variant={cartView === 'grid' ? 'secondary' : 'ghost'}
-                                              className="h-7 w-7" onClick={() => setCartView('grid')}
-                                          >
-                                              <LayoutGrid className="h-4 w-4" />
-                                              <span className="sr-only">Vista con imágenes</span>
-                                          </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>Vista con imágenes</TooltipContent>
-                                  </Tooltip>
-                              </div>
-                          </TooltipProvider>
                           <TooltipProvider>
                               <TabsList className="h-auto p-1 bg-transparent">
                               {carts.map((cart, index) => (
@@ -280,12 +248,12 @@ export function CartDisplay() {
                                   "flex items-center gap-4 p-3 rounded-lg",
                                   isDiscounted && "bg-yellow-100/50"
                                 )}>
-                                  {cartView === 'grid' && (
+                                  <div className="hidden sm:block">
                                     <CartItemImage
                                       src={resolveProductImageUrl(item.product.image)}
                                       alt={item.product.name}
                                     />
-                                  )}
+                                  </div>
                                   <div className="flex-grow space-y-2">
                                     <p className="font-medium text-sm leading-tight">{item.product.name}</p>
                                     <div className="flex items-center gap-2">
@@ -309,8 +277,7 @@ export function CartDisplay() {
                                       <p className="font-semibold text-base mt-1">{formatCurrency(currentPrice * item.quantity)}</p>
                                     </div>
                                   </div>
-                                  <div className="flex flex-col items-end gap-1">
-                                    <CartItemDetailButton product={item.product} />
+                                  <div className="flex flex-col items-end">
                                     <PriceEditor cartItem={item} />
                                   </div>
                                 </div>

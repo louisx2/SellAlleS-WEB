@@ -1,22 +1,23 @@
 'use client';
 
-import { MoreHorizontal, Package, MapPin, Tag, Truck, Boxes } from 'lucide-react';
+import { Info, Package, MapPin, Tag, Truck, Boxes } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useCategories } from '@/context/category-provider';
 import { useLocations } from '@/context/location-provider';
 import { useSuppliers } from '@/context/supplier-provider';
+import { cn } from '@/lib/utils';
 import type { Product } from '@/lib/types';
 
-interface CartItemDetailButtonProps {
+interface ProductDetailButtonProps {
   product: Product;
+  className?: string;
 }
 
 // Detalle de solo-lectura del producto, útil al vender: descripción,
-// ubicación, categoría, proveedor y stock. El objeto `product` ya viene
-// embebido en el CartItem, así que no hace falta ninguna consulta extra —
-// solo resolver los ids a nombre legible con los providers ya cargados.
-export function CartItemDetailButton({ product }: CartItemDetailButtonProps) {
+// ubicación, categoría, proveedor y stock. Se resuelven los ids a nombre
+// legible con los providers ya cargados, sin ninguna consulta extra.
+export function ProductDetailButton({ product, className }: ProductDetailButtonProps) {
   const { categories } = useCategories();
   const { locations } = useLocations();
   const { suppliers } = useSuppliers();
@@ -28,11 +29,16 @@ export function CartItemDetailButton({ product }: CartItemDetailButtonProps) {
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" title="Detalle del producto">
-          <MoreHorizontal className="h-4 w-4" />
+        <Button
+          variant="secondary" size="icon"
+          className={cn("h-7 w-7 shrink-0 rounded-full shadow", className)}
+          onClick={(e) => e.stopPropagation()}
+          title="Ver detalle del producto"
+        >
+          <Info className="h-4 w-4" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-72" align="end">
+      <PopoverContent className="w-72" align="end" onClick={(e) => e.stopPropagation()}>
         <div className="space-y-2">
           <div>
             <p className="font-semibold text-sm leading-tight">{product.name}</p>

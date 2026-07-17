@@ -83,8 +83,8 @@ export type User = {
   companies?: { id: string; name: string; status: 'trial' | 'active' | 'suspended'; isDemo: boolean }[];
   emailConfirmedAt?: string | null;
   companyMaxUsers?: number | null;
-  // Vista preferida del carrito del POS: lista compacta o con imágenes.
-  cartView?: 'list' | 'grid';
+  // Vista preferida del panel de Inventario del POS: lista compacta o con imágenes.
+  inventoryView?: 'list' | 'grid';
 };
 
 export type Branch = {
