@@ -1,0 +1,36 @@
+{
+  "name": "SellAlleS - Sistema de Punto de Venta",
+  "short_name": "SellAlleS",
+  "description": "SaaS multitenant de punto de venta para la web",
+  "start_url": "/login",
+  "display": "standalone",
+  "background_color": "#1e293b",
+  "theme_color": "#35bbf0",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

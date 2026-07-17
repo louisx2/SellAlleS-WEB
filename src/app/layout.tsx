@@ -4,6 +4,7 @@ import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { cn } from '@/lib/utils';
 import { AuthProvider } from '@/context/auth-provider';
+import { PWARegister } from '@/components/pwa-register';
 
 const ptSans = PT_Sans({
   subsets: ['latin'],
@@ -14,11 +15,18 @@ const ptSans = PT_Sans({
 export const metadata: Metadata = {
   title: 'SellAlleS',
   description: 'Sistema de Punto de Venta',
+  manifest: '/manifest.json',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: 'SellAlleS',
+  },
 };
 
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
+  themeColor: '#35bbf0',
 };
 
 export default function RootLayout({
@@ -30,6 +38,7 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       <body className={cn("min-h-screen bg-background font-sans antialiased", ptSans.variable)}>
         <AuthProvider>
+          <PWARegister />
           {children}
           <Toaster />
         </AuthProvider>
