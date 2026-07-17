@@ -89,7 +89,7 @@ export default function SalesPage() {
           <Input
             placeholder="Buscar por ID de venta..."
             value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
+            onChange={(event) => setSearchTerm(event.target.value.replace(/'/g, '-'))}
             className="pl-9 w-full"
           />
         </div>
