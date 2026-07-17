@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Building2, Store, Pencil, Search, Filter, UserCog, MoreHorizontal, KeyRound, Trash2 } from 'lucide-react';
+import { Building2, Store, Pencil, Search, Filter, UserCog, MoreHorizontal, KeyRound, Trash2, Mail } from 'lucide-react';
 import type { Company } from '@/lib/types';
 import type { PlatformBranch, PlatformUser } from '@/app/(app)/admin/users/page';
 import {
@@ -47,6 +47,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
   const [confirmPwd, setConfirmPwd] = useState('');
   const [working, setWorking] = useState(false);
   const [selectedUser, setSelectedUser] = useState<PlatformUser | null>(null);
+  const [emailActionBusyId, setEmailActionBusyId] = useState<string | null>(null);
 
   const companyName = useMemo(() => {
     const map: Record<string, string> = {};
@@ -114,6 +115,42 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
       toast({ title: 'No se pudo cambiar', description: err?.message ?? 'Error.', variant: 'destructive' });
     } finally {
       setWorking(false);
+    }
+  };
+
+  // Enviar el correo de "olvidé mi contraseña" — funciona sin importar si el
+  // usuario ya confirmó su correo o no; simplemente le manda el enlace de
+  // /reset-password para que fije una contraseña nueva él mismo.
+  const handleSendReset = async (u: PlatformUser) => {
+    setEmailActionBusyId(u.id);
+    try {
+      const redirectTo = `${window.location.origin}/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(u.email, { redirectTo });
+      if (error) throw error;
+      toast({ title: 'Enlace enviado', description: `Se envió un correo a ${u.email} para restablecer su contraseña.` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message ?? 'No se pudo enviar el correo.', variant: 'destructive' });
+    } finally {
+      setEmailActionBusyId(null);
+    }
+  };
+
+  // Reenvía el correo de confirmación de cuenta (solo tiene sentido si el
+  // usuario todavía no confirmó — se oculta cuando ya está verificado).
+  const handleResendConfirm = async (u: PlatformUser) => {
+    setEmailActionBusyId(u.id);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: u.email,
+        options: { emailRedirectTo: `${window.location.origin}/login` },
+      });
+      if (error) throw error;
+      toast({ title: 'Correo de confirmación enviado', description: `Se reenvió el enlace a ${u.email}.` });
+    } catch (err: any) {
+      toast({ title: 'Error al enviar', description: err?.message ?? 'No se pudo reenviar el correo.', variant: 'destructive' });
+    } finally {
+      setEmailActionBusyId(null);
     }
   };
 
@@ -268,6 +305,22 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                           <KeyRound className="mr-2 h-4 w-4" />
                           <span>Fijar contraseña</span>
                         </DropdownMenuItem>
+                        <DropdownMenuItem
+                          onSelect={() => setTimeout(() => handleSendReset(u), 0)}
+                          disabled={emailActionBusyId === u.id}
+                        >
+                          <Mail className="mr-2 h-4 w-4" />
+                          <span>Enviar restablecimiento</span>
+                        </DropdownMenuItem>
+                        {!u.emailConfirmedAt && (
+                          <DropdownMenuItem
+                            onSelect={() => setTimeout(() => handleResendConfirm(u), 0)}
+                            disabled={emailActionBusyId === u.id}
+                          >
+                            <Mail className="mr-2 h-4 w-4 text-amber-500" />
+                            <span className="text-amber-500 font-medium">Reenviar confirmación</span>
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onSelect={() => { setSelectedUser(u); setDeleteOpen(true); }}

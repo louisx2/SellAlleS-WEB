@@ -33,6 +33,7 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
   const [resending, setResending] = useState(false);
+  const [sendingReset, setSendingReset] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -98,6 +99,23 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
       toast({ title: 'Error al enviar', description: err?.message ?? 'No se pudo reenviar el correo.', variant: 'destructive' });
     } finally {
       setResending(false);
+    }
+  };
+
+  // Envía el correo de "olvidé mi contraseña" — sirve sin importar si el
+  // usuario ya confirmó su cuenta o no.
+  const handleSendReset = async () => {
+    if (!user) return;
+    setSendingReset(true);
+    try {
+      const redirectTo = `${window.location.origin}/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo });
+      if (error) throw error;
+      toast({ title: 'Enlace enviado', description: `Se envió un correo a ${user.email} para restablecer su contraseña.` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message ?? 'No se pudo enviar el correo.', variant: 'destructive' });
+    } finally {
+      setSendingReset(false);
     }
   };
 
@@ -266,6 +284,19 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
                 {resending ? 'Enviando…' : 'Reenviar confirmación'}
               </Button>
             )}
+          </div>
+
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div className="space-y-0.5">
+              <Label>Restablecer contraseña</Label>
+              <p className="text-xs text-muted-foreground">
+                Envía un correo a {user.email} con un enlace para que fije una contraseña nueva.
+              </p>
+            </div>
+            <Button type="button" size="sm" variant="outline" onClick={handleSendReset} disabled={sendingReset}>
+              <Mail className="mr-2 h-3.5 w-3.5" />
+              {sendingReset ? 'Enviando…' : 'Enviar enlace'}
+            </Button>
           </div>
 
           {availableRoles.filter(r => !r.name.toLowerCase().includes('gerente')).length > 0 && (

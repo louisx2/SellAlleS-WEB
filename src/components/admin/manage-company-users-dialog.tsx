@@ -21,7 +21,10 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
-import { PlusCircle, Trash2, ShieldCheck, Shield, Link2, Unlink } from 'lucide-react';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { PlusCircle, Trash2, ShieldCheck, Shield, Link2, Unlink, MoreHorizontal, Mail } from 'lucide-react';
 
 interface CompanyUser {
   id: string;
@@ -31,6 +34,7 @@ interface CompanyUser {
   isSuperAdmin: boolean;
   branchId: string | null;
   roleIds: string[];
+  emailConfirmedAt: string | null;
 }
 
 interface RoleOption { id: string; name: string; }
@@ -84,7 +88,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     if (!companyId) return;
     setLoading(true);
     const [{ data: profs }, { data: bs }, { data: rls }, { data: links }] = await Promise.all([
-      supabase.from('profiles').select('id, name, email, role, is_super_admin, branch_id, profile_roles(role_id)').eq('company_id', companyId).order('name'),
+      supabase.from('profiles').select('id, name, email, role, is_super_admin, branch_id, email_confirmed_at, profile_roles(role_id)').eq('company_id', companyId).order('name'),
       supabase.from('branches').select('id, name').eq('company_id', companyId).order('name'),
       supabase.from('roles').select('id, name').eq('company_id', companyId).eq('is_system', false).order('name'),
       // Usuarios con acceso a esta empresa cuya empresa principal es OTRA.
@@ -94,6 +98,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       id: p.id, name: p.name ?? 'Usuario', email: p.email ?? '',
       role: p.role, isSuperAdmin: p.is_super_admin === true, branchId: p.branch_id,
       roleIds: (p.profile_roles ?? []).map((pr: any) => pr.role_id),
+      emailConfirmedAt: p.email_confirmed_at,
     })));
     setBranches((bs ?? []).map((b: any) => ({ id: b.id, name: b.name })));
     setRoles((rls ?? []).map((r: any) => ({ id: r.id, name: r.name })));
@@ -161,6 +166,40 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, roleIds: nextRoleIds } : u)));
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo actualizar el rol.', variant: 'destructive' });
+    } finally {
+      setBusy(user.id, false);
+    }
+  };
+
+  // Envía el correo de "olvidé mi contraseña" — funciona sin importar si el
+  // usuario ya confirmó su cuenta o no.
+  const handleSendReset = async (user: CompanyUser) => {
+    setBusy(user.id, true);
+    try {
+      const redirectTo = `${window.location.origin}/reset-password`;
+      const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo });
+      if (error) throw error;
+      toast({ title: 'Enlace enviado', description: `Se envió un correo a ${user.email} para restablecer su contraseña.` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message ?? 'No se pudo enviar el correo.', variant: 'destructive' });
+    } finally {
+      setBusy(user.id, false);
+    }
+  };
+
+  // Reenvía el correo de confirmación de cuenta (solo aplica si aún no confirmó).
+  const handleResendConfirm = async (user: CompanyUser) => {
+    setBusy(user.id, true);
+    try {
+      const { error } = await supabase.auth.resend({
+        type: 'signup',
+        email: user.email,
+        options: { emailRedirectTo: `${window.location.origin}/login` },
+      });
+      if (error) throw error;
+      toast({ title: 'Correo de confirmación enviado', description: `Se reenvió el enlace a ${user.email}.` });
+    } catch (err: any) {
+      toast({ title: 'Error al enviar', description: err?.message ?? 'No se pudo reenviar el correo.', variant: 'destructive' });
     } finally {
       setBusy(user.id, false);
     }
@@ -459,14 +498,35 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button
-                          variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive"
-                          onClick={() => setDeleteTarget(u)}
-                          disabled={rowBusy[u.id] || u.id === appUser?.id}
-                          title="Eliminar usuario"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                        <DropdownMenu modal={false}>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" className="h-8 w-8" disabled={rowBusy[u.id]}>
+                              <span className="sr-only">Abrir menú</span>
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onSelect={() => setTimeout(() => handleSendReset(u), 0)}>
+                              <Mail className="mr-2 h-4 w-4" />
+                              <span>Enviar restablecimiento</span>
+                            </DropdownMenuItem>
+                            {!u.emailConfirmedAt && (
+                              <DropdownMenuItem onSelect={() => setTimeout(() => handleResendConfirm(u), 0)}>
+                                <Mail className="mr-2 h-4 w-4 text-amber-500" />
+                                <span className="text-amber-500 font-medium">Reenviar confirmación</span>
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              onSelect={() => setTimeout(() => setDeleteTarget(u), 0)}
+                              disabled={u.id === appUser?.id}
+                              className="text-destructive focus:text-destructive"
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              <span>Eliminar</span>
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </TableCell>
                     </TableRow>
                   ))
