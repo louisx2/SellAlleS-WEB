@@ -83,6 +83,28 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
     });
   };
   const isReportChecked = (slug: string) => (permissions.reports_visible ?? REPORT_ITEMS.map((r) => r.slug)).includes(slug);
+ 
+  const handleToggleColumn = (action: PermissionAction, checked: boolean) => {
+    setPermissions((prev) => {
+      const newPerms = { ...prev };
+      visibleResources.forEach((r) => {
+        const current = new Set(newPerms[r.key] ?? []);
+        if (checked) current.add(action); else current.delete(action);
+        newPerms[r.key] = Array.from(current);
+      });
+      return newPerms;
+    });
+  };
+
+  const handleToggleAll = (checked: boolean) => {
+    setPermissions((prev) => {
+      const newPerms = { ...prev };
+      visibleResources.forEach((r) => {
+        newPerms[r.key] = checked ? ['view', 'create', 'edit', 'delete'] : [];
+      });
+      return newPerms;
+    });
+  };
 
   const handleSave = async () => {
     if (!name.trim()) {
@@ -146,28 +168,59 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
                 <TabsTrigger value="reportes">Reportes</TabsTrigger>
               </TabsList>
               <TabsContent value="permisos">
-                <PermissionsGrid resources={visibleResources} permissions={permissions} isSystem={permissionsLocked} toggle={toggle} />
+                <PermissionsGrid 
+                  resources={visibleResources} 
+                  permissions={permissions} 
+                  isSystem={permissionsLocked} 
+                  toggle={toggle}
+                  onToggleColumn={handleToggleColumn}
+                  onToggleAll={handleToggleAll}
+                />
               </TabsContent>
               <TabsContent value="reportes">
-                <div className="rounded-lg border p-3 grid gap-2">
-                  <p className="text-xs text-muted-foreground">
-                    Elige qué reportes puede ver este rol dentro de "Reportes".
-                  </p>
-                  {REPORT_ITEMS.map((item) => (
-                    <label key={item.slug} className="flex items-center gap-2 text-sm">
+                <div className="rounded-lg border p-3 grid gap-2 bg-card">
+                  <div className="flex items-center justify-between border-b pb-2 mb-1">
+                    <label className="flex items-center gap-2 text-sm font-semibold cursor-pointer select-none">
                       <Checkbox
-                        checked={isReportChecked(item.slug)}
+                        checked={REPORT_ITEMS.every((r) => isReportChecked(r.slug))}
                         disabled={permissionsLocked}
-                        onCheckedChange={(c) => toggleReport(item.slug, !!c)}
+                        onCheckedChange={(checked) => {
+                          setPermissions((prev) => ({
+                            ...prev,
+                            reports_visible: checked ? REPORT_ITEMS.map((r) => r.slug) : [],
+                          }));
+                        }}
                       />
-                      {item.label}
+                      Seleccionar Todos los Reportes
                     </label>
-                  ))}
+                    <p className="text-xs text-muted-foreground">
+                      Elige qué reportes puede ver este rol.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {REPORT_ITEMS.map((item) => (
+                      <label key={item.slug} className="flex items-center gap-2 text-sm p-1.5 rounded hover:bg-muted/50 cursor-pointer select-none">
+                        <Checkbox
+                          checked={isReportChecked(item.slug)}
+                          disabled={permissionsLocked}
+                          onCheckedChange={(c) => toggleReport(item.slug, !!c)}
+                        />
+                        {item.label}
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </TabsContent>
             </Tabs>
           ) : (
-            <PermissionsGrid resources={visibleResources} permissions={permissions} isSystem={permissionsLocked} toggle={toggle} />
+            <PermissionsGrid 
+              resources={visibleResources} 
+              permissions={permissions} 
+              isSystem={permissionsLocked} 
+              toggle={toggle}
+              onToggleColumn={handleToggleColumn}
+              onToggleAll={handleToggleAll}
+            />
           )}
         </div>
 
@@ -183,28 +236,57 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
 }
 
 function PermissionsGrid({
-  resources, permissions, isSystem, toggle,
+  resources, permissions, isSystem, toggle, onToggleColumn, onToggleAll,
 }: {
   resources: { key: PermissionResource; label: string }[];
   permissions: RolePermissions;
   isSystem: boolean;
   toggle: (resource: PermissionResource, action: PermissionAction, checked: boolean) => void;
+  onToggleColumn?: (action: PermissionAction, checked: boolean) => void;
+  onToggleAll?: (checked: boolean) => void;
 }) {
+  const isAllChecked = resources.length > 0 && resources.every(
+    (r) => PERMISSION_ACTIONS.every((a) => permissions[r.key]?.includes(a.key))
+  );
+
+  const isColumnChecked = (action: PermissionAction) =>
+    resources.length > 0 && resources.every((r) => permissions[r.key]?.includes(action));
+
   return (
     <div className="rounded-lg border overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b bg-muted/30">
-            <th className="text-left p-2 font-medium">Sección</th>
+            <th className="text-left p-2 font-medium">
+              <div className="flex items-center gap-2 whitespace-nowrap">
+                {!isSystem && onToggleAll && (
+                  <Checkbox
+                    checked={isAllChecked}
+                    onCheckedChange={(c) => onToggleAll(!!c)}
+                  />
+                )}
+                <span>Sección</span>
+              </div>
+            </th>
             {PERMISSION_ACTIONS.map((a) => (
-              <th key={a.key} className="text-center p-2 font-medium whitespace-nowrap">{a.label}</th>
+              <th key={a.key} className="text-center p-2 font-medium whitespace-nowrap">
+                <div className="flex flex-col items-center gap-1.5 min-w-[60px]">
+                  <span>{a.label}</span>
+                  {!isSystem && onToggleColumn && (
+                    <Checkbox
+                      checked={isColumnChecked(a.key)}
+                      onCheckedChange={(c) => onToggleColumn(a.key, !!c)}
+                    />
+                  )}
+                </div>
+              </th>
             ))}
           </tr>
         </thead>
         <tbody>
           {resources.map((r) => (
-            <tr key={r.key} className="border-b last:border-0">
-              <td className="p-2">{r.label}</td>
+            <tr key={r.key} className="border-b last:border-0 hover:bg-muted/10">
+              <td className="p-2 font-medium">{r.label}</td>
               {PERMISSION_ACTIONS.map((a) => (
                 <td key={a.key} className="text-center p-2">
                   <Checkbox
