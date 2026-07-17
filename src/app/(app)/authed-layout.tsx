@@ -23,6 +23,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { supabase } from '@/lib/supabase/client';
 import { ProfileModal } from '@/components/profile/profile-modal';
 
 interface NavItem {
@@ -88,6 +89,32 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [branchLogo, setBranchLogo] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!appUser?.activeBranchId) {
+      setBranchLogo(null);
+      return;
+    }
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('branches')
+          .select('logo_url')
+          .eq('id', appUser.activeBranchId)
+          .limit(1)
+          .maybeSingle();
+        if (data?.logo_url) {
+          setBranchLogo(data.logo_url);
+        } else {
+          setBranchLogo(null);
+        }
+      } catch (err) {
+        console.warn("Error loading branch logo in layout:", err);
+        setBranchLogo(null);
+      }
+    })();
+  }, [appUser?.activeBranchId]);
 
   useEffect(() => {
     setMounted(true);
@@ -217,10 +244,9 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const logoName = isSuperAdmin && !isImpersonating 
     ? 'Plataforma SellAlleS' 
     : (hasMultipleCompanies && !isImpersonating ? 'Mis Empresas' : (profile?.name || 'SellAlleS'));
-  const activeBranchObj = appUser?.branches?.find(b => b.id === appUser.activeBranchId);
   const logoImgUrl = (isSuperAdmin && !isImpersonating) || (hasMultipleCompanies && !isImpersonating) 
     ? null 
-    : (activeBranchObj?.logoUrl || profile?.logoUrl);
+    : (branchLogo || profile?.logoUrl);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">

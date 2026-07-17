@@ -68,7 +68,7 @@ export type User = {
   role: 'admin' | 'cashier' | 'manager';
   branch: string; // Nombre de la sucursal activa
   activeBranchId?: string; // ID de la sucursal activa
-  branches?: { id: string; name: string }[]; // Lista de sucursales a las que pertenece
+  branches?: { id: string; name: string; logoUrl?: string; ticketLogoUrl?: string }[]; // Lista de sucursales a las que pertenece
   companyId?: string;
   companyStatus?: 'trial' | 'active' | 'suspended';
   companyDemoExpiresAt?: string; // empresa de prueba pública ("Probar Plataforma"); se banea al vencer
