@@ -236,7 +236,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // estado de inmediato para que el efecto redirija a /login, y diferir el
       // signOut FUERA del callback — llamarlo dentro de onAuthStateChange
       // deadlockea el lock de auth de supabase-js (skeleton congelado).
-      if (sess?.user) {
+      // En /reset-password la sesión es de recuperación (para poder fijar la
+      // contraseña): no aplicar el auto-signout de "no mantener sesión", o el
+      // enlace del correo quedaría inservible si el usuario desmarcó esa opción
+      // en un login anterior en este navegador.
+      const onResetPassword = typeof window !== 'undefined' && window.location.pathname === '/reset-password';
+      if (sess?.user && !onResetPassword) {
         const keepSession = localStorage.getItem('keepSession');
         const tabSession = sessionStorage.getItem('tabSession');
         if (keepSession === 'false' && tabSession !== 'true') {
@@ -281,7 +286,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const isImpersonating = !!appUser?.impersonatedCompanyId;
       const isClientRoute = !pathname.startsWith('/admin');
 
-      if (isPublic) {
+      if (isPublic && pathname !== '/reset-password') {
+        // /reset-password se excluye: durante la recuperación se establece una
+        // sesión temporal (para poder llamar updateUser), pero el usuario debe
+        // quedarse ahí a fijar su contraseña, no rebotar al dashboard.
         if (appUser?.isSuperAdmin) {
           router.replace('/admin/companies');
         } else if (hasMultipleCompanies && !isImpersonating) {
@@ -289,7 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           router.replace('/dashboard');
         }
-      } else {
+      } else if (!isPublic) {
         if (appUser?.isSuperAdmin && !isImpersonating && isClientRoute) {
           router.replace('/admin/companies');
         } else if (hasMultipleCompanies && !isImpersonating && isClientRoute) {
@@ -411,14 +419,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Estado de carga / transición: mostrar el skeleton a pantalla completa.
   if (loading) return <AppSkeleton message="Cargando plataforma..." />;
   const isPublic = publicRoutes.includes(pathname);
-  if (session && !appUser) return <AppSkeleton message="Cargando datos..." />;   // sesión activa, cargando perfil
+  // /reset-password se maneja aparte: aunque exista una sesión de recuperación,
+  // la página debe renderizarse (el usuario está fijando su contraseña), no un
+  // skeleton ni un rebote al dashboard.
+  const isResetPassword = pathname === '/reset-password';
+  if (session && !appUser && !isResetPassword) return <AppSkeleton message="Cargando datos..." />;   // sesión activa, cargando perfil
   if (!session && !isPublic) return <AppSkeleton message="Cargando plataforma..." />;  // sin sesión, redirigiendo a login
   // Sesión activa pero seguimos en una ruta pública (login/reset-password): ya
   // se disparó el redirect a /dashboard pero el pathname todavía no lo refleja.
   // Sin este caso, aquí abajo se hace fallthrough a `children` y el formulario
   // de login remonta de golpe (con su estado en blanco) justo antes de que la
   // navegación termine — se ve como un parpadeo de vuelta al login.
-  if (session && isPublic) return <AppSkeleton message="Entrando..." />;
+  if (session && isPublic && !isResetPassword) return <AppSkeleton message="Entrando..." />;
 
   // Cuenta autenticada pero sin empresa: onboarding obligatorio antes de la app.
   if (session && appUser && needsCompany && !isPublic) {
