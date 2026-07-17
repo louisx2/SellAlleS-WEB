@@ -1,12 +1,12 @@
 'use client';
 
-import { Info, Package, MapPin, Tag, Truck, Boxes } from 'lucide-react';
+import { Info, Package, MapPin, Tag, Truck, Boxes, Layers } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useCategories } from '@/context/category-provider';
 import { useLocations } from '@/context/location-provider';
 import { useSuppliers } from '@/context/supplier-provider';
-import { cn } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
 import type { Product } from '@/lib/types';
 
 interface ProductDetailButtonProps {
@@ -25,6 +25,8 @@ export function ProductDetailButton({ product, className }: ProductDetailButtonP
   const categoryName = categories.find((c) => c.id === product.categoryId)?.name;
   const locationName = locations.find((l) => l.id === product.locationId)?.name;
   const supplierName = suppliers.find((s) => s.id === product.supplierId)?.name;
+
+  const hasWholesale = product.wholesalePrice != null && product.wholesalePrice > 0;
 
   return (
     <Popover>
@@ -73,6 +75,17 @@ export function ProductDetailButton({ product, className }: ProductDetailButtonP
               <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span>Stock disponible: <span className="font-medium">{product.stock}</span></span>
             </div>
+            {hasWholesale && (
+              <div className="flex items-start gap-1.5">
+                <Layers className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+                <span>
+                  Precio por mayor: <span className="font-medium">{formatCurrency(product.wholesalePrice!)}</span>
+                  {product.wholesaleMinQuantity != null && product.wholesaleMinQuantity > 0 && (
+                    <> <span className="text-muted-foreground">(desde {product.wholesaleMinQuantity} unidades)</span></>
+                  )}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </PopoverContent>
