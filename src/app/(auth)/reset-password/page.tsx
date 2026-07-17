@@ -34,14 +34,19 @@ export default function ResetPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // Detecta la sesión de recuperación creada al abrir el enlace del correo.
-  // El cliente (detectSessionInUrl) consume el token del hash y dispara el
-  // evento PASSWORD_RECOVERY; puede llegar un instante después de montar, así
-  // que además de consultar getSession() escuchamos el cambio de estado. Si en
-  // unos segundos no aparece sesión, el enlace es inválido o expiró.
+  // IMPORTANTE: esta página solo debe habilitarse ante el evento real
+  // PASSWORD_RECOVERY (el token del enlace de correo, consumido por
+  // detectSessionInUrl). NUNCA confiar en "ya hay una sesión activa"
+  // (getSession()) — si alguien entra a esta URL a mano en un navegador que
+  // quedó logueado, eso encontraría la sesión normal del dueño de la cuenta y
+  // dejaría cambiarle la contraseña sin pedir la anterior. La marca en
+  // sessionStorage solo sirve para sobrevivir un refresh de la propia pestaña
+  // justo después de que el evento ya disparó una vez.
   useEffect(() => {
     let settled = false;
-    const markReady = () => { if (!settled) { settled = true; setStatus('ready'); } };
+    const markReady = () => {
+      if (!settled) { settled = true; sessionStorage.setItem('passwordRecoveryActive', '1'); setStatus('ready'); }
+    };
     const markInvalid = () => {
       if (!settled) {
         settled = true;
@@ -50,15 +55,15 @@ export default function ResetPasswordPage() {
       }
     };
 
-    // 1. ¿Ya hay sesión? (recovery ya procesado, o el usuario ya estaba dentro).
-    supabase.auth.getSession().then(({ data }) => { if (data.session) markReady(); });
+    if (sessionStorage.getItem('passwordRecoveryActive') === '1') {
+      markReady();
+    }
 
-    // 2. La sesión de recuperación puede llegar un poco después.
-    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
-      if (event === 'PASSWORD_RECOVERY' || sess?.user) markReady();
+    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') markReady();
     });
 
-    // 3. Nada llegó: enlace inválido/expirado.
+    // Si el evento no llega en unos segundos, el enlace es inválido/expiró.
     const timer = setTimeout(markInvalid, 5000);
 
     return () => { clearTimeout(timer); sub.subscription.unsubscribe(); };
@@ -84,6 +89,7 @@ export default function ResetPasswordPage() {
       // Cerrar la sesión de recuperación: el usuario entra de nuevo con su
       // contraseña nueva (y no queda una sesión de recuperación abierta).
       await supabase.auth.signOut();
+      sessionStorage.removeItem('passwordRecoveryActive');
       toast({ title: 'Contraseña actualizada', description: 'Ya puedes iniciar sesión con tu nueva contraseña.' });
       router.replace('/login');
     } catch (err: any) {
