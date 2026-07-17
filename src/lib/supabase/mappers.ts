@@ -138,6 +138,7 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   name: r.name ?? '', phone: r.phone ?? '', rnc: r.rnc ?? '', address: r.address ?? '',
   socialMedia: { instagram: r.instagram ?? '', facebook: r.facebook ?? '' },
   logoUrl: r.logo_url ?? '', ticketLogoUrl: r.ticket_logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
+  ticketNameDisplay: (r.ticket_name_display ?? 'company') as CompanyProfile['ticketNameDisplay'],
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
   loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
@@ -153,6 +154,7 @@ export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   name: p.name, phone: p.phone ?? null, rnc: p.rnc ?? null, address: p.address ?? null,
   instagram: p.socialMedia?.instagram ?? null, facebook: p.socialMedia?.facebook ?? null,
   logo_url: p.logoUrl ?? null, ticket_logo_url: p.ticketLogoUrl ?? null, receipt_footer: p.receiptFooter ?? null,
+  ticket_name_display: p.ticketNameDisplay ?? 'company',
 });
 
 // ---------- Sale (con sale_items y customer embebidos) ----------

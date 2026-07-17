@@ -31,6 +31,7 @@ function TicketBody({ loan }: { loan: Loan }) {
         </div>
       )}
       <h3 className="text-lg font-semibold text-center">{profile.name}</h3>
+      {profile.secondaryName && <p className="text-sm font-medium text-center">{profile.secondaryName}</p>}
       <div className="text-xs text-muted-foreground text-center">
         {profile.address && <p>{profile.address}</p>}
         {profile.rnc && <p>RNC: {profile.rnc}</p>}

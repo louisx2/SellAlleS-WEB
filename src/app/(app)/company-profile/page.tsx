@@ -10,6 +10,7 @@ import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useToast } from '@/hooks/use-toast';
 import type { CompanyProfile } from '@/lib/types';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Info, Loader2, Upload } from 'lucide-react';
 import { useAuth } from '@/context/auth-provider';
@@ -285,6 +286,32 @@ export default function CompanyProfilePage() {
                   </div>
                 )}
               </div>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="ticketNameDisplay">Nombre en el encabezado del ticket</Label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-4 w-4 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>El nombre de sucursal usa su "Nombre comercial" (configurable en Sucursales) o, si no lo tiene, su nombre interno.</p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
+              <Select
+                value={formData.ticketNameDisplay}
+                onValueChange={(v) => setFormData((prev) => ({ ...prev, ticketNameDisplay: v as CompanyProfile['ticketNameDisplay'] }))}
+              >
+                <SelectTrigger id="ticketNameDisplay" className="sm:w-80"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="company">Solo el nombre de la empresa</SelectItem>
+                  <SelectItem value="branch">Solo el nombre de la sucursal</SelectItem>
+                  <SelectItem value="both">Ambos (empresa y sucursal)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="receiptFooter">Pie de Página del Recibo</Label>
               <Textarea

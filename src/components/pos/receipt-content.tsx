@@ -38,6 +38,7 @@ export function ReceiptHeader({ sale }: ReceiptProps) {
         </div>
       )}
       <h3 className="text-lg font-semibold text-center">{profile.name}</h3>
+      {profile.secondaryName && <p className="text-sm font-medium text-center">{profile.secondaryName}</p>}
        <div className="text-xs text-muted-foreground text-center">
         <p>{profile.address}</p>
         <p>RNC: {profile.rnc}</p>

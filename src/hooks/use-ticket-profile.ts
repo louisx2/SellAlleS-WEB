@@ -10,6 +10,8 @@ import { useAuth } from '@/context/auth-provider';
 // empresa (identidad fiscal única).
 export interface TicketProfile {
   name: string;
+  // Segunda línea bajo `name` cuando la empresa configuró "mostrar ambos".
+  secondaryName?: string;
   phone: string;
   address: string;
   rnc: string;
@@ -30,8 +32,22 @@ export function useTicketProfile(branchRef?: string | null): TicketProfile {
   const target = branchRef || appUser?.branch || '';
   const branch = target ? branches.find((b) => b.name === target || b.id === target) : undefined;
 
+  const companyName = profile.name;
+  const branchName = branch?.displayName?.trim() || branch?.name?.trim() || '';
+
+  // Qué nombre encabeza el ticket, según lo configurado en el perfil de la
+  // empresa: el de la empresa (por defecto), el de la sucursal, o ambos.
+  let name = companyName;
+  let secondaryName: string | undefined;
+  if (profile.ticketNameDisplay === 'branch') {
+    name = branchName || companyName;
+  } else if (profile.ticketNameDisplay === 'both' && branchName && branchName !== companyName) {
+    secondaryName = branchName;
+  }
+
   return {
-    name: branch?.displayName?.trim() || profile.name,
+    name,
+    secondaryName,
     phone: branch?.phone?.trim() || profile.phone,
     address: branch?.address?.trim() || profile.address,
     rnc: profile.rnc,

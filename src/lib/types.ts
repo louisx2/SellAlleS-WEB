@@ -229,6 +229,8 @@ export type Quote = {
   createdAt: Date;
 };
 
+export type TicketNameDisplay = 'company' | 'branch' | 'both';
+
 export type CompanyProfile = {
   name: string;
   phone: string;
@@ -241,6 +243,9 @@ export type CompanyProfile = {
   logoUrl: string;
   ticketLogoUrl: string;
   receiptFooter: string;
+  // Qué nombre encabeza el ticket: el de la empresa, el de la sucursal (o su
+  // nombre comercial si lo tiene), o ambos.
+  ticketNameDisplay: TicketNameDisplay;
   lateFeeRate: number;         // % de mora sobre la cuota vencida
   defaultInterestRate: number; // % de interés mensual sugerido en el POS
   loanLateFeeRate: number;         // % de mora de préstamos (independiente de lateFeeRate)
