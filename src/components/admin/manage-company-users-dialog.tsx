@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
@@ -22,7 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
-import { PlusCircle, Trash2, ShieldCheck, Shield } from 'lucide-react';
+import { PlusCircle, Trash2, ShieldCheck, Shield, Link2, Unlink } from 'lucide-react';
 
 interface CompanyUser {
   id: string;
@@ -37,6 +36,15 @@ interface CompanyUser {
 interface RoleOption { id: string; name: string; }
 
 interface BranchOption { id: string; name: string; }
+
+// Usuario cuya empresa PRINCIPAL es otra, pero que tiene acceso a esta
+// empresa vía profile_companies (multi-empresa).
+interface LinkedUser {
+  id: string;
+  name: string;
+  email: string;
+  primaryCompanyName: string;
+}
 
 const NONE = 'none';
 const emptyAddForm = { name: '', email: '', password: '', role: 'cashier' as 'admin' | 'cashier', branchId: '' };
@@ -66,13 +74,21 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [addSaving, setAddSaving] = useState(false);
 
+  // Vincular un usuario EXISTENTE (de otra empresa) a esta empresa.
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkEmail, setLinkEmail] = useState('');
+  const [linkSaving, setLinkSaving] = useState(false);
+  const [linkedUsers, setLinkedUsers] = useState<LinkedUser[]>([]);
+
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const [{ data: profs }, { data: bs }, { data: rls }] = await Promise.all([
+    const [{ data: profs }, { data: bs }, { data: rls }, { data: links }] = await Promise.all([
       supabase.from('profiles').select('id, name, email, role, is_super_admin, branch_id, profile_roles(role_id)').eq('company_id', companyId).order('name'),
       supabase.from('branches').select('id, name').eq('company_id', companyId).order('name'),
       supabase.from('roles').select('id, name').eq('company_id', companyId).eq('is_system', false).order('name'),
+      // Usuarios con acceso a esta empresa cuya empresa principal es OTRA.
+      supabase.from('profile_companies').select('profiles(id, name, email, company_id, companies(name))').eq('company_id', companyId),
     ]);
     setUsers((profs ?? []).map((p: any) => ({
       id: p.id, name: p.name ?? 'Usuario', email: p.email ?? '',
@@ -81,11 +97,22 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     })));
     setBranches((bs ?? []).map((b: any) => ({ id: b.id, name: b.name })));
     setRoles((rls ?? []).map((r: any) => ({ id: r.id, name: r.name })));
+    setLinkedUsers(
+      (links ?? [])
+        .map((l: any) => l.profiles)
+        .filter((p: any) => p && p.company_id !== companyId)
+        .map((p: any) => ({
+          id: p.id,
+          name: p.name ?? 'Usuario',
+          email: p.email ?? '',
+          primaryCompanyName: p.companies?.name ?? 'Otra empresa',
+        }))
+    );
     setLoading(false);
   }, [companyId]);
 
   useEffect(() => {
-    if (open && companyId) { load(); setAddOpen(false); setAddForm(emptyAddForm); }
+    if (open && companyId) { load(); setAddOpen(false); setAddForm(emptyAddForm); setLinkOpen(false); setLinkEmail(''); }
   }, [open, companyId, load]);
 
   const setBusy = (id: string, v: boolean) => setRowBusy((prev) => ({ ...prev, [id]: v }));
@@ -175,33 +202,23 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     }
     setAddSaving(true);
     try {
-      // Cliente temporal (sin persistir sesión) para no pisar la sesión del super
-      // admin: auth.signUp es una operación pública, no requiere service_role.
-      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-      const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-      const tempClient = createClient(supabaseUrl, supabaseAnonKey, { auth: { persistSession: false } });
-
-      const { data: authData, error: authError } = await tempClient.auth.signUp({
-        email: addForm.email.trim(),
-        password: addForm.password,
-        options: { data: { name: addForm.name.trim() } },
+      // Alta vía Edge Function (service_role): mismo camino que /users. Evita
+      // el signUp público (rate-limit de correos) y confirma el correo de una
+      // vez, ya que el super admin verificó la identidad al crearlo.
+      const { data, error } = await supabase.functions.invoke('admin-user-actions', {
+        body: {
+          action: 'create',
+          companyId,
+          name: addForm.name.trim(),
+          email: addForm.email.trim(),
+          password: addForm.password,
+          role: addForm.role,
+          branchId: addForm.branchId,
+          branchIds: [addForm.branchId],
+        },
       });
-      if (authError) throw authError;
-      if (!authData.user) throw new Error('No se pudo crear la cuenta.');
-
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: authData.user.id,
-        email: addForm.email.trim(),
-        name: addForm.name.trim(),
-        role: addForm.role,
-        company_id: companyId,
-        branch_id: addForm.branchId,
-      });
-      if (profileError) throw profileError;
-
-      await supabase.from('profile_branches').insert({
-        profile_id: authData.user.id, branch_id: addForm.branchId, company_id: companyId,
-      });
+      if (error) throw new Error((data as any)?.error ?? error.message);
+      if ((data as any)?.error) throw new Error((data as any).error);
 
       toast({ title: 'Usuario creado', description: `${addForm.name} añadido a ${companyName}.` });
       setAddForm(emptyAddForm);
@@ -214,6 +231,63 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     }
   };
 
+  // Vincular por email un usuario que ya existe en otra empresa: inserta la
+  // fila en profile_companies. El usuario verá "Mis Empresas" al entrar y
+  // podrá cambiarse a esta empresa (sin tocar su empresa principal actual).
+  const handleLink = async () => {
+    if (!companyId) return;
+    const email = linkEmail.trim().toLowerCase();
+    if (!email) {
+      toast({ title: 'Escribe el correo', description: 'Indica el correo del usuario existente.', variant: 'destructive' });
+      return;
+    }
+    setLinkSaving(true);
+    try {
+      const { data: prof, error: findErr } = await supabase
+        .from('profiles')
+        .select('id, name, email, company_id, is_super_admin')
+        .ilike('email', email)
+        .maybeSingle();
+      if (findErr) throw findErr;
+      if (!prof) throw new Error('No existe ningún usuario con ese correo.');
+      if (prof.is_super_admin) throw new Error('Un super admin ya tiene acceso a todas las empresas.');
+      if (prof.company_id === companyId) throw new Error('Ese usuario ya pertenece a esta empresa.');
+
+      const { error: linkErr } = await supabase
+        .from('profile_companies')
+        .upsert({ profile_id: prof.id, company_id: companyId }, { onConflict: 'profile_id,company_id' });
+      if (linkErr) throw linkErr;
+
+      toast({ title: 'Usuario vinculado', description: `${prof.name ?? prof.email} ahora puede entrar a ${companyName} desde "Mis Empresas".` });
+      setLinkEmail('');
+      setLinkOpen(false);
+      await load();
+    } catch (err: any) {
+      toast({ title: 'No se pudo vincular', description: err?.message ?? 'Error.', variant: 'destructive' });
+    } finally {
+      setLinkSaving(false);
+    }
+  };
+
+  const handleUnlink = async (lu: LinkedUser) => {
+    if (!companyId) return;
+    setBusy(lu.id, true);
+    try {
+      const { error } = await supabase
+        .from('profile_companies')
+        .delete()
+        .eq('profile_id', lu.id)
+        .eq('company_id', companyId);
+      if (error) throw error;
+      setLinkedUsers((prev) => prev.filter((u) => u.id !== lu.id));
+      toast({ title: 'Acceso retirado', description: `${lu.name} ya no puede entrar a ${companyName}.` });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message ?? 'No se pudo desvincular.', variant: 'destructive' });
+    } finally {
+      setBusy(lu.id, false);
+    }
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -223,11 +297,43 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
             <DialogDescription>Agrega, mueve entre sucursales o elimina usuarios de esta empresa.</DialogDescription>
           </DialogHeader>
 
-          {!addOpen ? (
-            <Button variant="outline" size="sm" className="w-fit" onClick={() => setAddOpen(true)}>
-              <PlusCircle className="mr-2 h-4 w-4" /> Agregar usuario
-            </Button>
-          ) : (
+          {!addOpen && !linkOpen && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}>
+                <PlusCircle className="mr-2 h-4 w-4" /> Agregar usuario
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setLinkOpen(true)}>
+                <Link2 className="mr-2 h-4 w-4" /> Vincular usuario existente
+              </Button>
+            </div>
+          )}
+
+          {linkOpen && (
+            <div className="grid gap-3 rounded-lg border p-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="linkEmail">Correo del usuario existente</Label>
+                <Input
+                  id="linkEmail"
+                  type="email"
+                  placeholder="usuario@correo.com"
+                  value={linkEmail}
+                  onChange={(e) => setLinkEmail(e.target.value)}
+                  disabled={linkSaving}
+                />
+                <p className="text-xs text-muted-foreground">
+                  El usuario debe existir en otra empresa. Quedará vinculado a {companyName} y al iniciar sesión verá "Mis Empresas" para elegir a cuál entrar.
+                </p>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" size="sm" onClick={() => { setLinkOpen(false); setLinkEmail(''); }} disabled={linkSaving}>Cancelar</Button>
+                <Button size="sm" onClick={handleLink} disabled={linkSaving}>
+                  {linkSaving ? 'Vinculando…' : 'Vincular'}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {addOpen && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border p-3">
               <div className="grid gap-1.5">
                 <Label htmlFor="addName">Nombre</Label>
@@ -368,6 +474,32 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
               </TableBody>
             </Table>
           </div>
+
+          {linkedUsers.length > 0 && (
+            <div className="rounded-lg border p-3 space-y-2">
+              <p className="text-sm font-medium">Usuarios de otras empresas con acceso</p>
+              <p className="text-xs text-muted-foreground">
+                Su empresa principal es otra, pero pueden entrar a {companyName} desde "Mis Empresas".
+              </p>
+              <div className="space-y-2">
+                {linkedUsers.map((lu) => (
+                  <div key={lu.id} className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{lu.name}</div>
+                      <div className="text-xs text-muted-foreground truncate">{lu.email} · Principal: {lu.primaryCompanyName}</div>
+                    </div>
+                    <Button
+                      variant="ghost" size="sm" className="h-8 text-destructive hover:text-destructive shrink-0"
+                      onClick={() => handleUnlink(lu)}
+                      disabled={rowBusy[lu.id]}
+                    >
+                      <Unlink className="mr-1.5 h-3.5 w-3.5" /> Quitar acceso
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
