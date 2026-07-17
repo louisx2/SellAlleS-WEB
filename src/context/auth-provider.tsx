@@ -21,6 +21,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   setImpersonatedCompany: (companyId: string | null, companyName: string | null) => void;
   setActiveBranch: (branchId: string, branchName: string) => void;
+  setCartView: (view: 'list' | 'grid') => void;
   refreshProfile: () => Promise<void>;
 }
 
@@ -62,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase
       .from('profiles')
       .select(`
-        id, name, email, role, is_super_admin, company_id,
+        id, name, email, role, is_super_admin, company_id, pos_cart_view,
         companies!profiles_company_id_fkey(status, demo_expires_at, trial_ends_at, paid_until, max_users),
         branches!profiles_branch_id_fkey(id, name, is_active),
         profile_branches(branches(id, name, is_active)),
@@ -217,6 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         customRoles: customRoles,
         companies: companyList,
         companyMaxUsers: maxUsers,
+        cartView: (data as any).pos_cart_view === 'list' ? 'list' : 'grid',
       };
       setAppUser(user);
       if (!requireSelection) persistLocal(user);
@@ -376,6 +378,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // Preferencia de vista del carrito del POS (lista/imágenes): por usuario,
+  // viaja con la cuenta sin importar el dispositivo. Se actualiza en memoria
+  // al toque y se persiste en segundo plano.
+  const setCartView = useCallback((view: 'list' | 'grid') => {
+    setAppUser((prev) => {
+      if (!prev) return null;
+      const updated = { ...prev, cartView: view };
+      persistLocal(updated);
+      supabase.from('profiles').update({ pos_cart_view: view }).eq('id', prev.id).then(() => {});
+      return updated;
+    });
+  }, []);
+
   const signIn = async (email: string, pass: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
@@ -467,7 +482,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ appUser, loading, signIn, signUp, signOut, setImpersonatedCompany, setActiveBranch, refreshProfile }}>
+    <AuthContext.Provider value={{ appUser, loading, signIn, signUp, signOut, setImpersonatedCompany, setActiveBranch, setCartView, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
