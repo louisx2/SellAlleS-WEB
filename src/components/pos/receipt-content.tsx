@@ -7,6 +7,7 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase/client';
 
 interface ReceiptProps {
   sale: Sale;
@@ -27,11 +28,35 @@ const paymentMethodText = {
 
 export function ReceiptHeader({ sale }: ReceiptProps) {
   const { profile } = useCompanyProfile();
+  const [ticketLogo, setTicketLogo] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTicketLogo(profile.ticketLogoUrl || null);
+    if (!sale.branchId) return;
+
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('branches')
+          .select('ticket_logo_url')
+          .eq('name', sale.branchId)
+          .limit(1)
+          .maybeSingle();
+
+        if (data?.ticket_logo_url) {
+          setTicketLogo(data.ticket_logo_url);
+        }
+      } catch (err) {
+        console.warn("Error loading branch ticket logo:", err);
+      }
+    })();
+  }, [sale.branchId, profile.ticketLogoUrl]);
+
   return (
     <div className="text-left space-y-1">
-      {profile.ticketLogoUrl && (
+      {ticketLogo && (
         <div className="flex justify-center pb-1">
-          <img src={profile.ticketLogoUrl} alt="" style={{ maxHeight: 60, maxWidth: '80%', objectFit: 'contain' }} />
+          <img src={ticketLogo} alt="" style={{ maxHeight: 60, maxWidth: '80%', objectFit: 'contain' }} />
         </div>
       )}
       <h3 className="text-lg font-semibold text-center">{profile.name}</h3>

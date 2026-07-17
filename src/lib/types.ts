@@ -90,6 +90,8 @@ export type Branch = {
   name: string;
   location: string;
   isActive: boolean;
+  logoUrl?: string;
+  ticketLogoUrl?: string;
 };
 
 export type Company = {

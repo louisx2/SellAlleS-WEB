@@ -90,8 +90,20 @@ export const customerToRow = (c: Partial<Customer>) => ({
 });
 
 // ---------- Branch ----------
-export const rowToBranch = (r: any): Branch => ({ id: r.id, name: r.name, location: r.location ?? '', isActive: r.is_active ?? true });
-export const branchToRow = (b: Partial<Branch>) => ({ name: b.name, location: b.location ?? null });
+export const rowToBranch = (r: any): Branch => ({ 
+  id: r.id, 
+  name: r.name, 
+  location: r.location ?? '', 
+  isActive: r.is_active ?? true,
+  logoUrl: r.logo_url ?? undefined,
+  ticketLogoUrl: r.ticket_logo_url ?? undefined
+});
+export const branchToRow = (b: Partial<Branch>) => ({ 
+  name: b.name, 
+  location: b.location ?? null,
+  logo_url: b.logoUrl ?? null,
+  ticket_logo_url: b.ticketLogoUrl ?? null
+});
 
 // ---------- Supplier ----------
 export const rowToSupplier = (r: any): Supplier => ({

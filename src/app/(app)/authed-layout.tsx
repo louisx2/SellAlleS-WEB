@@ -217,7 +217,10 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const logoName = isSuperAdmin && !isImpersonating 
     ? 'Plataforma SellAlleS' 
     : (hasMultipleCompanies && !isImpersonating ? 'Mis Empresas' : (profile?.name || 'SellAlleS'));
-  const logoImgUrl = (isSuperAdmin && !isImpersonating) || (hasMultipleCompanies && !isImpersonating) ? null : profile?.logoUrl;
+  const activeBranchObj = appUser?.branches?.find(b => b.id === appUser.activeBranchId);
+  const logoImgUrl = (isSuperAdmin && !isImpersonating) || (hasMultipleCompanies && !isImpersonating) 
+    ? null 
+    : (activeBranchObj?.logoUrl || profile?.logoUrl);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
