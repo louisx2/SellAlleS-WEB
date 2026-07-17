@@ -34,39 +34,72 @@ export default function ResetPasswordPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // IMPORTANTE: esta página solo debe habilitarse ante el evento real
-  // PASSWORD_RECOVERY (el token del enlace de correo, consumido por
-  // detectSessionInUrl). NUNCA confiar en "ya hay una sesión activa"
-  // (getSession()) — si alguien entra a esta URL a mano en un navegador que
-  // quedó logueado, eso encontraría la sesión normal del dueño de la cuenta y
-  // dejaría cambiarle la contraseña sin pedir la anterior. La marca en
-  // sessionStorage solo sirve para sobrevivir un refresh de la propia pestaña
-  // justo después de que el evento ya disparó una vez.
+  // El hash del enlace de recuperación (#access_token...&type=recovery) lo
+  // captura un script inline en el layout raíz ANTES de que cargue cualquier
+  // bundle (sessionStorage 'pwRecoveryHash') — así no hay carrera posible con
+  // supabase-js consumiéndolo y disparando PASSWORD_RECOVERY antes de que
+  // esta página se monte (eso era lo que hacía fallar el flujo en producción).
+  // Aquí la página establece la sesión ELLA MISMA con esos tokens: si son
+  // forjados o vencidos, el servidor los rechaza → inválido. NUNCA se confía
+  // en una sesión ya abierta (getSession) — eso permitiría cambiar la clave
+  // de un navegador logueado sin conocer la contraseña anterior.
   useEffect(() => {
-    let settled = false;
+    let cancelled = false;
+    // El hash guardado solo se borra al validar CON ÉXITO (markReady): así un
+    // refresh (o el doble-mount de StrictMode en dev) reproduce el mismo
+    // resultado en vez de caer al mensaje genérico de "sin enlace".
     const markReady = () => {
-      if (!settled) { settled = true; sessionStorage.setItem('passwordRecoveryActive', '1'); setStatus('ready'); }
+      sessionStorage.removeItem('pwRecoveryHash');
+      sessionStorage.setItem('passwordRecoveryActive', '1');
+      if (!cancelled) setStatus('ready');
     };
-    const markInvalid = () => {
-      if (!settled) {
-        settled = true;
-        setInvalidReason('El enlace de recuperación es inválido o ya expiró. Solicita uno nuevo desde "¿Olvidaste tu contraseña?".');
-        setStatus('invalid');
+    const markInvalid = (reason: string) => {
+      if (!cancelled) { setInvalidReason(reason); setStatus('invalid'); }
+    };
+
+    (async () => {
+      const rawHash = sessionStorage.getItem('pwRecoveryHash');
+
+      if (!rawHash) {
+        // Refresh de la pestaña después de que el flujo ya validó una vez.
+        if (sessionStorage.getItem('passwordRecoveryActive') === '1') { markReady(); return; }
+        markInvalid('Abre esta página desde el enlace de recuperación que te enviamos por correo. Si ya lo usaste, solicita uno nuevo desde "¿Olvidaste tu contraseña?".');
+        return;
       }
-    };
 
-    if (sessionStorage.getItem('passwordRecoveryActive') === '1') {
+      const params = new URLSearchParams(rawHash);
+
+      // Supabase redirige con el error en el hash cuando el enlace ya se usó o venció.
+      const errCode = params.get('error_code');
+      if (errCode || params.get('error')) {
+        markInvalid(errCode === 'otp_expired'
+          ? 'Este enlace ya fue usado o expiró. Solicita uno nuevo desde "¿Olvidaste tu contraseña?".'
+          : (params.get('error_description') || 'El enlace de recuperación es inválido. Solicita uno nuevo.'));
+        return;
+      }
+
+      const access_token = params.get('access_token');
+      const refresh_token = params.get('refresh_token');
+      if (!access_token || !refresh_token) {
+        markInvalid('El enlace llegó incompleto. Solicita uno nuevo desde "¿Olvidaste tu contraseña?".');
+        return;
+      }
+
+      const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+      if (error) {
+        markInvalid('El enlace de recuperación es inválido o ya expiró. Solicita uno nuevo desde "¿Olvidaste tu contraseña?".');
+        return;
+      }
       markReady();
-    }
+    })();
 
+    // Redundancia: si por algún motivo el script inline no capturó el hash y
+    // supabase-js sí lo procesó, el evento PASSWORD_RECOVERY también habilita.
     const { data: sub } = supabase.auth.onAuthStateChange((event) => {
       if (event === 'PASSWORD_RECOVERY') markReady();
     });
 
-    // Si el evento no llega en unos segundos, el enlace es inválido/expiró.
-    const timer = setTimeout(markInvalid, 5000);
-
-    return () => { clearTimeout(timer); sub.subscription.unsubscribe(); };
+    return () => { cancelled = true; sub.subscription.unsubscribe(); };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
