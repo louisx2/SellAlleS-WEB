@@ -60,6 +60,7 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'receivables', label: 'Cuentas por Cobrar' },
   { slug: 'inventory', label: 'Valorización de Inventario' },
   { slug: 'taxes', label: 'Impuestos' },
+  { slug: 'ganancias', label: 'Reporte de Ganancias' },
 ];
 
 // Red de seguridad: si por algún motivo no aparece la fila del rol de

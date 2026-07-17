@@ -59,6 +59,7 @@ const reportsNavItems = [
     { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
     { href: '/reports/inventory', label: 'Valorización de Inventario' },
     { href: '/reports/taxes', label: 'Impuestos' },
+    { href: '/reports/ganancias', label: 'Reporte de Ganancias' },
 ];
 
 const adminNavItems: NavItem[] = [
