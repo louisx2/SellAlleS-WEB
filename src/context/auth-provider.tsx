@@ -310,38 +310,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setImpersonatedCompany = useCallback(async (companyId: string | null, companyName: string | null) => {
     // Si no es super admin pero tiene múltiples compañías, actualizar su profiles.company_id en la base de datos
     if (appUser && !appUser.isSuperAdmin && appUser.companies && appUser.companies.length > 1) {
-      let nextBranchId = null;
+      // 1) Cambiar la empresa PRIMERO: las sucursales de la empresa destino no
+      // son legibles bajo RLS hasta que current_company_id() apunte a ella
+      // (consultarlas antes devolvía vacío y el usuario entraba sin sucursal).
+      // El trigger check_profile_company_access valida que el usuario tenga la
+      // fila en profile_companies antes de aceptar el cambio.
+      const { error } = await supabase
+        .from('profiles')
+        .update({ company_id: companyId, branch_id: null })
+        .eq('id', appUser.id);
+
+      if (error) {
+        console.error('Error switching company:', error.message);
+        return;
+      }
+
+      // 2) Ya dentro de la empresa destino: fijar una sucursal por defecto.
+      localStorage.removeItem('userBranchId');
       if (companyId) {
-        // Encontrar una sucursal por defecto para esa compañía
         const { data: branchData } = await supabase
           .from('branches')
           .select('id, name')
           .eq('company_id', companyId)
           .eq('is_active', true)
           .limit(1);
-        
+
         if (branchData && branchData[0]) {
-          nextBranchId = branchData[0].id;
-          localStorage.setItem('userBranchId', nextBranchId);
-        } else {
-          localStorage.removeItem('userBranchId');
+          await supabase.from('profiles').update({ branch_id: branchData[0].id }).eq('id', appUser.id);
+          localStorage.setItem('userBranchId', branchData[0].id);
         }
-      } else {
-        localStorage.removeItem('userBranchId');
-      }
-
-      // Actualizar la compañía y sucursal del perfil en la base de datos
-      const { error } = await supabase
-        .from('profiles')
-        .update({ 
-          company_id: companyId,
-          branch_id: nextBranchId
-        })
-        .eq('id', appUser.id);
-
-      if (error) {
-        console.error('Error switching company:', error.message);
-        return;
       }
     }
 
