@@ -90,19 +90,27 @@ export const customerToRow = (c: Partial<Customer>) => ({
 });
 
 // ---------- Branch ----------
-export const rowToBranch = (r: any): Branch => ({ 
-  id: r.id, 
-  name: r.name, 
-  location: r.location ?? '', 
+export const rowToBranch = (r: any): Branch => ({
+  id: r.id,
+  name: r.name,
+  location: r.location ?? '',
   isActive: r.is_active ?? true,
   logoUrl: r.logo_url ?? undefined,
-  ticketLogoUrl: r.ticket_logo_url ?? undefined
+  ticketLogoUrl: r.ticket_logo_url ?? undefined,
+  displayName: r.display_name ?? undefined,
+  phone: r.phone ?? undefined,
+  address: r.address ?? undefined,
+  receiptFooter: r.receipt_footer ?? undefined,
 });
-export const branchToRow = (b: Partial<Branch>) => ({ 
-  name: b.name, 
+export const branchToRow = (b: Partial<Branch>) => ({
+  name: b.name,
   location: b.location ?? null,
   logo_url: b.logoUrl ?? null,
-  ticket_logo_url: b.ticketLogoUrl ?? null
+  ticket_logo_url: b.ticketLogoUrl ?? null,
+  display_name: b.displayName?.trim() || null,
+  phone: b.phone?.trim() || null,
+  address: b.address?.trim() || null,
+  receipt_footer: b.receiptFooter?.trim() || null,
 });
 
 // ---------- Supplier ----------

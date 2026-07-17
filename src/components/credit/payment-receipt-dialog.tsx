@@ -12,7 +12,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Printer } from 'lucide-react';
-import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
 import type { PaymentMethod, PaymentResult } from '@/lib/types';
 
@@ -36,7 +36,8 @@ export interface PaymentReceiptData {
 }
 
 function ReceiptBody({ data }: { data: PaymentReceiptData }) {
-  const { profile } = useCompanyProfile();
+  // Perfil de la sucursal donde se registró el abono, con herencia de la empresa.
+  const profile = useTicketProfile(data.branchName);
   const { result } = data;
   const isFinancing = result.installmentsTotal != null && result.installmentsTotal > 0;
 

@@ -1,13 +1,12 @@
 'use client';
 
 import type { Sale } from '@/lib/types';
-import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase/client';
 
 interface ReceiptProps {
   sale: Sale;
@@ -27,36 +26,15 @@ const paymentMethodText = {
 };
 
 export function ReceiptHeader({ sale }: ReceiptProps) {
-  const { profile } = useCompanyProfile();
-  const [ticketLogo, setTicketLogo] = useState<string | null>(null);
-
-  useEffect(() => {
-    setTicketLogo(profile.ticketLogoUrl || null);
-    if (!sale.branchId) return;
-
-    (async () => {
-      try {
-        const { data } = await supabase
-          .from('branches')
-          .select('ticket_logo_url')
-          .eq('name', sale.branchId)
-          .limit(1)
-          .maybeSingle();
-
-        if (data?.ticket_logo_url) {
-          setTicketLogo(data.ticket_logo_url);
-        }
-      } catch (err) {
-        console.warn("Error loading branch ticket logo:", err);
-      }
-    })();
-  }, [sale.branchId, profile.ticketLogoUrl]);
+  // Perfil efectivo del ticket: datos de la sucursal donde se hizo la venta
+  // (sale.branchId guarda el nombre), con herencia de la empresa por campo.
+  const profile = useTicketProfile(sale.branchId);
 
   return (
     <div className="text-left space-y-1">
-      {ticketLogo && (
+      {profile.ticketLogoUrl && (
         <div className="flex justify-center pb-1">
-          <img src={ticketLogo} alt="" style={{ maxHeight: 60, maxWidth: '80%', objectFit: 'contain' }} />
+          <img src={profile.ticketLogoUrl} alt="" style={{ maxHeight: 60, maxWidth: '80%', objectFit: 'contain' }} />
         </div>
       )}
       <h3 className="text-lg font-semibold text-center">{profile.name}</h3>
@@ -210,7 +188,7 @@ export function ReceiptTotals({ sale }: ReceiptProps) {
 
 
 export function ReceiptContent({ sale }: ReceiptProps) {
-  const { profile } = useCompanyProfile();
+  const profile = useTicketProfile(sale.branchId);
   const [showBarcode, setShowBarcode] = useState(true);
   const [barcodeType, setBarcodeType] = useState<'code128' | 'qr'>('code128');
 

@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Printer } from 'lucide-react';
-import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
 import type { Loan } from '@/lib/types';
 
@@ -19,7 +19,8 @@ const FREQUENCY_LABEL: Record<string, string> = {
 // Ticket/contrato del préstamo: datos del cliente, términos y el cronograma
 // completo de cuotas. Imprimible en papel térmico (misma clase que el recibo).
 function TicketBody({ loan }: { loan: Loan }) {
-  const { profile } = useCompanyProfile();
+  // Perfil de la sucursal del préstamo (branchId es UUID), con herencia de la empresa.
+  const profile = useTicketProfile(loan.branchId);
   const interest = loan.totalWithInterest - loan.principal;
 
   return (

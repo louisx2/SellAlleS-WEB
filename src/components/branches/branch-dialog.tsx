@@ -14,6 +14,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { formatPhone } from '@/lib/format';
 import type { Branch } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useBranches } from '@/context/branch-provider';
@@ -33,6 +35,7 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
 
   const [logoUrl, setLogoUrl] = useState(branch?.logoUrl || '');
   const [ticketLogoUrl, setTicketLogoUrl] = useState(branch?.ticketLogoUrl || '');
+  const [phone, setPhone] = useState(branch?.phone || '');
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingTicketLogo, setUploadingTicketLogo] = useState(false);
 
@@ -131,6 +134,11 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
       isActive: branch?.isActive ?? true,
       logoUrl: logoUrl || undefined,
       ticketLogoUrl: ticketLogoUrl || undefined,
+      // Perfil del ticket: vacío = hereda del perfil de la empresa.
+      displayName: (formData.get('displayName') as string) || undefined,
+      phone: phone || undefined,
+      address: (formData.get('address') as string) || undefined,
+      receiptFooter: (formData.get('receiptFooter') as string) || undefined,
     };
 
     if (isEditMode && branch) {
@@ -173,7 +181,45 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
               </Label>
               <Input id="location" name="location" defaultValue={branch?.location} className="col-span-3" required />
             </div>
-            
+
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium">Perfil del ticket</p>
+              <p className="text-xs text-muted-foreground">
+                Datos que salen impresos en los tickets de esta sucursal. Si dejas un campo vacío, se usa el del perfil de la empresa.
+              </p>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="displayName" className="text-right">
+                Nombre comercial
+              </Label>
+              <Input id="displayName" name="displayName" defaultValue={branch?.displayName} className="col-span-3" placeholder="El de la empresa" />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="branch-phone" className="text-right">
+                Teléfono
+              </Label>
+              <Input
+                id="branch-phone"
+                value={phone}
+                onChange={(e) => setPhone(formatPhone(e.target.value))}
+                className="col-span-3"
+                placeholder="809-000-0000"
+                inputMode="tel"
+              />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="branch-address" className="text-right">
+                Dirección
+              </Label>
+              <Input id="branch-address" name="address" defaultValue={branch?.address} className="col-span-3" placeholder="La de la empresa" />
+            </div>
+            <div className="grid grid-cols-4 items-start gap-4">
+              <Label htmlFor="receiptFooter" className="text-right pt-2">
+                Pie de recibo
+              </Label>
+              <Textarea id="receiptFooter" name="receiptFooter" defaultValue={branch?.receiptFooter} className="col-span-3" rows={2} placeholder="El de la empresa" />
+            </div>
+
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="logo" className="text-right">
                 Logo App

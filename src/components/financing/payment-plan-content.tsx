@@ -1,7 +1,7 @@
 'use client';
 
 import { Separator } from '@/components/ui/separator';
-import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
 import { addMonths } from 'date-fns';
 import type { Sale } from '@/lib/types';
@@ -13,7 +13,8 @@ interface PaymentPlanContentProps {
 // Cronograma de cuotas imprimible. Usa las cuotas reales de la base
 // (sale.installments); si aún no están cargadas, estima desde el plan.
 export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
-  const { profile } = useCompanyProfile();
+  // Perfil de la sucursal de la venta (branchId guarda el nombre), con herencia de la empresa.
+  const profile = useTicketProfile(sale.branchId);
   const fin = sale.financingDetails;
 
   const rows = (sale.installments && sale.installments.length > 0)

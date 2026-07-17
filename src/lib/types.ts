@@ -92,6 +92,12 @@ export type Branch = {
   isActive: boolean;
   logoUrl?: string;
   ticketLogoUrl?: string;
+  // Perfil del ticket propio de la sucursal. Cualquier campo vacío/ausente
+  // hereda el dato del perfil de la empresa (companies) al imprimir.
+  displayName?: string; // nombre comercial mostrado en el ticket
+  phone?: string;
+  address?: string;
+  receiptFooter?: string;
 };
 
 export type Company = {
