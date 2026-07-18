@@ -151,6 +151,18 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
       const isManagerRole = role === 'manager';
       const dbRole = isManagerRole ? 'cashier' : role;
 
+      // Rol por empresa: el rol elegido aplica a la membresía de la empresa
+      // principal (las vinculaciones extra conservan su rol, o nacen 'cashier').
+      if (primaryCompanyId) {
+        const { error: pcRoleError } = await supabase
+          .from('profile_companies')
+          .upsert(
+            { profile_id: user.id, company_id: primaryCompanyId, role: dbRole },
+            { onConflict: 'profile_id,company_id' }
+          );
+        if (pcRoleError) throw pcRoleError;
+      }
+
       const { error } = await supabase
         .from('profiles')
         .update({
@@ -175,11 +187,23 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
         }
       }
 
-      await supabase.from('profile_roles').delete().eq('profile_id', user.id);
-      if (finalRoleIds.length > 0) {
-        await supabase
-          .from('profile_roles')
-          .insert(finalRoleIds.map((roleId) => ({ profile_id: user.id, role_id: roleId })));
+      // Tocar SOLO los roles personalizados de la empresa principal: el perfil
+      // puede tener roles de sus otras empresas y no hay que borrárselos.
+      if (primaryCompanyId) {
+        const { data: companyRoles } = await supabase
+          .from('roles')
+          .select('id')
+          .eq('company_id', primaryCompanyId);
+        const companyRoleIds = (companyRoles ?? []).map((r) => r.id);
+        if (companyRoleIds.length > 0) {
+          await supabase.from('profile_roles').delete().eq('profile_id', user.id).in('role_id', companyRoleIds);
+        }
+        const insertRoleIds = finalRoleIds.filter((id) => companyRoleIds.includes(id));
+        if (insertRoleIds.length > 0) {
+          await supabase
+            .from('profile_roles')
+            .insert(insertRoleIds.map((roleId) => ({ profile_id: user.id, role_id: roleId })));
+        }
       }
 
       // Quitar asociaciones de empresas que quedaron desmarcadas (ya con
@@ -194,11 +218,15 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
         await supabase.from('profile_companies').delete().eq('profile_id', user.id);
       }
 
-      await supabase.from('profile_branches').delete().eq('profile_id', user.id);
-      if (primaryCompanyId && finalBranchIds.length > 0) {
-        await supabase.from('profile_branches').insert(
-          finalBranchIds.map((bId) => ({ profile_id: user.id, branch_id: bId, company_id: primaryCompanyId }))
-        );
+      // Reemplazar SOLO las sucursales de la empresa principal (las de sus
+      // otras empresas se conservan).
+      if (primaryCompanyId) {
+        await supabase.from('profile_branches').delete().eq('profile_id', user.id).eq('company_id', primaryCompanyId);
+        if (finalBranchIds.length > 0) {
+          await supabase.from('profile_branches').insert(
+            finalBranchIds.map((bId) => ({ profile_id: user.id, branch_id: bId, company_id: primaryCompanyId }))
+          );
+        }
       }
 
       toast({ title: 'Usuario actualizado', description: `${user.name} se actualizó correctamente.` });

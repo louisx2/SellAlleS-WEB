@@ -80,7 +80,8 @@ export type User = {
   isSuperAdmin?: boolean;
   baseRolePermissions?: RolePermissions; // Permisos del rol de sistema (Administrador/Cajero) que corresponde a `role`
   customRoles?: Role[]; // Roles adicionales asignados al usuario
-  companies?: { id: string; name: string; status: 'trial' | 'active' | 'suspended'; isDemo: boolean }[];
+  // role: rol del usuario EN esa empresa (profile_companies.role); `role` (arriba) es el de la empresa activa
+  companies?: { id: string; name: string; status: 'trial' | 'active' | 'suspended'; isDemo: boolean; role: 'admin' | 'cashier' }[];
   emailConfirmedAt?: string | null;
   companyMaxUsers?: number | null;
   // Vista preferida del panel de Inventario del POS: lista compacta o con imágenes.

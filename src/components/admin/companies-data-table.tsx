@@ -173,6 +173,17 @@ export function CompaniesDataTable({
                               Demo
                             </Badge>
                           )}
+                          {!appUser?.isSuperAdmin && appUser?.companies?.some((uc) => uc.id === c.id) && (
+                            appUser.companies.find((uc) => uc.id === c.id)!.role === 'admin' ? (
+                              <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20 text-[10px] py-0 px-1.5 h-5 font-semibold">
+                                Administrador
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="bg-muted text-muted-foreground border-border text-[10px] py-0 px-1.5 h-5 font-semibold">
+                                Cajero
+                              </Badge>
+                            )
+                          )}
                         </div>
                         <span className="text-xs text-muted-foreground font-normal">
                           Sector: {getSectorLabel(c.business_type)}

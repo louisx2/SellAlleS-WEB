@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sellalles-cache-v1';
+const CACHE_NAME = 'sellalles-cache-v2';
 const PRECACHE_ASSETS = [
   '/',
   '/login',

@@ -128,11 +128,23 @@ export function UserProvider({ children }: { children: ReactNode }) {
       updatePayload.branch_id = branchId;
     }
 
+    // Fuente de verdad del rol: la membresía perfil↔empresa de la empresa
+    // activa. El trigger de lockout impide dejar la empresa sin admin.
+    if (activeCompanyId) {
+      const { error: pcError } = await supabase
+        .from('profile_companies')
+        .upsert(
+          { profile_id: updated.id, company_id: activeCompanyId, role: dbRole },
+          { onConflict: 'profile_id,company_id' }
+        );
+      if (pcError) throw pcError;
+    }
+
     const { error } = await supabase
       .from('profiles')
       .update(updatePayload)
       .eq('id', updated.id);
-      
+
     if (error) throw error;
 
     // Update custom roles if provided
@@ -153,15 +165,25 @@ export function UserProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Borrar roles anteriores
-      await supabase.from('profile_roles').delete().eq('profile_id', updated.id);
-      
-      // Insertar nuevos
-      if (finalCustomRoles.length > 0) {
-        const insertData = finalCustomRoles.map(role => ({
+      // Borrar SOLO los roles de la empresa activa: el perfil puede tener
+      // roles personalizados de sus otras empresas y no hay que tocárselos.
+      const { data: companyRoles } = await supabase
+        .from('roles')
+        .select('id')
+        .eq('company_id', activeCompanyId);
+      const companyRoleIds = (companyRoles ?? []).map(r => r.id);
+      if (companyRoleIds.length > 0) {
+        await supabase.from('profile_roles').delete().eq('profile_id', updated.id).in('role_id', companyRoleIds);
+      }
+
+      // Insertar nuevos (la UI solo lista roles de la empresa activa)
+      const insertData = finalCustomRoles
+        .filter(role => companyRoleIds.includes(role.id))
+        .map(role => ({
           profile_id: updated.id,
           role_id: role.id
         }));
+      if (insertData.length > 0) {
         const { error: prError } = await supabase.from('profile_roles').insert(insertData);
         if (prError) throw prError;
       }
@@ -169,8 +191,9 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     // Update profile branches if provided
     if (updated.branches) {
-      // Borrar sucursales anteriores
-      await supabase.from('profile_branches').delete().eq('profile_id', updated.id);
+      // Borrar sucursales anteriores SOLO de la empresa activa (las de sus
+      // otras empresas no se tocan)
+      await supabase.from('profile_branches').delete().eq('profile_id', updated.id).eq('company_id', activeCompanyId);
 
       // Insertar nuevas
       if (updated.branches.length > 0) {

@@ -140,9 +140,16 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   };
 
   const handleRoleChange = async (user: CompanyUser, newRole: 'admin' | 'cashier') => {
-    if (newRole === user.role) return;
+    if (newRole === user.role || !companyId) return;
     setBusy(user.id, true);
     try {
+      // Fuente de verdad: el rol vive en la membresía perfil↔empresa. El trigger
+      // de lockout impide dejar la empresa sin admin (el error llega al toast).
+      const { error: pcError } = await supabase
+        .from('profile_companies')
+        .upsert({ profile_id: user.id, company_id: companyId, role: newRole }, { onConflict: 'profile_id,company_id' });
+      if (pcError) throw pcError;
+      // Caché del rol activo: estos usuarios tienen esta empresa como activa.
       const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', user.id);
       if (error) throw error;
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, role: newRole } : u)));
@@ -158,9 +165,15 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     const nextRoleIds = checked ? [...user.roleIds, roleId] : user.roleIds.filter((id) => id !== roleId);
     setBusy(user.id, true);
     try {
-      await supabase.from('profile_roles').delete().eq('profile_id', user.id);
-      if (nextRoleIds.length > 0) {
-        const { error } = await supabase.from('profile_roles').insert(nextRoleIds.map((roleId) => ({ profile_id: user.id, role_id: roleId })));
+      // Tocar SOLO los roles de esta empresa: el perfil puede tener roles
+      // personalizados de sus otras empresas y no hay que borrárselos.
+      const companyRoleIds = roles.map((r) => r.id);
+      const nextCompanyRoleIds = nextRoleIds.filter((id) => companyRoleIds.includes(id));
+      if (companyRoleIds.length > 0) {
+        await supabase.from('profile_roles').delete().eq('profile_id', user.id).in('role_id', companyRoleIds);
+      }
+      if (nextCompanyRoleIds.length > 0) {
+        const { error } = await supabase.from('profile_roles').insert(nextCompanyRoleIds.map((roleId) => ({ profile_id: user.id, role_id: roleId })));
         if (error) throw error;
       }
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, roleIds: nextRoleIds } : u)));

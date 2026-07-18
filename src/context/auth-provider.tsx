@@ -19,7 +19,7 @@ interface AuthContextType {
   signIn: (email: string, pass: string) => Promise<void>;
   signUp: (name: string, email: string, pass: string, businessName: string) => Promise<{ needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
-  setImpersonatedCompany: (companyId: string | null, companyName: string | null) => void;
+  setImpersonatedCompany: (companyId: string | null, companyName: string | null, branch?: { id: string; name: string }) => void;
   setActiveBranch: (branchId: string, branchName: string) => void;
   setInventoryView: (view: 'list' | 'grid') => void;
   refreshProfile: () => Promise<void>;
@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         branches!profiles_branch_id_fkey(id, name, is_active),
         profile_branches(branches(id, name, is_active)),
         profile_roles(roles(id, name, description, permissions)),
-        profile_companies(companies(id, name, status, is_demo))
+        profile_companies(role, companies(id, name, status, is_demo))
       `)
       .eq('id', userId)
       .maybeSingle();
@@ -85,13 +85,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (data) {
       const companyList = ((data as any).profile_companies ?? [])
-        .map((pc: any) => pc.companies)
-        .filter(Boolean)
-        .map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          status: c.status,
-          isDemo: c.is_demo ?? false
+        .filter((pc: any) => pc.companies)
+        .map((pc: any) => ({
+          id: pc.companies.id,
+          name: pc.companies.name,
+          status: pc.companies.status,
+          isDemo: pc.companies.is_demo ?? false,
+          role: (pc.role === 'admin' ? 'admin' : 'cashier') as 'admin' | 'cashier'
         }));
 
       setNeedsCompany(!data.company_id && companyList.length === 0);
@@ -110,11 +110,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       }
 
+      // Un admin de la empresa activa puede operar desde CUALQUIER sucursal de
+      // esa empresa (RLS ya le da acceso total a sus datos): el selector debe
+      // ofrecer todas, no solo las asignadas en profile_branches — clave al
+      // entrar a otra empresa donde no tiene asignaciones. Cajeros y gerentes
+      // siguen limitados a sus sucursales asignadas.
+      if (!data.is_super_admin && data.company_id && data.role === 'admin') {
+        const { data: companyBranches } = await supabase
+          .from('branches')
+          .select('id, name, is_active')
+          .eq('company_id', data.company_id)
+          .order('name');
+        if (companyBranches && companyBranches.length > 0) {
+          allBranches.length = 0;
+          companyBranches.forEach((b: any) => {
+            allBranches.push({ id: b.id, name: b.name, isActive: b.is_active !== false });
+          });
+        }
+      }
+
       const branchList = allBranches.filter(b => b.isActive).map(b => ({ id: b.id, name: b.name }));
 
+      const savedImpersonatedId = localStorage.getItem('userImpersonatedCompany');
+      // Multi-empresa sin empresa elegida aún ("lobby"): va directo a Mis
+      // Empresas; ni el selector de sucursal ni el bloqueo por sucursales
+      // inactivas de la empresa activa VIEJA deben interponerse.
+      const isMultiCompanyLobby = !data.is_super_admin && companyList.length > 1 && !savedImpersonatedId;
+
       // Tenía sucursal(es) asignadas pero TODAS están desactivadas: bloquear el
-      // acceso (igual que una empresa suspendida), salvo super admin.
-      setNoActiveBranches(allBranches.length > 0 && branchList.length === 0);
+      // acceso (igual que una empresa suspendida), salvo super admin o lobby.
+      setNoActiveBranches(allBranches.length > 0 && branchList.length === 0 && !isMultiCompanyLobby);
 
       const customRoles = (data.profile_roles ?? [])
         .map((pr: any) => pr.roles)
@@ -144,7 +169,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Si ya había una sucursal activa seleccionada previamente en esta sesión, mantenerla
       const savedBranchId = localStorage.getItem('userBranchId');
-      const savedImpersonatedId = localStorage.getItem('userImpersonatedCompany');
       const savedImpersonatedName = localStorage.getItem('userImpersonatedCompanyName');
 
       // El carrito del POS vive en localStorage sin distinguir empresa: si la
@@ -163,7 +187,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let activeBranch = branchList.length > 0 ? branchList[0] : { id: '', name: '' };
       let requireSelection = false;
 
-      if (isAdminOrManager && branchList.length > 1) {
+      if (isMultiCompanyLobby) {
+        // Sin selector de sucursal en el lobby: la sucursal se elige al ENTRAR
+        // a una empresa, no antes de decidir a cuál entrar.
+      } else if (isAdminOrManager && branchList.length > 1) {
         const sessionSelected = sessionStorage.getItem('branchSelectedThisSession');
         if (sessionSelected !== 'true') {
           requireSelection = true;
@@ -280,6 +307,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // mientras carga el perfil.
   useEffect(() => {
     if (loading) return;
+
+    // BLINDAJE DEL ENLACE DE RECUPERACIÓN.
+    // Al abrir el enlace del correo, /reset-password llama a setSession() con
+    // los tokens de recovery: eso crea una sesión real y persistente de
+    // Supabase (guardada en localStorage). Esa sesión SOLO debe servir para
+    // fijar una nueva contraseña dentro de /reset-password; jamás debe valer
+    // como inicio de sesión. El marcador 'pwRecoveryPending' vive en localStorage
+    // (durable y por-origen) para que el blindaje funcione incluso si el usuario
+    // sale de la app a otro origen (p. ej. "Volver al inicio" → sellalles.com) y
+    // regresa: sessionStorage se pierde al cruzar de origen, localStorage no.
+    // Si hay sesión + marcador pendiente en cualquier ruta distinta de
+    // /reset-password, cerramos la sesión. Se limpia el marcador aquí, así el
+    // blindaje se dispara una sola vez y un login posterior funciona normal.
+    if (session && pathname !== '/reset-password' &&
+        (typeof window !== 'undefined') &&
+        (localStorage.getItem('pwRecoveryPending') === '1' ||
+         sessionStorage.getItem('passwordRecoveryActive') === '1')) {
+      localStorage.removeItem('pwRecoveryPending');
+      sessionStorage.removeItem('passwordRecoveryActive');
+      setSession(null);
+      setAppUser(null);
+      clearLocal();
+      setTimeout(() => { supabase.auth.signOut(); }, 0);
+      return;
+    }
+
     const isPublic = publicRoutes.includes(pathname);
     if (!session && !isPublic) {
       router.replace('/login');
@@ -309,7 +362,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [session, loading, pathname, router, appUser]);
 
-  const setImpersonatedCompany = useCallback(async (companyId: string | null, companyName: string | null) => {
+  const setImpersonatedCompany = useCallback(async (companyId: string | null, companyName: string | null, branch?: { id: string; name: string }) => {
     // Si no es super admin pero tiene múltiples compañías, actualizar su profiles.company_id en la base de datos
     if (appUser && !appUser.isSuperAdmin && appUser.companies && appUser.companies.length > 1) {
       // 1) Cambiar la empresa PRIMERO: las sucursales de la empresa destino no
@@ -327,19 +380,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // 2) Ya dentro de la empresa destino: fijar una sucursal por defecto.
+      // 2) Ya dentro de la empresa destino: fijar la sucursal.
       localStorage.removeItem('userBranchId');
       if (companyId) {
-        const { data: branchData } = await supabase
-          .from('branches')
-          .select('id, name')
-          .eq('company_id', companyId)
-          .eq('is_active', true)
-          .limit(1);
+        if (branch) {
+          // Entró por el botón de UNA sucursal concreta: fijarla y saltar el
+          // selector de sucursal tras el reload.
+          await supabase.from('profiles').update({ branch_id: branch.id }).eq('id', appUser.id);
+          localStorage.setItem('userBranchId', branch.id);
+          sessionStorage.setItem('branchSelectedThisSession', 'true');
+        } else {
+          // Entró por el botón de la EMPRESA: fijar una sucursal de respaldo en
+          // BD y limpiar la marca de sesión para que, tras el reload, aparezca
+          // el selector de sucursal de esta empresa (si hay más de una).
+          sessionStorage.removeItem('branchSelectedThisSession');
+          const { data: branchData } = await supabase
+            .from('branches')
+            .select('id, name')
+            .eq('company_id', companyId)
+            .eq('is_active', true)
+            .limit(1);
 
-        if (branchData && branchData[0]) {
-          await supabase.from('profiles').update({ branch_id: branchData[0].id }).eq('id', appUser.id);
-          localStorage.setItem('userBranchId', branchData[0].id);
+          if (branchData && branchData[0]) {
+            await supabase.from('profiles').update({ branch_id: branchData[0].id }).eq('id', appUser.id);
+          }
         }
       }
     }
@@ -417,6 +481,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('keepSession');
     sessionStorage.removeItem('tabSession');
     sessionStorage.removeItem('branchSelectedThisSession');
+    sessionStorage.removeItem('passwordRecoveryActive');
+    localStorage.removeItem('pwRecoveryPending');
     setAppUser(null);
     setSession(null);
     router.replace('/login');
@@ -435,6 +501,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // la página debe renderizarse (el usuario está fijando su contraseña), no un
   // skeleton ni un rebote al dashboard.
   const isResetPassword = pathname === '/reset-password';
+  // Sesión de recuperación fuera de /reset-password: NUNCA renderizar una
+  // pantalla protegida, ni por un frame. El efecto de arriba ya la está
+  // cerrando; aquí mostramos un skeleton neutro mientras se cierra y redirige a
+  // /login (si no, el dashboard podría verse un instante antes de que corra el
+  // efecto, ya que useEffect se ejecuta después del render).
+  const recoveryPending = typeof window !== 'undefined' && localStorage.getItem('pwRecoveryPending') === '1';
+  if (session && recoveryPending && !isResetPassword) return <AppSkeleton message="Cerrando sesión…" />;
   if (session && !appUser && !isResetPassword) return <AppSkeleton message="Cargando datos..." />;   // sesión activa, cargando perfil
   if (!session && !isPublic) return <AppSkeleton message="Cargando plataforma..." />;  // sin sesión, redirigiendo a login
   // Sesión activa pero seguimos en una ruta pública (login/reset-password): ya

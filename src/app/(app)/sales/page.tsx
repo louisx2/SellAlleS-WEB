@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { useAuth } from '@/context/auth-provider';
 import { addDays, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { DateRange } from 'react-day-picker';
@@ -24,24 +25,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 export default function SalesPage() {
   const { sales } = useSales();
   const { branches } = useBranches();
-  
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [userBranch, setUserBranch] = useState<string | null>(null);
+  const { appUser } = useAuth();
+
+  // Rol y sucursal desde el contexto (rol de la empresa activa), no de
+  // localStorage: al cambiar de empresa el rol puede ser distinto.
+  const userRole = appUser?.role ?? null;
+  const userBranch = appUser?.branch ?? null;
+
   const [selectedBranch, setSelectedBranch] = useState('all');
   const [date, setDate] = useState<DateRange | undefined>(undefined);
   const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
-    const role = localStorage.getItem('userRole');
-    setUserRole(role);
-    
-    const branch = localStorage.getItem('userBranch');
-    setUserBranch(branch);
-
-    if (role !== 'admin' && branch) {
-      setSelectedBranch(branch);
+    if (userRole !== 'admin' && userBranch) {
+      setSelectedBranch(userBranch);
     }
-  }, []);
+  }, [userRole, userBranch]);
 
   const filteredSales = useMemo(() => {
     let filtered = sales;

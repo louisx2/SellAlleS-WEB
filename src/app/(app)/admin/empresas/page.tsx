@@ -616,7 +616,9 @@ export default function CompaniesManagementPage() {
         onEnterCompany={(c) => setImpersonatedCompany(c.id, c.name)}
         onEnterBranch={(cId, cName, bId, bName) => {
           setActiveBranch(bId, bName);
-          setImpersonatedCompany(cId, cName);
+          // Pasar la sucursal elegida: entra directo a ELLA (sin selector) en
+          // vez de caer en la primera sucursal activa de la empresa.
+          setImpersonatedCompany(cId, cName, { id: bId, name: bName });
         }}
         onEditBranch={setEditingBranch}
         onDeleteCompany={setDeleteCompanyTarget}

@@ -51,6 +51,13 @@ export default function ResetPasswordPage() {
     const markReady = () => {
       sessionStorage.removeItem('pwRecoveryHash');
       sessionStorage.setItem('passwordRecoveryActive', '1');
+      // Marcador DURABLE (localStorage, por-origen): la sesión de recuperación
+      // que Supabase persiste en localStorage puede sobrevivir a que el usuario
+      // salga de la app (p. ej. "Volver al inicio" → sellalles.com) y regrese.
+      // sessionStorage se pierde al cruzar de origen; localStorage no. Con este
+      // marcador, el AuthProvider reconoce esa sesión como "de recuperación" al
+      // volver y la cierra en vez de dejar entrar al perfil sin la contraseña.
+      localStorage.setItem('pwRecoveryPending', '1');
       if (!cancelled) setStatus('ready');
     };
     const markInvalid = (reason: string) => {
@@ -123,6 +130,7 @@ export default function ResetPasswordPage() {
       // contraseña nueva (y no queda una sesión de recuperación abierta).
       await supabase.auth.signOut();
       sessionStorage.removeItem('passwordRecoveryActive');
+      localStorage.removeItem('pwRecoveryPending');
       toast({ title: 'Contraseña actualizada', description: 'Ya puedes iniciar sesión con tu nueva contraseña.' });
       router.replace('/login');
     } catch (err: any) {
