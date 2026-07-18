@@ -31,7 +31,9 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
   const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
-  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
+  // Sucursales seleccionadas POR empresa: cada empresa marcada tiene su
+  // propio checklist independiente (companyId -> ids de sucursal).
+  const [branchesByCompany, setBranchesByCompany] = useState<Record<string, string[]>>({});
   const [resending, setResending] = useState(false);
   const [sendingReset, setSendingReset] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -43,7 +45,12 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
     
     setRole(user.role === 'admin' ? 'admin' : (isManager ? 'manager' : 'cashier'));
     setSelectedRoleIds(user.customRoles.map((r) => r.id).filter(id => !managerRoleIds.includes(id)));
-    setSelectedBranchIds(user.branches.map((b) => b.id));
+
+    const grouped: Record<string, string[]> = {};
+    user.branches.forEach((b) => {
+      (grouped[b.companyId] ??= []).push(b.id);
+    });
+    setBranchesByCompany(grouped);
 
     // Cargar las compañías asignadas al perfil
     supabase
@@ -60,12 +67,9 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
 
   }, [open, user]);
 
-  // Las sucursales disponibles reaccionan a la empresa principal actualmente
-  // seleccionada (la primera marcada en el multi-empresa), no a la empresa
-  // original del perfil: si el super admin cambia la empresa principal, las
-  // sucursales del checklist deben ser las de esa empresa.
+  // Empresa principal: la primera marcada en el multi-empresa (o la original
+  // del perfil si aún no se tocó el checklist de empresas).
   const effectivePrimaryCompanyId = selectedCompanyIds.length > 0 ? selectedCompanyIds[0] : (user?.companyId ?? null);
-  const companyBranches = branches.filter((b) => b.companyId === effectivePrimaryCompanyId);
 
   // Los roles personalizados disponibles también reaccionan a la empresa
   // principal seleccionada (no a la empresa original del perfil), y excluyen
@@ -124,16 +128,22 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
   const company = companies.find((c) => c.id === user.companyId);
 
   const handleSave = async () => {
-    if (selectedBranchIds.length === 0) {
-      toast({ title: 'Selecciona al menos una sucursal', description: 'El usuario necesita acceso a al menos una sucursal.', variant: 'destructive' });
+    if (selectedCompanyIds.length === 0) {
+      toast({ title: 'Selecciona al menos una empresa', variant: 'destructive' });
+      return;
+    }
+    const companyWithoutBranches = selectedCompanyIds.find((cId) => (branchesByCompany[cId] ?? []).length === 0);
+    if (companyWithoutBranches) {
+      const cName = companies.find((c) => c.id === companyWithoutBranches)?.name ?? 'una empresa';
+      toast({ title: 'Selecciona al menos una sucursal', description: `${cName} necesita al menos una sucursal marcada.`, variant: 'destructive' });
       return;
     }
     setSaving(true);
     try {
       const primaryCompanyId = selectedCompanyIds.length > 0 ? selectedCompanyIds[0] : null;
+      const primaryBranchIds = primaryCompanyId ? (branchesByCompany[primaryCompanyId] ?? []) : [];
       // Sucursal activa: mantiene la que ya tenía si sigue marcada, si no la primera marcada.
-      const activeBranchId = selectedBranchIds.includes(user.branchId ?? '') ? user.branchId : selectedBranchIds[0];
-      const finalBranchIds = selectedBranchIds;
+      const activeBranchId = primaryBranchIds.includes(user.branchId ?? '') ? user.branchId : primaryBranchIds[0];
 
       // Insertar primero las asociaciones nuevas en profile_companies: el trigger
       // check_profile_company_access exige que la fila ya exista ahí antes de
@@ -218,13 +228,15 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
         await supabase.from('profile_companies').delete().eq('profile_id', user.id);
       }
 
-      // Reemplazar SOLO las sucursales de la empresa principal (las de sus
-      // otras empresas se conservan).
-      if (primaryCompanyId) {
-        await supabase.from('profile_branches').delete().eq('profile_id', user.id).eq('company_id', primaryCompanyId);
-        if (finalBranchIds.length > 0) {
+      // Reemplazar las sucursales de CADA empresa marcada con su propio
+      // checklist (las de empresas que quedaron desmarcadas ya se limpiaron
+      // arriba por el cascade de profile_companies.delete).
+      for (const compId of selectedCompanyIds) {
+        const compBranchIds = branchesByCompany[compId] ?? [];
+        await supabase.from('profile_branches').delete().eq('profile_id', user.id).eq('company_id', compId);
+        if (compBranchIds.length > 0) {
           await supabase.from('profile_branches').insert(
-            finalBranchIds.map((bId) => ({ profile_id: user.id, branch_id: bId, company_id: primaryCompanyId }))
+            compBranchIds.map((bId) => ({ profile_id: user.id, branch_id: bId, company_id: compId }))
           );
         }
       }
@@ -287,15 +299,29 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
             </Select>
           </div>
 
-          <div className="grid gap-2">
-            <Label>Sucursales</Label>
-            <BranchChecklist
-              branches={companyBranches}
-              selectedIds={selectedBranchIds}
-              onChange={setSelectedBranchIds}
-              idPrefix="platform-branch"
-            />
-          </div>
+          {/* Un checklist de sucursales POR CADA empresa marcada arriba: al marcar
+              una empresa nueva, aparece su propio checklist independiente. */}
+          {selectedCompanyIds.length === 0 ? (
+            <div className="grid gap-2">
+              <Label>Sucursales</Label>
+              <p className="text-sm text-muted-foreground">Marca al menos una empresa para elegir sus sucursales.</p>
+            </div>
+          ) : (
+            selectedCompanyIds.map((compId) => {
+              const compName = companies.find((c) => c.id === compId)?.name ?? 'Empresa';
+              return (
+                <div key={compId} className="grid gap-2">
+                  <Label>Sucursales — {compName}{compId === effectivePrimaryCompanyId ? ' (principal)' : ''}</Label>
+                  <BranchChecklist
+                    branches={branches.filter((b) => b.companyId === compId)}
+                    selectedIds={branchesByCompany[compId] ?? []}
+                    onChange={(ids) => setBranchesByCompany((prev) => ({ ...prev, [compId]: ids }))}
+                    idPrefix={`platform-branch-${compId}`}
+                  />
+                </div>
+              );
+            })
+          )}
 
           <div className="flex items-center justify-between rounded-lg border p-3">
             <div className="space-y-0.5">

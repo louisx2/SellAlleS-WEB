@@ -110,16 +110,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
       }
 
-      // Un admin de la empresa activa puede operar desde CUALQUIER sucursal de
-      // esa empresa (RLS ya le da acceso total a sus datos): el selector debe
-      // ofrecer todas, no solo las asignadas en profile_branches — clave al
-      // entrar a otra empresa donde no tiene asignaciones. Cajeros y gerentes
-      // siguen limitados a sus sucursales asignadas.
-      if (!data.is_super_admin && data.company_id && data.role === 'admin') {
+      const savedImpersonatedId = localStorage.getItem('userImpersonatedCompany');
+
+      // Un admin de la empresa activa (o un super admin impersonando una)
+      // puede operar desde CUALQUIER sucursal de esa empresa (RLS ya le da
+      // acceso total a sus datos): el selector debe ofrecer todas, no solo
+      // las asignadas en profile_branches — clave al entrar a otra empresa
+      // donde no tiene asignaciones. Cajeros y gerentes siguen limitados a
+      // sus sucursales asignadas.
+      const branchCompanyId = data.is_super_admin
+        ? (savedImpersonatedId || null)
+        : (data.company_id && data.role === 'admin' ? data.company_id : null);
+      if (branchCompanyId) {
         const { data: companyBranches } = await supabase
           .from('branches')
           .select('id, name, is_active')
-          .eq('company_id', data.company_id)
+          .eq('company_id', branchCompanyId)
           .order('name');
         if (companyBranches && companyBranches.length > 0) {
           allBranches.length = 0;
@@ -131,7 +137,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const branchList = allBranches.filter(b => b.isActive).map(b => ({ id: b.id, name: b.name }));
 
-      const savedImpersonatedId = localStorage.getItem('userImpersonatedCompany');
       // Multi-empresa sin empresa elegida aún ("lobby"): va directo a Mis
       // Empresas; ni el selector de sucursal ni el bloqueo por sucursales
       // inactivas de la empresa activa VIEJA deben interponerse.
@@ -166,6 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const isManager = customRoles.some((r: any) => r.name.toLowerCase().includes('gerente'));
       const isAdminOrManager = !data.is_super_admin && (data.role === 'admin' || isManager);
+      const isSuperAdminImpersonating = !!data.is_super_admin && !!savedImpersonatedId;
 
       // Si ya había una sucursal activa seleccionada previamente en esta sesión, mantenerla
       const savedBranchId = localStorage.getItem('userBranchId');
@@ -190,7 +196,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isMultiCompanyLobby) {
         // Sin selector de sucursal en el lobby: la sucursal se elige al ENTRAR
         // a una empresa, no antes de decidir a cuál entrar.
-      } else if (isAdminOrManager && branchList.length > 1) {
+      } else if ((isAdminOrManager || isSuperAdminImpersonating) && branchList.length > 1) {
         const sessionSelected = sessionStorage.getItem('branchSelectedThisSession');
         if (sessionSelected !== 'true') {
           requireSelection = true;
@@ -380,20 +386,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // 2) Ya dentro de la empresa destino: fijar la sucursal.
-      localStorage.removeItem('userBranchId');
+      // 2) Ya dentro de la empresa destino: fijar la sucursal en BD.
       if (companyId) {
         if (branch) {
-          // Entró por el botón de UNA sucursal concreta: fijarla y saltar el
-          // selector de sucursal tras el reload.
           await supabase.from('profiles').update({ branch_id: branch.id }).eq('id', appUser.id);
-          localStorage.setItem('userBranchId', branch.id);
-          sessionStorage.setItem('branchSelectedThisSession', 'true');
         } else {
-          // Entró por el botón de la EMPRESA: fijar una sucursal de respaldo en
-          // BD y limpiar la marca de sesión para que, tras el reload, aparezca
-          // el selector de sucursal de esta empresa (si hay más de una).
-          sessionStorage.removeItem('branchSelectedThisSession');
+          // Entró por el botón de la EMPRESA: fijar una sucursal de respaldo;
+          // el selector, si aplica, la sobrescribirá al elegir.
           const { data: branchData } = await supabase
             .from('branches')
             .select('id, name')
@@ -405,6 +404,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             await supabase.from('profiles').update({ branch_id: branchData[0].id }).eq('id', appUser.id);
           }
         }
+      }
+    }
+
+    // Selección de sucursal: aplica tanto a un usuario multi-empresa como a un
+    // super admin impersonando una empresa. Entrar por una sucursal concreta
+    // la fija y salta el selector tras el reload; entrar por el botón de la
+    // EMPRESA limpia la marca para que, si tiene más de una sucursal, aparezca
+    // el selector de esa empresa.
+    if (companyId) {
+      if (branch) {
+        localStorage.setItem('userBranchId', branch.id);
+        sessionStorage.setItem('branchSelectedThisSession', 'true');
+      } else {
+        localStorage.removeItem('userBranchId');
+        sessionStorage.removeItem('branchSelectedThisSession');
       }
     }
 
@@ -542,8 +556,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           sessionStorage.setItem('branchSelectedThisSession', 'true');
           setActiveBranch(id, name);
           setNeedsBranchSelection(false);
-          // Si es superAdmin (y por alguna razón entró acá), ir a plataforma.
-          if (appUser?.isSuperAdmin) {
+          // Super admin SIN impersonar (caso residual/defensivo): ir a la
+          // plataforma. Impersonando una empresa, o usuario normal: ir al
+          // dashboard de esa empresa.
+          if (appUser?.isSuperAdmin && !appUser.impersonatedCompanyId) {
             router.replace('/admin/companies');
           } else {
             router.replace('/dashboard');

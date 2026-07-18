@@ -17,7 +17,7 @@ export interface PlatformUser {
   companyId: string | null;
   branchId: string | null;
   branchName: string;
-  branches: { id: string; name: string }[];
+  branches: { id: string; name: string; companyId: string }[];
   customRoles: { id: string; name: string; description: string }[];
   emailConfirmedAt: string | null;
 }
@@ -48,7 +48,7 @@ export default function PlatformUsersPage() {
           id, name, email, role, is_super_admin, company_id, branch_id, email_confirmed_at,
           branches!profiles_branch_id_fkey(name),
           profile_roles(roles(id, name, description)),
-          profile_branches(branches(id, name))
+          profile_branches(company_id, branches(id, name))
         `),
     ]);
 
@@ -69,9 +69,8 @@ export default function PlatformUsersPage() {
             branchId: p.branch_id,
             branchName: Array.isArray(p.branches) ? p.branches[0]?.name ?? '' : p.branches?.name ?? '',
             branches: (p.profile_branches ?? [])
-              .map((pb: any) => pb.branches)
-              .filter(Boolean)
-              .map((b: any) => ({ id: b.id, name: b.name })),
+              .filter((pb: any) => pb.branches)
+              .map((pb: any) => ({ id: pb.branches.id, name: pb.branches.name, companyId: pb.company_id })),
             customRoles: (p.profile_roles ?? [])
               .map((pr: any) => pr.roles)
               .filter(Boolean)

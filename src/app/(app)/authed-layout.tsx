@@ -191,7 +191,8 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const isImpersonating = !!appUser.impersonatedCompanyId;
   const isDemoCompany = !!appUser.companyDemoExpiresAt;
   const isReadOnly = !!appUser.isReadOnly;
-  const hasTopBanner = isImpersonating || isDemoCompany || isReadOnly;
+  // El banner de "operando en otra empresa" solo se muestra a super admin.
+  const hasTopBanner = (isImpersonating && isSuperAdmin) || isDemoCompany || isReadOnly;
   const showOperationalMenus = (!isSuperAdmin && !hasMultipleCompanies) || isImpersonating;
   const isManager = appUser?.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
   const isAdminOrManager = !isSuperAdmin && (userRole === 'admin' || isManager);
@@ -251,20 +252,19 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
-      {isImpersonating && (
+      {/* Solo super admin: aviso de seguridad de que está operando como otra
+          empresa. Para usuarios normales multi-empresa no se muestra —
+          "Cambiar Empresa" sigue disponible en el menú de usuario. */}
+      {isImpersonating && isSuperAdmin && (
         <div className="fixed top-0 z-50 w-full bg-indigo-600 text-white px-4 py-1.5 text-xs flex items-center justify-center gap-4 font-medium shadow-md">
           <span>
-            {isSuperAdmin ? (
-              <>⚠️ Modo Soporte: Estás operando como Super Administrador en <strong>{appUser.impersonatedCompanyName}</strong></>
-            ) : (
-              <>Estás operando en la empresa <strong>{appUser.impersonatedCompanyName}</strong></>
-            )}
+            ⚠️ Modo Soporte: Estás operando como Super Administrador en <strong>{appUser.impersonatedCompanyName}</strong>
           </span>
           <button
             onClick={() => setImpersonatedCompany(null, null)}
             className="bg-white text-indigo-600 px-3 py-0.5 rounded-full hover:bg-indigo-50 transition-colors font-bold"
           >
-            {isSuperAdmin ? 'Volver a Plataforma' : 'Cambiar Empresa'}
+            Volver a Plataforma
           </button>
         </div>
       )}
