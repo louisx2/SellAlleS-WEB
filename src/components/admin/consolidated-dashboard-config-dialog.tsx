@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { format, subDays } from 'date-fns';
+import { es } from 'date-fns/locale';
+import type { DateRange } from 'react-day-picker';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
@@ -8,9 +11,12 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BranchChecklist } from '@/components/users/branch-checklist';
-import { Trash2, PlusCircle } from 'lucide-react';
+import { Trash2, PlusCircle, CalendarIcon, FileBarChart } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { formatCurrency } from '@/lib/utils';
@@ -38,6 +44,7 @@ interface ConsolidatedDashboardConfigDialogProps {
   onConfigSaved: (config: ConsolidatedDashboardConfig) => void;
   externalEntries: ExternalEntry[];
   onExternalEntriesChanged: (entries: ExternalEntry[]) => void;
+  onGenerate: (dateRange: DateRange | undefined) => void;
 }
 
 const emptyEntryForm = { label: '', kind: 'income' as 'income' | 'expense', amount: '' };
@@ -48,11 +55,15 @@ const emptyEntryForm = { label: '', kind: 'income' as 'income' | 'expense', amou
 // (cambios inmediatos, sin borrador).
 export function ConsolidatedDashboardConfigDialog({
   open, onOpenChange, profileId, availableCompanies, config, onConfigSaved,
-  externalEntries, onExternalEntriesChanged,
+  externalEntries, onExternalEntriesChanged, onGenerate,
 }: ConsolidatedDashboardConfigDialogProps) {
   const { toast } = useToast();
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [branchesByCompany, setBranchesByCompany] = useState<Record<string, string[]>>({});
+  const [dateRange, setDateRange] = useState<DateRange | undefined>({
+    from: subDays(new Date(), 30),
+    to: new Date(),
+  });
   const [saving, setSaving] = useState(false);
   const [entryForm, setEntryForm] = useState(emptyEntryForm);
   const [addingEntry, setAddingEntry] = useState(false);
@@ -63,7 +74,9 @@ export function ConsolidatedDashboardConfigDialog({
     setBranchesByCompany(config.branchesByCompany ?? {});
   }, [open, config]);
 
-  const handleSave = async () => {
+  // Guarda la selección de empresas/sucursales como punto de partida (viaja
+  // con la cuenta) y dispara la generación del reporte con el rango elegido.
+  const handleGenerate = async () => {
     setSaving(true);
     try {
       const nextConfig: ConsolidatedDashboardConfig = {
@@ -76,10 +89,10 @@ export function ConsolidatedDashboardConfigDialog({
         .eq('id', profileId);
       if (error) throw error;
       onConfigSaved(nextConfig);
-      toast({ title: 'Configuración guardada' });
+      onGenerate(dateRange);
       onOpenChange(false);
     } catch (err: any) {
-      toast({ title: 'Error', description: err?.message ?? 'No se pudo guardar.', variant: 'destructive' });
+      toast({ title: 'Error', description: err?.message ?? 'No se pudo generar el reporte.', variant: 'destructive' });
     } finally {
       setSaving(false);
     }
@@ -121,11 +134,46 @@ export function ConsolidatedDashboardConfigDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Configurar Panel Consolidado</DialogTitle>
-          <DialogDescription>Elige qué empresas y sucursales suman a los totales, y agrega otros negocios o gastos fuera del sistema.</DialogDescription>
+          <DialogTitle>Generar Reporte Consolidado</DialogTitle>
+          <DialogDescription>Elige empresas, sucursales y un rango de fechas, y agrega otros negocios o gastos fuera del sistema.</DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
+          <div className="grid gap-2">
+            <Label>Rango de fechas</Label>
+            <p className="text-xs text-muted-foreground -mt-1">Solo afecta ingresos, gastos y ventas — inventario y préstamos siempre muestran el saldo actual.</p>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn('w-full justify-start text-left font-normal', !dateRange && 'text-muted-foreground')}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {dateRange?.from ? (
+                    dateRange.to ? (
+                      <>{format(dateRange.from, 'dd/MM/yyyy', { locale: es })} - {format(dateRange.to, 'dd/MM/yyyy', { locale: es })}</>
+                    ) : (
+                      format(dateRange.from, 'dd/MM/yyyy', { locale: es })
+                    )
+                  ) : (
+                    <span>Selecciona un rango</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  initialFocus
+                  mode="range"
+                  defaultMonth={dateRange?.from}
+                  selected={dateRange}
+                  onSelect={setDateRange}
+                  numberOfMonths={2}
+                  locale={es}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
           <div className="grid gap-2">
             <Label>Empresas</Label>
             <div className="border rounded-md p-3 max-h-[140px] overflow-y-auto space-y-2">
@@ -168,8 +216,9 @@ export function ConsolidatedDashboardConfigDialog({
           })}
 
           <div className="flex justify-end">
-            <Button size="sm" onClick={handleSave} disabled={saving}>
-              {saving ? 'Guardando...' : 'Guardar empresas y sucursales'}
+            <Button size="sm" onClick={handleGenerate} disabled={saving || selectedCompanyIds.length === 0}>
+              <FileBarChart className="mr-2 h-4 w-4" />
+              {saving ? 'Generando...' : 'Generar Reporte'}
             </Button>
           </div>
 
