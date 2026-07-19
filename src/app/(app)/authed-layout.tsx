@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter } from '@/components/ui/sidebar';
+import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
 import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
@@ -467,6 +467,17 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
+            {hasMultipleCompanies && !isSuperAdmin && (
+              <SidebarMenuItem>
+                <Link href="/admin/consolidado" passHref>
+                  <SidebarMenuButton isActive={pathname.startsWith('/admin/consolidado')} tooltip="Panel Consolidado">
+                    <LineChart />
+                    <span className="group-data-[collapsible=icon]:hidden">Panel Consolidado</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            )}
+            {(isSuperAdmin || hasMultipleCompanies) && <SidebarSeparator />}
             {isSuperAdmin && (
               <SidebarMenuItem>
                 <Link href="/admin/users" passHref>

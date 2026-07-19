@@ -261,7 +261,7 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-2">
+        <div className="grid gap-4 py-2 max-h-[60vh] overflow-y-auto pr-2">
           <div className="grid gap-2">
             <Label>Empresas Asignadas (Multi-Empresa)</Label>
             <div className="border rounded-md p-3 max-h-[160px] overflow-y-auto space-y-2">

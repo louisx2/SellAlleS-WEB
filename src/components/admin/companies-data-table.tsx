@@ -93,6 +93,8 @@ export function CompaniesDataTable({
     return matchesSearch && matchesStatus && matchesType;
   });
 
+  const columnCount = appUser?.isSuperAdmin ? 6 : 5;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-card p-4 rounded-xl border shadow-sm">
@@ -105,31 +107,37 @@ export function CompaniesDataTable({
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          <Filter className="h-4 w-4 text-muted-foreground hidden sm:block" />
-          <Select value={typeFilter} onValueChange={(v: any) => setTypeFilter(v)}>
-            <SelectTrigger className="w-full sm:w-[150px] bg-muted/50 border-transparent focus:bg-background">
-              <SelectValue placeholder="Tipo" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los tipos</SelectItem>
-              <SelectItem value="real">Solo Reales</SelectItem>
-              <SelectItem value="demo">Solo Demos</SelectItem>
-            </SelectContent>
-          </Select>
+        {/* Filtros de Tipo/Estado (real vs. demo, prueba/activa/suspendida) son
+            metadata de administración de la plataforma SaaS — solo tienen
+            sentido para el super admin gestionando muchos tenants, no para un
+            dueño de negocio viendo sus propias empresas. */}
+        {appUser?.isSuperAdmin && (
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+            <Filter className="h-4 w-4 text-muted-foreground hidden sm:block" />
+            <Select value={typeFilter} onValueChange={(v: any) => setTypeFilter(v)}>
+              <SelectTrigger className="w-full sm:w-[150px] bg-muted/50 border-transparent focus:bg-background">
+                <SelectValue placeholder="Tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los tipos</SelectItem>
+                <SelectItem value="real">Solo Reales</SelectItem>
+                <SelectItem value="demo">Solo Demos</SelectItem>
+              </SelectContent>
+            </Select>
 
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-[150px] bg-muted/50 border-transparent focus:bg-background">
-              <SelectValue placeholder="Estado" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los estados</SelectItem>
-              <SelectItem value="active">Activas</SelectItem>
-              <SelectItem value="trial">En Prueba</SelectItem>
-              <SelectItem value="suspended">Suspendidas</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="w-full sm:w-[150px] bg-muted/50 border-transparent focus:bg-background">
+                <SelectValue placeholder="Estado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los estados</SelectItem>
+                <SelectItem value="active">Activas</SelectItem>
+                <SelectItem value="trial">En Prueba</SelectItem>
+                <SelectItem value="suspended">Suspendidas</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
@@ -138,7 +146,7 @@ export function CompaniesDataTable({
             <TableRow>
               <TableHead className="w-[300px]">Empresa / Sucursales</TableHead>
               <TableHead>RNC</TableHead>
-              <TableHead>Estado</TableHead>
+              {appUser?.isSuperAdmin && <TableHead>Estado</TableHead>}
               <TableHead>Fiscal</TableHead>
               <TableHead>Plan</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
@@ -146,9 +154,9 @@ export function CompaniesDataTable({
           </TableHeader>
           <TableBody>
             {loading ? (
-              <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">Cargando empresas...</TableCell></TableRow>
+              <TableRow><TableCell colSpan={columnCount} className="text-center py-12 text-muted-foreground">Cargando empresas...</TableCell></TableRow>
             ) : filteredCompanies.length === 0 ? (
-              <TableRow><TableCell colSpan={6} className="text-center py-12 text-muted-foreground">No se encontraron empresas.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={columnCount} className="text-center py-12 text-muted-foreground">No se encontraron empresas.</TableCell></TableRow>
             ) : (
               filteredCompanies.map((c) => (
                 <TableRow key={c.id} className="group hover:bg-muted/10 transition-colors">
@@ -168,7 +176,7 @@ export function CompaniesDataTable({
                       <div className="flex flex-col">
                         <div className="flex items-center gap-2">
                           <span className="text-base font-semibold">{c.name}</span>
-                          {c.is_demo && (
+                          {c.is_demo && appUser?.isSuperAdmin && (
                             <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/20 text-[10px] py-0 px-1.5 h-5 font-bold uppercase tracking-wider">
                               Demo
                             </Badge>
@@ -293,9 +301,11 @@ export function CompaniesDataTable({
                   <TableCell className="align-top py-4">
                     {c.rnc ? <span className="font-mono text-sm">{c.rnc}</span> : <span className="text-muted-foreground text-sm">—</span>}
                   </TableCell>
-                  <TableCell className="align-top py-4">
-                    <Badge variant={STATUS_VARIANT[c.status]} className="shadow-sm">{STATUS_LABEL[c.status]}</Badge>
-                  </TableCell>
+                  {appUser?.isSuperAdmin && (
+                    <TableCell className="align-top py-4">
+                      <Badge variant={STATUS_VARIANT[c.status]} className="shadow-sm">{STATUS_LABEL[c.status]}</Badge>
+                    </TableCell>
+                  )}
                   <TableCell className="align-top py-4">
                     <div className="flex flex-col gap-1 text-xs">
                        <span className={c.is_formalized ? "text-emerald-600 font-medium" : "text-muted-foreground"}>

@@ -145,6 +145,14 @@ export type Role = {
     permissions?: RolePermissions;
 };
 
+// Selección guardada del Panel Consolidado: qué empresas (donde el usuario es
+// admin) y qué sucursales de cada una entran en los totales. Una empresa
+// presente con array vacío = todas sus sucursales.
+export type ConsolidatedDashboardConfig = {
+    companyIds: string[];
+    branchesByCompany: Record<string, string[]>;
+};
+
 export type CartItem = {
   cartItemId: string; // Unique identifier for the item in the cart
   product: Product;
