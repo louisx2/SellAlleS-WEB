@@ -12,11 +12,9 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BranchChecklist } from '@/components/users/branch-checklist';
 import { Trash2, PlusCircle, CalendarIcon, FileBarChart } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { formatCurrency } from '@/lib/utils';
@@ -142,36 +140,32 @@ export function ConsolidatedDashboardConfigDialog({
           <div className="grid gap-2">
             <Label>Rango de fechas</Label>
             <p className="text-xs text-muted-foreground -mt-1">Solo afecta ingresos, gastos y ventas — inventario y préstamos siempre muestran el saldo actual.</p>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn('w-full justify-start text-left font-normal', !dateRange && 'text-muted-foreground')}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {dateRange?.from ? (
-                    dateRange.to ? (
-                      <>{format(dateRange.from, 'dd/MM/yyyy', { locale: es })} - {format(dateRange.to, 'dd/MM/yyyy', { locale: es })}</>
-                    ) : (
-                      format(dateRange.from, 'dd/MM/yyyy', { locale: es })
-                    )
-                  ) : (
-                    <span>Selecciona un rango</span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  initialFocus
-                  mode="range"
-                  defaultMonth={dateRange?.from}
-                  selected={dateRange}
-                  onSelect={setDateRange}
-                  numberOfMonths={2}
-                  locale={es}
-                />
-              </PopoverContent>
-            </Popover>
+            {/* Calendario en línea (no en Popover): un Popover portalizado
+                dentro de un Dialog modal de Radix pierde los clics — el
+                Dialog trata las interacciones fuera de su propio árbol como
+                "afuera" y las intercepta. Mostrarlo directo evita el problema. */}
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <CalendarIcon className="h-4 w-4 text-muted-foreground" />
+              {dateRange?.from ? (
+                dateRange.to ? (
+                  <>{format(dateRange.from, 'dd/MM/yyyy', { locale: es })} - {format(dateRange.to, 'dd/MM/yyyy', { locale: es })}</>
+                ) : (
+                  format(dateRange.from, 'dd/MM/yyyy', { locale: es })
+                )
+              ) : (
+                <span className="text-muted-foreground">Selecciona un rango</span>
+              )}
+            </div>
+            <div className="border rounded-md flex justify-center">
+              <Calendar
+                mode="range"
+                defaultMonth={dateRange?.from}
+                selected={dateRange}
+                onSelect={setDateRange}
+                numberOfMonths={1}
+                locale={es}
+              />
+            </div>
           </div>
 
           <div className="grid gap-2">
@@ -214,13 +208,6 @@ export function ConsolidatedDashboardConfigDialog({
               </div>
             );
           })}
-
-          <div className="flex justify-end">
-            <Button size="sm" onClick={handleGenerate} disabled={saving || selectedCompanyIds.length === 0}>
-              <FileBarChart className="mr-2 h-4 w-4" />
-              {saving ? 'Generando...' : 'Generar Reporte'}
-            </Button>
-          </div>
 
           <div className="grid gap-2 pt-2 border-t">
             <Label>Otros ingresos/gastos (fuera del sistema)</Label>
@@ -274,6 +261,10 @@ export function ConsolidatedDashboardConfigDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cerrar</Button>
+          <Button onClick={handleGenerate} disabled={saving || selectedCompanyIds.length === 0}>
+            <FileBarChart className="mr-2 h-4 w-4" />
+            {saving ? 'Generando...' : 'Generar Reporte'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
