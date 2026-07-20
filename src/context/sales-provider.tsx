@@ -3,7 +3,7 @@
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
 import type { Sale, PaymentMethod, PaymentResult } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
-import { rowToSale, saleToRow, saleItemToRow, rowToPaymentResult } from '@/lib/supabase/mappers';
+import { rowToSale, saleToRow, rowToPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
 
 interface SalesContextType {
@@ -51,17 +51,18 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     }
     // El NCF lo asigna el trigger set_sale_ncf en la base (atómico, desde
     // ncf_sequences y solo si la empresa tiene ncf_enabled).
-    const { data: sale, error } = await supabase
-      .from('sales')
-      .insert(saleToRow(saleData, branchUuid))
-      .select()
-      .single();
+    const { data: sale, error } = await supabase.rpc('create_sale_with_items', {
+      p_sale: saleToRow(saleData, branchUuid),
+      p_items: saleData.items.map((item) => ({
+        product_id: item.product.id || null,
+        product_name: item.product.name,
+        quantity: item.quantity,
+        price: item.product.price,
+        custom_price: item.customPrice ?? null,
+        itbis: item.product.itbis,
+      })),
+    });
     if (error) throw error;
-    if (sale && saleData.items?.length) {
-      const rows = saleData.items.map((it) => saleItemToRow(it, sale.id));
-      const { error: itemsError } = await supabase.from('sale_items').insert(rows);
-      if (itemsError) throw itemsError;
-    }
     // Venta originada en una cotización: marcarla como convertida.
     if (saleData.quoteId) {
       await supabase.from('quotes').update({ status: 'converted' }).eq('id', saleData.quoteId);

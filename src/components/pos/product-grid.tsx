@@ -33,7 +33,7 @@ export function ProductGrid({ products, view }: ProductGridProps) {
                 <p className="text-primary font-bold">{formatCurrency(product.price)}</p>
               </div>
               <ProductDetailButton product={product} className="static shadow-none" />
-              <Button size="icon" onClick={() => handleAddToCart(product)} aria-label="Añadir al carrito">
+              <Button size="icon" onClick={() => handleAddToCart(product)} aria-label="Añadir al carrito" disabled={product.stock <= 0} title={product.stock <= 0 ? 'Sin existencias' : undefined}>
                  <PlusCircle className="h-4 w-4" />
               </Button>
            </div>
@@ -55,12 +55,14 @@ export function ProductGrid({ products, view }: ProductGridProps) {
           <CardContent className="p-4 flex-grow">
             <CardTitle className="text-base font-medium leading-tight mb-1">{product.name}</CardTitle>
             <p className="font-bold text-lg text-primary">{formatCurrency(product.price)}</p>
+            {product.stock <= 0 && <p className="text-xs text-destructive mt-1">Sin existencias</p>}
           </CardContent>
           <CardFooter className="p-4 pt-0">
             <Button
               className="w-full"
               onClick={() => handleAddToCart(product)}
               size="default"
+              disabled={product.stock <= 0}
             >
               <PlusCircle className="mr-2 h-4 w-4" />
               Añadir

@@ -6,16 +6,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Switch } from '@/components/ui/switch';
 import { useBranches } from '@/context/branch-provider';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
 
 /**
- * Define si el precio público de cada sucursal ya incluye ITBIS. El valor se
+ * Define si el precio público de la sucursal activa ya incluye ITBIS. El valor se
  * guarda en la sucursal para que una empresa pueda usar esquemas distintos por
  * punto de venta; cada venta congela el modo utilizado para su historial.
  */
 export function TaxSettingsCard() {
   const { branches, updateBranch, loading } = useBranches();
+  const { appUser } = useAuth();
   const { toast } = useToast();
   const [savingId, setSavingId] = useState<string | null>(null);
+
+  const activeBranch = branches.find((item) => item.id === appUser?.activeBranchId);
 
   const setItbisMode = async (branchId: string, itbisIncluded: boolean) => {
     const branch = branches.find((item) => item.id === branchId);
@@ -45,21 +49,22 @@ export function TaxSettingsCard() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <Building2 className="h-5 w-5" /> Impuestos por sucursal
+          <Building2 className="h-5 w-5" /> Impuestos de la sucursal actual
         </CardTitle>
         <CardDescription>
-          Define cómo se muestran los precios al cliente. Esta configuración no altera ventas ya realizadas.
+          Define cómo se muestran los precios al cliente en la sucursal activa. Esta configuración no altera ventas ya realizadas.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {loading ? (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" /> Cargando sucursales...
+            <Loader2 className="h-4 w-4 animate-spin" /> Cargando configuración...
           </div>
-        ) : branches.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No hay sucursales configuradas.</p>
+        ) : !activeBranch ? (
+          <p className="text-sm text-muted-foreground">No hay una sucursal activa seleccionada.</p>
         ) : (
-          branches.map((branch) => {
+          (() => {
+            const branch = activeBranch;
             const saving = savingId === branch.id;
             return (
               <div key={branch.id} className="flex items-center justify-between gap-4 border rounded-lg p-4">
@@ -82,9 +87,10 @@ export function TaxSettingsCard() {
                 </div>
               </div>
             );
-          })
+          })()
         )}
       </CardContent>
     </Card>
   );
 }
+

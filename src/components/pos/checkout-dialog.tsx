@@ -37,7 +37,7 @@ interface CheckoutDialogProps {
 
 export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: CheckoutDialogProps) {
   const { activeCart, total, subtotal, itbisAmount, itbisIncluded, totalDiscount, createSale, completeSale } = useCart();
-  const { updateStock } = useProducts();
+  const { reload: reloadProducts } = useProducts();
   const { addSale: addSaleToContext } = useSales();
   const { customers, reload: reloadCustomers } = useCustomers();
   const { appUser } = useAuth();
@@ -146,9 +146,10 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       // cuotas y actualizan el balance del cliente en la misma transacción.
       const savedSale = await addSaleToContext(sale);
 
-      sale.items.forEach(item => {
-        updateStock(item.product.id, item.quantity);
-      });
+      // La base descuenta y valida el stock en la misma inserción de cada
+      // detalle de venta. Releemos para mostrar el inventario real, incluso
+      // si otra caja vendió al mismo tiempo.
+      await reloadProducts();
 
       if (savedSale.paymentStatus === 'credit' || savedSale.paymentStatus === 'in_financing') {
         await reloadCustomers(); // el balance lo escribió el trigger

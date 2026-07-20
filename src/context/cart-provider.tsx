@@ -91,6 +91,17 @@ const cartStore = create<CartStore>()(
       addItem: (product) => set(state => {
         const newCarts = state.carts.map(cart => {
           if (cart.id === state.activeCartId) {
+            const quantityInCart = cart.items
+              .filter(item => item.product.id === product.id)
+              .reduce((total, item) => total + item.quantity, 0);
+
+            if (quantityInCart >= product.stock) {
+              set({ toast: product.stock <= 0
+                ? `${product.name} no tiene existencias disponibles.`
+                : `Solo hay ${product.stock} unidad${product.stock === 1 ? '' : 'es'} disponible${product.stock === 1 ? '' : 's'} de ${product.name}.` });
+              setTimeout(() => set({ toast: null }), 3000);
+              return cart;
+            }
             // Find an item with the same product ID and no custom price
             const existingItem = cart.items.find(item => item.product.id === product.id && item.customPrice === undefined);
             if (existingItem) {
@@ -123,12 +134,22 @@ const cartStore = create<CartStore>()(
         ),
       })),
 
-      updateQuantity: (cartItemId, quantity) => set(state => ({
-        carts: state.carts.map(cart => {
+      updateQuantity: (cartItemId, quantity) => set(state => {
+        const carts = state.carts.map(cart => {
           if (cart.id === state.activeCartId) {
             if (quantity <= 0) {
               // Remove item if quantity is zero or less
               return { ...cart, items: cart.items.filter(item => item.cartItemId !== cartItemId) };
+            }
+            const itemToUpdate = cart.items.find(item => item.cartItemId === cartItemId);
+            if (!itemToUpdate) return cart;
+            const quantityInOtherLines = cart.items
+              .filter(item => item.product.id === itemToUpdate.product.id && item.cartItemId !== cartItemId)
+              .reduce((total, item) => total + item.quantity, 0);
+            if (quantity + quantityInOtherLines > itemToUpdate.product.stock) {
+              set({ toast: `Solo hay ${itemToUpdate.product.stock} unidad${itemToUpdate.product.stock === 1 ? '' : 'es'} disponible${itemToUpdate.product.stock === 1 ? '' : 's'} de ${itemToUpdate.product.name}.` });
+              setTimeout(() => set({ toast: null }), 3000);
+              return cart;
             }
             return {
               ...cart,
@@ -138,8 +159,9 @@ const cartStore = create<CartStore>()(
             };
           }
           return cart;
-        }),
-      })),
+        });
+        return { carts };
+      }),
 
       setCustomPrice: (cartItemId, price) => set(state => {
         const newCarts = state.carts.map(cart => {

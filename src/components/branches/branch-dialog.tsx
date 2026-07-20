@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -21,6 +21,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useBranches } from '@/context/branch-provider';
 import { supabase } from '@/lib/supabase/client';
 import { Loader2, Upload } from 'lucide-react';
+import { Switch } from '@/components/ui/switch';
 
 interface BranchDialogProps {
   branch?: Branch;
@@ -36,8 +37,18 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
   const [logoUrl, setLogoUrl] = useState(branch?.logoUrl || '');
   const [ticketLogoUrl, setTicketLogoUrl] = useState(branch?.ticketLogoUrl || '');
   const [phone, setPhone] = useState(branch?.phone || '');
+  const [itbisIncluded, setItbisIncluded] = useState(branch?.itbisIncluded ?? false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingTicketLogo, setUploadingTicketLogo] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setLogoUrl(branch?.logoUrl || '');
+      setTicketLogoUrl(branch?.ticketLogoUrl || '');
+      setPhone(branch?.phone || '');
+      setItbisIncluded(branch?.itbisIncluded ?? false);
+    }
+  }, [open, branch]);
 
   const processAndUpload = async (file: File, type: 'logo' | 'ticket') => {
     const isLogo = type === 'logo';
@@ -134,6 +145,7 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
       isActive: branch?.isActive ?? true,
       logoUrl: logoUrl || undefined,
       ticketLogoUrl: ticketLogoUrl || undefined,
+      itbisIncluded: itbisIncluded,
       // Perfil del ticket: vacío = hereda del perfil de la empresa.
       displayName: (formData.get('displayName') as string) || undefined,
       phone: phone || undefined,
@@ -155,6 +167,7 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
       });
     }
     setOpen(false);
+    setTimeout(() => window.location.reload(), 800);
   };
 
   return (
@@ -180,6 +193,28 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
                 Ubicación
               </Label>
               <Input id="location" name="location" defaultValue={branch?.location} className="col-span-3" required />
+            </div>
+
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium">Configuración de Impuestos</p>
+              <p className="text-xs text-muted-foreground">
+                Define cómo se calcula el ITBIS en los precios de venta de esta sucursal.
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-4 border rounded-lg p-3">
+              <div className="space-y-0.5 col-span-3">
+                <Label htmlFor="itbisIncluded" className="font-medium cursor-pointer text-sm">
+                  Precios con ITBIS incluido
+                </Label>
+                <p className="text-xs text-muted-foreground leading-normal">
+                  El POS desglosará el 18% hacia adentro. Desactivado sumará el 18% al total.
+                </p>
+              </div>
+              <Switch
+                id="itbisIncluded"
+                checked={itbisIncluded}
+                onCheckedChange={setItbisIncluded}
+              />
             </div>
 
             <div className="border-t pt-3">
