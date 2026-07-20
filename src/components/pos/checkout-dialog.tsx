@@ -36,7 +36,7 @@ interface CheckoutDialogProps {
 }
 
 export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: CheckoutDialogProps) {
-  const { activeCart, total, subtotal, itbisAmount, totalDiscount, createSale, completeSale } = useCart();
+  const { activeCart, total, subtotal, itbisAmount, itbisIncluded, totalDiscount, createSale, completeSale } = useCart();
   const { updateStock } = useProducts();
   const { addSale: addSaleToContext } = useSales();
   const { customers, reload: reloadCustomers } = useCustomers();
@@ -450,7 +450,9 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                         </div>
                     )}
                     <div className="flex justify-between">
-                        <span className="text-muted-foreground">ITBIS ({ITBIS_RATE * 100}%)</span>
+                        <span className="text-muted-foreground">
+                          {itbisIncluded ? `ITBIS incluido (${ITBIS_RATE * 100}%)` : `ITBIS (${ITBIS_RATE * 100}%)`}
+                        </span>
                         <span>{formatCurrency(itbisAmount)}</span>
                     </div>
                     <Separator className="my-2" />

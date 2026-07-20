@@ -67,6 +67,9 @@ export function ReceiptHeader({ sale }: ReceiptProps) {
 }
 
 export function ReceiptItems({ sale }: ReceiptProps) {
+    // Venta con precios ITBIS incluido: el impuesto se desglosa hacia adentro
+    // (parte del precio), no se suma encima.
+    const included = !!sale.itbisIncluded;
     return (
         <div className="space-y-3 font-mono text-xs py-3 border-t border-b border-dashed border-foreground/50">
             {sale.items.map(item => {
@@ -74,7 +77,9 @@ export function ReceiptItems({ sale }: ReceiptProps) {
               const originalPrice = item.product.price;
               const hasDiscount = item.customPrice !== undefined && item.customPrice < originalPrice;
               const itemSubtotal = price * item.quantity;
-              const itemItbis = item.product.itbis ? itemSubtotal * ITBIS_RATE : 0;
+              const itemItbis = item.product.itbis
+                ? (included ? itemSubtotal * ITBIS_RATE / (1 + ITBIS_RATE) : itemSubtotal * ITBIS_RATE)
+                : 0;
               const itemDiscountAmount = hasDiscount ? (originalPrice - (item.customPrice ?? 0)) * item.quantity : 0;
 
               return (
@@ -92,7 +97,7 @@ export function ReceiptItems({ sale }: ReceiptProps) {
                   )}
                   {item.product.itbis && (
                     <div className="flex justify-between text-muted-foreground pl-2">
-                        <span>ITBIS</span>
+                        <span>{included ? 'ITBIS incl.' : 'ITBIS'}</span>
                         <span>{formatCurrency(itemItbis)}</span>
                     </div>
                   )}
@@ -139,7 +144,7 @@ export function ReceiptTotals({ sale }: ReceiptProps) {
               </div>
           )}
           <div className="flex justify-between">
-              <span className="uppercase">ITBIS Total:</span>
+              <span className="uppercase">{sale.itbisIncluded ? 'ITBIS Incluido:' : 'ITBIS Total:'}</span>
               <span>{formatCurrency(sale.itbisAmount)}</span>
           </div>
       </div>

@@ -12,6 +12,7 @@ interface CompanyProfileContextType {
 
 const EMPTY: CompanyProfile = {
   name: 'SellAlleS', phone: '', rnc: '', address: '',
+  isFormalized: false, ncfEnabled: false,
   socialMedia: { instagram: '', facebook: '' }, logoUrl: '', ticketLogoUrl: '', receiptFooter: '',
   ticketNameDisplay: 'company',
   lateFeeRate: 5, defaultInterestRate: 3.5,

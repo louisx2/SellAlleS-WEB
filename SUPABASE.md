@@ -25,7 +25,8 @@ Funciones helper (SECURITY DEFINER) usadas por las políticas:
 Plataforma (SaaS): `plans`, `companies`, `subscriptions`
 Empresa (tenant): `branches`, `profiles`, `roles`, `customers`, `suppliers`,
 `products`, `expenses`, `sales`, `sale_items`, `credit_payments`,
-`financing_installments`, `ncf_sequences`
+`financing_installments`, `ncf_sequences`, `supplier_invoices`,
+`supplier_invoice_items`, `supplier_payments`
 
 Todas las tablas tenant llevan `company_id` y tienen RLS activado.
 
@@ -64,6 +65,47 @@ insert, sin saltos ni duplicados. Si `ncf_enabled` es false, la venta queda
 con `ncf` NULL. Para empezar a emitir: activar `ncf_enabled` en la empresa y
 cargar filas en `ncf_sequences` (tipo 'consumer' prefix 'B02', tipo 'fiscal'
 prefix 'B01', con su rango autorizado por DGII).
+
+## Precios con ITBIS incluido (migración `branch_itbis_included`)
+
+`branches.itbis_included` (default false) configura por sucursal si los
+precios de venta ya traen el 18%: el POS desglosa el impuesto hacia adentro
+(base = precio / 1.18) sin cambiar el total. En false, el ITBIS se suma
+encima (comportamiento clásico). El modo se congela por venta en
+`sales.itbis_included` para que los recibos históricos siempre desglosen
+igual. El cálculo vive en el cliente (`useCart` en
+`src/context/cart-provider.tsx`); `sales.subtotal` guarda siempre la base
+sin impuesto y `sales.itbis_amount` el ITBIS, en ambos modos.
+
+## Cuentas por Pagar / Compras (migración `payables_module`)
+
+Facturas de suplidores a nivel documento con los campos del Formato 606 de
+DGII (tipo de gasto 01-11, NCF recibido, ITBIS facturado/retenido,
+retención ISR, ISC, propina, forma de pago 01-07). Módulos configurables por
+empresa: `payables` (el módulo) y `purchases` (flag: las líneas con
+`product_id` suman `products.stock` al registrar la compra).
+
+- `supplier_invoices` — `balance` es columna generada:
+  `total - itbis_retenido - isr_retention_amount - amount_paid` (las
+  retenciones se remiten a DGII, no al suplidor). `status`
+  pending/partial/paid lo escriben SOLO las RPCs. NCF único por
+  (company, supplier) vía índice parcial. RLS: INSERT exige
+  `is_module_enabled(company_id, 'payables', false)`; DELETE solo con
+  `amount_paid = 0`.
+- RPC `create_supplier_invoice(...)` — valida suplidor/NCF/retenciones,
+  calcula `total` en el servidor, inserta factura + items, suma stock si
+  `purchases` está activo, y registra el pago inicial si `p_initial_payment > 0`.
+- RPC `register_supplier_payment(p_invoice_id, p_amount, p_method,
+  p_branch_id, p_notes, p_reference)` — lock de la factura, valida contra
+  `balance`, actualiza `amount_paid`/`payment_date`/`status`. Con método
+  `cash` y módulo caja activo: exige caja abierta e inserta un
+  `caja_movements` tipo 'out' ("Pago a suplidor: …") para que el cierre cuadre.
+- Roles: el rol de sistema `admin` incluye el recurso `payables`
+  (backfill + `seed_system_roles()` actualizado). `seed_system_roles` ya no es
+  ejecutable vía REST (revoke en migración `payables_hardening`).
+- El Formato 606 (TXT pipe-delimited) se genera en el cliente desde
+  `src/lib/dgii-606.ts` + `/reports/compras-606`, solo para empresas con
+  `is_formalized`.
 
 ## Motor de crédito y financiamiento (migración `credit_financing_engine`)
 

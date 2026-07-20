@@ -3,6 +3,8 @@
 import { createContext, useEffect, ReactNode, useContext } from 'react';
 import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart, Coupon } from '@/lib/types';
 import { ITBIS_RATE, GENERIC_CUSTOMER, round2 } from '@/lib/utils';
+import { useAuth } from '@/context/auth-provider';
+import { useBranches } from '@/context/branch-provider';
 import { create, useStore } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
@@ -325,22 +327,37 @@ export const useCart = () => {
   // This allows components to subscribe to changes.
   const state = useStore(store);
 
+  // Config de la sucursal activa: ¿los precios ya traen el ITBIS?
+  const { appUser } = useAuth();
+  const { branches } = useBranches();
+  const activeBranch =
+    branches.find((b) => b.id === appUser?.activeBranchId) ??
+    branches.find((b) => b.name === appUser?.branch);
+  const itbisIncluded = !!activeBranch?.itbisIncluded;
+
   // Derived state calculations
   const activeCart = state.carts.find(cart => cart.id === state.activeCartId);
-  
+
   const selectedCustomer = activeCart?.selectedCustomer;
 
-  const subtotal = activeCart?.items.reduce((acc, item) => {
+  // Suma bruta de las líneas (los precios tal cual se cobran) y su parte gravada.
+  const grossTotal = activeCart?.items.reduce((acc, item) => {
     const price = getEffectiveUnitPrice(item, selectedCustomer);
     return acc + price * item.quantity;
   }, 0) || 0;
 
-  const itbisAmount = activeCart?.items.reduce((acc, item) => {
+  const taxableGross = activeCart?.items.reduce((acc, item) => {
     const price = getEffectiveUnitPrice(item, selectedCustomer);
-    return item.product.itbis ? acc + (price * item.quantity * ITBIS_RATE) : acc
+    return item.product.itbis ? acc + price * item.quantity : acc;
   }, 0) || 0;
 
-  const total = subtotal + itbisAmount;
+  // ITBIS incluido: el impuesto vive dentro del precio (base = precio / 1.18)
+  // y el total no cambia. Excluido: el impuesto se suma encima del precio.
+  const itbisAmount = itbisIncluded
+    ? round2(taxableGross * ITBIS_RATE / (1 + ITBIS_RATE))
+    : round2(taxableGross * ITBIS_RATE);
+  const subtotal = itbisIncluded ? round2(grossTotal - itbisAmount) : grossTotal;
+  const total = itbisIncluded ? grossTotal : grossTotal + itbisAmount;
 
   const totalItems = activeCart?.items.reduce((acc, item) => acc + item.quantity, 0) || 0;
 
@@ -395,6 +412,7 @@ export const useCart = () => {
       subtotal,
       itbisAmount,
       total,
+      itbisIncluded, // congelado para que el recibo desglose igual siempre
       paymentMethod,
       paymentStatus: paymentStatus,
       amountPaid,
@@ -424,6 +442,7 @@ export const useCart = () => {
     activeCart,
     subtotal,
     itbisAmount,
+    itbisIncluded,
     total,
     totalItems,
     totalDiscount,

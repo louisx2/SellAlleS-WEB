@@ -24,6 +24,8 @@ interface ProductContextType {
   updateProduct: (product: Product) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
   bulkImportProducts: (items: BulkImportItem[], onProgress?: (done: number, total: number) => void) => Promise<BulkImportResult>;
+  /** Relee productos de la base (p. ej. tras una compra que sumó stock en el servidor). */
+  reload: () => Promise<void>;
   loading: boolean;
 }
 
@@ -111,7 +113,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, bulkImportProducts, loading }}>
+    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, bulkImportProducts, reload: load, loading }}>
       {children}
     </ProductContext.Provider>
   );

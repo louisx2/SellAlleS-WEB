@@ -93,6 +93,10 @@ export type Branch = {
   name: string;
   location: string;
   isActive: boolean;
+  // Precios con ITBIS incluido: el precio del producto ya trae el impuesto y
+  // el POS lo desglosa "hacia adentro" (base = precio / 1.18). false/ausente =
+  // el precio es base y el ITBIS se suma encima (comportamiento clásico).
+  itbisIncluded?: boolean;
   logoUrl?: string;
   ticketLogoUrl?: string;
   // Perfil del ticket propio de la sucursal. Cualquier campo vacío/ausente
@@ -126,7 +130,7 @@ export type PermissionAction = 'view' | 'create' | 'edit' | 'delete';
 // Un recurso por cada sección de la app gateada a admin (nav de authed-layout).
 export type PermissionResource =
   | 'dashboard' | 'pos' | 'sales' | 'quotes' | 'services' | 'credit' | 'financing'
-  | 'prestamos' | 'caja' | 'expenses' | 'reports' | 'products' | 'customers'
+  | 'prestamos' | 'caja' | 'expenses' | 'payables' | 'reports' | 'products' | 'customers'
   | 'suppliers' | 'company-profile' | 'users' | 'branches' | 'roles' | 'suscripcion'
   | 'service-types';
 
@@ -196,6 +200,9 @@ export type Sale = {
   subtotal: number;
   itbisAmount: number;
   total: number;
+  // Congelado al vender desde la config de la sucursal: true = los precios ya
+  // traían el ITBIS (el recibo desglosa hacia adentro), false = se sumó encima.
+  itbisIncluded?: boolean;
   paymentMethod: 'cash' | 'card' | 'transfer' | 'credit' | 'financing';
   paymentStatus: 'paid' | 'credit' | 'in_financing';
   amountPaid: number;
@@ -247,6 +254,11 @@ export type CompanyProfile = {
   phone: string;
   rnc: string;
   address: string;
+  // Flags fiscales de la empresa (solo lectura: los administra el super admin
+  // y la tarjeta de NCF). Gatean la sección fiscal DGII de Cuentas por Pagar
+  // y el reporte Formato 606.
+  isFormalized: boolean;
+  ncfEnabled: boolean;
   socialMedia: {
     instagram: string;
     facebook: string;
@@ -439,6 +451,80 @@ export type Expense = {
     amount: number;
     category: string;
     branchId: string;
+};
+
+// ---------- Cuentas por Pagar (facturas de suplidores, Formato 606 DGII) ----------
+export type SupplierInvoiceStatus = 'pending' | 'partial' | 'paid';
+
+export type SupplierInvoiceItem = {
+  id: string;
+  invoiceId: string;
+  productId?: string;   // ausente = línea libre (no toca inventario)
+  description: string;
+  quantity: number;
+  unitCost: number;
+  itbisAmount: number;
+};
+
+export type SupplierPayment = {
+  id: string;
+  invoiceId: string;
+  supplierId: string;
+  amount: number;
+  method: PaymentMethod;
+  reference?: string;
+  notes?: string;
+  userName?: string;
+  date: Date;
+  branchId: string;     // nombre de sucursal a nivel de app (join branches(name))
+};
+
+// Los códigos de los campos fiscales ('01'..'11', etc.) y sus etiquetas viven
+// en src/lib/dgii-606.ts. Todos los montos fiscales son 0/undefined para
+// empresas informales.
+export type SupplierInvoice = {
+  id: string;
+  supplierId: string;
+  supplier?: Supplier;
+  branchId: string;         // nombre de sucursal (misma convención que Sale)
+  invoiceNumber?: string;
+  issueDate: string;        // yyyy-mm-dd (fecha comprobante 606)
+  dueDate?: string;
+  paymentDate?: string;     // última fecha de pago (606)
+  status: SupplierInvoiceStatus;
+  subtotalGoods: number;    // monto facturado bienes (606)
+  subtotalServices: number; // monto facturado servicios (606)
+  total: number;
+  amountPaid: number;
+  // total - retenciones - abonado: las retenciones se remiten a DGII, no al
+  // suplidor, así que la factura queda saldada al cubrir este balance.
+  balance: number;
+  ncf?: string;
+  ncfModified?: string;
+  expenseType?: string;         // tipo bienes/servicios '01'..'11'
+  itbisFacturado: number;
+  itbisRetenido: number;
+  itbisProporcionalidad: number;
+  itbisLlevadoCosto: number;
+  isrRetentionType?: string;    // '01'..'08'
+  isrRetentionAmount: number;
+  impuestoSelectivo: number;
+  otrosImpuestos: number;
+  propinaLegal: number;
+  paymentForm?: string;         // forma de pago 606 '01'..'07'
+  notes?: string;
+  userName?: string;
+  createdAt: Date;
+  items: SupplierInvoiceItem[];
+  payments: SupplierPayment[];
+};
+
+// Resultado de la RPC register_supplier_payment.
+export type SupplierPaymentResult = {
+  paymentId: string;
+  amount: number;
+  remainingBalance: number;
+  status: SupplierInvoiceStatus;
 };
 
 export type ServiceType = {

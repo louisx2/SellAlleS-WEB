@@ -20,6 +20,7 @@ export const PERMISSION_RESOURCES: { key: PermissionResource; label: string }[] 
   { key: 'prestamos', label: 'Préstamos' },
   { key: 'caja', label: 'Caja' },
   { key: 'expenses', label: 'Gastos' },
+  { key: 'payables', label: 'Cuentas por Pagar (Suplidores)' },
   { key: 'reports', label: 'Reportes' },
   { key: 'products', label: 'Inventario' },
   { key: 'customers', label: 'Clientes' },
@@ -45,6 +46,7 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
   prestamos: 'prestamos',
   caja: 'caja',
   expenses: 'expenses',
+  payables: 'payables',
   reports: 'reports',
   suppliers: 'suppliers',
   'service-types': 'services',
@@ -61,6 +63,7 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'inventory', label: 'Valorización de Inventario' },
   { slug: 'taxes', label: 'Impuestos' },
   { slug: 'ganancias', label: 'Reporte de Ganancias' },
+  { slug: 'compras-606', label: 'Compras (Formato 606)' },
 ];
 
 // Red de seguridad: si por algún motivo no aparece la fila del rol de

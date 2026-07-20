@@ -12,6 +12,7 @@ import { LocationProvider } from '@/context/location-provider';
 import { CustomerProvider } from '@/context/customer-provider';
 import { SalesProvider } from '@/context/sales-provider';
 import { SupplierProvider } from '@/context/supplier-provider';
+import { PayablesProvider } from '@/context/payables-provider';
 import { ExpenseProvider } from '@/context/expense-provider';
 import { QuotesProvider } from '@/context/quotes-provider';
 import { LoanProvider } from '@/context/loan-provider';
@@ -32,6 +33,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                 <CustomerProvider>
                   <SalesProvider>
                     <SupplierProvider>
+                      <PayablesProvider>
                       <ExpenseProvider>
                         <QuotesProvider>
                           <LoanProvider>
@@ -43,6 +45,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                           </LoanProvider>
                         </QuotesProvider>
                       </ExpenseProvider>
+                      </PayablesProvider>
                     </SupplierProvider>
                   </SalesProvider>
                 </CustomerProvider>

@@ -65,8 +65,9 @@ export function CartDisplay() {
     toast, 
     totalItems, 
     clearCart, 
-    subtotal, 
-    itbisAmount, 
+    subtotal,
+    itbisAmount,
+    itbisIncluded,
     total,
     totalDiscount,
     updateQuantity,
@@ -307,7 +308,7 @@ export function CartDisplay() {
                 </div>
               )}
               <div className="flex justify-between">
-                <span>ITBIS (18%)</span>
+                <span>{itbisIncluded ? 'ITBIS incluido (18%)' : 'ITBIS (18%)'}</span>
                 <span>{formatCurrency(itbisAmount)}</span>
               </div>
               <div className="flex justify-between font-bold text-lg mt-1">

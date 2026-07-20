@@ -8,10 +8,14 @@ import { LoyaltySettingsCard } from '@/components/company-profile/loyalty-settin
 import { CajaEmailSettingsCard } from '@/components/company-profile/caja-email-settings-card';
 import { BranchSharingCard } from '@/components/company-profile/branch-sharing-card';
 import { PrintSettingsCard } from '@/components/company-profile/print-settings-card';
+import { TaxSettingsCard } from '@/components/company-profile/tax-settings-card';
 import { useModules } from '@/context/modules-provider';
 
 export default function SettingsPage() {
   const { isModuleEnabled } = useModules();
+  // El POS calcula el ITBIS y Reportes expone su control fiscal. Si alguno
+  // está apagado, la configuración se conserva en la sucursal pero se oculta.
+  const canConfigureTaxes = isModuleEnabled('pos') && isModuleEnabled('reports');
 
   return (
     <>
@@ -21,6 +25,11 @@ export default function SettingsPage() {
         <div>
           <NcfSettingsCard />
         </div>
+        {canConfigureTaxes && (
+          <div>
+            <TaxSettingsCard />
+          </div>
+        )}
         <div>
           <FinancingSettingsCard />
         </div>

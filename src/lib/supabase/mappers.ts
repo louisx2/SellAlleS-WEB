@@ -1,4 +1,4 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 
 // ---------- Role ----------
@@ -95,6 +95,7 @@ export const rowToBranch = (r: any): Branch => ({
   name: r.name,
   location: r.location ?? '',
   isActive: r.is_active ?? true,
+  itbisIncluded: !!r.itbis_included,
   logoUrl: r.logo_url ?? undefined,
   ticketLogoUrl: r.ticket_logo_url ?? undefined,
   displayName: r.display_name ?? undefined,
@@ -105,6 +106,7 @@ export const rowToBranch = (r: any): Branch => ({
 export const branchToRow = (b: Partial<Branch>) => ({
   name: b.name,
   location: b.location ?? null,
+  itbis_included: b.itbisIncluded ?? false,
   logo_url: b.logoUrl ?? null,
   ticket_logo_url: b.ticketLogoUrl ?? null,
   display_name: b.displayName?.trim() || null,
@@ -127,6 +129,77 @@ export const supplierToRow = (s: Partial<Supplier>) => ({
   rnc: s.rnc ?? null,
 });
 
+// ---------- Cuentas por Pagar (facturas de suplidores) ----------
+// Solo lectura + RPCs: no hay *ToRow — las facturas las crea
+// create_supplier_invoice y los abonos register_supplier_payment.
+export const rowToSupplierInvoiceItem = (r: any): SupplierInvoiceItem => ({
+  id: r.id,
+  invoiceId: r.invoice_id,
+  productId: r.product_id ?? undefined,
+  description: r.description,
+  quantity: Number(r.quantity),
+  unitCost: Number(r.unit_cost),
+  itbisAmount: Number(r.itbis_amount ?? 0),
+});
+
+export const rowToSupplierPayment = (r: any): SupplierPayment => ({
+  id: r.id,
+  invoiceId: r.invoice_id,
+  supplierId: r.supplier_id,
+  amount: Number(r.amount),
+  method: r.method ?? 'cash',
+  reference: r.reference ?? undefined,
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  date: new Date(r.date),
+  branchId: r.branches?.name ?? '',
+});
+
+export const rowToSupplierInvoice = (r: any): SupplierInvoice => ({
+  id: r.id,
+  supplierId: r.supplier_id,
+  supplier: r.suppliers ? rowToSupplier(r.suppliers) : undefined,
+  branchId: r.branches?.name ?? '',
+  invoiceNumber: r.invoice_number ?? undefined,
+  issueDate: r.issue_date,
+  dueDate: r.due_date ?? undefined,
+  paymentDate: r.payment_date ?? undefined,
+  status: r.status,
+  subtotalGoods: Number(r.subtotal_goods ?? 0),
+  subtotalServices: Number(r.subtotal_services ?? 0),
+  total: Number(r.total ?? 0),
+  amountPaid: Number(r.amount_paid ?? 0),
+  balance: Number(r.balance ?? 0),
+  ncf: r.ncf ?? undefined,
+  ncfModified: r.ncf_modified ?? undefined,
+  expenseType: r.expense_type ?? undefined,
+  itbisFacturado: Number(r.itbis_facturado ?? 0),
+  itbisRetenido: Number(r.itbis_retenido ?? 0),
+  itbisProporcionalidad: Number(r.itbis_proporcionalidad ?? 0),
+  itbisLlevadoCosto: Number(r.itbis_llevado_costo ?? 0),
+  isrRetentionType: r.isr_retention_type ?? undefined,
+  isrRetentionAmount: Number(r.isr_retention_amount ?? 0),
+  impuestoSelectivo: Number(r.impuesto_selectivo ?? 0),
+  otrosImpuestos: Number(r.otros_impuestos ?? 0),
+  propinaLegal: Number(r.propina_legal ?? 0),
+  paymentForm: r.payment_form ?? undefined,
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  createdAt: new Date(r.created_at),
+  items: (r.supplier_invoice_items ?? []).map(rowToSupplierInvoiceItem),
+  payments: (r.supplier_payments ?? [])
+    .map(rowToSupplierPayment)
+    .sort((a: SupplierPayment, b: SupplierPayment) => a.date.getTime() - b.date.getTime()),
+});
+
+// jsonb devuelto por register_supplier_payment.
+export const rowToSupplierPaymentResult = (r: any): SupplierPaymentResult => ({
+  paymentId: r.payment_id,
+  amount: Number(r.amount),
+  remainingBalance: Number(r.remaining_balance ?? 0),
+  status: r.status,
+});
+
 // ---------- Expense ----------
 export const rowToExpense = (r: any): Expense => ({
   id: r.id, date: new Date(r.date), description: r.description, amount: Number(r.amount),
@@ -136,6 +209,7 @@ export const rowToExpense = (r: any): Expense => ({
 // ---------- CompanyProfile ----------
 export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   name: r.name ?? '', phone: r.phone ?? '', rnc: r.rnc ?? '', address: r.address ?? '',
+  isFormalized: !!r.is_formalized, ncfEnabled: !!r.ncf_enabled,
   socialMedia: { instagram: r.instagram ?? '', facebook: r.facebook ?? '' },
   logoUrl: r.logo_url ?? '', ticketLogoUrl: r.ticket_logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
   ticketNameDisplay: (r.ticket_name_display ?? 'company') as CompanyProfile['ticketNameDisplay'],
@@ -210,6 +284,7 @@ export const rowToSale = (r: any): Sale => ({
   id: r.id,
   items: (r.sale_items ?? []).map(rowToCartItem),
   subtotal: Number(r.subtotal), itbisAmount: Number(r.itbis_amount), total: Number(r.total),
+  itbisIncluded: !!r.itbis_included,
   paymentMethod: r.payment_method, paymentStatus: r.payment_status, amountPaid: Number(r.amount_paid),
   paymentReference: r.payment_reference ?? undefined,
   customer: r.customers ? rowToCustomer(r.customers) : undefined,
@@ -235,6 +310,7 @@ export const saleToRow = (s: Omit<Sale, 'id'>, branchUuid: string | null) => ({
   branch_id: branchUuid,
   customer_id: isUuid(s.customerId) ? s.customerId : null,
   subtotal: s.subtotal, itbis_amount: s.itbisAmount, total: s.total,
+  itbis_included: s.itbisIncluded ?? false,
   payment_method: s.paymentMethod, payment_status: s.paymentStatus, amount_paid: s.amountPaid,
   payment_reference: s.paymentReference ?? null, ncf: s.ncf ?? null, ncf_type: s.ncfType,
   down_payment_method: s.downPaymentMethod ?? null,

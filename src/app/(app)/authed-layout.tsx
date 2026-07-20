@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt } from 'lucide-react';
+import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -45,6 +45,7 @@ const featuresNavItems: NavItem[] = [
   { href: '/quotes', icon: FileText, label: 'Cotizaciones', module: 'quotes', permission: 'quotes' },
   { href: '/services', icon: Wrench, label: 'Servicios', module: 'services', permission: 'services' },
   { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', module: 'credit', permission: 'credit' },
+  { href: '/payables', icon: ReceiptText, label: 'Cuentas por Pagar', module: 'payables', permission: 'payables' },
   { href: '/financing', icon: Landmark, label: 'Financiamientos', module: 'financing', permission: 'financing' },
   { href: '/prestamos', icon: HandCoins, label: 'Préstamos', module: 'prestamos', permission: 'prestamos' },
   { href: '/caja', icon: Coins, label: 'Caja', module: 'caja', permission: 'caja' },
@@ -60,6 +61,7 @@ const reportsNavItems = [
     { href: '/reports/inventory', label: 'Valorización de Inventario' },
     { href: '/reports/taxes', label: 'Impuestos' },
     { href: '/reports/ganancias', label: 'Reporte de Ganancias' },
+    { href: '/reports/compras-606', label: 'Compras (Formato 606)' },
 ];
 
 const adminNavItems: NavItem[] = [
@@ -216,9 +218,13 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const visibleAdminNavItems = adminNavItems.filter(item => showOperationalMenus && moduleOk(item) && hasExtra(item.permission));
   const canViewAdmin = showOperationalMenus && visibleAdminNavItems.length > 0;
   const canViewReports = showOperationalMenus && isModuleEnabled('reports') && hasExtra('reports');
-  const visibleReportsNavItems = reportsNavItems.filter(
-    (item) => isReportVisible(effectivePermissions, item.href.split('/').pop()!)
-  );
+  const visibleReportsNavItems = reportsNavItems.filter((item) => {
+    const slug = item.href.split('/').pop()!;
+    // El 606 es un reporte fiscal DGII: aplica solo a empresas formalizadas y
+    // depende de las facturas del módulo de Cuentas por Pagar.
+    if (slug === 'compras-606' && (!profile.isFormalized || !isModuleEnabled('payables'))) return false;
+    return isReportVisible(effectivePermissions, slug);
+  });
 
   // Guard de rutas: si la URL pertenece a un módulo apagado para esta
   // empresa, no se renderiza el contenido (aunque escriban la URL a mano).

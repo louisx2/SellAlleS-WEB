@@ -11,6 +11,8 @@ export type ModuleKey =
   | 'financing'
   | 'suppliers'
   | 'expenses'
+  | 'payables'
+  | 'purchases'
   | 'reports'
   | 'lavanderia'
   | 'services'
@@ -36,6 +38,8 @@ export const APP_MODULES: AppModule[] = [
   { key: 'financing',  label: 'Financiamiento',     description: 'Planes de cuotas con interés y mora.',                defaultEnabled: true },
   { key: 'suppliers',  label: 'Proveedores',        description: 'Directorio de suplidores.',                           defaultEnabled: true },
   { key: 'expenses',   label: 'Gastos',             description: 'Registro de gastos del negocio.',                     defaultEnabled: true },
+  { key: 'payables',   label: 'Cuentas por Pagar',  description: 'Facturas de suplidores, abonos y antigüedad de saldos. Con datos fiscales DGII (Formato 606) para empresas formalizadas.', defaultEnabled: false },
+  { key: 'purchases',  label: 'Compras a Inventario', description: 'Las facturas de suplidores pueden llevar líneas de productos que suman al stock. Requiere Cuentas por Pagar.', defaultEnabled: false },
   { key: 'reports',    label: 'Reportes',           description: 'Resúmenes de ventas, productos e impuestos.',         defaultEnabled: true },
   { key: 'services',   label: 'Servicios/Reparaciones', description: 'Gestión de órdenes de servicio y uso de repuestos.',  defaultEnabled: true },
   { key: 'lavanderia', label: 'Lavandería',         description: 'Órdenes de servicio de lavandería.',                  defaultEnabled: false, comingSoon: true },
@@ -55,6 +59,7 @@ const ROUTE_MODULE: Array<{ prefix: string; module: ModuleKey }> = [
   { prefix: '/financing', module: 'financing' },
   { prefix: '/suppliers', module: 'suppliers' },
   { prefix: '/expenses',  module: 'expenses' },
+  { prefix: '/payables',  module: 'payables' },
   { prefix: '/reports',   module: 'reports' },
   { prefix: '/services',  module: 'services' },
   { prefix: '/service-types', module: 'services' },
