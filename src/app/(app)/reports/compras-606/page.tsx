@@ -4,6 +4,8 @@ import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { usePayables } from '@/context/payables-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useBranches } from '@/context/branch-provider';
+import { useAuth } from '@/context/auth-provider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,6 +32,8 @@ const defaultPeriod = () => {
 export default function Compras606Page() {
   const { invoices } = usePayables();
   const { profile } = useCompanyProfile();
+  const { branches } = useBranches();
+  const { appUser } = useAuth();
   const [period, setPeriod] = useState(defaultPeriod());
 
   const periodInvoices = useMemo(
@@ -48,7 +52,9 @@ export default function Compras606Page() {
     return { compras, itbis, retenido };
   }, [rows]);
 
-  const companyRnc = (profile.rnc ?? '').replace(/\D/g, '');
+  const activeBranch = branches.find((b) => b.id === appUser?.activeBranchId);
+  const activeRnc = activeBranch?.rnc || profile.rnc || '';
+  const companyRnc = activeRnc.replace(/\D/g, '');
 
   if (!profile.isFormalized) {
     return (
@@ -102,7 +108,7 @@ export default function Compras606Page() {
         </div>
         {!companyRnc && (
           <p className="text-sm text-amber-600 dark:text-amber-400">
-            La empresa no tiene RNC configurado (Perfil de Empresa): se necesita para el archivo de envío.
+            La sucursal actual no tiene RNC configurado (Perfil de Sucursal): se necesita para el archivo de envío.
           </p>
         )}
       </div>

@@ -100,6 +100,7 @@ export const rowToBranch = (r: any): Branch => ({
   ticketLogoUrl: r.ticket_logo_url ?? undefined,
   displayName: r.display_name ?? undefined,
   phone: r.phone ?? undefined,
+  rnc: r.rnc ?? undefined,
   address: r.address ?? undefined,
   receiptFooter: r.receipt_footer ?? undefined,
 });
@@ -111,6 +112,7 @@ export const branchToRow = (b: Partial<Branch>) => ({
   ticket_logo_url: b.ticketLogoUrl ?? null,
   display_name: b.displayName?.trim() || null,
   phone: b.phone?.trim() || null,
+  rnc: b.rnc?.trim() || null,
   address: b.address?.trim() || null,
   receipt_footer: b.receiptFooter?.trim() || null,
 });

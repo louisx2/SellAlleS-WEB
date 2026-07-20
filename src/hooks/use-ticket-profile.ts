@@ -50,7 +50,7 @@ export function useTicketProfile(branchRef?: string | null): TicketProfile {
     secondaryName,
     phone: branch?.phone?.trim() || profile.phone,
     address: branch?.address?.trim() || profile.address,
-    rnc: profile.rnc,
+    rnc: branch?.rnc?.trim() || profile.rnc,
     ticketLogoUrl: branch?.ticketLogoUrl || profile.ticketLogoUrl,
     receiptFooter: branch?.receiptFooter?.trim() || profile.receiptFooter,
     socialMedia: profile.socialMedia,

@@ -70,7 +70,7 @@ const adminNavItems: NavItem[] = [
     { href: '/locations', icon: MapPin, label: 'Ubicaciones', permission: 'products' },
     { href: '/customers', icon: UsersRound, label: 'Clientes', permission: 'customers' },
     { href: '/suppliers', icon: Truck, label: 'Proveedores', module: 'suppliers', permission: 'suppliers' },
-    { href: '/company-profile', icon: Building, label: 'Perfil de Empresa', permission: 'company-profile' },
+    { href: '/company-profile', icon: Building, label: 'Perfil de Sucursal', permission: 'company-profile' },
     { href: '/users', icon: Users, label: 'Usuarios', permission: 'users' },
     { href: '/branches', icon: Store, label: 'Sucursales', permission: 'branches' },
     { href: '/roles', icon: Shield, label: 'Roles', permission: 'roles' },

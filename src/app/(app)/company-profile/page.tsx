@@ -7,22 +7,55 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useBranches } from '@/context/branch-provider';
 import { useToast } from '@/hooks/use-toast';
 import type { CompanyProfile } from '@/lib/types';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Info, Loader2, Upload } from 'lucide-react';
+import { Info, Loader2, Upload, Store, Building2 } from 'lucide-react';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 
 export default function CompanyProfilePage() {
   const { profile, updateProfile } = useCompanyProfile();
+  const { branches, updateBranch } = useBranches();
   const { appUser } = useAuth();
-  const [formData, setFormData] = useState<CompanyProfile>(profile);
   const { toast } = useToast();
+
+  const [companyData, setCompanyData] = useState<CompanyProfile>(profile);
+  const [branchName, setBranchName] = useState('');
+  const [branchDisplayName, setBranchDisplayName] = useState('');
+  const [branchPhone, setBranchPhone] = useState('');
+  const [branchRnc, setBranchRnc] = useState('');
+  const [branchAddress, setBranchAddress] = useState('');
+  const [branchLogoUrl, setBranchLogoUrl] = useState('');
+  const [branchTicketLogoUrl, setBranchTicketLogoUrl] = useState('');
+  const [branchReceiptFooter, setBranchReceiptFooter] = useState('');
+
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingTicketLogo, setUploadingTicketLogo] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const activeBranch = branches.find((b) => b.id === appUser?.activeBranchId);
+
+  // Sincronizar estados locales con los contextos cargados
+  useEffect(() => {
+    setCompanyData(profile);
+  }, [profile]);
+
+  useEffect(() => {
+    if (activeBranch) {
+      setBranchName(activeBranch.name || '');
+      setBranchDisplayName(activeBranch.displayName || '');
+      setBranchPhone(activeBranch.phone || '');
+      setBranchRnc(activeBranch.rnc || '');
+      setBranchAddress(activeBranch.address || '');
+      setBranchLogoUrl(activeBranch.logoUrl || '');
+      setBranchTicketLogoUrl(activeBranch.ticketLogoUrl || '');
+      setBranchReceiptFooter(activeBranch.receiptFooter || '');
+    }
+  }, [activeBranch]);
 
   const processAndUpload = async (file: File, type: 'logo' | 'ticket') => {
     const isLogo = type === 'logo';
@@ -30,7 +63,6 @@ export default function CompanyProfilePage() {
     else setUploadingTicketLogo(true);
 
     try {
-      // 1. Cargar la imagen en un Canvas
       const img = new Image();
       img.src = URL.createObjectURL(file);
       await new Promise((resolve) => (img.onload = resolve));
@@ -39,7 +71,6 @@ export default function CompanyProfilePage() {
       let width = img.width;
       let height = img.height;
 
-      // Tamaño máximo: 512 para logo normal, 300 para ticket
       const maxDim = isLogo ? 512 : 300;
       if (width > maxDim || height > maxDim) {
         if (width > height) {
@@ -58,7 +89,6 @@ export default function CompanyProfilePage() {
 
       ctx.drawImage(img, 0, 0, width, height);
 
-      // Conversión a escala de grises para el logo del ticket (impresión térmica)
       if (!isLogo) {
         const imgData = ctx.getImageData(0, 0, width, height);
         const data = imgData.data;
@@ -66,7 +96,6 @@ export default function CompanyProfilePage() {
           const r = data[i];
           const g = data[i + 1];
           const b = data[i + 2];
-          // Fórmula de luminancia para escala de grises
           const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
           data[i] = gray;
           data[i + 1] = gray;
@@ -75,14 +104,14 @@ export default function CompanyProfilePage() {
         ctx.putImageData(imgData, 0, 0);
       }
 
-      // 2. Convertir canvas a blob PNG
       const blob = await new Promise<Blob | null>((resolve) =>
         canvas.toBlob((b) => resolve(b), 'image/png')
       );
       if (!blob) throw new Error('Falló la conversión de la imagen');
 
-      // 3. Subir a Supabase Storage (bucket público product-images)
-      const path = `logos/${Date.now()}_${isLogo ? 'logo' : 'ticket'}.png`;
+      // Si es una sucursal nueva y no tiene id, usamos un UUID aleatorio para la imagen.
+      const fileId = activeBranch?.id || crypto.randomUUID();
+      const path = `logos/branch_${fileId}_${isLogo ? 'logo' : 'ticket'}_${Date.now()}.png`;
       const { error: uploadError } = await supabase.storage
         .from('product-images')
         .upload(path, blob, {
@@ -92,20 +121,22 @@ export default function CompanyProfilePage() {
 
       if (uploadError) throw uploadError;
 
-      // 4. Obtener URL pública
       const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(path);
       const publicUrl = urlData.publicUrl;
 
-      // Actualizar el estado del formulario
-      setFormData((prev) => ({
-        ...prev,
-        [isLogo ? 'logoUrl' : 'ticketLogoUrl']: publicUrl,
-      }));
-
-      toast({
-        title: isLogo ? 'Logo de empresa actualizado' : 'Logo de ticket actualizado',
-        description: 'La imagen ha sido optimizada y formateada automáticamente.',
-      });
+      if (isLogo) {
+        setBranchLogoUrl(publicUrl);
+        toast({
+          title: 'Logo de sucursal cargado',
+          description: 'El logo principal se cargó y optimizó.',
+        });
+      } else {
+        setBranchTicketLogoUrl(publicUrl);
+        toast({
+          title: 'Logo de ticket cargado',
+          description: 'El logo para tickets térmicos se convirtió a escala de grises.',
+        });
+      }
     } catch (err: any) {
       console.error(err);
       toast({
@@ -119,105 +150,178 @@ export default function CompanyProfilePage() {
     }
   };
 
-  // El perfil llega async desde el provider: sincronizar el formulario cuando
-  // cambie (p. ej. carga directa de la página) para no mostrar datos vacíos.
-  useEffect(() => { setFormData(profile); }, [profile]);
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleCompanyChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setCompanyData((prev) => ({ ...prev, [name]: value }));
   };
-  
+
   const handleSocialChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-        ...prev,
-        socialMedia: {
-            ...prev.socialMedia,
-            [name]: value,
-        }
+    setCompanyData((prev) => ({
+      ...prev,
+      socialMedia: {
+        ...prev.socialMedia,
+        [name]: value,
+      },
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateProfile(formData);
-    toast({
-      title: 'Perfil actualizado',
-      description: 'La información de la empresa ha sido guardada.',
-    });
+    setIsSaving(true);
+    try {
+      // 1. Guardar cambios de la empresa global
+      await updateProfile(companyData);
+
+      // 2. Guardar cambios de la sucursal activa
+      if (activeBranch) {
+        await updateBranch({
+          ...activeBranch,
+          name: branchName,
+          displayName: branchDisplayName || undefined,
+          phone: branchPhone || undefined,
+          rnc: branchRnc || undefined,
+          address: branchAddress || undefined,
+          logoUrl: branchLogoUrl || undefined,
+          ticketLogoUrl: branchTicketLogoUrl || undefined,
+          receiptFooter: branchReceiptFooter || undefined,
+        });
+      }
+
+      toast({
+        title: 'Perfil actualizado',
+        description: 'La información del perfil de la sucursal ha sido guardada.',
+      });
+
+      // Recarga forzada estándar para prevenir pointer-events freeze
+      setTimeout(() => window.location.reload(), 800);
+    } catch (error: any) {
+      toast({
+        title: 'Error al guardar cambios',
+        description: error?.message ?? 'Inténtalo de nuevo.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
     <>
-    <form onSubmit={handleSubmit}>
-      <PageHeader title="Perfil de la Empresa">
-        <Button type="submit">Guardar Cambios</Button>
-      </PageHeader>
+      <form onSubmit={handleSubmit}>
+        <PageHeader title="Perfil de la Sucursal">
+          <Button type="submit" disabled={isSaving}>
+            {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Guardar Cambios
+          </Button>
+        </PageHeader>
 
-      <div className="grid gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Información de Contacto</CardTitle>
-            <CardDescription>Datos principales de tu negocio.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="name">Nombre de la empresa</Label>
-              <Input
-                id="name"
-                name="name"
-                value={formData.name}
-                onChange={handleChange}
-                disabled={!appUser?.isSuperAdmin}
-              />
-              {!appUser?.isSuperAdmin && (
-                <p className="text-xs text-muted-foreground">
-                  Solo un super administrador de la plataforma puede cambiar el nombre de la empresa.
-                </p>
+        <div className="grid gap-6">
+          {/* SECCIÓN SUCURSAL ACTIVA */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Store className="h-5 w-5 text-primary" /> Información de la Sucursal Activa
+              </CardTitle>
+              <CardDescription>
+                Configura los datos del punto de venta en el que estás operando actualmente.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!activeBranch ? (
+                <p className="text-sm text-muted-foreground">Cargando datos de la sucursal...</p>
+              ) : (
+                <>
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="branchName">Nombre de la sucursal (interno)</Label>
+                      <Input
+                        id="branchName"
+                        value={branchName}
+                        onChange={(e) => setBranchName(e.target.value)}
+                        placeholder="Ej: Principal, Zona Oriental"
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="branchDisplayName">Nombre comercial (se muestra en tickets)</Label>
+                      <Input
+                        id="branchDisplayName"
+                        value={branchDisplayName}
+                        onChange={(e) => setBranchDisplayName(e.target.value)}
+                        placeholder="Dejar vacío para usar el nombre de la empresa"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="branchRnc">RNC de la sucursal</Label>
+                      <Input
+                        id="branchRnc"
+                        value={branchRnc}
+                        onChange={(e) => setBranchRnc(e.target.value)}
+                        placeholder="RNC específico para esta sucursal"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="branchPhone">Teléfono de la sucursal</Label>
+                      <Input
+                        id="branchPhone"
+                        value={branchPhone}
+                        onChange={(e) => setBranchPhone(e.target.value)}
+                        placeholder="Ej: 809-555-5555"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="branchAddress">Dirección de la sucursal</Label>
+                    <Input
+                      id="branchAddress"
+                      value={branchAddress}
+                      onChange={(e) => setBranchAddress(e.target.value)}
+                      placeholder="Dirección física del punto de venta"
+                    />
+                  </div>
+                </>
               )}
-            </div>
-            <div className="grid sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="phone">Teléfono</Label>
-                <Input id="phone" name="phone" value={formData.phone} onChange={handleChange} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="rnc">RNC</Label>
-                <Input id="rnc" name="rnc" value={formData.rnc} onChange={handleChange} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="address">Dirección</Label>
-              <Input id="address" name="address" value={formData.address} onChange={handleChange} />
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Personalización de Recibos</CardTitle>
-            <CardDescription>Configura cómo se ven tus recibos impresos.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-             <div className="space-y-2">
+          {/* PERSONALIZACIÓN DE RECIBOS DE SUCURSAL */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Impresión y Logos (Sucursal)</CardTitle>
+              <CardDescription>
+                Sube el logotipo a color y blanco/negro de la sucursal. Si no se configuran, se usarán los globales de la empresa.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="logoUrl">Logo de la Empresa (app, a color)</Label>
+                  <Label htmlFor="branchLogoUrl">Logo de la Sucursal (App, a color)</Label>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Info className="h-4 w-4 text-muted-foreground cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>Se muestra en el menú lateral y encabezado de la aplicación. Se auto-formatea a un tamaño óptimo.</p>
+                        <p>Se muestra en la app para esta sucursal.</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </div>
                 <div className="flex gap-2 items-center">
-                  <Input id="logoUrl" name="logoUrl" value={formData.logoUrl || ''} onChange={handleChange} placeholder="https://..." className="flex-grow" />
+                  <Input
+                    id="branchLogoUrl"
+                    value={branchLogoUrl}
+                    onChange={(e) => setBranchLogoUrl(e.target.value)}
+                    placeholder="https://..."
+                    className="flex-grow"
+                  />
                   <input
-                    id="logo-file-input"
+                    id="branch-logo-file"
                     type="file"
                     accept="image/*"
                     className="hidden"
@@ -231,36 +335,43 @@ export default function CompanyProfilePage() {
                     type="button"
                     variant="outline"
                     disabled={uploadingLogo}
-                    onClick={() => document.getElementById('logo-file-input')?.click()}
+                    onClick={() => document.getElementById('branch-logo-file')?.click()}
                   >
                     {uploadingLogo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
                     Subir
                   </Button>
                 </div>
-                {formData.logoUrl && (
-                  <div className="mt-2 relative w-16 h-16 border rounded-md overflow-hidden bg-muted">
-                    <img src={formData.logoUrl} alt="Vista previa logo" className="object-contain w-full h-full" />
+                {branchLogoUrl && (
+                  <div className="mt-2 w-16 h-16 border rounded-md overflow-hidden bg-muted">
+                    <img src={branchLogoUrl} alt="Vista previa logo sucursal" className="object-contain w-full h-full" />
                   </div>
                 )}
               </div>
-             <div className="space-y-2">
+
+              <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="ticketLogoUrl">Logo para Tickets/Recibos (impresión térmica)</Label>
+                  <Label htmlFor="branchTicketLogoUrl">Logo para Tickets (Impresión térmica)</Label>
                   <TooltipProvider>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Info className="h-4 w-4 text-muted-foreground cursor-help" />
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>Imagen optimizada para impresoras térmicas. Se auto-formatea automáticamente a escala de grises y un tamaño óptimo para impresión.</p>
+                        <p>Se convierte automáticamente a escala de grises y un tamaño óptimo.</p>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
                 </div>
                 <div className="flex gap-2 items-center">
-                  <Input id="ticketLogoUrl" name="ticketLogoUrl" value={formData.ticketLogoUrl || ''} onChange={handleChange} placeholder="https://..." className="flex-grow" />
+                  <Input
+                    id="branchTicketLogoUrl"
+                    value={branchTicketLogoUrl}
+                    onChange={(e) => setBranchTicketLogoUrl(e.target.value)}
+                    placeholder="https://..."
+                    className="flex-grow"
+                  />
                   <input
-                    id="ticket-logo-file-input"
+                    id="branch-ticket-file"
                     type="file"
                     accept="image/*"
                     className="hidden"
@@ -274,77 +385,126 @@ export default function CompanyProfilePage() {
                     type="button"
                     variant="outline"
                     disabled={uploadingTicketLogo}
-                    onClick={() => document.getElementById('ticket-logo-file-input')?.click()}
+                    onClick={() => document.getElementById('branch-ticket-file')?.click()}
                   >
                     {uploadingTicketLogo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
                     Subir
                   </Button>
                 </div>
-                {formData.ticketLogoUrl && (
-                  <div className="mt-2 relative w-16 h-16 border rounded-md overflow-hidden bg-muted p-1">
-                    <img src={formData.ticketLogoUrl} alt="Vista previa logo ticket" className="object-contain w-full h-full filter grayscale" />
+                {branchTicketLogoUrl && (
+                  <div className="mt-2 w-16 h-16 border rounded-md overflow-hidden bg-muted p-1">
+                    <img
+                      src={branchTicketLogoUrl}
+                      alt="Vista previa logo ticket sucursal"
+                      className="object-contain w-full h-full filter grayscale"
+                    />
                   </div>
                 )}
               </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="ticketNameDisplay">Nombre en el encabezado del ticket</Label>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>El nombre de sucursal usa su "Nombre comercial" (configurable en Sucursales) o, si no lo tiene, su nombre interno.</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              </div>
-              <Select
-                value={formData.ticketNameDisplay}
-                onValueChange={(v) => setFormData((prev) => ({ ...prev, ticketNameDisplay: v as CompanyProfile['ticketNameDisplay'] }))}
-              >
-                <SelectTrigger id="ticketNameDisplay" className="sm:w-80"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="company">Solo el nombre de la empresa</SelectItem>
-                  <SelectItem value="branch">Solo el nombre de la sucursal</SelectItem>
-                  <SelectItem value="both">Ambos (empresa y sucursal)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="receiptFooter">Pie de Página del Recibo</Label>
-              <Textarea
-                id="receiptFooter"
-                name="receiptFooter"
-                value={formData.receiptFooter}
-                onChange={handleChange}
-                maxLength={150}
-                placeholder="Ej: Gracias por su compra. Las devoluciones se aceptan hasta 7 días después de la compra."
-                className="min-h-[80px]"
-              />
-            </div>
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Redes Sociales</CardTitle>
-            <CardDescription>Enlaces a tus perfiles sociales.</CardDescription>
-          </CardHeader>
-          <CardContent className="grid sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="instagram">Instagram</Label>
-              <Input id="instagram" name="instagram" value={formData.socialMedia.instagram} onChange={handleSocialChange} placeholder="@tuempresa" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="facebook">Facebook</Label>
-              <Input id="facebook" name="facebook" value={formData.socialMedia.facebook} onChange={handleSocialChange} placeholder="fb.com/tuempresa" />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </form>
+              <div className="space-y-2">
+                <Label htmlFor="branchReceiptFooter">Pie de Página del Recibo (de esta sucursal)</Label>
+                <Textarea
+                  id="branchReceiptFooter"
+                  value={branchReceiptFooter}
+                  onChange={(e) => setBranchReceiptFooter(e.target.value)}
+                  maxLength={150}
+                  placeholder="Ej: Gracias por comprar en esta sucursal. Cambios hasta 7 días."
+                  className="min-h-[80px]"
+                />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* SECCIÓN EMPRESA GLOBAL (SOCIAL MEDIA Y RNC GLOBAL) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Building2 className="h-5 w-5" /> Información de la Empresa (Global)
+              </CardTitle>
+              <CardDescription>
+                Configura los datos fiscales y redes sociales que comparte toda la empresa.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="company-name">Nombre de la empresa global</Label>
+                <Input
+                  id="company-name"
+                  name="name"
+                  value={companyData.name}
+                  onChange={handleCompanyChange}
+                  disabled={!appUser?.isSuperAdmin}
+                />
+                {!appUser?.isSuperAdmin && (
+                  <p className="text-xs text-muted-foreground">
+                    Solo un super administrador de la plataforma puede cambiar el nombre de la empresa global.
+                  </p>
+                )}
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="company-rnc">RNC de la empresa (global)</Label>
+                  <Input
+                    id="company-rnc"
+                    name="rnc"
+                    value={companyData.rnc || ''}
+                    onChange={handleCompanyChange}
+                    placeholder="RNC global"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="ticketNameDisplay">Nombre en el encabezado de recibos</Label>
+                  </div>
+                  <Select
+                    value={companyData.ticketNameDisplay}
+                    onValueChange={(v) =>
+                      setCompanyData((prev) => ({
+                        ...prev,
+                        ticketNameDisplay: v as CompanyProfile['ticketNameDisplay'],
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="ticketNameDisplay">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="company">Solo el nombre de la empresa</SelectItem>
+                      <SelectItem value="branch">Solo el nombre de la sucursal</SelectItem>
+                      <SelectItem value="both">Ambos (empresa y sucursal)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="instagram">Instagram</Label>
+                  <Input
+                    id="instagram"
+                    name="instagram"
+                    value={companyData.socialMedia.instagram}
+                    onChange={handleSocialChange}
+                    placeholder="@tuempresa"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="facebook">Facebook</Label>
+                  <Input
+                    id="facebook"
+                    name="facebook"
+                    value={companyData.socialMedia.facebook}
+                    onChange={handleSocialChange}
+                    placeholder="fb.com/tuempresa"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </form>
     </>
   );
 }

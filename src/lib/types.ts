@@ -103,6 +103,7 @@ export type Branch = {
   // hereda el dato del perfil de la empresa (companies) al imprimir.
   displayName?: string; // nombre comercial mostrado en el ticket
   phone?: string;
+  rnc?: string;
   address?: string;
   receiptFooter?: string;
 };

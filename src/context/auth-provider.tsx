@@ -371,11 +371,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setImpersonatedCompany = useCallback(async (companyId: string | null, companyName: string | null, branch?: { id: string; name: string }) => {
     // Si no es super admin pero tiene múltiples compañías, actualizar su profiles.company_id en la base de datos
     if (appUser && !appUser.isSuperAdmin && appUser.companies && appUser.companies.length > 1) {
-      // 1) Cambiar la empresa PRIMERO: las sucursales de la empresa destino no
-      // son legibles bajo RLS hasta que current_company_id() apunte a ella
-      // (consultarlas antes devolvía vacío y el usuario entraba sin sucursal).
-      // El trigger check_profile_company_access valida que el usuario tenga la
-      // fila en profile_companies antes de aceptar el cambio.
+      // 1) Cambiar la empresa primero para que current_company_id() apunte a
+      // ella en las queries siguientes. El trigger check_profile_company_access
+      // valida que el usuario tenga la fila en profile_companies antes de
+      // aceptar el cambio. (El RLS de branches ya permite leer las sucursales
+      // de cualquier empresa donde el usuario sea miembro vía user_company_ids.)
       const { error } = await supabase
         .from('profiles')
         .update({ company_id: companyId, branch_id: null })
