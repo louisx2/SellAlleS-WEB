@@ -1,4 +1,9 @@
-const CACHE_NAME = 'sellalles-cache-v2';
+// Bumpear esta versión purga el caché acumulado del bucket anterior (el
+// `activate` de abajo borra cualquier caché con nombre distinto a este). La
+// protección real contra builds desincronizados es el listener de
+// controllerchange en pwa-register.tsx, que recarga automáticamente cuando
+// un Service Worker nuevo toma control de una pestaña ya abierta.
+const CACHE_NAME = 'sellalles-cache-v3';
 const PRECACHE_ASSETS = [
   '/',
   '/login',

@@ -566,6 +566,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }}
         onSignOut={signOut}
+        onGoToCompanies={
+          appUser.companies && appUser.companies.length > 1
+            ? () => setImpersonatedCompany(null, null)
+            : undefined
+        }
       />
     );
   }

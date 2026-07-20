@@ -1,15 +1,17 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Store, LogOut } from 'lucide-react';
+import { Store, LogOut, Building2 } from 'lucide-react';
 
 interface BranchSelectorProps {
   userName: string;
   branches: { id: string; name: string }[];
   onSelect: (id: string, name: string) => void;
   onSignOut: () => void;
+  /** Solo para usuarios con más de una empresa: ir directo a Mis Empresas sin tener que entrar primero a una sucursal. */
+  onGoToCompanies?: () => void;
 }
 
-export function BranchSelector({ userName, branches, onSelect, onSignOut }: BranchSelectorProps) {
+export function BranchSelector({ userName, branches, onSelect, onSignOut, onGoToCompanies }: BranchSelectorProps) {
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
@@ -36,7 +38,13 @@ export function BranchSelector({ userName, branches, onSelect, onSignOut }: Bran
             </Button>
           ))}
         </CardContent>
-        <CardFooter>
+        <CardFooter className="flex flex-col gap-2">
+          {onGoToCompanies && (
+            <Button variant="outline" className="w-full" onClick={onGoToCompanies}>
+              <Building2 className="mr-2 h-4 w-4" />
+              Ir a Mis Empresas
+            </Button>
+          )}
           <Button variant="ghost" className="w-full text-muted-foreground" onClick={onSignOut}>
             <LogOut className="mr-2 h-4 w-4" />
             Cerrar sesión
