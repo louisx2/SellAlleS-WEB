@@ -16,7 +16,10 @@ function json(status: number, obj: unknown) {
 async function sendEmailWithAttachment(to: string, subject: string, html: string, pdfBase64: string, filename: string) {
   const apiKey = Deno.env.get('RESEND_API_KEY');
   if (!apiKey) throw new Error('Falta la variable de entorno RESEND_API_KEY.');
-  const from = Deno.env.get('RESEND_FROM_EMAIL') ?? 'onboarding@resend.dev';
+  // Antes caía a onboarding@resend.dev, un dominio que no es nuestro: Resend lo
+  // rechaza siempre. Mejor decir qué falta que fingir que se puede enviar.
+  const from = Deno.env.get('RESEND_FROM_EMAIL');
+  if (!from) throw new Error('Falta la variable de entorno RESEND_FROM_EMAIL.');
 
   const resp = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -39,8 +42,12 @@ async function sendEmailWithAttachment(to: string, subject: string, html: string
   });
 
   if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    throw new Error(`Resend API Error: ${resp.status} ${errText}`);
+    const errText = (await resp.text().catch(() => '')).slice(0, 300);
+    // El tamaño importa: el PDF viaja en base64 dentro del JSON, y un recibo
+    // largo puede pasarse del límite de la petición. Sin este dato, un fallo
+    // por tamaño se ve igual que uno de credenciales.
+    const pesoMb = (pdfBase64.length / 1024 / 1024).toFixed(2);
+    throw new Error(`Resend respondió ${resp.status}: ${errText} (adjunto ${pesoMb} MB en base64)`);
   }
 }
 
@@ -112,7 +119,7 @@ Deno.serve(async (req) => {
         <div style="background-color: #F9FAFB; padding: 15px; border-radius: 5px; margin: 20px 0;">
           <table style="width: 100%; border-collapse: collapse;">
             ${sale.ncf ? `<tr><td style="padding: 5px 0; font-weight: bold;">NCF:</td><td style="padding: 5px 0;">${sale.ncf}</td></tr>` : ''}
-            <tr><td style="padding: 5px 0; font-weight: bold;">Total facturado:</td><td style="padding: 5px 0; color: #10B981; font-weight: bold;">RD$ ${sale.total.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+            <tr><td style="padding: 5px 0; font-weight: bold;">Total facturado:</td><td style="padding: 5px 0; color: #10B981; font-weight: bold;">RD$ ${Number(sale.total).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
           </table>
         </div>
         <p style="font-size: 12px; color: #9CA3AF; text-align: center; margin-top: 30px;">

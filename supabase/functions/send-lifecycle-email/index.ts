@@ -73,8 +73,11 @@ function fmtMoneda(v: unknown): string {
 function bloqueContacto(c: Contacto): string {
   const partes: string[] = [];
   if (c.whatsappEnabled && c.whatsappNumber) {
+    // Sin el número a la vista: el enlace ya lleva al chat correcto, y mostrarlo
+    // solo invita a guardarlo o marcarlo por fuera. Si cambia el número, los
+    // correos viejos siguen funcionando porque el destino sale de la config.
     partes.push(
-      `<a href="https://wa.me/${esc(c.whatsappNumber)}" style="display:inline-block;background:#059669;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;">WhatsApp${c.whatsappLabel ? ` ${esc(c.whatsappLabel)}` : ''}</a>`,
+      `<a href="https://wa.me/${esc(c.whatsappNumber)}" style="display:inline-block;background:#059669;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;">Contáctanos por WhatsApp</a>`,
     );
   }
   if (c.emailEnabled && c.email) {
