@@ -57,21 +57,59 @@ export function buildSaleReceiptText(sale: Sale, companyName?: string): string {
   return text;
 }
 
-export function shareSaleViaWhatsApp(sale: Sale, companyName?: string) {
-  const text = buildSaleReceiptText(sale, companyName);
+/** Normaliza el teléfono del cliente al formato que espera WhatsApp. */
+function telefonoParaWhatsApp(sale: Sale): string {
   let phone = sale.customer?.phone ? sale.customer.phone.replace(/\D/g, '') : '';
-
-  if (phone) {
-    if (phone.length === 10 && (phone.startsWith('809') || phone.startsWith('829') || phone.startsWith('849'))) {
-      phone = '1' + phone;
-    }
+  if (phone.length === 10 && (phone.startsWith('809') || phone.startsWith('829') || phone.startsWith('849'))) {
+    phone = '1' + phone;
   }
+  return phone;
+}
 
+function abrirWhatsApp(text: string, phone: string) {
   const url = phone
     ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`
     : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-
   window.open(url, '_blank');
+}
+
+export function shareSaleViaWhatsApp(sale: Sale, companyName?: string) {
+  abrirWhatsApp(buildSaleReceiptText(sale, companyName), telefonoParaWhatsApp(sale));
+}
+
+/**
+ * Sube el PDF y abre WhatsApp con un enlace de descarga temporal.
+ *
+ * WhatsApp no deja adjuntar un archivo desde un enlace `wa.me`, así que la
+ * alternativa anterior obligaba al cajero a descargar el PDF y adjuntarlo a
+ * mano. Con el enlace el mensaje sale de una vez.
+ *
+ * El enlace es firmado y vence: una factura lleva datos del cliente y no debe
+ * quedar accesible para siempre a quien la reenvíe.
+ */
+export async function shareSalePdfLinkViaWhatsApp(
+  saleId: string,
+  pdfBase64: string,
+  sale: Sale,
+  companyName?: string,
+): Promise<{ url: string; diasValidez: number }> {
+  const { data, error } = await supabase.functions.invoke('receipt-link', {
+    body: { saleId, pdfBase64 },
+  });
+
+  const msg = (data as { error?: string })?.error ?? error?.message;
+  if (msg) throw new Error(msg);
+
+  const { url, diasValidez } = data as { url: string; diasValidez: number };
+
+  const negocio = companyName ?? 'nuestro negocio';
+  const texto =
+    `¡Gracias por su compra en ${negocio}!\n\n` +
+    `Aquí puede descargar su comprobante en PDF:\n${url}\n\n` +
+    `El enlace estará disponible por ${diasValidez} días.`;
+
+  abrirWhatsApp(texto, telefonoParaWhatsApp(sale));
+  return { url, diasValidez };
 }
 
 /** Tamaño real del recibo en milímetros, tomado de lo que se ve en pantalla.

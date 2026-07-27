@@ -90,7 +90,7 @@ export default function SaleReceiptClient() {
       console.error(error);
       toast({
         title: 'Error al enviar correo',
-        description: error?.message || 'Ocurrió un error al procesar el envío con Resend.',
+        description: error?.message || 'No se pudo enviar el correo. Intenta de nuevo.',
         variant: 'destructive',
       });
     } finally {
@@ -168,9 +168,9 @@ export default function SaleReceiptClient() {
       <Dialog open={activeDialog === 'email'} onOpenChange={(open) => !open && setActiveDialog('none')}>
         <DialogContent className="max-w-sm">
           <div className="space-y-4">
-            <DialogTitle>Enviar por Correo (Resend)</DialogTitle>
+            <DialogTitle>Enviar por Correo</DialogTitle>
             <DialogDescription>
-              Se generará una factura en PDF y se enviará automáticamente al cliente mediante Resend.
+              Se generará la factura en PDF y se enviará al correo del cliente.
             </DialogDescription>
             <div className="space-y-2 pt-2">
               <label className="text-sm font-medium">Correo del destinatario:</label>

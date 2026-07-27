@@ -13,15 +13,16 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Loader2, Download, Send } from 'lucide-react';
+import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Loader2, Download, Send, Link as LinkIcon } from 'lucide-react';
 import { ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from './receipt-content';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
-  shareSaleViaWhatsApp, 
-  generateReceiptPdf, 
-  downloadReceiptPdfFile, 
-  sendReceiptViaResendEmail 
+import {
+  shareSaleViaWhatsApp,
+  shareSalePdfLinkViaWhatsApp,
+  generateReceiptPdf,
+  downloadReceiptPdfFile,
+  sendReceiptViaResendEmail
 } from '@/lib/receipt-sharing';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useToast } from '@/hooks/use-toast';
@@ -47,6 +48,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
   // Email states
   const [emailAddress, setEmailAddress] = useState('');
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [sendingLink, setSendingLink] = useState(false);
   
   // Reset screen and prefill email on open
   useEffect(() => {
@@ -63,6 +65,32 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
   if (!sale) return null;
 
   const filename = `factura_${sale.ncf || sale.id.slice(0, 8)}.pdf`;
+
+  // Sube el PDF y abre WhatsApp con el enlace de descarga. WhatsApp no deja
+  // adjuntar archivos desde un enlace, así que esta es la única forma de que el
+  // cajero no tenga que descargar y adjuntar a mano.
+  const handleSharePdfLink = async () => {
+    if (!pdfContentRef.current) return;
+    setSendingLink(true);
+    try {
+      const pdfBase64 = await generateReceiptPdf(pdfContentRef.current, filename);
+      const { diasValidez } = await shareSalePdfLinkViaWhatsApp(sale.id, pdfBase64, sale, profile.name);
+      toast({
+        title: 'Enlace generado',
+        description: `El enlace de descarga estará disponible por ${diasValidez} días.`,
+      });
+      setActiveScreen('receipt');
+    } catch (error: any) {
+      console.error(error);
+      toast({
+        title: 'No se pudo generar el enlace',
+        description: error?.message || 'Intenta de nuevo.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingLink(false);
+    }
+  };
 
   const handleSendEmail = async () => {
     if (!emailAddress.trim() || !emailAddress.includes('@')) {
@@ -95,7 +123,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
       console.error(error);
       toast({
         title: 'Error al enviar correo',
-        description: error?.message || 'Ocurrió un error al procesar el envío con Resend.',
+        description: error?.message || 'No se pudo enviar el correo. Intenta de nuevo.',
         variant: 'destructive',
       });
     } finally {
@@ -184,10 +212,10 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                 <Button variant="ghost" size="icon" onClick={() => setActiveScreen('receipt')} className="h-8 w-8">
                   <ArrowLeft className="h-4 w-4" />
                 </Button>
-                <DialogTitle>Enviar por Correo (Resend)</DialogTitle>
+                <DialogTitle>Enviar por Correo</DialogTitle>
               </div>
               <DialogDescription>
-                Se generará una factura en PDF y se enviará de forma automática al cliente mediante Resend.
+                Se generará la factura en PDF y se enviará al correo del cliente.
               </DialogDescription>
               
               <div className="space-y-2 pt-2">
@@ -260,8 +288,25 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                   </div>
                 </Button>
 
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
+                  className="justify-start h-auto py-3 px-4 border-emerald-200 dark:border-emerald-900"
+                  disabled={sendingLink}
+                  onClick={handleSharePdfLink}
+                >
+                  <div className="text-left">
+                    <p className="font-semibold flex items-center">
+                      <LinkIcon className="mr-2 h-4 w-4" />
+                      {sendingLink ? 'Generando enlace...' : 'Enviar Enlace del PDF'}
+                    </p>
+                    <p className="text-xs text-muted-foreground font-normal mt-0.5">
+                      Manda el mensaje con un enlace de descarga del PDF. No hay que adjuntar nada a mano.
+                    </p>
+                  </div>
+                </Button>
+
+                <Button
+                  variant="outline"
                   className="justify-start h-auto py-3 px-4"
                   onClick={async () => {
                     await handleDownloadPdf();
