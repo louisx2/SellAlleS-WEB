@@ -1,14 +1,13 @@
-// Sube el PDF de un comprobante a Storage y devuelve un enlace de descarga
-// temporal, para compartirlo por WhatsApp.
+// Entrega al navegador lo necesario para compartir el comprobante de una venta
+// por WhatsApp: una URL firmada para SUBIR el PDF y otra para DESCARGARLO.
 //
-// Por qué un enlace y no el archivo: WhatsApp Web no permite adjuntar un
-// archivo desde un enlace `wa.me`, así que hasta ahora el flujo obligaba a
-// descargar el PDF y adjuntarlo a mano. Con un enlace, el mensaje sale de una
-// vez y el cliente descarga cuando quiera.
+// El PDF no pasa por esta funcion. Antes llegaba en base64 dentro del JSON y la
+// peticion fallaba por tamano ("Failed to send a request to the Edge
+// Function"): un comprobante pesa mas de lo que admite ese cuerpo.
 //
-// El bucket es privado y la URL va firmada con vencimiento: una factura lleva
-// nombre del cliente, artículos y NCF, y no debe quedar accesible para siempre
-// a quien reenvíe el enlace.
+// Tampoco se le dan permisos de escritura al cliente sobre el bucket: sube con
+// una URL firmada de un solo uso que se emite aqui, despues de comprobar que la
+// venta es de su empresa. El bucket sigue privado y sin policies.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const cors = {
@@ -24,13 +23,13 @@ function json(status: number, obj: unknown) {
   });
 }
 
-/** Días que vive el enlace. Suficiente para que el cliente lo abra con calma,
- *  corto para que un reenvío no lo deje expuesto indefinidamente. */
+/** Dias que vive el enlace de descarga. Suficiente para que el cliente lo abra
+ *  con calma, corto para que un reenvio no lo deje expuesto indefinidamente. */
 const DIAS_VALIDEZ = 15;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
-  if (req.method !== 'POST') return json(405, { error: 'Método no permitido.' });
+  if (req.method !== 'POST') return json(405, { error: 'Metodo no permitido.' });
 
   try {
     const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '');
@@ -43,7 +42,7 @@ Deno.serve(async (req) => {
     );
 
     const { data: caller, error: callerErr } = await admin.auth.getUser(token);
-    if (callerErr || !caller?.user) return json(401, { error: 'Sesión inválida.' });
+    if (callerErr || !caller?.user) return json(401, { error: 'Sesion invalida.' });
 
     const { data: perfil } = await admin
       .from('profiles')
@@ -54,11 +53,8 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => null);
     const saleId = body?.saleId;
-    const pdfBase64 = body?.pdfBase64;
-    if (!saleId || !pdfBase64) return json(400, { error: 'Se requiere saleId y pdfBase64.' });
+    if (!saleId) return json(400, { error: 'Se requiere saleId.' });
 
-    // Misma comprobación que el envío por correo: nadie genera el enlace de una
-    // venta de otra empresa.
     const { data: sale } = await admin
       .from('sales')
       .select('id, company_id, ncf')
@@ -69,41 +65,37 @@ Deno.serve(async (req) => {
       return json(403, { error: 'No tienes permiso para acceder a esta venta.' });
     }
 
-    // base64 -> bytes. El PDF viene del navegador ya generado.
-    let bytes: Uint8Array;
-    try {
-      const binario = atob(pdfBase64);
-      bytes = new Uint8Array(binario.length);
-      for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
-    } catch {
-      return json(400, { error: 'El PDF no es base64 válido.' });
-    }
-
-    // Ruta por empresa: mantiene los archivos separados y hace evidente a quién
-    // pertenece cada uno si algún día hay que limpiar.
+    // Ruta por empresa: los archivos quedan separados y es evidente de quien es
+    // cada uno si algun dia hay que limpiar.
     const ruta = `${sale.company_id}/${sale.id}.pdf`;
 
-    const { error: upErr } = await admin.storage
+    const { data: subida, error: upErr } = await admin.storage
       .from('comprobantes')
-      .upload(ruta, bytes, { contentType: 'application/pdf', upsert: true });
-    if (upErr) {
-      console.error('Fallo subiendo el comprobante:', upErr.message);
-      return json(502, { error: `No se pudo guardar el PDF: ${upErr.message}` });
+      .createSignedUploadUrl(ruta, { upsert: true });
+    if (upErr || !subida) {
+      console.error('Fallo creando la URL de subida:', upErr?.message);
+      return json(502, { error: `No se pudo preparar la subida: ${upErr?.message ?? 'desconocido'}` });
     }
 
+    // Firmar la descarga antes de que el archivo exista es valido: la URL
+    // simplemente no resuelve hasta que se sube, y para entonces ya se subio.
     const { data: firmada, error: signErr } = await admin.storage
       .from('comprobantes')
       .createSignedUrl(ruta, DIAS_VALIDEZ * 24 * 60 * 60, {
-        // Que el navegador lo descargue con nombre legible en vez de abrir un
-        // visor con el uuid de la venta como título.
         download: `comprobante${sale.ncf ? `-${sale.ncf}` : ''}.pdf`,
       });
     if (signErr || !firmada?.signedUrl) {
-      console.error('Fallo firmando la URL:', signErr?.message);
-      return json(502, { error: 'No se pudo generar el enlace.' });
+      console.error('Fallo firmando la descarga:', signErr?.message);
+      return json(502, { error: `No se pudo generar el enlace: ${signErr?.message ?? 'desconocido'}` });
     }
 
-    return json(200, { ok: true, url: firmada.signedUrl, diasValidez: DIAS_VALIDEZ });
+    return json(200, {
+      ok: true,
+      ruta,
+      uploadToken: subida.token,
+      url: firmada.signedUrl,
+      diasValidez: DIAS_VALIDEZ,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('receipt-link:', msg);
