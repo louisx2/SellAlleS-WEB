@@ -89,7 +89,7 @@ Deno.serve(async (req) => {
     // Fetch sale info to verify permission
     const { data: sale, error: saleErr } = await admin
       .from('sales')
-      .select('id, company_id, total, ncf')
+      .select('id, company_id, branch_id, total, ncf, created_at')
       .eq('id', saleId)
       .single();
 
@@ -108,18 +108,44 @@ Deno.serve(async (req) => {
       .eq('id', sale.company_id)
       .single();
 
+    // Ajustes propios de la sucursal: cada una decide como se ve el correo que
+    // manda a SUS clientes (igual que ya pasa con el pie del ticket).
+    const { data: branch } = sale.branch_id
+      ? await admin
+          .from('branches')
+          .select('name, display_name, receipt_email_show_amount, receipt_email_show_branch, receipt_email_message')
+          .eq('id', sale.branch_id)
+          .maybeSingle()
+      : { data: null };
+
     const companyName = company?.name ?? 'SellAlleS';
+    const branchName = branch?.display_name || branch?.name || null;
+    const mostrarMonto = branch?.receipt_email_show_amount ?? true;
+    const mostrarSucursal = (branch?.receipt_email_show_branch ?? true) && !!branchName;
+
+    const fechaVenta = new Date(sale.created_at).toLocaleDateString('es-DO', {
+      day: '2-digit', month: 'long', year: 'numeric',
+    });
+
+    // Donde se emitio: el nombre de la sucursal si esta activado, y si no el de
+    // la empresa. Nunca queda un "en ." suelto.
+    const lugar = mostrarSucursal ? `${companyName} — ${branchName}` : companyName;
+    const textoPorDefecto =
+      `Le hacemos entrega del comprobante electrónico correspondiente a su compra en <strong>${lugar}</strong>, en fecha ${fechaVenta}.`;
+    const mensaje = (branch?.receipt_email_message ?? '').trim() || textoPorDefecto;
     const emailSubject = `Comprobante de Compra${sale.ncf ? ` NCF ${sale.ncf}` : ''} - ${companyName}`;
     const emailHtml = `
       <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 5px;">
         <h2 style="color: #4F46E5; border-bottom: 2px solid #F3F4F6; padding-bottom: 10px;">Comprobante de Compra</h2>
         <p>Estimado(a) cliente,</p>
-        <p>Le hacemos entrega del comprobante electrónico correspondiente a su compra en <strong>${companyName}</strong>.</p>
+        <p>${mensaje}</p>
         <p>En el archivo adjunto de este correo encontrará su factura en formato PDF.</p>
         <div style="background-color: #F9FAFB; padding: 15px; border-radius: 5px; margin: 20px 0;">
           <table style="width: 100%; border-collapse: collapse;">
+            ${mostrarSucursal ? `<tr><td style="padding: 5px 0; font-weight: bold;">Sucursal:</td><td style="padding: 5px 0;">${branchName}</td></tr>` : ''}
+            <tr><td style="padding: 5px 0; font-weight: bold;">Fecha:</td><td style="padding: 5px 0;">${fechaVenta}</td></tr>
             ${sale.ncf ? `<tr><td style="padding: 5px 0; font-weight: bold;">NCF:</td><td style="padding: 5px 0;">${sale.ncf}</td></tr>` : ''}
-            <tr><td style="padding: 5px 0; font-weight: bold;">Total facturado:</td><td style="padding: 5px 0; color: #10B981; font-weight: bold;">RD$ ${Number(sale.total).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>
+            ${mostrarMonto ? `<tr><td style="padding: 5px 0; font-weight: bold;">Total facturado:</td><td style="padding: 5px 0; color: #10B981; font-weight: bold;">RD$ ${Number(sale.total).toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>` : ''}
           </table>
         </div>
         <p style="font-size: 12px; color: #9CA3AF; text-align: center; margin-top: 30px;">

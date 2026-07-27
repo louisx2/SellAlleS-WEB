@@ -107,10 +107,13 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto):
     case 'bienvenida':
       return {
         subject: `Bienvenido a SellAlleS, ${String(vars.companyName ?? '')}`.trim(),
+        // Genérico a propósito: no todas las empresas tienen activados los
+        // mismos módulos, así que prometer "facturar y cuadrar caja" podía
+        // nombrar cosas que ese cliente no verá al entrar.
         text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nTu cuenta de ${vars.companyName ?? 'tu empresa'} ya está lista en SellAlleS.\n\n${vars.trialEndsAt ? `Tu prueba gratis va hasta el ${fmtFecha(vars.trialEndsAt)}.\n\n` : ''}Cualquier duda, escríbenos.\n\nEquipo SellAlleS`,
         html: envolver('Tu cuenta ya está lista', `
           <p>Hola${nombre},</p>
-          <p>La cuenta de <strong>${empresa}</strong> quedó activa en SellAlleS. Ya puedes registrar productos, facturar y cuadrar caja.</p>
+          <p>La cuenta de <strong>${empresa}</strong> quedó activa en SellAlleS y ya puedes empezar a usarla.</p>
           ${vars.trialEndsAt ? `<p>Tu prueba gratis va hasta el <strong>${esc(fmtFecha(vars.trialEndsAt))}</strong>.</p>` : ''}
           <p>Si necesitas ayuda para arrancar, estamos aquí:</p>`, c),
       };
