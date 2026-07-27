@@ -47,7 +47,14 @@ const emptyForm = {
   customBusinessType: '',
   maxUsers: 2,
   customMonthlyPrice: '',
+  // Fechas que gobiernan el bloqueo de la app: si la prueba vence o la
+  // suscripción caduca, la empresa pasa a solo-lectura. Vacías = nunca vence.
+  trialEndsAt: '',
+  paidUntil: '',
 };
+
+/** timestamptz/date de la base -> yyyy-mm-dd para un <input type="date">. */
+const aInputFecha = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
 
 export default function CompaniesManagementPage() {
   const { appUser, setImpersonatedCompany, setActiveBranch } = useAuth();
@@ -170,6 +177,8 @@ export default function CompaniesManagementPage() {
       customBusinessType: isPreset ? '' : (c.business_type ?? ''),
       maxUsers: c.max_users ?? 2,
       customMonthlyPrice: subs[c.id]?.custom_monthly_price != null ? String(subs[c.id].custom_monthly_price) : '',
+      trialEndsAt: aInputFecha(c.trial_ends_at),
+      paidUntil: aInputFecha(c.paid_until),
     });
     setExtraUsers([]);
     // Cargar la config de compartir entre sucursales de esta empresa.
@@ -320,6 +329,10 @@ export default function CompaniesManagementPage() {
         is_demo: form.isDemo,
         business_type: form.businessType === 'otro' ? form.customBusinessType.trim() : form.businessType,
         max_users: form.maxUsers,
+        // Se guarda el final del día elegido: "vence el 27" debe significar que
+        // el 27 todavía puede trabajar, no que amanece bloqueado.
+        trial_ends_at: form.trialEndsAt ? new Date(`${form.trialEndsAt}T23:59:59`).toISOString() : null,
+        paid_until: form.paidUntil || null,
       };
 
       let companyId = editingId;
@@ -811,6 +824,41 @@ export default function CompaniesManagementPage() {
                   value={form.maxUsers}
                   onChange={(e) => setForm({ ...form, maxUsers: parseInt(e.target.value) || 1 })}
                 />
+              </div>
+
+              {/* Estas dos fechas son las que deciden si la empresa entra en
+                  solo-lectura, y de las que salen los avisos automáticos. */}
+              <div className="grid gap-4 sm:grid-cols-2 rounded-lg border p-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="trialEndsAt">Prueba hasta</Label>
+                  <Input
+                    id="trialEndsAt"
+                    type="date"
+                    value={form.trialEndsAt}
+                    onChange={(e) => setForm({ ...form, trialEndsAt: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Solo aplica mientras el estado sea <strong>Prueba</strong>. Al crear se llena sola
+                    con los días configurados en Configuración de la Plataforma.
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="paidUntil">Pagado hasta</Label>
+                  <Input
+                    id="paidUntil"
+                    type="date"
+                    value={form.paidUntil}
+                    onChange={(e) => setForm({ ...form, paidUntil: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Se actualiza sola al registrar un pago. Edítala solo para corregir o para
+                    poner al día una empresa que venía sin fecha.
+                  </p>
+                </div>
+                <p className="sm:col-span-2 text-xs text-muted-foreground">
+                  Vacías = no vence nunca. Cuando la fecha pasa, la empresa puede seguir
+                  consultando sus datos pero no registrar ni modificar.
+                </p>
               </div>
 
               <div className="flex items-center justify-between rounded-lg border p-3 bg-amber-500/5 border-amber-500/20">

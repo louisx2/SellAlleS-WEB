@@ -11,8 +11,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Mail, Shield } from 'lucide-react';
-import { waLink, supportMailto, type SupportContact } from '@/lib/support-contact';
+import { MessageCircle, Mail, Shield, CalendarClock } from 'lucide-react';
+import {
+  waLink, supportMailto, parseDiasLista, formatDiasLista,
+  DEFAULT_TRIAL_SETTINGS, type SupportContact, type TrialSettings,
+} from '@/lib/support-contact';
 
 // Formatos que también valida la base (constraints de platform_settings): si se
 // relaja uno hay que relajar el otro, o el guardado falla con un error de
@@ -27,6 +30,30 @@ export default function PlatformSettingsPage() {
 
   const [form, setForm] = useState<SupportContact>(support);
   const [saving, setSaving] = useState(false);
+
+  // La config de prueba no la necesita el resto de la app, así que se lee y
+  // guarda aquí en vez de cargarla en el provider global.
+  const [trial, setTrial] = useState<TrialSettings>(DEFAULT_TRIAL_SETTINGS);
+  const [avisosPruebaTexto, setAvisosPruebaTexto] = useState(formatDiasLista(DEFAULT_TRIAL_SETTINGS.trialReminderDays));
+  const [avisosCobroTexto, setAvisosCobroTexto] = useState(formatDiasLista(DEFAULT_TRIAL_SETTINGS.paymentReminderDays));
+
+  useEffect(() => {
+    supabase
+      .from('platform_settings')
+      .select('trial_days, trial_reminder_days, payment_reminder_days')
+      .maybeSingle()
+      .then(({ data }) => {
+        if (!data) return;
+        const t: TrialSettings = {
+          trialDays: data.trial_days ?? DEFAULT_TRIAL_SETTINGS.trialDays,
+          trialReminderDays: data.trial_reminder_days ?? DEFAULT_TRIAL_SETTINGS.trialReminderDays,
+          paymentReminderDays: data.payment_reminder_days ?? DEFAULT_TRIAL_SETTINGS.paymentReminderDays,
+        };
+        setTrial(t);
+        setAvisosPruebaTexto(formatDiasLista(t.trialReminderDays));
+        setAvisosCobroTexto(formatDiasLista(t.paymentReminderDays));
+      });
+  }, []);
 
   // El provider carga de forma asíncrona: cuando llegan los valores reales se
   // vuelcan al formulario (salvo que el usuario ya esté escribiendo).
@@ -67,6 +94,23 @@ export default function PlatformSettingsPage() {
       return;
     }
 
+    // Listas vacías apagarían los avisos en silencio; la base también lo
+    // rechaza, pero es mejor decirlo aquí con un mensaje entendible.
+    const avisosPrueba = parseDiasLista(avisosPruebaTexto);
+    const avisosCobro = parseDiasLista(avisosCobroTexto);
+    if (avisosPrueba.length === 0 || avisosCobro.length === 0) {
+      toast({
+        variant: 'destructive',
+        title: 'Faltan los días de aviso',
+        description: 'Escribe al menos un número en cada lista, separados por comas. Ej: 7, 3, 1.',
+      });
+      return;
+    }
+    if (!Number.isInteger(trial.trialDays) || trial.trialDays < 1 || trial.trialDays > 365) {
+      toast({ variant: 'destructive', title: 'Días de prueba inválidos', description: 'Debe ser entre 1 y 365.' });
+      return;
+    }
+
     setSaving(true);
     const { error } = await supabase
       .from('platform_settings')
@@ -77,6 +121,9 @@ export default function PlatformSettingsPage() {
         support_email_enabled: form.emailEnabled,
         support_email: email || null,
         support_hours: (form.hours ?? '').trim() || null,
+        trial_days: trial.trialDays,
+        trial_reminder_days: avisosPrueba,
+        payment_reminder_days: avisosCobro,
       })
       .eq('id', true);
     setSaving(false);
@@ -202,6 +249,67 @@ export default function PlatformSettingsPage() {
                 Enlace resultante: <span className="font-mono">{previewMail}</span>
               </p>
             )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <CalendarClock className="h-5 w-5 text-amber-600" />
+              Prueba gratis y avisos
+            </CardTitle>
+            <CardDescription>
+              Cuánto dura la prueba de una empresa nueva y con cuánta anticipación se avisa.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="trial-days">Días de prueba</Label>
+              <Input
+                id="trial-days"
+                type="number"
+                min={1}
+                max={365}
+                className="max-w-[140px]"
+                value={trial.trialDays}
+                onChange={(e) => { setDirty(true); setTrial({ ...trial, trialDays: parseInt(e.target.value) || 0 }); }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Se aplica a las empresas nuevas, tanto las que se registran por la landing como las
+                que creas desde el panel. No cambia las que ya existen.
+              </p>
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="avisos-prueba">Avisar la prueba, días antes</Label>
+                <Input
+                  id="avisos-prueba"
+                  placeholder="7, 3, 1"
+                  value={avisosPruebaTexto}
+                  onChange={(e) => { setDirty(true); setAvisosPruebaTexto(e.target.value); }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Con pruebas largas, avisar solo al final llega tarde: el aviso de la mitad alcanza
+                  al usuario cuando ya cargó sus datos.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="avisos-cobro">Avisar el cobro, días antes</Label>
+                <Input
+                  id="avisos-cobro"
+                  placeholder="3"
+                  value={avisosCobroTexto}
+                  onChange={(e) => { setDirty(true); setAvisosCobroTexto(e.target.value); }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Cuenta desde la fecha de <strong>Pagado hasta</strong> de cada empresa.
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Números separados por comas. Se guardan de mayor a menor y sin repetidos.
+            </p>
           </CardContent>
         </Card>
 

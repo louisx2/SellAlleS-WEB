@@ -14,6 +14,35 @@ export interface SupportContact {
   hours: string | null;
 }
 
+/** Duración de la prueba y tramos de aviso. Los usa el backend (registro y
+ *  barrido diario); aquí viajan solo para poder editarlos desde el panel. */
+export interface TrialSettings {
+  /** Días de prueba de una empresa nueva. */
+  trialDays: number;
+  /** Días ANTES del fin de prueba en que se avisa. Ej: [7,3,1]. */
+  trialReminderDays: number[];
+  /** Días antes de `paid_until` en que se recuerda el cobro. Ej: [3]. */
+  paymentReminderDays: number[];
+}
+
+export const DEFAULT_TRIAL_SETTINGS: TrialSettings = {
+  trialDays: 28,
+  trialReminderDays: [7, 3, 1],
+  paymentReminderDays: [3],
+};
+
+/** "7, 3, 1" -> [7,3,1]. Descarta lo que no sea un entero positivo y ordena de
+ *  mayor a menor, que es el orden en que ocurren los avisos. */
+export function parseDiasLista(texto: string): number[] {
+  const nums = texto
+    .split(/[,\s]+/)
+    .map((s) => Number.parseInt(s, 10))
+    .filter((n) => Number.isInteger(n) && n > 0 && n <= 365);
+  return Array.from(new Set(nums)).sort((a, b) => b - a);
+}
+
+export const formatDiasLista = (dias: number[]) => dias.join(', ');
+
 /** Valores de arranque: los mismos que estaban en el código antes de esta
  *  tabla. Se usan mientras carga la consulta y si la consulta falla. */
 export const DEFAULT_SUPPORT_CONTACT: SupportContact = {
