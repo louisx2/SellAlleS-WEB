@@ -43,7 +43,8 @@ type Template =
   | 'prueba-por-vencer'
   | 'prueba-vencida'
   | 'cuenta-activada'
-  | 'recibo-suscripcion';
+  | 'recibo-suscripcion'
+  | 'cobro-por-vencer';
 
 interface Contacto {
   whatsappEnabled: boolean;
@@ -147,6 +148,20 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto):
           <p>Gracias por confiar en SellAlleS.</p>`, c),
       };
 
+    case 'cobro-por-vencer': {
+      const dias = Number(vars.daysLeft ?? 0);
+      const cuando = dias === 1 ? 'mañana' : `en ${dias} días`;
+      return {
+        subject: `Tu suscripción de SellAlleS vence ${cuando}`,
+        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nLa suscripción de ${vars.companyName ?? 'tu empresa'} vence ${cuando} (${fmtFecha(vars.paidUntil)}).\n\nPara renovarla, escríbenos y coordinamos la transferencia.\n\nEquipo SellAlleS`,
+        html: envolver(`Tu suscripción vence ${cuando}`, `
+          <p>Hola${nombre},</p>
+          <p>La suscripción de <strong>${empresa}</strong> vence <strong>${esc(cuando)}</strong>${vars.paidUntil ? ` (${esc(fmtFecha(vars.paidUntil))})` : ''}.</p>
+          <p>Si vence sin renovar, vas a <strong>seguir viendo tus datos</strong>, pero no podrás registrar ventas ni modificar información hasta ponerte al día. Nada se borra.</p>
+          <p>Escríbenos y coordinamos la transferencia:</p>`, c),
+      };
+    }
+
     case 'recibo-suscripcion':
       return {
         subject: `Recibo de pago — SellAlleS${vars.paidUntil ? ` (hasta ${fmtFecha(vars.paidUntil)})` : ''}`,
@@ -201,7 +216,8 @@ Deno.serve(async (req) => {
     const dedupeKey = String(body?.dedupeKey ?? '').trim();
 
     const validas: Template[] = [
-      'bienvenida', 'prueba-por-vencer', 'prueba-vencida', 'cuenta-activada', 'recibo-suscripcion',
+      'bienvenida', 'prueba-por-vencer', 'prueba-vencida', 'cuenta-activada',
+      'recibo-suscripcion', 'cobro-por-vencer',
     ];
     if (!template || !validas.includes(template)) return json(400, { error: 'Plantilla no reconocida.' });
     if (!to || !to.includes('@')) return json(400, { error: 'Destinatario inválido.' });
