@@ -74,6 +74,26 @@ export function shareSaleViaWhatsApp(sale: Sale, companyName?: string) {
   window.open(url, '_blank');
 }
 
+/** Tamaño real del recibo en milímetros, tomado de lo que se ve en pantalla.
+ *
+ *  Los formatos varían por empresa (ticket de 58 mm, de 80 mm, o una factura
+ *  ancha), así que en vez de asumir uno se mide el elemento y se convierte a mm
+ *  con los 96 dpi que usa CSS. Así el PDF sale a la medida sin que nadie tenga
+ *  que configurar nada, y si mañana aparece otro formato, funciona igual. */
+function medidasDelRecibo(element: HTMLElement, canvas: HTMLCanvasElement) {
+  const PX_A_MM = 25.4 / 96;
+  const anchoPx = element.offsetWidth || canvas.width;
+  // Si por lo que sea el ancho medido es absurdo, se cae a 80 mm (el estándar
+  // de las térmicas) antes que generar un PDF de tamaño inválido.
+  const anchoMm = anchoPx > 0 ? anchoPx * PX_A_MM : 80;
+  const anchoFinal = Math.min(Math.max(anchoMm, 40), 300);
+  return {
+    anchoMm: anchoFinal,
+    // El alto respeta la proporción del render: sin deformar y sin recortar.
+    altoMm: (canvas.height * anchoFinal) / canvas.width,
+  };
+}
+
 export async function generateReceiptPdf(element: HTMLElement, filename: string): Promise<string> {
   const jsPDF = (await import('jspdf')).default;
   const html2canvas = (await import('html2canvas')).default;
@@ -84,30 +104,19 @@ export async function generateReceiptPdf(element: HTMLElement, filename: string)
   });
   
   const imgData = canvas.toDataURL('image/jpeg', 0.8);
-  
-  // Create a 80mm wide receipt style PDF, or standard A4. Since users like printable PDF receipts, 
-  // we will use standard A4 format for professional look when printing/emailing.
+  const { anchoMm, altoMm } = medidasDelRecibo(element, canvas);
+
+  // Página a la medida exacta del recibo, en vez de A4. Forzar 210 mm estiraba
+  // un ticket de 80 mm hasta casi el triple: se veía ampliado y borroso, y
+  // partido en varias páginas. Con el formato derivado del propio elemento
+  // funciona igual para 58 mm, 80 mm o una factura ancha, sin ajustes.
   const pdf = new jsPDF({
-    orientation: 'portrait',
+    orientation: altoMm >= anchoMm ? 'portrait' : 'landscape',
     unit: 'mm',
-    format: 'a4',
+    format: [anchoMm, altoMm],
   });
 
-  const imgWidth = 210;
-  const pageHeight = 297;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
-  let heightLeft = imgHeight;
-  let position = 0;
-
-  pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-  heightLeft -= pageHeight;
-
-  while (heightLeft >= 0) {
-    position = heightLeft - imgHeight;
-    pdf.addPage();
-    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-  }
+  pdf.addImage(imgData, 'JPEG', 0, 0, anchoMm, altoMm);
 
   return pdf.output('datauristring').split(',')[1];
 }

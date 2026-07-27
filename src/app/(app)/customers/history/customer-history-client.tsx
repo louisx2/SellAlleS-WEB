@@ -21,13 +21,14 @@ import {
 } from '@/components/ui/dialog';
 import { ArrowLeft, KeyRound } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { PasswordInput } from '@/components/ui/password-input';
 
 const PAYMENT_METHOD_LABEL: Record<string, string> = {
-  cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'Crédito', financing: 'Financiamiento',
+  cash: 'Efectivo', card: 'Tarjeta', transfer: 'Transferencia', credit: 'CrÃƒÂ©dito', financing: 'Financiamiento',
 };
 
 const PAYMENT_STATUS_LABEL: Record<string, string> = {
-  paid: 'Pagada', credit: 'A crédito', in_financing: 'En financiamiento',
+  paid: 'Pagada', credit: 'A crÃƒÂ©dito', in_financing: 'En financiamiento',
 };
 
 const SERVICE_STATUS_LABEL: Record<string, string> = {
@@ -97,7 +98,7 @@ export default function CustomerHistoryClient() {
 
   const handleResetPin = async () => {
     if (!/^\d{6,}$/.test(newPin)) {
-      toast({ title: 'PIN inválido', description: 'Debe tener al menos 6 dígitos.', variant: 'destructive' });
+      toast({ title: 'PIN invÃƒÂ¡lido', description: 'Debe tener al menos 6 dÃƒÂ­gitos.', variant: 'destructive' });
       return;
     }
     setWorking(true);
@@ -107,7 +108,7 @@ export default function CustomerHistoryClient() {
       });
       if (error) throw new Error((data as any)?.error ?? error.message);
       if ((data as any)?.error) throw new Error((data as any).error);
-      toast({ title: 'PIN actualizado', description: `Se fijó un nuevo PIN para ${customer?.name}.` });
+      toast({ title: 'PIN actualizado', description: `Se fijÃƒÂ³ un nuevo PIN para ${customer?.name}.` });
       setPortalStatus((prev) => (prev ? { ...prev, hasPortalAccess: true } : prev));
       setResetOpen(false);
       setNewPin('');
@@ -151,13 +152,13 @@ export default function CustomerHistoryClient() {
           <CardTitle>{customer.name}</CardTitle>
           <CardDescription>
             {customer.phone && <>Tel: {customer.phone}</>}
-            {customer.rnc && <> · RNC: {customer.rnc}</>}
+            {customer.rnc && <> Ã‚Â· RNC: {customer.rnc}</>}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
             <div className="rounded-lg border p-3">
-              <p className="text-muted-foreground">Descuento automático</p>
+              <p className="text-muted-foreground">Descuento automÃƒÂ¡tico</p>
               <p className="text-xl font-bold">{customer.discountPercentage > 0 ? `${customer.discountPercentage}%` : 'Sin descuento'}</p>
             </div>
             <div className="rounded-lg border p-3">
@@ -177,21 +178,21 @@ export default function CustomerHistoryClient() {
           <CardHeader>
             <CardTitle>Portal de Clientes ("Mi Estado de Cuenta")</CardTitle>
             <CardDescription>
-              Consulta de préstamos/crédito en línea con cédula y PIN.
+              Consulta de prÃƒÂ©stamos/crÃƒÂ©dito en lÃƒÂ­nea con cÃƒÂ©dula y PIN.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-wrap items-center justify-between gap-3">
             {!portalStatus ? (
-              <p className="text-sm text-muted-foreground">Cargando…</p>
+              <p className="text-sm text-muted-foreground">CargandoÃ¢â‚¬Â¦</p>
             ) : !portalStatus.cedulaValid ? (
               <p className="text-sm text-muted-foreground">
-                Este cliente no tiene una cédula válida (11 dígitos) en el campo "RNC/Cédula" —
-                no puede usar el portal todavía.
+                Este cliente no tiene una cÃƒÂ©dula vÃƒÂ¡lida (11 dÃƒÂ­gitos) en el campo "RNC/CÃƒÂ©dula" Ã¢â‚¬â€
+                no puede usar el portal todavÃƒÂ­a.
               </p>
             ) : (
               <>
                 <Badge variant={portalStatus.hasPortalAccess ? 'outline' : 'secondary'}>
-                  {portalStatus.hasPortalAccess ? 'PIN activado' : 'Aún no ha creado su PIN'}
+                  {portalStatus.hasPortalAccess ? 'PIN activado' : 'AÃƒÂºn no ha creado su PIN'}
                 </Badge>
                 <Button variant="outline" size="sm" onClick={() => setResetOpen(true)}>
                   <KeyRound className="mr-2 h-4 w-4" />
@@ -211,13 +212,13 @@ export default function CustomerHistoryClient() {
           <CardContent>
             {coupons.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-6">
-                Este cliente aún no tiene cupones.
+                Este cliente aÃƒÂºn no tiene cupones.
               </p>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Código</TableHead>
+                    <TableHead>CÃƒÂ³digo</TableHead>
                     <TableHead>Premio</TableHead>
                     <TableHead>Emitido</TableHead>
                     <TableHead>Vence</TableHead>
@@ -259,7 +260,7 @@ export default function CustomerHistoryClient() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Fecha</TableHead>
-                  <TableHead>Método</TableHead>
+                  <TableHead>MÃƒÂ©todo</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead>Estado</TableHead>
                 </TableRow>
@@ -302,7 +303,7 @@ export default function CustomerHistoryClient() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Fecha</TableHead>
-                    <TableHead>Descripción</TableHead>
+                    <TableHead>DescripciÃƒÂ³n</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead>Estado</TableHead>
                   </TableRow>
@@ -332,24 +333,22 @@ export default function CustomerHistoryClient() {
           <DialogHeader>
             <DialogTitle>Restablecer PIN</DialogTitle>
             <DialogDescription>
-              Escribe el nuevo PIN para {customer.name}. Podrá entrar a "Mi Estado de Cuenta" con él de inmediato.
+              Escribe el nuevo PIN para {customer.name}. PodrÃƒÂ¡ entrar a "Mi Estado de Cuenta" con ÃƒÂ©l de inmediato.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2 py-2">
             <Label htmlFor="newPin">Nuevo PIN</Label>
-            <Input
-              id="newPin"
-              type="password"
-              inputMode="numeric"
+            <PasswordInput
+              id="newPin" inputMode="numeric"
               value={newPin}
               onChange={(e) => setNewPin(e.target.value)}
-              placeholder="Mínimo 6 dígitos"
+              placeholder="MÃƒÂ­nimo 6 dÃƒÂ­gitos"
               autoComplete="off"
             />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setResetOpen(false)} disabled={working}>Cancelar</Button>
-            <Button onClick={handleResetPin} disabled={working}>{working ? 'Guardando…' : 'Guardar'}</Button>
+            <Button onClick={handleResetPin} disabled={working}>{working ? 'GuardandoÃ¢â‚¬Â¦' : 'Guardar'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

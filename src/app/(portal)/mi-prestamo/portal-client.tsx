@@ -13,6 +13,7 @@ import { formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { calculateFinancingStatus } from '@/lib/utils';
 import type { Loan, Sale } from '@/lib/types';
+import { PasswordInput } from '@/components/ui/password-input';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
@@ -28,7 +29,7 @@ async function callFunction<T>(name: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   const data = await resp.json();
-  if (!resp.ok) throw new Error(data?.error ?? 'Ocurrió un error inesperado.');
+  if (!resp.ok) throw new Error(data?.error ?? 'OcurriÃƒÂ³ un error inesperado.');
   return data as T;
 }
 
@@ -102,13 +103,13 @@ function LoanCard({ loan, lateFeeRate }: { loan: Loan; lateFeeRate: number }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-          Préstamo
+          PrÃƒÂ©stamo
           {status.pendingBalance <= 0 ? (
             <Badge className="bg-green-600">Pagado</Badge>
           ) : status.isOverdue ? (
             <Badge variant="destructive">Atrasado</Badge>
           ) : (
-            <Badge variant="outline">Al día</Badge>
+            <Badge variant="outline">Al dÃƒÂ­a</Badge>
           )}
         </CardTitle>
         <CardDescription>
@@ -140,8 +141,8 @@ function LoanCard({ loan, lateFeeRate }: { loan: Loan; lateFeeRate: number }) {
             </div>
           )}
           <div>
-            <p className="text-muted-foreground">Próximo vencimiento</p>
-            <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
+            <p className="text-muted-foreground">PrÃƒÂ³ximo vencimiento</p>
+            <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : 'Ã¢â‚¬â€'}</p>
           </div>
         </div>
         <InstallmentsTable installments={loan.installments} />
@@ -157,13 +158,13 @@ function CreditSaleCard({ sale, lateFeeRate }: { sale: Sale; lateFeeRate: number
     <Card>
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-          {isFinancing ? 'Compra financiada' : 'Compra a crédito'}
+          {isFinancing ? 'Compra financiada' : 'Compra a crÃƒÂ©dito'}
           {status.pendingBalance <= 0 ? (
             <Badge className="bg-green-600">Pagado</Badge>
           ) : status.isOverdue ? (
             <Badge variant="destructive">Atrasado</Badge>
           ) : (
-            <Badge variant="outline">Al día</Badge>
+            <Badge variant="outline">Al dÃƒÂ­a</Badge>
           )}
         </CardTitle>
         <CardDescription>
@@ -191,8 +192,8 @@ function CreditSaleCard({ sale, lateFeeRate }: { sale: Sale; lateFeeRate: number
             </div>
           )}
           <div>
-            <p className="text-muted-foreground">Próximo vencimiento</p>
-            <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
+            <p className="text-muted-foreground">PrÃƒÂ³ximo vencimiento</p>
+            <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : 'Ã¢â‚¬â€'}</p>
           </div>
         </div>
         <InstallmentsTable installments={sale.installments} />
@@ -211,7 +212,7 @@ function BusinessDashboard({ business }: { business: PortalBusiness }) {
       </div>
       {!hasDebt ? (
         <p className="text-sm text-muted-foreground py-6 text-center">
-          No tienes préstamos ni compras a crédito registradas con este negocio.
+          No tienes prÃƒÂ©stamos ni compras a crÃƒÂ©dito registradas con este negocio.
         </p>
       ) : (
         <>
@@ -268,7 +269,7 @@ export default function PortalClient() {
   const handleCedulaSubmit = async () => {
     const digits = onlyDigits(cedula);
     if (digits.length !== 11) {
-      setError('La cédula debe tener 11 dígitos.');
+      setError('La cÃƒÂ©dula debe tener 11 dÃƒÂ­gitos.');
       return;
     }
     setError(null);
@@ -301,8 +302,8 @@ export default function PortalClient() {
   };
 
   const handleSetupSubmit = async () => {
-    if (!phone.trim()) { setError('Ingresa el teléfono registrado con el negocio.'); return; }
-    if (!/^\d{6,}$/.test(newPin)) { setError('El PIN debe tener al menos 6 dígitos.'); return; }
+    if (!phone.trim()) { setError('Ingresa el telÃƒÂ©fono registrado con el negocio.'); return; }
+    if (!/^\d{6,}$/.test(newPin)) { setError('El PIN debe tener al menos 6 dÃƒÂ­gitos.'); return; }
     if (newPin !== confirmPin) { setError('Los PIN no coinciden.'); return; }
     setError(null);
     setLoading(true);
@@ -346,7 +347,7 @@ export default function PortalClient() {
 
   const handleChangePin = async () => {
     if (!oldPinInput) { setChangePinError('Ingresa tu PIN actual.'); return; }
-    if (!/^\d{6,}$/.test(newPinInput)) { setChangePinError('El PIN nuevo debe tener al menos 6 dígitos.'); return; }
+    if (!/^\d{6,}$/.test(newPinInput)) { setChangePinError('El PIN nuevo debe tener al menos 6 dÃƒÂ­gitos.'); return; }
     if (newPinInput !== confirmNewPinInput) { setChangePinError('Los PIN nuevos no coinciden.'); return; }
     setChangePinError(null);
     setChangePinLoading(true);
@@ -365,7 +366,7 @@ export default function PortalClient() {
 
   const handleForgotSubmit = async () => {
     const digits = onlyDigits(cedula);
-    if (digits.length !== 11) { setForgotError('La cédula debe tener 11 dígitos.'); return; }
+    if (digits.length !== 11) { setForgotError('La cÃƒÂ©dula debe tener 11 dÃƒÂ­gitos.'); return; }
     setForgotError(null);
     setForgotLoading(true);
     try {
@@ -379,7 +380,7 @@ export default function PortalClient() {
   };
 
   const handleResetViaToken = async () => {
-    if (!/^\d{6,}$/.test(resetNewPin)) { setResetError('El PIN debe tener al menos 6 dígitos.'); return; }
+    if (!/^\d{6,}$/.test(resetNewPin)) { setResetError('El PIN debe tener al menos 6 dÃƒÂ­gitos.'); return; }
     if (resetNewPin !== resetConfirmPin) { setResetError('Los PIN no coinciden.'); return; }
     setResetError(null);
     setResetLoading(true);
@@ -404,11 +405,11 @@ export default function PortalClient() {
           <Card>
             <CardHeader>
               <CardTitle>Consulta tu estado de cuenta</CardTitle>
-              <CardDescription>Ingresa tu cédula para continuar.</CardDescription>
+              <CardDescription>Ingresa tu cÃƒÂ©dula para continuar.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-1">
-                <Label htmlFor="cedula">Cédula</Label>
+                <Label htmlFor="cedula">CÃƒÂ©dula</Label>
                 <Input
                   id="cedula"
                   inputMode="numeric"
@@ -431,15 +432,13 @@ export default function PortalClient() {
           <Card>
             <CardHeader>
               <CardTitle>Ingresa tu PIN</CardTitle>
-              <CardDescription>Cédula: {cedula}</CardDescription>
+              <CardDescription>CÃƒÂ©dula: {cedula}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-1">
                 <Label htmlFor="pin">PIN</Label>
-                <Input
-                  id="pin"
-                  type="password"
-                  inputMode="numeric"
+                <PasswordInput
+                  id="pin" inputMode="numeric"
                   value={pin}
                   onChange={(e) => setPin(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleLoginSubmit()}
@@ -452,14 +451,14 @@ export default function PortalClient() {
               </Button>
               <Button variant="ghost" className="w-full" onClick={handleReset}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Cambiar cédula
+                Cambiar cÃƒÂ©dula
               </Button>
               <button
                 type="button"
                 onClick={() => { setForgotSent(false); setForgotError(null); setStep('forgot'); }}
                 className="w-full text-center text-sm text-muted-foreground underline underline-offset-2"
               >
-                ¿Olvidaste tu PIN?
+                Ã‚Â¿Olvidaste tu PIN?
               </button>
             </CardContent>
           </Card>
@@ -476,15 +475,15 @@ export default function PortalClient() {
             <CardContent className="space-y-4">
               {forgotSent ? (
                 <p className="text-sm text-green-600">
-                  Si tenemos un correo registrado para esta cédula, te enviamos las instrucciones. Revisa tu bandeja de entrada.
+                  Si tenemos un correo registrado para esta cÃƒÂ©dula, te enviamos las instrucciones. Revisa tu bandeja de entrada.
                 </p>
               ) : (
                 <>
-                  <p className="text-sm text-muted-foreground">Cédula: {cedula}</p>
+                  <p className="text-sm text-muted-foreground">CÃƒÂ©dula: {cedula}</p>
                   {forgotError && <p className="text-sm text-destructive">{forgotError}</p>}
                   <Button className="w-full" onClick={handleForgotSubmit} disabled={forgotLoading}>
                     {forgotLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Enviar enlace de recuperación
+                    Enviar enlace de recuperaciÃƒÂ³n
                   </Button>
                 </>
               )}
@@ -504,27 +503,23 @@ export default function PortalClient() {
             <CardContent className="space-y-4">
               {resetDone ? (
                 <>
-                  <p className="text-sm text-green-600">Tu PIN se actualizó. Ya puedes iniciar sesión con él.</p>
-                  <Button className="w-full" onClick={handleReset}>Ir a iniciar sesión</Button>
+                  <p className="text-sm text-green-600">Tu PIN se actualizÃƒÂ³. Ya puedes iniciar sesiÃƒÂ³n con ÃƒÂ©l.</p>
+                  <Button className="w-full" onClick={handleReset}>Ir a iniciar sesiÃƒÂ³n</Button>
                 </>
               ) : (
                 <>
                   <div className="space-y-1">
-                    <Label htmlFor="resetNewPin">PIN nuevo (mínimo 6 dígitos)</Label>
-                    <Input
-                      id="resetNewPin"
-                      type="password"
-                      inputMode="numeric"
+                    <Label htmlFor="resetNewPin">PIN nuevo (mÃƒÂ­nimo 6 dÃƒÂ­gitos)</Label>
+                    <PasswordInput
+                      id="resetNewPin" inputMode="numeric"
                       value={resetNewPin}
                       onChange={(e) => setResetNewPin(e.target.value)}
                     />
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="resetConfirmPin">Confirma el PIN</Label>
-                    <Input
-                      id="resetConfirmPin"
-                      type="password"
-                      inputMode="numeric"
+                    <PasswordInput
+                      id="resetConfirmPin" inputMode="numeric"
                       value={resetConfirmPin}
                       onChange={(e) => setResetConfirmPin(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleResetViaToken()}
@@ -546,32 +541,28 @@ export default function PortalClient() {
             <CardHeader>
               <CardTitle>Crea tu PIN</CardTitle>
               <CardDescription>
-                Es tu primera vez aquí. Verifica tu identidad con el teléfono que el
-                negocio tiene registrado y crea un PIN de al menos 6 dígitos.
+                Es tu primera vez aquÃƒÂ­. Verifica tu identidad con el telÃƒÂ©fono que el
+                negocio tiene registrado y crea un PIN de al menos 6 dÃƒÂ­gitos.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-1">
-                <Label htmlFor="phone">Teléfono registrado</Label>
+                <Label htmlFor="phone">TelÃƒÂ©fono registrado</Label>
                 <Input id="phone" inputMode="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
               </div>
               <Separator />
               <div className="space-y-1">
-                <Label htmlFor="newPin">Nuevo PIN (mínimo 6 dígitos)</Label>
-                <Input
-                  id="newPin"
-                  type="password"
-                  inputMode="numeric"
+                <Label htmlFor="newPin">Nuevo PIN (mÃƒÂ­nimo 6 dÃƒÂ­gitos)</Label>
+                <PasswordInput
+                  id="newPin" inputMode="numeric"
                   value={newPin}
                   onChange={(e) => setNewPin(e.target.value)}
                 />
               </div>
               <div className="space-y-1">
                 <Label htmlFor="confirmPin">Confirma tu PIN</Label>
-                <Input
-                  id="confirmPin"
-                  type="password"
-                  inputMode="numeric"
+                <PasswordInput
+                  id="confirmPin" inputMode="numeric"
                   value={confirmPin}
                   onChange={(e) => setConfirmPin(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleSetupSubmit()}
@@ -584,7 +575,7 @@ export default function PortalClient() {
               </Button>
               <Button variant="ghost" className="w-full" onClick={handleReset}>
                 <ArrowLeft className="mr-2 h-4 w-4" />
-                Cambiar cédula
+                Cambiar cÃƒÂ©dula
               </Button>
             </CardContent>
           </Card>
@@ -594,7 +585,7 @@ export default function PortalClient() {
           <Card>
             <CardHeader>
               <CardTitle>Selecciona un negocio</CardTitle>
-              <CardDescription>Tienes cuentas con más de un negocio.</CardDescription>
+              <CardDescription>Tienes cuentas con mÃƒÂ¡s de un negocio.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {businesses.map((b) => (
@@ -614,7 +605,7 @@ export default function PortalClient() {
         {step === 'dashboard' && businesses.length === 0 && (
           <Card>
             <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              No encontramos préstamos ni compras a crédito asociadas a tu cédula.
+              No encontramos prÃƒÂ©stamos ni compras a crÃƒÂ©dito asociadas a tu cÃƒÂ©dula.
             </CardContent>
           </Card>
         )}
@@ -650,7 +641,7 @@ export default function PortalClient() {
             <CardContent className="space-y-4">
               {changePinSuccess ? (
                 <>
-                  <p className="text-sm text-green-600">Tu PIN se actualizó correctamente.</p>
+                  <p className="text-sm text-green-600">Tu PIN se actualizÃƒÂ³ correctamente.</p>
                   <Button
                     className="w-full"
                     onClick={() => { setShowChangePin(false); setChangePinSuccess(false); }}
@@ -662,30 +653,24 @@ export default function PortalClient() {
                 <>
                   <div className="space-y-1">
                     <Label htmlFor="oldPinInput">PIN actual</Label>
-                    <Input
-                      id="oldPinInput"
-                      type="password"
-                      inputMode="numeric"
+                    <PasswordInput
+                      id="oldPinInput" inputMode="numeric"
                       value={oldPinInput}
                       onChange={(e) => setOldPinInput(e.target.value)}
                     />
                   </div>
                   <div className="space-y-1">
-                    <Label htmlFor="newPinInput">PIN nuevo (mínimo 6 dígitos)</Label>
-                    <Input
-                      id="newPinInput"
-                      type="password"
-                      inputMode="numeric"
+                    <Label htmlFor="newPinInput">PIN nuevo (mÃƒÂ­nimo 6 dÃƒÂ­gitos)</Label>
+                    <PasswordInput
+                      id="newPinInput" inputMode="numeric"
                       value={newPinInput}
                       onChange={(e) => setNewPinInput(e.target.value)}
                     />
                   </div>
                   <div className="space-y-1">
                     <Label htmlFor="confirmNewPinInput">Confirma el PIN nuevo</Label>
-                    <Input
-                      id="confirmNewPinInput"
-                      type="password"
-                      inputMode="numeric"
+                    <PasswordInput
+                      id="confirmNewPinInput" inputMode="numeric"
                       value={confirmNewPinInput}
                       onChange={(e) => setConfirmNewPinInput(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleChangePin()}
@@ -709,7 +694,7 @@ export default function PortalClient() {
 
         <p className="text-xs text-muted-foreground text-center mt-8 flex items-center justify-center gap-1">
           <ShieldCheck className="h-3.5 w-3.5" />
-          Consulta de saldo únicamente. Tu sesión expira sola por seguridad.
+          Consulta de saldo ÃƒÂºnicamente. Tu sesiÃƒÂ³n expira sola por seguridad.
         </p>
       </div>
     </div>

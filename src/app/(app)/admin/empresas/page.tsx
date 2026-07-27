@@ -30,6 +30,7 @@ import { CompanyRolesDialog } from '@/components/admin/company-roles-dialog';
 import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
+import { PasswordInput } from '@/components/ui/password-input';
 
 interface Plan { id: string; name: string; price: number; max_users?: number; monthly_price?: number | null; annual_price_per_month?: number | null; }
 interface Sub { id: string; company_id: string; plan_id: string | null; custom_monthly_price?: number | null; }
@@ -48,7 +49,7 @@ const emptyForm = {
   maxUsers: 2,
   customMonthlyPrice: '',
   // Fechas que gobiernan el bloqueo de la app: si la prueba vence o la
-  // suscripción caduca, la empresa pasa a solo-lectura. Vacías = nunca vence.
+  // suscripciÃƒÂ³n caduca, la empresa pasa a solo-lectura. VacÃƒÂ­as = nunca vence.
   trialEndsAt: '',
   paidUntil: '',
 };
@@ -97,7 +98,7 @@ export default function CompaniesManagementPage() {
   const [paymentsFor, setPaymentsFor] = useState<Company | null>(null);
   const [rolesFor, setRolesFor] = useState<Company | null>(null);
   const [branchStatusTarget, setBranchStatusTarget] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
-  // Compartir entre sucursales (por módulo). Default OFF: cada sucursal aislada.
+  // Compartir entre sucursales (por mÃƒÂ³dulo). Default OFF: cada sucursal aislada.
   const [sharing, setSharing] = useState({ clientes: false, credito: false, financiamiento: false, prestamos: false });
 
   const load = useCallback(async () => {
@@ -135,7 +136,7 @@ export default function CompaniesManagementPage() {
       <div>
         <PageHeader title="Empresas" />
         <Card><CardContent className="py-10 text-center text-muted-foreground">
-          No tienes permiso para ver esta sección.
+          No tienes permiso para ver esta secciÃƒÂ³n.
         </CardContent></Card>
       </div>
     );
@@ -143,8 +144,8 @@ export default function CompaniesManagementPage() {
 
   const getPlanName = (companyId: string) => {
     const sub = subs[companyId];
-    if (!sub?.plan_id) return '—';
-    return plans.find((p) => p.id === sub.plan_id)?.name ?? '—';
+    if (!sub?.plan_id) return 'Ã¢â‚¬â€';
+    return plans.find((p) => p.id === sub.plan_id)?.name ?? 'Ã¢â‚¬â€';
   };
 
   const getPlanRates = (companyId: string) => {
@@ -208,7 +209,7 @@ export default function CompaniesManagementPage() {
 
     if (!editingId && step === 1) {
       if (form.businessType === 'otro' && !form.customBusinessType.trim()) {
-        toast({ title: 'Especificar sector', description: 'Por favor, escribe a qué se dedica el negocio.', variant: 'destructive' });
+        toast({ title: 'Especificar sector', description: 'Por favor, escribe a quÃƒÂ© se dedica el negocio.', variant: 'destructive' });
         return;
       }
       setStep(2);
@@ -221,27 +222,27 @@ export default function CompaniesManagementPage() {
         return;
       }
       if (form.adminPassword.length < 8) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe tener al menos 8 caracteres.', variant: 'destructive' });
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a del administrador debe tener al menos 8 caracteres.', variant: 'destructive' });
         return;
       }
       if (!/[A-Z]/.test(form.adminPassword)) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe incluir al menos una letra mayúscula.', variant: 'destructive' });
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a del administrador debe incluir al menos una letra mayÃƒÂºscula.', variant: 'destructive' });
         return;
       }
       if (!/[a-z]/.test(form.adminPassword)) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe incluir al menos una letra minúscula.', variant: 'destructive' });
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a del administrador debe incluir al menos una letra minÃƒÂºscula.', variant: 'destructive' });
         return;
       }
       if (!/\d/.test(form.adminPassword)) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe incluir al menos un número.', variant: 'destructive' });
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a del administrador debe incluir al menos un nÃƒÂºmero.', variant: 'destructive' });
         return;
       }
       if (!/[@$!%*?&._\-\/#]/.test(form.adminPassword)) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña del administrador debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a del administrador debe incluir al menos un carÃƒÂ¡cter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
         return;
       }
       if (form.adminPassword !== form.adminConfirmPassword) {
-        toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas del administrador no coinciden.', variant: 'destructive' });
+        toast({ title: 'ContraseÃƒÂ±as no coinciden', description: 'Las contraseÃƒÂ±as del administrador no coinciden.', variant: 'destructive' });
         return;
       }
 
@@ -254,7 +255,7 @@ export default function CompaniesManagementPage() {
           .maybeSingle();
 
         if (existingUser) {
-          toast({ title: 'Correo en uso', description: 'El correo electrónico del administrador ya está registrado.', variant: 'destructive' });
+          toast({ title: 'Correo en uso', description: 'El correo electrÃƒÂ³nico del administrador ya estÃƒÂ¡ registrado.', variant: 'destructive' });
           setSaving(false);
           return;
         }
@@ -277,33 +278,33 @@ export default function CompaniesManagementPage() {
           return;
         }
         if (u.password.length < 8) {
-          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe tener al menos 8 caracteres.`, variant: 'destructive' });
+          toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: `La contraseÃƒÂ±a para ${u.email} debe tener al menos 8 caracteres.`, variant: 'destructive' });
           return;
         }
         if (!/[A-Z]/.test(u.password)) {
-          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe incluir al menos una letra mayúscula.`, variant: 'destructive' });
+          toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: `La contraseÃƒÂ±a para ${u.email} debe incluir al menos una letra mayÃƒÂºscula.`, variant: 'destructive' });
           return;
         }
         if (!/[a-z]/.test(u.password)) {
-          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe incluir al menos una letra minúscula.`, variant: 'destructive' });
+          toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: `La contraseÃƒÂ±a para ${u.email} debe incluir al menos una letra minÃƒÂºscula.`, variant: 'destructive' });
           return;
         }
         if (!/\d/.test(u.password)) {
-          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe incluir al menos un número.`, variant: 'destructive' });
+          toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: `La contraseÃƒÂ±a para ${u.email} debe incluir al menos un nÃƒÂºmero.`, variant: 'destructive' });
           return;
         }
         if (!/[@$!%*?&._\-\/#]/.test(u.password)) {
-          toast({ title: 'Contraseña débil', description: `La contraseña para ${u.email} debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).`, variant: 'destructive' });
+          toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: `La contraseÃƒÂ±a para ${u.email} debe incluir al menos un carÃƒÂ¡cter especial (ej: @$!%*?&._-/#).`, variant: 'destructive' });
           return;
         }
         if (u.password !== u.confirmPassword) {
-          toast({ title: 'Contraseñas no coinciden', description: `Las contraseñas para ${u.email} no coinciden.`, variant: 'destructive' });
+          toast({ title: 'ContraseÃƒÂ±as no coinciden', description: `Las contraseÃƒÂ±as para ${u.email} no coinciden.`, variant: 'destructive' });
           return;
         }
 
         const { data: existingUser } = await supabase.from('profiles').select('id').eq('email', u.email.trim()).maybeSingle();
         if (existingUser) {
-          toast({ title: 'Correo en uso', description: `El correo ${u.email} ya está registrado en la plataforma.`, variant: 'destructive' });
+          toast({ title: 'Correo en uso', description: `El correo ${u.email} ya estÃƒÂ¡ registrado en la plataforma.`, variant: 'destructive' });
           return;
         }
       }
@@ -311,7 +312,7 @@ export default function CompaniesManagementPage() {
       const totalNewUsers = 1 + extraUsers.length;
       const maxUsersLimit = form.maxUsers;
       if (maxUsersLimit !== null && totalNewUsers > maxUsersLimit) {
-        toast({ title: 'Límite superado', description: `No puedes crear ${totalNewUsers} usuarios. El límite de la empresa es de ${maxUsersLimit} usuarios.`, variant: 'destructive' });
+        toast({ title: 'LÃƒÂ­mite superado', description: `No puedes crear ${totalNewUsers} usuarios. El lÃƒÂ­mite de la empresa es de ${maxUsersLimit} usuarios.`, variant: 'destructive' });
         return;
       }
     }
@@ -329,8 +330,8 @@ export default function CompaniesManagementPage() {
         is_demo: form.isDemo,
         business_type: form.businessType === 'otro' ? form.customBusinessType.trim() : form.businessType,
         max_users: form.maxUsers,
-        // Se guarda el final del día elegido: "vence el 27" debe significar que
-        // el 27 todavía puede trabajar, no que amanece bloqueado.
+        // Se guarda el final del dÃƒÂ­a elegido: "vence el 27" debe significar que
+        // el 27 todavÃƒÂ­a puede trabajar, no que amanece bloqueado.
         trial_ends_at: form.trialEndsAt ? new Date(`${form.trialEndsAt}T23:59:59`).toISOString() : null,
         paid_until: form.paidUntil || null,
       };
@@ -454,9 +455,9 @@ export default function CompaniesManagementPage() {
           }
         }
 
-        // Preset por tipo de negocio: enciende/apaga los módulos verticales
-        // (servicios/lavandería/préstamos) y siembra categorías/tipos de
-        // servicio por defecto. Los módulos "núcleo" no se tocan.
+        // Preset por tipo de negocio: enciende/apaga los mÃƒÂ³dulos verticales
+        // (servicios/lavanderÃƒÂ­a/prÃƒÂ©stamos) y siembra categorÃƒÂ­as/tipos de
+        // servicio por defecto. Los mÃƒÂ³dulos "nÃƒÂºcleo" no se tocan.
         const preset = BUSINESS_TYPE_PRESETS[form.businessType];
         const optionalRows = OPTIONAL_VERTICALS.map((key) => ({
           company_id: companyId, module_key: key, enabled: preset.modules.includes(key),
@@ -479,7 +480,7 @@ export default function CompaniesManagementPage() {
 
       // Bienvenida solo al crear, y nunca a las empresas demo: se borran solas
       // a las pocas horas y escribirles solo gasta cupo del plan de correo.
-      // Va sin await y con su propio manejo de error: la empresa YA quedó
+      // Va sin await y con su propio manejo de error: la empresa YA quedÃƒÂ³
       // creada, y un fallo de correo no debe hacer parecer lo contrario.
       if (!editingId && companyId && !form.isDemo && form.adminEmail.trim()) {
         void (async () => {
@@ -501,7 +502,7 @@ export default function CompaniesManagementPage() {
             if (msg) throw new Error(msg);
           } catch (e: any) {
             toast({
-              title: 'La empresa se creó, pero no se envió la bienvenida',
+              title: 'La empresa se creÃƒÂ³, pero no se enviÃƒÂ³ la bienvenida',
               description: e?.message ?? 'Error enviando el correo.',
               variant: 'destructive',
             });
@@ -558,8 +559,8 @@ export default function CompaniesManagementPage() {
   };
 
   // Borra la empresa y TODO su historial (ventas, clientes, financiamientos,
-  // usuarios...) vía RPC. Los perfiles borrados por SQL dejan cuentas de auth
-  // huérfanas, así que se purgan aparte con la Edge Function admin-user-actions.
+  // usuarios...) vÃƒÂ­a RPC. Los perfiles borrados por SQL dejan cuentas de auth
+  // huÃƒÂ©rfanas, asÃƒÂ­ que se purgan aparte con la Edge Function admin-user-actions.
   const handleDeleteCompany = async () => {
     if (!deleteCompanyTarget) return;
     const { data: profileIds, error } = await supabase.rpc('delete_company_cascade', {
@@ -577,7 +578,7 @@ export default function CompaniesManagementPage() {
   };
 
   // Borra la sucursal y su historial operativo; usuarios y clientes quedan
-  // desvinculados (no se borran). Bloqueada si es la única sucursal (RPC lo valida).
+  // desvinculados (no se borran). Bloqueada si es la ÃƒÂºnica sucursal (RPC lo valida).
   const handleDeleteBranch = async () => {
     if (!deleteBranchTarget) return;
     const { error } = await supabase.rpc('delete_branch_cascade', { p_branch_id: deleteBranchTarget.id });
@@ -588,8 +589,8 @@ export default function CompaniesManagementPage() {
   };
 
   // Crea una sucursal para una empresa arbitraria sin necesidad de impersonarla:
-  // se fija company_id explícito (current_company_id() no sirve aquí porque el
-  // super admin no está necesariamente "dentro" de esa empresa).
+  // se fija company_id explÃƒÂ­cito (current_company_id() no sirve aquÃƒÂ­ porque el
+  // super admin no estÃƒÂ¡ necesariamente "dentro" de esa empresa).
   const handleAddBranch = async () => {
     if (!addBranchFor || !newBranchName.trim()) return;
     setSaving(true);
@@ -706,8 +707,8 @@ export default function CompaniesManagementPage() {
               {editingId
                 ? 'Gestiona los datos de la empresa, su plan y su estado fiscal (DGII).'
                 : step === 1
-                  ? 'Completa la información general de la nueva empresa.'
-                  : 'Registra los datos de la persona que administrará esta empresa.'}
+                  ? 'Completa la informaciÃƒÂ³n general de la nueva empresa.'
+                  : 'Registra los datos de la persona que administrarÃƒÂ¡ esta empresa.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -738,7 +739,7 @@ export default function CompaniesManagementPage() {
                       <Label htmlFor="custom-business-type">Especificar sector *</Label>
                       <Input
                         id="custom-business-type"
-                        placeholder="Ej: Peluquería, Gimnasio, etc."
+                        placeholder="Ej: PeluquerÃƒÂ­a, Gimnasio, etc."
                         value={form.customBusinessType}
                         onChange={(e) => setForm({ ...form, customBusinessType: e.target.value })}
                         required
@@ -752,7 +753,7 @@ export default function CompaniesManagementPage() {
                   <Label htmlFor="custom-business-type">Sector / Rubro</Label>
                   <Input
                     id="custom-business-type"
-                    placeholder="Ej: Peluquería, Gimnasio, etc."
+                    placeholder="Ej: PeluquerÃƒÂ­a, Gimnasio, etc."
                     value={form.customBusinessType}
                     onChange={(e) => setForm({ ...form, customBusinessType: e.target.value })}
                   />
@@ -761,15 +762,15 @@ export default function CompaniesManagementPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label htmlFor="rnc">RNC (opcional)</Label>
-                  <Input id="rnc" value={form.rnc} onChange={(e) => setForm({ ...form, rnc: e.target.value })} placeholder="Solo si está formalizada" />
+                  <Input id="rnc" value={form.rnc} onChange={(e) => setForm({ ...form, rnc: e.target.value })} placeholder="Solo si estÃƒÂ¡ formalizada" />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="phone">Teléfono</Label>
+                  <Label htmlFor="phone">TelÃƒÂ©fono</Label>
                   <Input id="phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="address">Dirección</Label>
+                <Label htmlFor="address">DirecciÃƒÂ³n</Label>
                 <Input id="address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -816,7 +817,7 @@ export default function CompaniesManagementPage() {
               )}
 
               <div className="grid gap-2">
-                <Label htmlFor="maxUsers">Límite de usuarios *</Label>
+                <Label htmlFor="maxUsers">LÃƒÂ­mite de usuarios *</Label>
                 <Input
                   id="maxUsers"
                   type="number"
@@ -827,7 +828,7 @@ export default function CompaniesManagementPage() {
               </div>
 
               {/* Estas dos fechas son las que deciden si la empresa entra en
-                  solo-lectura, y de las que salen los avisos automáticos. */}
+                  solo-lectura, y de las que salen los avisos automÃƒÂ¡ticos. */}
               <div className="grid gap-4 sm:grid-cols-2 rounded-lg border p-3">
                 <div className="grid gap-2">
                   <Label htmlFor="trialEndsAt">Prueba hasta</Label>
@@ -839,7 +840,7 @@ export default function CompaniesManagementPage() {
                   />
                   <p className="text-xs text-muted-foreground">
                     Solo aplica mientras el estado sea <strong>Prueba</strong>. Al crear se llena sola
-                    con los días configurados en Configuración de la Plataforma.
+                    con los dÃƒÂ­as configurados en ConfiguraciÃƒÂ³n de la Plataforma.
                   </p>
                 </div>
                 <div className="grid gap-2">
@@ -851,20 +852,20 @@ export default function CompaniesManagementPage() {
                     onChange={(e) => setForm({ ...form, paidUntil: e.target.value })}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Se actualiza sola al registrar un pago. Edítala solo para corregir o para
-                    poner al día una empresa que venía sin fecha.
+                    Se actualiza sola al registrar un pago. EdÃƒÂ­tala solo para corregir o para
+                    poner al dÃƒÂ­a una empresa que venÃƒÂ­a sin fecha.
                   </p>
                 </div>
                 <p className="sm:col-span-2 text-xs text-muted-foreground">
-                  Vacías = no vence nunca. Cuando la fecha pasa, la empresa puede seguir
+                  VacÃƒÂ­as = no vence nunca. Cuando la fecha pasa, la empresa puede seguir
                   consultando sus datos pero no registrar ni modificar.
                 </p>
               </div>
 
               <div className="flex items-center justify-between rounded-lg border p-3 bg-amber-500/5 border-amber-500/20">
                 <div>
-                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">¿Es empresa Demo?</p>
-                  <p className="text-xs text-muted-foreground font-normal">Excluye esta empresa de estadísticas y reportes reales.</p>
+                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">Ã‚Â¿Es empresa Demo?</p>
+                  <p className="text-xs text-muted-foreground font-normal">Excluye esta empresa de estadÃƒÂ­sticas y reportes reales.</p>
                 </div>
                 <Switch checked={form.isDemo} onCheckedChange={(v) => setForm({ ...form, isDemo: v })} />
               </div>
@@ -879,7 +880,7 @@ export default function CompaniesManagementPage() {
               <div className="flex items-center justify-between rounded-lg border p-3">
                 <div>
                   <p className="text-sm font-medium">Emite comprobantes (NCF / e-CF)</p>
-                  <p className="text-xs text-muted-foreground">Habilita la facturación fiscal para esta empresa.</p>
+                  <p className="text-xs text-muted-foreground">Habilita la facturaciÃƒÂ³n fiscal para esta empresa.</p>
                 </div>
                 <Switch checked={form.ncfEnabled} onCheckedChange={(v) => setForm({ ...form, ncfEnabled: v })} />
               </div>
@@ -896,8 +897,8 @@ export default function CompaniesManagementPage() {
                   </div>
                   <div className="flex items-center justify-between rounded-lg border p-3">
                     <div>
-                      <p className="text-sm font-medium">Crédito compartido</p>
-                      <p className="text-xs text-muted-foreground">Las ventas a crédito se pueden ver y cobrar desde cualquier sucursal.</p>
+                      <p className="text-sm font-medium">CrÃƒÂ©dito compartido</p>
+                      <p className="text-xs text-muted-foreground">Las ventas a crÃƒÂ©dito se pueden ver y cobrar desde cualquier sucursal.</p>
                     </div>
                     <Switch checked={sharing.credito} onCheckedChange={(v) => setSharing({ ...sharing, credito: v })} />
                   </div>
@@ -910,8 +911,8 @@ export default function CompaniesManagementPage() {
                   </div>
                   <div className="flex items-center justify-between rounded-lg border p-3">
                     <div>
-                      <p className="text-sm font-medium">Préstamos compartidos</p>
-                      <p className="text-xs text-muted-foreground">Los préstamos de dinero se pueden ver y cobrar desde cualquier sucursal.</p>
+                      <p className="text-sm font-medium">PrÃƒÂ©stamos compartidos</p>
+                      <p className="text-xs text-muted-foreground">Los prÃƒÂ©stamos de dinero se pueden ver y cobrar desde cualquier sucursal.</p>
                     </div>
                     <Switch checked={sharing.prestamos} onCheckedChange={(v) => setSharing({ ...sharing, prestamos: v })} />
                   </div>
@@ -926,7 +927,7 @@ export default function CompaniesManagementPage() {
                   id="adminName"
                   value={form.adminName}
                   onChange={(e) => setForm({ ...form, adminName: e.target.value })}
-                  placeholder="Ej: Carlos Gómez"
+                  placeholder="Ej: Carlos GÃƒÂ³mez"
                 />
               </div>
               <div className="grid gap-2">
@@ -941,23 +942,19 @@ export default function CompaniesManagementPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-2">
-                  <Label htmlFor="adminPassword">Contraseña *</Label>
-                  <Input
-                    id="adminPassword"
-                    type="password"
-                    value={form.adminPassword}
+                  <Label htmlFor="adminPassword">ContraseÃƒÂ±a *</Label>
+                  <PasswordInput
+                    id="adminPassword" value={form.adminPassword}
                     onChange={(e) => setForm({ ...form, adminPassword: e.target.value })}
-                    placeholder="Mínimo 8 caracteres"
+                    placeholder="MÃƒÂ­nimo 8 caracteres"
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="adminConfirmPassword">Confirmar Contraseña *</Label>
-                  <Input
-                    id="adminConfirmPassword"
-                    type="password"
-                    value={form.adminConfirmPassword}
+                  <Label htmlFor="adminConfirmPassword">Confirmar ContraseÃƒÂ±a *</Label>
+                  <PasswordInput
+                    id="adminConfirmPassword" value={form.adminConfirmPassword}
                     onChange={(e) => setForm({ ...form, adminConfirmPassword: e.target.value })}
-                    placeholder="Repite la contraseña"
+                    placeholder="Repite la contraseÃƒÂ±a"
                   />
                 </div>
               </div>
@@ -985,7 +982,7 @@ export default function CompaniesManagementPage() {
                     className="absolute right-2 top-2 h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
                     onClick={() => setExtraUsers(extraUsers.filter((_, i) => i !== idx))}
                   >
-                    ×
+                    Ãƒâ€”
                   </Button>
                   <p className="text-xs font-bold text-muted-foreground uppercase">Usuario #{idx + 1}</p>
                   
@@ -1021,30 +1018,26 @@ export default function CompaniesManagementPage() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <div className="grid gap-1">
-                      <Label className="text-xs">Contraseña *</Label>
-                      <Input
-                        type="password"
-                        value={u.password}
+                      <Label className="text-xs">ContraseÃƒÂ±a *</Label>
+                      <PasswordInput value={u.password}
                         onChange={(e) => {
                           const updated = [...extraUsers];
                           updated[idx].password = e.target.value;
                           setExtraUsers(updated);
                         }}
-                        placeholder="Mínimo 8 caracteres"
+                        placeholder="MÃƒÂ­nimo 8 caracteres"
                         required
                       />
                     </div>
                     <div className="grid gap-1">
-                      <Label className="text-xs">Confirmar Contraseña *</Label>
-                      <Input
-                        type="password"
-                        value={u.confirmPassword}
+                      <Label className="text-xs">Confirmar ContraseÃƒÂ±a *</Label>
+                      <PasswordInput value={u.confirmPassword}
                         onChange={(e) => {
                           const updated = [...extraUsers];
                           updated[idx].confirmPassword = e.target.value;
                           setExtraUsers(updated);
                         }}
-                        placeholder="Repite la contraseña"
+                        placeholder="Repite la contraseÃƒÂ±a"
                         required
                       />
                     </div>
@@ -1072,7 +1065,7 @@ export default function CompaniesManagementPage() {
 
               {extraUsers.length === 0 && (
                 <div className="text-center py-6 text-xs text-muted-foreground border border-dashed rounded-lg">
-                  No has agregado ningún usuario adicional. Haz clic en "Agregar usuario" para registrar más accesos.
+                  No has agregado ningÃƒÂºn usuario adicional. Haz clic en "Agregar usuario" para registrar mÃƒÂ¡s accesos.
                 </div>
               )}
             </div>
@@ -1082,7 +1075,7 @@ export default function CompaniesManagementPage() {
             {editingId ? (
               <>
                 <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>Cancelar</Button>
-                <Button onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+                <Button onClick={handleSave} disabled={saving}>{saving ? 'GuardandoÃ¢â‚¬Â¦' : 'Guardar'}</Button>
               </>
             ) : step === 1 ? (
               <>
@@ -1094,7 +1087,7 @@ export default function CompaniesManagementPage() {
             ) : step === 2 ? (
               <>
                 <Button variant="outline" onClick={() => setStep(1)} disabled={saving}>
-                  <ArrowLeft className="mr-2 h-4 w-4" /> Atrás
+                  <ArrowLeft className="mr-2 h-4 w-4" /> AtrÃƒÂ¡s
                 </Button>
                 <Button onClick={handleSave} disabled={saving}>
                   Siguiente <ArrowRight className="ml-2 h-4 w-4" />
@@ -1103,7 +1096,7 @@ export default function CompaniesManagementPage() {
             ) : (
               <>
                 <Button variant="outline" onClick={() => setStep(2)} disabled={saving}>
-                  <ArrowLeft className="mr-2 h-4 w-4" /> Atrás
+                  <ArrowLeft className="mr-2 h-4 w-4" /> AtrÃƒÂ¡s
                 </Button>
                 <Button onClick={handleSave} disabled={saving}>
                   {saving ? 'Creando...' : 'Guardar y Crear'}
@@ -1139,7 +1132,7 @@ export default function CompaniesManagementPage() {
                 />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="branchLocation" className="text-right">Ubicación</Label>
+                <Label htmlFor="branchLocation" className="text-right">UbicaciÃƒÂ³n</Label>
                 <Input
                   id="branchLocation"
                   value={editingBranch.location}
@@ -1160,12 +1153,12 @@ export default function CompaniesManagementPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {statusTarget?.status === 'suspended' ? '¿Reactivar esta empresa?' : '¿Desactivar esta empresa?'}
+              {statusTarget?.status === 'suspended' ? 'Ã‚Â¿Reactivar esta empresa?' : 'Ã‚Â¿Desactivar esta empresa?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {statusTarget?.status === 'suspended'
-                ? `“${statusTarget?.name}” volverá a estar activa y sus usuarios podrán acceder de nuevo.`
-                : `“${statusTarget?.name}” quedará suspendida. Sus usuarios no podrán acceder hasta que la reactives.`}
+                ? `Ã¢â‚¬Å“${statusTarget?.name}Ã¢â‚¬Â volverÃƒÂ¡ a estar activa y sus usuarios podrÃƒÂ¡n acceder de nuevo.`
+                : `Ã¢â‚¬Å“${statusTarget?.name}Ã¢â‚¬Â quedarÃƒÂ¡ suspendida. Sus usuarios no podrÃƒÂ¡n acceder hasta que la reactives.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1175,7 +1168,7 @@ export default function CompaniesManagementPage() {
               disabled={saving}
               className={statusTarget?.status === 'suspended' ? '' : 'bg-destructive text-destructive-foreground hover:bg-destructive/90'}
             >
-              {saving ? 'Guardando…' : statusTarget?.status === 'suspended' ? 'Reactivar' : 'Desactivar'}
+              {saving ? 'GuardandoÃ¢â‚¬Â¦' : statusTarget?.status === 'suspended' ? 'Reactivar' : 'Desactivar'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1211,14 +1204,14 @@ export default function CompaniesManagementPage() {
               <Input id="newBranchName" value={newBranchName} onChange={(e) => setNewBranchName(e.target.value)} placeholder="Ej: Santiago" />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="newBranchLocation">Ubicación</Label>
+              <Label htmlFor="newBranchLocation">UbicaciÃƒÂ³n</Label>
               <Input id="newBranchLocation" value={newBranchLocation} onChange={(e) => setNewBranchLocation(e.target.value)} placeholder="Opcional" />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddBranchFor(null)} disabled={saving}>Cancelar</Button>
             <Button onClick={handleAddBranch} disabled={saving || !newBranchName.trim()}>
-              {saving ? 'Creando…' : 'Crear sucursal'}
+              {saving ? 'CreandoÃ¢â‚¬Â¦' : 'Crear sucursal'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1228,12 +1221,12 @@ export default function CompaniesManagementPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {branchStatusTarget?.isActive ? '¿Desactivar esta sucursal?' : '¿Reactivar esta sucursal?'}
+              {branchStatusTarget?.isActive ? 'Ã‚Â¿Desactivar esta sucursal?' : 'Ã‚Â¿Reactivar esta sucursal?'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {branchStatusTarget?.isActive
-                ? `Los usuarios de "${branchStatusTarget?.name}" no podrán acceder hasta que la reactives. No se borra ningún dato.`
-                : `"${branchStatusTarget?.name}" volverá a estar activa y sus usuarios podrán acceder de nuevo.`}
+                ? `Los usuarios de "${branchStatusTarget?.name}" no podrÃƒÂ¡n acceder hasta que la reactives. No se borra ningÃƒÂºn dato.`
+                : `"${branchStatusTarget?.name}" volverÃƒÂ¡ a estar activa y sus usuarios podrÃƒÂ¡n acceder de nuevo.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1243,7 +1236,7 @@ export default function CompaniesManagementPage() {
               disabled={saving}
               className={branchStatusTarget?.isActive ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''}
             >
-              {saving ? 'Guardando…' : branchStatusTarget?.isActive ? 'Desactivar' : 'Reactivar'}
+              {saving ? 'GuardandoÃ¢â‚¬Â¦' : branchStatusTarget?.isActive ? 'Desactivar' : 'Reactivar'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

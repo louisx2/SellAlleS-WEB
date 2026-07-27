@@ -9,6 +9,7 @@ import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Shield, User, Lock, Mail, Store } from 'lucide-react';
+import { PasswordInput } from '@/components/ui/password-input';
 
 interface ProfileModalProps {
   open: boolean;
@@ -48,7 +49,7 @@ export function ProfileModal({ open, onOpenChange }: ProfileModalProps) {
   const handleUpdateName = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      toast({ title: 'Error', description: 'El nombre no puede estar vacío.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'El nombre no puede estar vacÃƒÂ­o.', variant: 'destructive' });
       return;
     }
 
@@ -76,17 +77,17 @@ export function ProfileModal({ open, onOpenChange }: ProfileModalProps) {
   const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPassword || !confirmPassword) {
-      toast({ title: 'Error', description: 'Por favor, completa todos los campos de contraseña.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Por favor, completa todos los campos de contraseÃƒÂ±a.', variant: 'destructive' });
       return;
     }
 
     if (newPassword.length < 6) {
-      toast({ title: 'Error', description: 'La nueva contraseña debe tener al menos 6 caracteres.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'La nueva contraseÃƒÂ±a debe tener al menos 6 caracteres.', variant: 'destructive' });
       return;
     }
 
     if (newPassword !== confirmPassword) {
-      toast({ title: 'Error', description: 'Las contraseñas nuevas no coinciden.', variant: 'destructive' });
+      toast({ title: 'Error', description: 'Las contraseÃƒÂ±as nuevas no coinciden.', variant: 'destructive' });
       return;
     }
 
@@ -95,13 +96,13 @@ export function ProfileModal({ open, onOpenChange }: ProfileModalProps) {
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) throw error;
 
-      toast({ title: 'Contraseña actualizada', description: 'Aplicando cambios y recargando...' });
+      toast({ title: 'ContraseÃƒÂ±a actualizada', description: 'Aplicando cambios y recargando...' });
       onOpenChange(false);
       setTimeout(() => {
         window.location.reload();
       }, 800);
     } catch (err: any) {
-      toast({ title: 'Error', description: err.message ?? 'No se pudo cambiar la contraseña.', variant: 'destructive' });
+      toast({ title: 'Error', description: err.message ?? 'No se pudo cambiar la contraseÃƒÂ±a.', variant: 'destructive' });
     } finally {
       setIsUpdatingPassword(false);
     }
@@ -113,12 +114,12 @@ export function ProfileModal({ open, onOpenChange }: ProfileModalProps) {
         <DialogHeader>
           <DialogTitle className="text-2xl">Mi Perfil</DialogTitle>
           <DialogDescription>
-            Administra tus datos personales y configuración de acceso.
+            Administra tus datos personales y configuraciÃƒÂ³n de acceso.
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-6 md:grid-cols-3 mt-4">
-          {/* Resumen e Información Fija */}
+          {/* Resumen e InformaciÃƒÂ³n Fija */}
           <div className="space-y-6 md:col-span-1">
             <div className="overflow-hidden rounded-xl border bg-gradient-to-b from-primary/5 to-transparent p-4 shadow-sm">
               <div className="text-center pb-2">
@@ -151,13 +152,13 @@ export function ProfileModal({ open, onOpenChange }: ProfileModalProps) {
             </div>
           </div>
 
-          {/* Formularios de Edición */}
+          {/* Formularios de EdiciÃƒÂ³n */}
           <div className="space-y-6 md:col-span-2">
             {/* Editar Nombre */}
             <div className="rounded-xl border shadow-sm">
               <div className="px-4 py-3 border-b bg-muted/20">
                 <h3 className="font-semibold">Datos Personales</h3>
-                <p className="text-xs text-muted-foreground">Modifica tu nombre público en la plataforma.</p>
+                <p className="text-xs text-muted-foreground">Modifica tu nombre pÃƒÂºblico en la plataforma.</p>
               </div>
               <form onSubmit={handleUpdateName}>
                 <div className="p-4 space-y-4">
@@ -182,20 +183,18 @@ export function ProfileModal({ open, onOpenChange }: ProfileModalProps) {
               </form>
             </div>
 
-            {/* Cambiar Contraseña */}
+            {/* Cambiar ContraseÃƒÂ±a */}
             <div className="rounded-xl border shadow-sm">
               <div className="px-4 py-3 border-b bg-muted/20">
                 <h3 className="font-semibold">Seguridad</h3>
-                <p className="text-xs text-muted-foreground">Actualiza tu contraseña de acceso.</p>
+                <p className="text-xs text-muted-foreground">Actualiza tu contraseÃƒÂ±a de acceso.</p>
               </div>
               <form onSubmit={handleUpdatePassword}>
                 <div className="p-4 space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="new-password">Nueva contraseña</Label>
-                    <Input
-                      id="new-password"
-                      type="password"
-                      placeholder="Mínimo 6 caracteres"
+                    <Label htmlFor="new-password">Nueva contraseÃƒÂ±a</Label>
+                    <PasswordInput
+                      id="new-password" placeholder="MÃƒÂ­nimo 6 caracteres"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       required
@@ -203,11 +202,9 @@ export function ProfileModal({ open, onOpenChange }: ProfileModalProps) {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="confirm-password">Confirmar nueva contraseña</Label>
-                    <Input
-                      id="confirm-password"
-                      type="password"
-                      placeholder="Repite la nueva contraseña"
+                    <Label htmlFor="confirm-password">Confirmar nueva contraseÃƒÂ±a</Label>
+                    <PasswordInput
+                      id="confirm-password" placeholder="Repite la nueva contraseÃƒÂ±a"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       required
@@ -218,7 +215,7 @@ export function ProfileModal({ open, onOpenChange }: ProfileModalProps) {
                 <div className="border-t px-4 py-3 flex justify-end bg-muted/10 rounded-b-xl">
                   <Button type="submit" disabled={isUpdatingPassword || !newPassword || !confirmPassword}>
                     {isUpdatingPassword && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Cambiar Contraseña
+                    Cambiar ContraseÃƒÂ±a
                   </Button>
                 </div>
               </form>

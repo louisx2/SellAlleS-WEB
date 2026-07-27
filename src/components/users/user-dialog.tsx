@@ -23,6 +23,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { BranchChecklist } from '@/components/users/branch-checklist';
 import { supabase } from '@/lib/supabase/client';
 import { useEffect } from 'react';
+import { PasswordInput } from '@/components/ui/password-input';
 
 interface UserDialogProps {
   user?: User;
@@ -83,31 +84,31 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
 
     if (!isEditMode) {
       if (!password) {
-        toast({ title: 'Contraseña requerida', description: 'Debes introducir una contraseña para el nuevo usuario.', variant: 'destructive'});
+        toast({ title: 'ContraseÃƒÂ±a requerida', description: 'Debes introducir una contraseÃƒÂ±a para el nuevo usuario.', variant: 'destructive'});
         return;
       }
       if (password.length < 8) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña debe tener al menos 8 caracteres.', variant: 'destructive'});
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe tener al menos 8 caracteres.', variant: 'destructive'});
         return;
       }
       if (!/[A-Z]/.test(password)) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra mayúscula.', variant: 'destructive'});
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos una letra mayÃƒÂºscula.', variant: 'destructive'});
         return;
       }
       if (!/[a-z]/.test(password)) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra minúscula.', variant: 'destructive'});
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos una letra minÃƒÂºscula.', variant: 'destructive'});
         return;
       }
       if (!/\d/.test(password)) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un número.', variant: 'destructive'});
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos un nÃƒÂºmero.', variant: 'destructive'});
         return;
       }
       if (!/[@$!%*?&._\-\/#]/.test(password)) {
-        toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive'});
+        toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos un carÃƒÂ¡cter especial (ej: @$!%*?&._-/#).', variant: 'destructive'});
         return;
       }
       if (password !== confirmPassword) {
-        toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas ingresadas no son iguales.', variant: 'destructive'});
+        toast({ title: 'ContraseÃƒÂ±as no coinciden', description: 'Las contraseÃƒÂ±as ingresadas no son iguales.', variant: 'destructive'});
         return;
       }
     }
@@ -118,7 +119,7 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
     }
 
     const finalBranches = branches.filter(b => selectedBranchIds.includes(b.id));
-    // Sucursal activa: mantiene la que ya tenía si sigue marcada, si no la primera marcada.
+    // Sucursal activa: mantiene la que ya tenÃƒÂ­a si sigue marcada, si no la primera marcada.
     const activeBranch = finalBranches.find(b => b.name === user?.branch) ?? finalBranches[0];
 
     const newUserData = {
@@ -141,17 +142,17 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
         } else {
           await addUser(newUserData, password!);
           toast({
-            title: `Usuario añadido`,
-            description: `El usuario '${newUserData.name}' ha sido añadido.`,
+            title: `Usuario aÃƒÂ±adido`,
+            description: `El usuario '${newUserData.name}' ha sido aÃƒÂ±adido.`,
           });
         }
         setOpen(false);
     } catch(error: any) {
-        let description = 'Ocurrió un error inesperado.';
+        let description = 'OcurriÃƒÂ³ un error inesperado.';
         if (error.code === 'auth/email-already-in-use') {
-            description = 'Este correo electrónico ya está en uso por otro usuario.';
+            description = 'Este correo electrÃƒÂ³nico ya estÃƒÂ¡ en uso por otro usuario.';
         } else if (error.code === 'auth/weak-password') {
-            description = 'La contraseña es demasiado débil. Debe tener al menos 6 caracteres.';
+            description = 'La contraseÃƒÂ±a es demasiado dÃƒÂ©bil. Debe tener al menos 6 caracteres.';
         }
         console.error("Error saving user:", error);
         toast({ title: 'Error al guardar', description, variant: 'destructive'});
@@ -163,9 +164,9 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
       {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{isEditMode ? 'Editar Usuario' : 'Añadir Usuario'}</DialogTitle>
+          <DialogTitle>{isEditMode ? 'Editar Usuario' : 'AÃƒÂ±adir Usuario'}</DialogTitle>
           <DialogDescription>
-            {isEditMode ? 'Edita los detalles del usuario.' : 'Añade un nuevo usuario y asígnale un rol.'}
+            {isEditMode ? 'Edita los detalles del usuario.' : 'AÃƒÂ±ade un nuevo usuario y asÃƒÂ­gnale un rol.'}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
@@ -186,15 +187,15 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
                <>
                  <div className="grid grid-cols-4 items-center gap-4">
                      <Label htmlFor="password" className="text-right">
-                         Contraseña
+                         ContraseÃƒÂ±a
                      </Label>
-                     <Input id="password" name="password" type="password" placeholder="Mínimo 8 caracteres" className="col-span-3" required />
+                     <PasswordInput id="password" name="password" placeholder="MÃƒÂ­nimo 8 caracteres" className="col-span-3" required />
                  </div>
                  <div className="grid grid-cols-4 items-center gap-4">
                      <Label htmlFor="confirmPassword" className="text-right">
                          Confirmar
                      </Label>
-                     <Input id="confirmPassword" name="confirmPassword" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" className="col-span-3" required />
+                     <PasswordInput id="confirmPassword" name="confirmPassword" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseÃƒÂ±a" className="col-span-3" required />
                  </div>
                </>
             )}

@@ -25,6 +25,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { PlusCircle, Trash2, ShieldCheck, Shield, Link2, Unlink, MoreHorizontal, Mail } from 'lucide-react';
+import { PasswordInput } from '@/components/ui/password-input';
 
 interface CompanyUser {
   id: string;
@@ -42,7 +43,7 @@ interface RoleOption { id: string; name: string; }
 interface BranchOption { id: string; name: string; }
 
 // Usuario cuya empresa PRINCIPAL es otra, pero que tiene acceso a esta
-// empresa vía profile_companies (multi-empresa).
+// empresa vÃƒÂ­a profile_companies (multi-empresa).
 interface LinkedUser {
   id: string;
   name: string;
@@ -60,7 +61,7 @@ interface ManageCompanyUsersDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-// Gestión de usuarios de UNA empresa desde el panel de super admin, sin necesidad
+// GestiÃƒÂ³n de usuarios de UNA empresa desde el panel de super admin, sin necesidad
 // de impersonar: consulta y escribe directamente por companyId (el super admin
 // ignora RLS). Permite agregar, mover de sucursal y eliminar.
 export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenChange }: ManageCompanyUsersDialogProps) {
@@ -143,13 +144,13 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     if (newRole === user.role || !companyId) return;
     setBusy(user.id, true);
     try {
-      // Fuente de verdad: el rol vive en la membresía perfil↔empresa. El trigger
+      // Fuente de verdad: el rol vive en la membresÃƒÂ­a perfilÃ¢â€ â€empresa. El trigger
       // de lockout impide dejar la empresa sin admin (el error llega al toast).
       const { error: pcError } = await supabase
         .from('profile_companies')
         .upsert({ profile_id: user.id, company_id: companyId, role: newRole }, { onConflict: 'profile_id,company_id' });
       if (pcError) throw pcError;
-      // Caché del rol activo: estos usuarios tienen esta empresa como activa.
+      // CachÃƒÂ© del rol activo: estos usuarios tienen esta empresa como activa.
       const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', user.id);
       if (error) throw error;
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, role: newRole } : u)));
@@ -166,7 +167,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     setBusy(user.id, true);
     try {
       // Tocar SOLO los roles de esta empresa: el perfil puede tener roles
-      // personalizados de sus otras empresas y no hay que borrárselos.
+      // personalizados de sus otras empresas y no hay que borrÃƒÂ¡rselos.
       const companyRoleIds = roles.map((r) => r.id);
       const nextCompanyRoleIds = nextRoleIds.filter((id) => companyRoleIds.includes(id));
       if (companyRoleIds.length > 0) {
@@ -184,15 +185,15 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     }
   };
 
-  // Envía el correo de "olvidé mi contraseña" — funciona sin importar si el
-  // usuario ya confirmó su cuenta o no.
+  // EnvÃƒÂ­a el correo de "olvidÃƒÂ© mi contraseÃƒÂ±a" Ã¢â‚¬â€ funciona sin importar si el
+  // usuario ya confirmÃƒÂ³ su cuenta o no.
   const handleSendReset = async (user: CompanyUser) => {
     setBusy(user.id, true);
     try {
       const redirectTo = `${window.location.origin}/reset-password`;
       const { error } = await supabase.auth.resetPasswordForEmail(user.email, { redirectTo });
       if (error) throw error;
-      toast({ title: 'Enlace enviado', description: `Se envió un correo a ${user.email} para restablecer su contraseña.` });
+      toast({ title: 'Enlace enviado', description: `Se enviÃƒÂ³ un correo a ${user.email} para restablecer su contraseÃƒÂ±a.` });
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo enviar el correo.', variant: 'destructive' });
     } finally {
@@ -200,7 +201,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     }
   };
 
-  // Reenvía el correo de confirmación de cuenta (solo aplica si aún no confirmó).
+  // ReenvÃƒÂ­a el correo de confirmaciÃƒÂ³n de cuenta (solo aplica si aÃƒÂºn no confirmÃƒÂ³).
   const handleResendConfirm = async (user: CompanyUser) => {
     setBusy(user.id, true);
     try {
@@ -210,7 +211,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
         options: { emailRedirectTo: `${window.location.origin}/login` },
       });
       if (error) throw error;
-      toast({ title: 'Correo de confirmación enviado', description: `Se reenvió el enlace a ${user.email}.` });
+      toast({ title: 'Correo de confirmaciÃƒÂ³n enviado', description: `Se reenviÃƒÂ³ el enlace a ${user.email}.` });
     } catch (err: any) {
       toast({ title: 'Error al enviar', description: err?.message ?? 'No se pudo reenviar el correo.', variant: 'destructive' });
     } finally {
@@ -245,18 +246,18 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const handleAdd = async () => {
     if (!companyId) return;
     if (!addForm.name.trim() || !addForm.email.trim() || !addForm.password.trim() || !addForm.branchId) {
-      toast({ title: 'Faltan datos', description: 'Completa nombre, email, contraseña y sucursal.', variant: 'destructive' });
+      toast({ title: 'Faltan datos', description: 'Completa nombre, email, contraseÃƒÂ±a y sucursal.', variant: 'destructive' });
       return;
     }
     if (addForm.password.length < 6) {
-      toast({ title: 'Contraseña débil', description: 'Debe tener al menos 6 caracteres.', variant: 'destructive' });
+      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'Debe tener al menos 6 caracteres.', variant: 'destructive' });
       return;
     }
     setAddSaving(true);
     try {
-      // Alta vía Edge Function (service_role): mismo camino que /users. Evita
-      // el signUp público (rate-limit de correos) y confirma el correo de una
-      // vez, ya que el super admin verificó la identidad al crearlo.
+      // Alta vÃƒÂ­a Edge Function (service_role): mismo camino que /users. Evita
+      // el signUp pÃƒÂºblico (rate-limit de correos) y confirma el correo de una
+      // vez, ya que el super admin verificÃƒÂ³ la identidad al crearlo.
       const { data, error } = await supabase.functions.invoke('admin-user-actions', {
         body: {
           action: 'create',
@@ -272,7 +273,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       if (error) throw new Error((data as any)?.error ?? error.message);
       if ((data as any)?.error) throw new Error((data as any).error);
 
-      toast({ title: 'Usuario creado', description: `${addForm.name} añadido a ${companyName}.` });
+      toast({ title: 'Usuario creado', description: `${addForm.name} aÃƒÂ±adido a ${companyName}.` });
       setAddForm(emptyAddForm);
       setAddOpen(false);
       await load();
@@ -284,8 +285,8 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   };
 
   // Vincular por email un usuario que ya existe en otra empresa: inserta la
-  // fila en profile_companies. El usuario verá "Mis Empresas" al entrar y
-  // podrá cambiarse a esta empresa (sin tocar su empresa principal actual).
+  // fila en profile_companies. El usuario verÃƒÂ¡ "Mis Empresas" al entrar y
+  // podrÃƒÂ¡ cambiarse a esta empresa (sin tocar su empresa principal actual).
   const handleLink = async () => {
     if (!companyId) return;
     const email = linkEmail.trim().toLowerCase();
@@ -301,7 +302,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
         .ilike('email', email)
         .maybeSingle();
       if (findErr) throw findErr;
-      if (!prof) throw new Error('No existe ningún usuario con ese correo.');
+      if (!prof) throw new Error('No existe ningÃƒÂºn usuario con ese correo.');
       if (prof.is_super_admin) throw new Error('Un super admin ya tiene acceso a todas las empresas.');
       if (prof.company_id === companyId) throw new Error('Ese usuario ya pertenece a esta empresa.');
 
@@ -373,13 +374,13 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                   disabled={linkSaving}
                 />
                 <p className="text-xs text-muted-foreground">
-                  El usuario debe existir en otra empresa. Quedará vinculado a {companyName} y al iniciar sesión verá "Mis Empresas" para elegir a cuál entrar.
+                  El usuario debe existir en otra empresa. QuedarÃƒÂ¡ vinculado a {companyName} y al iniciar sesiÃƒÂ³n verÃƒÂ¡ "Mis Empresas" para elegir a cuÃƒÂ¡l entrar.
                 </p>
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={() => { setLinkOpen(false); setLinkEmail(''); }} disabled={linkSaving}>Cancelar</Button>
                 <Button size="sm" onClick={handleLink} disabled={linkSaving}>
-                  {linkSaving ? 'Vinculando…' : 'Vincular'}
+                  {linkSaving ? 'VinculandoÃ¢â‚¬Â¦' : 'Vincular'}
                 </Button>
               </div>
             </div>
@@ -396,8 +397,8 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                 <Input id="addEmail" type="email" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor="addPassword">Contraseña</Label>
-                <Input id="addPassword" type="password" placeholder="Mínimo 6 caracteres" value={addForm.password} onChange={(e) => setAddForm({ ...addForm, password: e.target.value })} />
+                <Label htmlFor="addPassword">ContraseÃƒÂ±a</Label>
+                <PasswordInput id="addPassword" placeholder="MÃƒÂ­nimo 6 caracteres" value={addForm.password} onChange={(e) => setAddForm({ ...addForm, password: e.target.value })} />
               </div>
               <div className="grid gap-1.5">
                 <Label>Rol</Label>
@@ -421,11 +422,11 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
               <div className="sm:col-span-2 flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={() => { setAddOpen(false); setAddForm(emptyAddForm); }} disabled={addSaving}>Cancelar</Button>
                 <Button size="sm" onClick={handleAdd} disabled={addSaving || branches.length === 0}>
-                  {addSaving ? 'Creando…' : 'Crear usuario'}
+                  {addSaving ? 'CreandoÃ¢â‚¬Â¦' : 'Crear usuario'}
                 </Button>
               </div>
               {branches.length === 0 && (
-                <p className="sm:col-span-2 text-xs text-muted-foreground">Esta empresa no tiene sucursales todavía. Crea una primero.</p>
+                <p className="sm:col-span-2 text-xs text-muted-foreground">Esta empresa no tiene sucursales todavÃƒÂ­a. Crea una primero.</p>
               )}
             </div>
           )}
@@ -443,9 +444,9 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
               </TableHeader>
               <TableBody>
                 {loading ? (
-                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Cargando…</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">CargandoÃ¢â‚¬Â¦</TableCell></TableRow>
                 ) : users.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Sin usuarios todavía.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Sin usuarios todavÃƒÂ­a.</TableCell></TableRow>
                 ) : (
                   users.map((u) => (
                     <TableRow key={u.id}>
@@ -476,7 +477,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                       </TableCell>
                       <TableCell>
                         {u.isSuperAdmin ? (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-xs text-muted-foreground">Ã¢â‚¬â€</span>
                         ) : (
                           <Popover>
                             <PopoverTrigger asChild>
@@ -488,7 +489,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                             <PopoverContent className="w-56" align="start">
                               {roles.length === 0 ? (
                                 <p className="text-xs text-muted-foreground">
-                                  Esta empresa no tiene roles personalizados. Créalos desde "Gestionar roles".
+                                  Esta empresa no tiene roles personalizados. CrÃƒÂ©alos desde "Gestionar roles".
                                 </p>
                               ) : (
                                 <div className="flex flex-col gap-2">
@@ -514,7 +515,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                         <DropdownMenu modal={false}>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8" disabled={rowBusy[u.id]}>
-                              <span className="sr-only">Abrir menú</span>
+                              <span className="sr-only">Abrir menÃƒÂº</span>
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
@@ -526,7 +527,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                             {!u.emailConfirmedAt && (
                               <DropdownMenuItem onSelect={() => setTimeout(() => handleResendConfirm(u), 0)}>
                                 <Mail className="mr-2 h-4 w-4 text-amber-500" />
-                                <span className="text-amber-500 font-medium">Reenviar confirmación</span>
+                                <span className="text-amber-500 font-medium">Reenviar confirmaciÃƒÂ³n</span>
                               </DropdownMenuItem>
                             )}
                             <DropdownMenuSeparator />
@@ -559,7 +560,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                   <div key={lu.id} className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
                       <div className="text-sm font-medium truncate">{lu.name}</div>
-                      <div className="text-xs text-muted-foreground truncate">{lu.email} · Principal: {lu.primaryCompanyName}</div>
+                      <div className="text-xs text-muted-foreground truncate">{lu.email} Ã‚Â· Principal: {lu.primaryCompanyName}</div>
                     </div>
                     <Button
                       variant="ghost" size="sm" className="h-8 text-destructive hover:text-destructive shrink-0"
@@ -579,9 +580,9 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       <AlertDialog open={deleteTarget !== null} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar a {deleteTarget?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>Ã‚Â¿Eliminar a {deleteTarget?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Se borrará su cuenta por completo (perfil y acceso). Esta acción no se puede deshacer.
+              Se borrarÃƒÂ¡ su cuenta por completo (perfil y acceso). Esta acciÃƒÂ³n no se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

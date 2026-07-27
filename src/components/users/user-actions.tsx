@@ -26,6 +26,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useUsers } from '@/context/user-provider';
 import { usePermission } from '@/hooks/use-permission';
 import { supabase } from '@/lib/supabase/client';
+import { PasswordInput } from '@/components/ui/password-input';
 
 interface UserActionsProps {
   user: User;
@@ -45,34 +46,34 @@ export function UserActions({ user }: UserActionsProps) {
 
   const handleSetPassword = async () => {
     if (newPwd.length < 8) {
-      toast({ title: 'Contraseña débil', description: 'La contraseña debe tener al menos 8 caracteres.', variant: 'destructive' });
+      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe tener al menos 8 caracteres.', variant: 'destructive' });
       return;
     }
     if (!/[A-Z]/.test(newPwd)) {
-      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra mayúscula.', variant: 'destructive' });
+      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos una letra mayÃƒÂºscula.', variant: 'destructive' });
       return;
     }
     if (!/[a-z]/.test(newPwd)) {
-      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra minúscula.', variant: 'destructive' });
+      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos una letra minÃƒÂºscula.', variant: 'destructive' });
       return;
     }
     if (!/\d/.test(newPwd)) {
-      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un número.', variant: 'destructive' });
+      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos un nÃƒÂºmero.', variant: 'destructive' });
       return;
     }
     if (!/[@$!%*?&._\-\/#]/.test(newPwd)) {
-      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
+      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos un carÃƒÂ¡cter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
       return;
     }
     if (newPwd !== confirmPwd) {
-      toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas ingresadas no son iguales.', variant: 'destructive' });
+      toast({ title: 'ContraseÃƒÂ±as no coinciden', description: 'Las contraseÃƒÂ±as ingresadas no son iguales.', variant: 'destructive' });
       return;
     }
 
     setWorking(true);
     try {
       await setPassword(user.id, newPwd);
-      toast({ title: 'Contraseña actualizada', description: `Se fijó una nueva contraseña para ${user.name}.` });
+      toast({ title: 'ContraseÃƒÂ±a actualizada', description: `Se fijÃƒÂ³ una nueva contraseÃƒÂ±a para ${user.name}.` });
       setPwdOpen(false);
       setNewPwd('');
       setConfirmPwd('');
@@ -88,7 +89,7 @@ export function UserActions({ user }: UserActionsProps) {
       await sendPasswordReset(user.email);
       toast({
         title: 'Enlace enviado',
-        description: `Se envió un correo a ${user.email} para restablecer su contraseña.`,
+        description: `Se enviÃƒÂ³ un correo a ${user.email} para restablecer su contraseÃƒÂ±a.`,
       });
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo enviar el correo.', variant: 'destructive' });
@@ -107,13 +108,13 @@ export function UserActions({ user }: UserActionsProps) {
       });
       if (error) throw error;
       toast({
-        title: 'Correo de confirmación enviado',
-        description: `Se ha reenviado el enlace de confirmación a ${user.email}.`,
+        title: 'Correo de confirmaciÃƒÂ³n enviado',
+        description: `Se ha reenviado el enlace de confirmaciÃƒÂ³n a ${user.email}.`,
       });
     } catch (err: any) {
       toast({
         title: 'Error al enviar',
-        description: err?.message ?? 'No se pudo reenviar el correo de confirmación.',
+        description: err?.message ?? 'No se pudo reenviar el correo de confirmaciÃƒÂ³n.',
         variant: 'destructive',
       });
     } finally {
@@ -139,7 +140,7 @@ export function UserActions({ user }: UserActionsProps) {
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="h-8 w-8 p-0">
-            <span className="sr-only">Abrir menú</span>
+            <span className="sr-only">Abrir menÃƒÂº</span>
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
@@ -155,7 +156,7 @@ export function UserActions({ user }: UserActionsProps) {
           {canEdit && (
             <DropdownMenuItem onSelect={() => setTimeout(() => setPwdOpen(true), 0)}>
               <KeyRound className="mr-2 h-4 w-4" />
-              <span>Fijar contraseña</span>
+              <span>Fijar contraseÃƒÂ±a</span>
             </DropdownMenuItem>
           )}
           {canEdit && (
@@ -167,7 +168,7 @@ export function UserActions({ user }: UserActionsProps) {
           {canEdit && !user.emailConfirmedAt && (
             <DropdownMenuItem onSelect={() => setTimeout(handleResendConfirm, 0)} disabled={working}>
               <Mail className="mr-2 h-4 w-4 text-amber-500" />
-              <span className="text-amber-500 font-medium">Reenviar confirmación</span>
+              <span className="text-amber-500 font-medium">Reenviar confirmaciÃƒÂ³n</span>
             </DropdownMenuItem>
           )}
           {canDelete && <DropdownMenuSeparator />}
@@ -188,38 +189,34 @@ export function UserActions({ user }: UserActionsProps) {
       <Dialog open={pwdOpen} onOpenChange={(o) => { setPwdOpen(o); if (!o) { setNewPwd(''); setConfirmPwd(''); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Fijar contraseña</DialogTitle>
+            <DialogTitle>Fijar contraseÃƒÂ±a</DialogTitle>
             <DialogDescription>
-              Escribe la nueva contraseña para {user.name}. El usuario podrá entrar con ella de inmediato.
+              Escribe la nueva contraseÃƒÂ±a para {user.name}. El usuario podrÃƒÂ¡ entrar con ella de inmediato.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label htmlFor="newPwd">Nueva contraseña</Label>
-              <Input
-                id="newPwd"
-                type="password"
-                value={newPwd}
+              <Label htmlFor="newPwd">Nueva contraseÃƒÂ±a</Label>
+              <PasswordInput
+                id="newPwd" value={newPwd}
                 onChange={(e) => setNewPwd(e.target.value)}
-                placeholder="Mínimo 8 caracteres, mayúscula, especial"
+                placeholder="MÃƒÂ­nimo 8 caracteres, mayÃƒÂºscula, especial"
                 autoComplete="new-password"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="confirmPwd">Confirmar contraseña</Label>
-              <Input
-                id="confirmPwd"
-                type="password"
-                value={confirmPwd}
+              <Label htmlFor="confirmPwd">Confirmar contraseÃƒÂ±a</Label>
+              <PasswordInput
+                id="confirmPwd" value={confirmPwd}
                 onChange={(e) => setConfirmPwd(e.target.value)}
-                placeholder="Repite la contraseña"
+                placeholder="Repite la contraseÃƒÂ±a"
                 autoComplete="new-password"
               />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPwdOpen(false)} disabled={working}>Cancelar</Button>
-            <Button onClick={handleSetPassword} disabled={working}>{working ? 'Guardando…' : 'Guardar'}</Button>
+            <Button onClick={handleSetPassword} disabled={working}>{working ? 'GuardandoÃ¢â‚¬Â¦' : 'Guardar'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -227,9 +224,9 @@ export function UserActions({ user }: UserActionsProps) {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar a {user.name}?</AlertDialogTitle>
+            <AlertDialogTitle>Ã‚Â¿Eliminar a {user.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Se eliminará su cuenta por completo (perfil y acceso). Esta acción no se puede deshacer.
+              Se eliminarÃƒÂ¡ su cuenta por completo (perfil y acceso). Esta acciÃƒÂ³n no se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -239,7 +236,7 @@ export function UserActions({ user }: UserActionsProps) {
               disabled={working}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {working ? 'Eliminando…' : 'Eliminar'}
+              {working ? 'EliminandoÃ¢â‚¬Â¦' : 'Eliminar'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
