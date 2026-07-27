@@ -25,7 +25,9 @@ import { useSales } from '@/context/sales-provider';
 import { ExportButton } from '@/components/reports/export-button';
 
 export default function DateRangeReportPage() {
-  const { sales: allSales } = useSales();
+  const { sales: allSalesRaw } = useSales();
+  // Las ventas anuladas no cuentan como ingreso.
+  const allSales = React.useMemo(() => allSalesRaw.filter((s) => !s.cancelledAt), [allSalesRaw]);
   const [date, setDate] = React.useState<DateRange | undefined>({
     from: new Date(),
     to: new Date(),

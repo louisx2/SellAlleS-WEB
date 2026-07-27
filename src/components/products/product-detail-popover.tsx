@@ -7,6 +7,7 @@ import { useCategories } from '@/context/category-provider';
 import { useLocations } from '@/context/location-provider';
 import { useSuppliers } from '@/context/supplier-provider';
 import { cn, formatCurrency } from '@/lib/utils';
+import { formatQuantity } from '@/lib/units';
 import type { Product } from '@/lib/types';
 
 interface ProductDetailButtonProps {
@@ -73,7 +74,7 @@ export function ProductDetailButton({ product, className }: ProductDetailButtonP
             )}
             <div className="flex items-center gap-1.5">
               <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-              <span>Stock disponible: <span className="font-medium">{product.stock}</span></span>
+              <span>Stock disponible: <span className="font-medium">{formatQuantity(product.stock, product.unit)}</span></span>
             </div>
             {hasWholesale && (
               <div className="flex items-start gap-1.5">
@@ -81,7 +82,7 @@ export function ProductDetailButton({ product, className }: ProductDetailButtonP
                 <span>
                   Precio por mayor: <span className="font-medium">{formatCurrency(product.wholesalePrice!)}</span>
                   {product.wholesaleMinQuantity != null && product.wholesaleMinQuantity > 0 && (
-                    <> <span className="text-muted-foreground">(desde {product.wholesaleMinQuantity} unidades)</span></>
+                    <> <span className="text-muted-foreground">(desde {formatQuantity(product.wholesaleMinQuantity, product.unit)})</span></>
                   )}
                 </span>
               </div>

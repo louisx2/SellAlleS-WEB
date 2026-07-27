@@ -3,6 +3,7 @@
 import type { Sale } from '@/lib/types';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
+import { formatQtyCompact } from '@/lib/units';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
@@ -15,6 +16,8 @@ interface ReceiptProps {
 const ncfTypeText = {
     consumer: 'Consumidor Final',
     fiscal: 'Crédito Fiscal',
+    gubernamental: 'Gubernamental',
+    regimen_especial: 'Régimen Especial',
 }
 
 const paymentMethodText = {
@@ -34,15 +37,15 @@ export function ReceiptHeader({ sale }: ReceiptProps) {
     <div className="text-left space-y-1">
       {profile.ticketLogoUrl && (
         <div className="flex justify-center pb-1">
-          <img src={profile.ticketLogoUrl} alt="" style={{ maxHeight: 60, maxWidth: '80%', objectFit: 'contain' }} />
+          <img src={profile.ticketLogoUrl} alt="" style={{ maxHeight: 85, maxWidth: '80%', objectFit: 'contain' }} />
         </div>
       )}
       <h3 className="text-lg font-semibold text-center">{profile.name}</h3>
       {profile.secondaryName && <p className="text-sm font-medium text-center">{profile.secondaryName}</p>}
        <div className="text-xs text-muted-foreground text-center">
-        <p>{profile.address}</p>
-        <p>RNC: {profile.rnc}</p>
-        <p>Tel: {profile.phone}</p>
+        {profile.address && <p>{profile.address}</p>}
+        {profile.rnc && <p>RNC: {profile.rnc}</p>}
+        {profile.phone && <p>Tel: {profile.phone}</p>}
       </div>
       <Separator className="my-2" />
       <div className="text-sm pt-1">
@@ -54,7 +57,7 @@ export function ReceiptHeader({ sale }: ReceiptProps) {
       </div>
        <Separator className="my-2" />
        <div className="text-left pt-1 text-xs">
-          <p className="font-semibold uppercase">CLIENTE: {sale.customer?.name ?? 'Cliente Genérico'}</p>
+          <p className="font-semibold uppercase">CLIENTE: {sale.customer?.name ?? 'Consumidor Final'}</p>
           {sale.customer?.rnc && <p><span className="font-semibold uppercase">RNC:</span> {sale.customer.rnc}</p>}
        </div>
        <Separator className="my-2" />
@@ -86,7 +89,7 @@ export function ReceiptItems({ sale }: ReceiptProps) {
                 <div key={item.cartItemId}>
                   <p>{item.product.name}</p>
                   <div className="flex justify-between pl-2">
-                    <span>{item.quantity} x {formatCurrency(price)}</span>
+                    <span>{formatQtyCompact(item.quantity, item.product.unit)} x {formatCurrency(price)}</span>
                     <span>{formatCurrency(itemSubtotal)}</span>
                   </div>
                    {hasDiscount && (
@@ -109,7 +112,9 @@ export function ReceiptItems({ sale }: ReceiptProps) {
 }
 
 export function ReceiptTotals({ sale }: ReceiptProps) {
-  const totalItems = sale.items.reduce((acc, item) => acc + item.quantity, 0);
+  // Renglones: sumar cantidades no cuenta artículos si se mezclan libras con
+  // unidades ("Artículos: 4.7" no le dice nada al cliente).
+  const totalLines = sale.items.length;
   const totalDiscount = sale.items.reduce((acc, item) => {
     const originalPrice = item.product.price;
     if (item.customPrice !== undefined && item.customPrice < originalPrice) {
@@ -131,7 +136,7 @@ export function ReceiptTotals({ sale }: ReceiptProps) {
       <div className="space-y-0.5 text-xs">
           <div className="flex justify-between">
               <span className="uppercase font-medium">Total de Artículos:</span>
-              <span>{totalItems}</span>
+              <span>{totalLines}</span>
           </div>
           <div className="flex justify-between">
               <span className="uppercase">Subtotal:</span>

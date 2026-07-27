@@ -50,6 +50,36 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive'> = 
   active: 'default', trial: 'secondary', suspended: 'destructive',
 };
 
+const getPlanBadge = (name: string) => {
+  if (!name || name === '—') return <span className="text-muted-foreground text-sm">—</span>;
+  
+  let classes = 'bg-muted text-muted-foreground border-border';
+  
+  switch (name.toLowerCase()) {
+    case 'prueba':
+      classes = 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20';
+      break;
+    case 'gratis':
+      classes = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20';
+      break;
+    case 'pro':
+      classes = 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20';
+      break;
+    case 'empresarial':
+      classes = 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20';
+      break;
+    case 'a medida':
+      classes = 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border-cyan-500/20';
+      break;
+  }
+
+  return (
+    <Badge variant="outline" className={`${classes} font-semibold capitalize px-2 py-0.5 text-xs`}>
+      {name}
+    </Badge>
+  );
+};
+
 export function CompaniesDataTable({
   companies,
   loading,
@@ -314,7 +344,7 @@ export function CompaniesDataTable({
                        )}
                     </div>
                   </TableCell>
-                  <TableCell className="align-top py-4 text-sm">{getPlanName(c.id)}</TableCell>
+                  <TableCell className="align-top py-4 text-sm">{getPlanBadge(getPlanName(c.id))}</TableCell>
                   <TableCell className="text-right align-top py-4">
                     <div className="flex justify-end gap-2">
                       <Button variant="default" size="sm" className="h-8" onClick={() => onEnterCompany(c)}>

@@ -92,7 +92,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       supabase.from('branches').select('id, name').eq('company_id', companyId).order('name'),
       supabase.from('roles').select('id, name').eq('company_id', companyId).eq('is_system', false).order('name'),
       // Usuarios con acceso a esta empresa cuya empresa principal es OTRA.
-      supabase.from('profile_companies').select('profiles(id, name, email, company_id, companies(name))').eq('company_id', companyId),
+      supabase.from('profile_companies').select('profiles(id, name, email, company_id, companies!profiles_company_id_fkey(name))').eq('company_id', companyId),
     ]);
     setUsers((profs ?? []).map((p: any) => ({
       id: p.id, name: p.name ?? 'Usuario', email: p.email ?? '',
@@ -331,8 +331,8 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
         .eq('profile_id', lu.id)
         .eq('company_id', companyId);
       if (error) throw error;
-      setLinkedUsers((prev) => prev.filter((u) => u.id !== lu.id));
       toast({ title: 'Acceso retirado', description: `${lu.name} ya no puede entrar a ${companyName}.` });
+      await load();
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo desvincular.', variant: 'destructive' });
     } finally {

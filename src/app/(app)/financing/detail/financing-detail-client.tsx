@@ -112,7 +112,7 @@ export default function FinancingDetailClient() {
       <Card>
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-3">
-            {sale.customer?.name ?? 'Cliente Genérico'}
+            {sale.customer?.name ?? 'Consumidor Final'}
             {status.pendingBalance <= 0 ? (
               <Badge className="bg-green-600">Pagado</Badge>
             ) : status.isOverdue ? (

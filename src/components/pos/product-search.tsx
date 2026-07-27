@@ -25,13 +25,15 @@ export function ProductSearch() {
   const prevSaleCompletionCount = useRef(saleCompletionCount);
 
   const filteredProducts = useMemo(() => {
+    // Los productos sin inventario (platos, servicios) siempre están a la venta.
+    const productsInStock = allProducts.filter(p => !p.tracksStock || p.stock > 0);
     if (searchMode === 'code' || !searchTerm) {
       // When searching by code, we don't filter the grid. We just add the product.
       // When search is empty, show all products.
-      return allProducts;
+      return productsInStock;
     }
     const term = searchTerm.toLowerCase();
-    return allProducts.filter(product =>
+    return productsInStock.filter(product =>
       product.name.toLowerCase().includes(term)
     );
   }, [searchTerm, allProducts, searchMode]);

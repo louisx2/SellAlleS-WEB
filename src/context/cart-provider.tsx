@@ -3,6 +3,7 @@
 import { createContext, useEffect, ReactNode, useContext } from 'react';
 import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart, Coupon } from '@/lib/types';
 import { ITBIS_RATE, GENERIC_CUSTOMER, round2 } from '@/lib/utils';
+import { roundQty, normalizeQty, formatQuantity, unitAllowsDecimals } from '@/lib/units';
 import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
 import { create, useStore } from 'zustand';
@@ -48,7 +49,9 @@ export const getEffectiveUnitPrice = (item: CartItem, customer?: Customer): numb
     item.product.wholesalePrice !== null &&
     item.product.wholesaleMinQuantity !== undefined &&
     item.product.wholesaleMinQuantity !== null &&
-    item.quantity >= item.product.wholesaleMinQuantity
+    // roundQty: un carrito guardado antes del catálogo de unidades puede traer
+    // residuo flotante y 24.999999999 no debe perder el precio por mayor.
+    roundQty(item.quantity) >= item.product.wholesaleMinQuantity
   ) {
     basePrice = item.product.wholesalePrice;
   }
@@ -95,13 +98,20 @@ const cartStore = create<CartStore>()(
               .filter(item => item.product.id === product.id)
               .reduce((total, item) => total + item.quantity, 0);
 
-            if (quantityInCart >= product.stock) {
+            // Los productos sin inventario (platos preparados, servicios) se
+            // venden siempre: no hay existencias que agotar.
+            const remaining = product.tracksStock
+              ? roundQty(product.stock - quantityInCart)
+              : Number.POSITIVE_INFINITY;
+            if (remaining <= 0) {
               set({ toast: product.stock <= 0
                 ? `${product.name} no tiene existencias disponibles.`
-                : `Solo hay ${product.stock} unidad${product.stock === 1 ? '' : 'es'} disponible${product.stock === 1 ? '' : 's'} de ${product.name}.` });
+                : `Solo hay ${formatQuantity(product.stock, product.unit)} de ${product.name}.` });
               setTimeout(() => set({ toast: null }), 3000);
               return cart;
             }
+            // En unidades contables el stock es entero, así que esto es siempre 1.
+            const toAdd = normalizeQty(Math.min(1, remaining), product.unit);
             // Find an item with the same product ID and no custom price
             const existingItem = cart.items.find(item => item.product.id === product.id && item.customPrice === undefined);
             if (existingItem) {
@@ -109,7 +119,7 @@ const cartStore = create<CartStore>()(
               return {
                 ...cart,
                 items: cart.items.map(item =>
-                  item.cartItemId === existingItem.cartItemId ? { ...item, quantity: item.quantity + 1 } : item
+                  item.cartItemId === existingItem.cartItemId ? { ...item, quantity: roundQty(item.quantity + toAdd) } : item
                 ),
               };
             }
@@ -117,7 +127,7 @@ const cartStore = create<CartStore>()(
             const newCartItem: CartItem = {
                 cartItemId: `item-${Date.now()}-${Math.random()}`,
                 product,
-                quantity: 1,
+                quantity: toAdd,
             };
             return { ...cart, items: [...cart.items, newCartItem] };
           }
@@ -134,27 +144,35 @@ const cartStore = create<CartStore>()(
         ),
       })),
 
+      // Normaliza aquí, no en la UI: así cualquier origen de la cantidad (input
+      // del carrito, botones ±, editor de precio) queda cubierto por igual.
       updateQuantity: (cartItemId, quantity) => set(state => {
         const carts = state.carts.map(cart => {
           if (cart.id === state.activeCartId) {
-            if (quantity <= 0) {
+            const itemToUpdate = cart.items.find(item => item.cartItemId === cartItemId);
+            if (!itemToUpdate) return cart;
+            // La unidad manda: contables se redondean a entero, medibles a 3
+            // decimales (la escala real de products.stock en la base).
+            const qty = normalizeQty(quantity, itemToUpdate.product.unit);
+            if (!Number.isFinite(qty) || qty <= 0) {
               // Remove item if quantity is zero or less
               return { ...cart, items: cart.items.filter(item => item.cartItemId !== cartItemId) };
             }
-            const itemToUpdate = cart.items.find(item => item.cartItemId === cartItemId);
-            if (!itemToUpdate) return cart;
             const quantityInOtherLines = cart.items
               .filter(item => item.product.id === itemToUpdate.product.id && item.cartItemId !== cartItemId)
               .reduce((total, item) => total + item.quantity, 0);
-            if (quantity + quantityInOtherLines > itemToUpdate.product.stock) {
-              set({ toast: `Solo hay ${itemToUpdate.product.stock} unidad${itemToUpdate.product.stock === 1 ? '' : 'es'} disponible${itemToUpdate.product.stock === 1 ? '' : 's'} de ${itemToUpdate.product.name}.` });
+            // roundQty sobre la SUMA: sin él, 1.7 + 0.3 da 2.0000000000000004 y
+            // dispararía un falso "stock insuficiente" contra un stock de 2.
+            if (itemToUpdate.product.tracksStock
+                && roundQty(qty + quantityInOtherLines) > itemToUpdate.product.stock) {
+              set({ toast: `Solo hay ${formatQuantity(itemToUpdate.product.stock, itemToUpdate.product.unit)} de ${itemToUpdate.product.name}.` });
               setTimeout(() => set({ toast: null }), 3000);
               return cart;
             }
             return {
               ...cart,
               items: cart.items.map(item =>
-                item.cartItemId === cartItemId ? { ...item, quantity } : item
+                item.cartItemId === cartItemId ? { ...item, quantity: qty } : item
               ),
             };
           }
@@ -169,8 +187,16 @@ const cartStore = create<CartStore>()(
                 const itemToChange = cart.items.find(item => item.cartItemId === cartItemId);
                 if (!itemToChange) return cart;
 
-                // If quantity is 1 or price is being reset, just update the item
-                if (itemToChange.quantity === 1 || price === undefined) {
+                // Partir la línea (1 al precio nuevo + el resto al viejo) solo
+                // tiene sentido con unidades contables y cantidad entera > 1.
+                // En medibles (1.7 lb) el precio se aplica a toda la línea: si
+                // no, quedaría una línea de 1 y otra de 0.7000000000000002, y
+                // con 0.5 lb se partía en 1 y -0.5.
+                const canSplit = !unitAllowsDecimals(itemToChange.product.unit)
+                  && Number.isInteger(itemToChange.quantity)
+                  && itemToChange.quantity > 1;
+
+                if (!canSplit || price === undefined) {
                     return {
                         ...cart,
                         items: cart.items.map(item =>
@@ -193,7 +219,7 @@ const cartStore = create<CartStore>()(
                 // The remaining items with original price and adjusted quantity
                 const remainingItem: CartItem = {
                     ...itemToChange,
-                    quantity: itemToChange.quantity - 1,
+                    quantity: roundQty(itemToChange.quantity - 1),
                 };
                 
                 newItems.push(remainingItem, discountedItem);
@@ -381,7 +407,10 @@ export const useCart = () => {
   const subtotal = itbisIncluded ? round2(grossTotal - itbisAmount) : grossTotal;
   const total = itbisIncluded ? grossTotal : grossTotal + itbisAmount;
 
-  const totalItems = activeCart?.items.reduce((acc, item) => acc + item.quantity, 0) || 0;
+  const totalItems = roundQty(activeCart?.items.reduce((acc, item) => acc + item.quantity, 0) || 0);
+  // Cantidad de renglones. Sumar cantidades no sirve para contar artículos
+  // cuando el carrito mezcla libras con unidades (y "4.7" no cabe en el badge).
+  const totalLines = activeCart?.items.length ?? 0;
 
   const totalDiscount = activeCart?.items.reduce((acc, item) => {
     const price = getEffectiveUnitPrice(item, selectedCustomer);
@@ -408,10 +437,10 @@ export const useCart = () => {
     const { paymentMethod, branchId, amountPaid, paymentReference, downPaymentMethod, downPaymentReference, financingDetails, notes } = options;
 
     let paymentStatus: Sale['paymentStatus'] = 'paid';
-    if (paymentMethod === 'credit') {
-        paymentStatus = 'credit';
-    } else if (paymentMethod === 'financing') {
+    if (paymentMethod === 'financing' || financingDetails) {
         paymentStatus = 'in_financing';
+    } else if (paymentMethod === 'credit') {
+        paymentStatus = 'credit';
     } else if (amountPaid < total) {
         paymentStatus = 'credit';
     }
@@ -467,6 +496,7 @@ export const useCart = () => {
     itbisIncluded,
     total,
     totalItems,
+    totalLines,
     totalDiscount,
     createSale,
     getGenericCustomer,

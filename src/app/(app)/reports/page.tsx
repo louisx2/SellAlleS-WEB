@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatCurrency } from '@/lib/utils';
+import { formatQty } from '@/lib/units';
 import { 
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Legend 
 } from 'recharts';
@@ -45,12 +46,13 @@ export default function ReportsDashboardPage() {
   const hasFinancing = isModuleEnabled('financing');
   const hasPrestamos = isModuleEnabled('prestamos');
 
-  // --- Filtrado por Sucursal ---
+  // --- Filtrado por Sucursal (las ventas anuladas no cuentan como ingreso) ---
   const filteredSales = React.useMemo(() => {
+    const active = allSales.filter((s) => !s.cancelledAt);
     if (appUser?.role !== 'admin') {
-      return allSales.filter((s) => s.branchId === appUser?.branch);
+      return active.filter((s) => s.branchId === appUser?.branch);
     }
-    return selectedBranch === 'all' ? allSales : allSales.filter((s) => s.branchId === selectedBranch);
+    return selectedBranch === 'all' ? active : active.filter((s) => s.branchId === selectedBranch);
   }, [allSales, selectedBranch, appUser]);
 
   const filteredExpenses = React.useMemo(() => {
@@ -266,7 +268,7 @@ export default function ReportsDashboardPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Productos en Stock:</span>
-                <span className="font-bold">{stats.inventoryItems} unidades</span>
+                <span className="font-bold">{formatQty(stats.inventoryItems)} en existencias</span>
               </div>
               {hasPrestamos && (
                 <div className="flex justify-between">

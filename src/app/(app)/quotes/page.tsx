@@ -20,6 +20,7 @@ import { useQuotes } from '@/context/quotes-provider';
 import { useProducts } from '@/context/product-provider';
 import { openQuoteCart } from '@/context/cart-provider';
 import { formatCurrency } from '@/lib/utils';
+import { formatQtyCompact } from '@/lib/units';
 import type { Quote, QuoteStatus, CartItem } from '@/lib/types';
 import { ShoppingCart, Eye, FileText } from 'lucide-react';
 
@@ -202,7 +203,7 @@ export default function QuotesPage() {
                   const price = it.customPrice ?? it.product.price;
                   return (
                     <div key={it.cartItemId} className="flex justify-between gap-2">
-                      <span>{it.quantity} × {it.product.name}</span>
+                      <span>{formatQtyCompact(it.quantity, it.product.unit)} × {it.product.name}</span>
                       <span className="font-medium">{formatCurrency(price * it.quantity)}</span>
                     </div>
                   );

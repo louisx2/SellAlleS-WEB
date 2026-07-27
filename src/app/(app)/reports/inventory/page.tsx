@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
+import { formatQty, formatQuantity } from '@/lib/units';
 import { useProducts } from '@/context/product-provider';
 import { useCategories } from '@/context/category-provider';
 import { ExportButton } from '@/components/reports/export-button';
@@ -21,12 +22,15 @@ export default function InventoryReportPage() {
 
   const catName = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
 
+  // La valorización es de mercancía en almacén: los productos que no manejan
+  // existencias (platos preparados, servicios) quedan fuera del reporte.
   const rows = useMemo(() =>
-    products.map((p) => ({
+    products.filter((p) => p.tracksStock).map((p) => ({
       name: p.name,
       code: p.code,
       category: p.categoryId ? catName.get(p.categoryId) ?? '' : '',
       stock: p.stock,
+      unit: p.unit,
       cost: p.cost,
       price: p.price,
       costValue: p.cost * p.stock,
@@ -71,7 +75,7 @@ export default function InventoryReportPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(totals.costValue)}</div>
-            <p className="text-xs text-muted-foreground">{totals.units} unidades</p>
+            <p className="text-xs text-muted-foreground">{formatQty(totals.units)} en existencias (unidades mixtas)</p>
           </CardContent>
         </Card>
         <Card className="min-w-0">
@@ -126,7 +130,7 @@ export default function InventoryReportPage() {
                     <TableCell className="font-medium">{r.name}</TableCell>
                     <TableCell>{r.category || '—'}</TableCell>
                     <TableCell className="text-right">
-                      {r.stock}
+                      {formatQuantity(r.stock, r.unit)}
                       {r.lowStock && <Badge variant="destructive" className="ml-2 text-[10px] h-4 px-1">Bajo</Badge>}
                     </TableCell>
                     <TableCell className="text-right">{formatCurrency(r.costValue)}</TableCell>

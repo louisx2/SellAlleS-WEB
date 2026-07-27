@@ -80,7 +80,7 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
       email: formData.get('email') as string,
       rnc: rnc.trim(),
       address: formData.get('address') as string,
-      ncfType: (formData.get('ncfType') ?? 'consumer') as 'consumer' | 'fiscal',
+      ncfType: (formData.get('ncfType') ?? 'consumer') as import('@/lib/types').NcfType,
       birthdate: formData.get('birthdate') as string,
       notes: formData.get('notes') as string,
       creditBalance: customer?.creditBalance ?? 0, // Preserve existing balance
@@ -186,8 +186,10 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
                     <SelectValue placeholder="Selecciona un tipo" />
                     </SelectTrigger>
                     <SelectContent>
-                    <SelectItem value="consumer">Consumidor Final</SelectItem>
-                    <SelectItem value="fiscal">Crédito Fiscal</SelectItem>
+                    <SelectItem value="consumer">Consumidor Final (B02)</SelectItem>
+                    <SelectItem value="fiscal">Crédito Fiscal (B01)</SelectItem>
+                    <SelectItem value="gubernamental">Gubernamental (B15)</SelectItem>
+                    <SelectItem value="regimen_especial">Régimen Especial (B14)</SelectItem>
                     </SelectContent>
                 </Select>
             </div>

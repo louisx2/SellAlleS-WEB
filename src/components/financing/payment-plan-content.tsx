@@ -37,7 +37,7 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
     <div className="text-left space-y-1">
       {profile.ticketLogoUrl && (
         <div className="flex justify-center pb-1">
-          <img src={profile.ticketLogoUrl} alt="" style={{ maxHeight: 60, maxWidth: '80%', objectFit: 'contain' }} />
+          <img src={profile.ticketLogoUrl} alt="" style={{ maxHeight: 85, maxWidth: '80%', objectFit: 'contain' }} />
         </div>
       )}
       <h3 className="text-lg font-semibold text-center">{profile.name}</h3>
@@ -53,7 +53,7 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
         <p className="uppercase">Venta: {sale.id}</p>
         <p className="uppercase">Fecha: {new Date(sale.createdAt).toLocaleDateString('es-DO')}</p>
         <p className="uppercase">Sucursal: {sale.branchId || 'Principal'}</p>
-        <p className="font-semibold uppercase">Cliente: {sale.customer?.name ?? 'Cliente Genérico'}</p>
+        <p className="font-semibold uppercase">Cliente: {sale.customer?.name ?? 'Consumidor Final'}</p>
       </div>
       <Separator className="my-2" />
       <div className="text-xs space-y-1 py-1">

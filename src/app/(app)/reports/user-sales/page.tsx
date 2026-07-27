@@ -13,7 +13,9 @@ import { ExportButton } from '@/components/reports/export-button';
 
 
 export default function UserSalesReportPage() {
-  const { sales } = useSales();
+  const { sales: salesRaw } = useSales();
+  // Las ventas anuladas no cuentan como ingreso del vendedor.
+  const sales = useMemo(() => salesRaw.filter((s) => !s.cancelledAt), [salesRaw]);
   const { users } = useUsers();
 
   const salesByUser = useMemo(() => {

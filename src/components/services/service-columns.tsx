@@ -21,7 +21,7 @@ export const createServiceColumns = (onViewDetails: (service: Service) => void):
   {
     accessorKey: 'customer',
     header: 'Cliente',
-    cell: ({ row }) => row.original.customer?.name || 'Cliente Genérico',
+    cell: ({ row }) => row.original.customer?.name || 'Consumidor Final',
   },
   {
     accessorKey: 'serviceType',

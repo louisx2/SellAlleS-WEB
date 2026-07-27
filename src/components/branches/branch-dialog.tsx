@@ -24,14 +24,18 @@ import { Loader2, Upload } from 'lucide-react';
 
 interface BranchDialogProps {
   branch?: Branch;
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function BranchDialog({ branch, children }: BranchDialogProps) {
+export function BranchDialog({ branch, children, open: controlledOpen, onOpenChange }: BranchDialogProps) {
   const { toast } = useToast();
   const { addBranch, updateBranch } = useBranches();
   const isEditMode = !!branch;
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = onOpenChange || setInternalOpen;
 
   const [logoUrl, setLogoUrl] = useState(branch?.logoUrl || '');
   const [ticketLogoUrl, setTicketLogoUrl] = useState(branch?.ticketLogoUrl || '');
@@ -167,7 +171,7 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>{children}</DialogTrigger>
+      {children && <DialogTrigger asChild>{children}</DialogTrigger>}
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{isEditMode ? 'Editar Sucursal' : 'Añadir Sucursal'}</DialogTitle>
@@ -257,7 +261,7 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
                   Subir
                 </Button>
                 {logoUrl && (
-                  <img src={logoUrl} alt="Preview logo" className="h-8 w-8 object-contain border rounded bg-muted" />
+                  <img src={logoUrl} alt="Preview logo" className="w-24 h-16 object-contain border rounded bg-muted shadow-sm" />
                 )}
               </div>
             </div>
@@ -289,7 +293,7 @@ export function BranchDialog({ branch, children }: BranchDialogProps) {
                   Subir
                 </Button>
                 {ticketLogoUrl && (
-                  <img src={ticketLogoUrl} alt="Preview ticket" className="h-8 w-8 object-contain border rounded bg-muted filter grayscale" />
+                  <img src={ticketLogoUrl} alt="Preview ticket" className="w-24 h-16 object-contain border rounded bg-muted filter grayscale shadow-sm" />
                 )}
               </div>
             </div>

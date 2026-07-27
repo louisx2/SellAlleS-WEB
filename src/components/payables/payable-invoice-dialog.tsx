@@ -27,6 +27,7 @@ import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
+import { getUnit, unitAllowsDecimals } from '@/lib/units';
 import { EXPENSE_TYPES_606, ISR_RETENTION_TYPES_606, PAYMENT_FORMS_606, suggestPaymentForm606 } from '@/lib/dgii-606';
 import { ChevronsUpDown, Loader2, Plus, Trash2 } from 'lucide-react';
 
@@ -43,6 +44,7 @@ type ItemRow = {
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
+
 const num = (v: number | '') => (v === '' ? 0 : Number(v));
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -125,6 +127,12 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
     setPaymentForm(suggestPaymentForm606(condition === 'credit', method));
   }, [condition, method]);
 
+  // Unidad del producto ligado a la línea; las líneas libres no tienen.
+  const lineUnit = (item: ItemRow) =>
+    item.productId ? products.find((p) => p.id === item.productId)?.unit : undefined;
+  const lineAllowsDecimals = (item: ItemRow) =>
+    item.productId ? unitAllowsDecimals(lineUnit(item)) : true;
+
   const hasItems = items.length > 0;
   const itemsGoods = useMemo(() => round2(items.reduce((s, it) => s + num(it.quantity) * num(it.unitCost), 0)), [items]);
   const itemsItbis = useMemo(() => round2(items.reduce((s, it) => s + num(it.itbisAmount), 0)), [items]);
@@ -181,6 +189,14 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
       }
       if (num(it.quantity) <= 0) {
         toast({ title: 'Cantidad inválida', description: 'La cantidad de cada línea debe ser mayor que cero.', variant: 'destructive' });
+        return;
+      }
+      if (!lineAllowsDecimals(it) && !Number.isInteger(num(it.quantity))) {
+        toast({
+          title: 'Cantidad inválida',
+          description: `«${getUnit(lineUnit(it)).plural}» solo admite cantidades enteras.`,
+          variant: 'destructive',
+        });
         return;
       }
     }
@@ -366,9 +382,16 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
                       <Input value={item.description} onChange={(e) => setItem(index, { description: e.target.value })} />
                     </div>
                     <div className="col-span-4 sm:col-span-2 space-y-1">
-                      <Label className="text-xs text-muted-foreground">Cantidad</Label>
+                      <Label className="text-xs text-muted-foreground">
+                        Cantidad{lineUnit(item) ? ` (${getUnit(lineUnit(item)).short})` : ''}
+                      </Label>
+                      {/* El paso sigue la unidad del producto ligado: comprar
+                          2.55 cajas dejaría el inventario en cajas partidas. */}
                       <Input
-                        type="number" step="0.01" min="0" value={item.quantity}
+                        type="number"
+                        step={lineAllowsDecimals(item) ? '0.001' : '1'}
+                        min="0"
+                        value={item.quantity}
                         onChange={(e) => setItem(index, { quantity: e.target.value === '' ? '' : Number(e.target.value) })}
                       />
                     </div>

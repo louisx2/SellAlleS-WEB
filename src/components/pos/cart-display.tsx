@@ -31,10 +31,19 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { PriceEditor } from './price-editor';
+import { QuantityInput } from './quantity-input';
+import { formatQuantity, getUnit, roundQty } from '@/lib/units';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { Skeleton } from '../ui/skeleton';
+
+// "c/u" solo tiene sentido cuando se vende por pieza; en peso o medida el
+// precio es por libra, metro, galón…
+const perUnitLabel = (unit?: string | null) => {
+  const u = getUnit(unit);
+  return u.code === 'und' ? 'c/u' : `/ ${u.short}`;
+};
 
 function CartItemImage({ src, alt }: { src: string, alt: string }) {
     const [imageLoaded, setImageLoaded] = useState(false);
@@ -63,8 +72,8 @@ export function CartDisplay() {
     addCart, 
     removeCart, 
     toast, 
-    totalItems, 
-    clearCart, 
+    totalLines,
+    clearCart,
     subtotal,
     itbisAmount,
     itbisIncluded,
@@ -85,6 +94,9 @@ export function CartDisplay() {
   const { isModuleEnabled } = useModules();
 
   const activeCart = carts.find(cart => cart.id === activeCartId);
+  const hasStockError = activeCart?.items.some(
+    item => item.product.tracksStock && item.quantity > item.product.stock
+  ) || false;
   
   const handleSaleComplete = (sale: Sale) => {
     setCompletedSale(sale);
@@ -146,13 +158,13 @@ export function CartDisplay() {
                               <Tooltip>
                                   <TooltipTrigger asChild>
                                       <div>
-                                          <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" onClick={addCart} disabled={totalItems === 0}>
+                                          <Button size="icon" variant="outline" className="h-9 w-9 shrink-0" onClick={addCart} disabled={totalLines === 0}>
                                               <Plus className="h-4 w-4" />
                                               <span className="sr-only">Añadir nuevo carrito</span>
                                           </Button>
                                       </div>
                                   </TooltipTrigger>
-                                  {totalItems === 0 && (
+                                  {totalLines === 0 && (
                                       <TooltipContent>
                                           <p>Añade un producto para crear otro carrito.</p>
                                       </TooltipContent>
@@ -257,12 +269,21 @@ export function CartDisplay() {
                                   </div>
                                   <div className="flex-grow space-y-2">
                                     <p className="font-medium text-sm leading-tight">{item.product.name}</p>
-                                    <div className="flex items-center gap-2">
-                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.cartItemId, item.quantity - 1)}>
+                                    <div className="flex items-center gap-1.5">
+                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.cartItemId, roundQty(item.quantity - 1))}>
                                         <MinusCircle className="h-4 w-4" />
                                       </Button>
-                                      <span className="text-sm font-bold w-4 text-center">{item.quantity}</span>
-                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.cartItemId, item.quantity + 1)}>
+                                      <QuantityInput
+                                        value={item.quantity}
+                                        unit={item.product.unit}
+                                        onCommit={(qty) => updateQuantity(item.cartItemId, qty)}
+                                        className="h-7 w-16 px-1 text-sm font-bold"
+                                        aria-label={`Cantidad de ${item.product.name}`}
+                                      />
+                                      {getUnit(item.product.unit).code !== 'und' && (
+                                        <span className="text-xs text-muted-foreground">{getUnit(item.product.unit).short}</span>
+                                      )}
+                                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.cartItemId, roundQty(item.quantity + 1))}>
                                         <PlusCircle className="h-4 w-4" />
                                       </Button>
                                     </div>
@@ -270,12 +291,17 @@ export function CartDisplay() {
                                       {isDiscounted ? (
                                         <div className="block">
                                           <span className="text-xs text-muted-foreground line-through">{formatCurrency(item.product.price)}</span>
-                                          <span className="text-xs font-semibold block">{formatCurrency(currentPrice)} c/u</span>
+                                          <span className="text-xs font-semibold block">{formatCurrency(currentPrice)} {perUnitLabel(item.product.unit)}</span>
                                         </div>
                                       ) : (
-                                        <div className="text-xs font-semibold">{formatCurrency(currentPrice)} c/u</div>
+                                        <div className="text-xs font-semibold">{formatCurrency(currentPrice)} {perUnitLabel(item.product.unit)}</div>
                                       )}
                                       <p className="font-semibold text-base mt-1">{formatCurrency(currentPrice * item.quantity)}</p>
+                                      {item.product.tracksStock && roundQty(item.quantity) > item.product.stock && (
+                                        <p className="text-xs text-destructive font-semibold mt-1 animate-pulse">
+                                          ⚠️ Stock insuficiente (Disponibles: {formatQuantity(item.product.stock, item.product.unit)})
+                                        </p>
+                                      )}
                                     </div>
                                   </div>
                                   <div className="flex flex-col items-end">
@@ -317,7 +343,7 @@ export function CartDisplay() {
               </div>
             </div>
             <div className="flex w-full items-center gap-2">
-                <Button className="w-full" size="lg" onClick={() => setCheckoutOpen(true)}>
+                <Button className="w-full" size="lg" onClick={() => setCheckoutOpen(true)} disabled={hasStockError}>
                 Proceder al Pago
                 </Button>
                 {isModuleEnabled('quotes') && (

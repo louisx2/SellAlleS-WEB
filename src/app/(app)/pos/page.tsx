@@ -11,19 +11,21 @@ import { CardFooter } from '@/components/ui/card';
 import { useCart } from '@/context/cart-provider';
 
 function MobileCart() {
-  const { totalItems } = useCart();
+  // Renglones y no suma de cantidades: "4.7" no cabe en un badge de 24 px y no
+  // significa nada cuando el carrito mezcla libras con unidades.
+  const { totalLines } = useCart();
   return (
     <div className="lg:hidden fixed bottom-4 right-4 z-50">
         <Sheet>
             <SheetTrigger asChild>
                 <Button size="icon" className="h-16 w-16 rounded-full shadow-lg relative">
                     <ShoppingCart className="h-8 w-8" />
-                    {totalItems > 0 && (
-                        <Badge 
-                            variant="destructive" 
+                    {totalLines > 0 && (
+                        <Badge
+                            variant="destructive"
                             className="absolute -top-1 -right-1 rounded-full h-6 w-6 flex items-center justify-center text-sm"
                         >
-                            {totalItems}
+                            {totalLines}
                         </Badge>
                     )}
                 </Button>

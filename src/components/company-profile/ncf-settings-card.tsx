@@ -17,7 +17,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { Loader2, Plus } from 'lucide-react';
 
-type NcfTipo = 'consumer' | 'fiscal';
+type NcfTipo = 'consumer' | 'fiscal' | 'nota_credito' | 'gubernamental' | 'regimen_especial' | 'nota_debito';
 
 interface FiscalState {
   companyId: string;
@@ -39,8 +39,15 @@ interface NcfSequenceRow {
 const TIPO_LABEL: Record<NcfTipo, string> = {
   consumer: 'Consumidor Final (B02)',
   fiscal: 'Crédito Fiscal (B01)',
+  nota_credito: 'Nota de Crédito (B04)',
+  gubernamental: 'Gubernamental (B15)',
+  regimen_especial: 'Régimen Especial (B14)',
+  nota_debito: 'Nota de Débito (B03)',
 };
-const TIPO_PREFIX: Record<NcfTipo, string> = { consumer: 'B02', fiscal: 'B01' };
+const TIPO_PREFIX: Record<NcfTipo, string> = {
+  consumer: 'B02', fiscal: 'B01', nota_credito: 'B04',
+  gubernamental: 'B15', regimen_especial: 'B14', nota_debito: 'B03',
+};
 
 // Gestión fiscal de la empresa: formalización DGII, emisión de NCF y
 // secuencias autorizadas. El número lo asigna la base (trigger set_sale_ncf).
@@ -251,6 +258,7 @@ export function NcfSettingsCard() {
                     <SelectContent>
                       <SelectItem value="consumer">{TIPO_LABEL.consumer}</SelectItem>
                       <SelectItem value="fiscal">{TIPO_LABEL.fiscal}</SelectItem>
+                      <SelectItem value="nota_credito">{TIPO_LABEL.nota_credito}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

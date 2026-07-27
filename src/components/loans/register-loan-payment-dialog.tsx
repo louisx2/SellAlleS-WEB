@@ -42,6 +42,7 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
   const [saving, setSaving] = useState(false);
   const [receipt, setReceipt] = useState<PaymentReceiptData | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [selectedBank, setSelectedBank] = useState('Banreservas');
 
   const status = useMemo(() => calculateLoanStatus(loan, profile.loanLateFeeRate), [loan, profile.loanLateFeeRate]);
 
@@ -50,6 +51,7 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
       setAmount(status.paymentDue);
       setMethod(cashBlocked ? 'card' : 'cash');
       setReference('');
+      setSelectedBank('Banreservas');
       setNotes('');
     }
   }, [open, status.paymentDue, cashBlocked]);
@@ -80,7 +82,10 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
 
     setSaving(true);
     try {
-      const result = await payLoan(loan.id, paymentAmount, method, appUser?.activeBranchId, notes.trim() || undefined, reference.trim() || undefined);
+      const finalReference = method === 'transfer' && reference.trim()
+        ? `${selectedBank} - Ref: ${reference.trim()}`
+        : reference.trim();
+      const result = await payLoan(loan.id, paymentAmount, method, appUser?.activeBranchId, notes.trim() || undefined, finalReference || undefined);
       toast({
         title: 'Abono registrado',
         description: `Se registró un abono de ${formatCurrency(result.amount)} para ${loan.customer?.name ?? 'el cliente'}.`,
@@ -165,12 +170,36 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
             {cashBlocked && (
               <p className="text-xs text-amber-600 dark:text-amber-400">No hay caja abierta en esta sucursal: no puedes cobrar en efectivo.</p>
             )}
-            {(method === 'transfer' || method === 'card') && (
-              <div className="space-y-2">
-                <Label htmlFor="payment-reference">{method === 'transfer' ? 'Referencia de transferencia' : 'Referencia / aprobación'}</Label>
-                <Input id="payment-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === 'transfer' ? 'No. de transferencia' : 'No. de aprobación'} />
-              </div>
-            )}
+             {method === 'card' && (
+               <div className="space-y-2">
+                 <Label htmlFor="payment-reference">Referencia / aprobación</Label>
+                 <Input id="payment-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="No. de aprobación" />
+               </div>
+             )}
+             {method === 'transfer' && (
+               <div className="space-y-4">
+                 <div className="space-y-2">
+                   <Label htmlFor="bank">Banco</Label>
+                   <Select value={selectedBank} onValueChange={setSelectedBank}>
+                     <SelectTrigger id="bank"><SelectValue /></SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="Banreservas">Banreservas</SelectItem>
+                       <SelectItem value="Banco Popular">Banco Popular</SelectItem>
+                       <SelectItem value="BHD">BHD</SelectItem>
+                       <SelectItem value="Scotiabank">Scotiabank</SelectItem>
+                       <SelectItem value="APAP">Asociación Popular (APAP)</SelectItem>
+                       <SelectItem value="Banco Santa Cruz">Banco Santa Cruz</SelectItem>
+                       <SelectItem value="Banco Promerica">Banco Promerica</SelectItem>
+                       <SelectItem value="Otro">Otro / Internacional</SelectItem>
+                     </SelectContent>
+                   </Select>
+                 </div>
+                 <div className="space-y-2">
+                   <Label htmlFor="payment-reference">Referencia de transferencia</Label>
+                   <Input id="payment-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="No. de transferencia" />
+                 </div>
+               </div>
+             )}
             <div className="space-y-2">
               <Label htmlFor="payment-notes">Notas (Opcional)</Label>
               <Textarea id="payment-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ej: acuerdo de pago…" />

@@ -7,6 +7,17 @@ import { Sun, Moon } from 'lucide-react';
 export function AuthThemeToggle() {
   const { theme, setTheme } = useTheme();
 
+  const handleThemeChange = () => {
+    const newTheme = theme === 'dark' ? 'light' : 'dark';
+    if (!document.startViewTransition) {
+      setTheme(newTheme);
+      return;
+    }
+    document.startViewTransition(() => {
+      setTheme(newTheme);
+    });
+  };
+
   return (
     <Button
       type="button"
@@ -14,7 +25,7 @@ export function AuthThemeToggle() {
       size="icon"
       className="absolute right-4 top-4 z-10"
       aria-label="Cambiar tema"
-      onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      onClick={handleThemeChange}
     >
       {theme === 'dark' ? (
         <Sun className="h-5 w-5 text-orange-500" />

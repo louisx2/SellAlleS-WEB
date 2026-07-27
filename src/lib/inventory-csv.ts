@@ -1,5 +1,9 @@
 import Papa from 'papaparse';
 import type { Product, ProductCategory, ProductLocation, Supplier } from '@/lib/types';
+import {
+  DEFAULT_UNIT_CODE, formatQty, getUnit, normalizeQty, parseUnitInput,
+  unitAllowsDecimals, type UnitCode,
+} from '@/lib/units';
 
 // Encabezados de la plantilla (en español, en minúscula). El parseo es tolerante:
 // acepta mayúsculas/espacios y columnas en cualquier orden.
@@ -13,6 +17,8 @@ export const CSV_HEADERS = [
   'precio',
   'itbis',
   'existencias',
+  'unidad',
+  'maneja_inventario',
   'ubicacion',
   'precio_mayoreo',
   'cant_min_mayoreo',
@@ -30,6 +36,8 @@ export interface ParsedProductRow {
   price: number;
   itbis: boolean;
   stock: number;
+  unit: UnitCode;
+  tracksStock: boolean;
   locationName?: string;
   wholesalePrice?: number;
   wholesaleMinQuantity?: number;
@@ -92,6 +100,22 @@ export function parseProductsCsv(text: string): Promise<ParsedProductRow[]> {
           const wholesalePrice = parseNumber(g('precio_mayoreo'));
           const wholesaleMinQuantity = parseNumber(g('cant_min_mayoreo'));
 
+          // Unidad en blanco o no reconocida cae a la de siempre ('und'). Pero
+          // una cantidad fraccionada en unidad contable es error de fila, no
+          // redondeo silencioso: un typo en "kg" no debe truncar 12.5 a 12.
+          const rawUnit = cleanStr(g('unidad'));
+          const unit = parseUnitInput(rawUnit) ?? DEFAULT_UNIT_CODE;
+          // Columna ausente o vacía = maneja inventario (lo de siempre); solo
+          // un "no" explícito lo apaga.
+          const rawTracks = cleanStr(g('maneja_inventario'));
+          const tracksStock = rawTracks === '' ? true : parseBool(rawTracks);
+          if (tracksStock && stock !== undefined && !unitAllowsDecimals(unit) && !Number.isInteger(stock)) {
+            errors.push(`«${getUnit(unit).plural}» no admite decimales: existencias ${stock} no es entera.`);
+          }
+          if (wholesaleMinQuantity !== undefined && !unitAllowsDecimals(unit) && !Number.isInteger(wholesaleMinQuantity)) {
+            errors.push(`«${getUnit(unit).plural}» no admite decimales en la cantidad mínima de mayoreo.`);
+          }
+
           return {
             rowNumber: i + 1,
             code: cleanStr(g('codigo')),
@@ -102,10 +126,12 @@ export function parseProductsCsv(text: string): Promise<ParsedProductRow[]> {
             cost: cost ?? 0,
             price: price ?? 0,
             itbis: parseBool(g('itbis')),
-            stock: stock ?? 0,
+            stock: tracksStock ? normalizeQty(stock ?? 0, unit) : 0,
+            unit,
+            tracksStock,
             locationName: cleanStr(g('ubicacion')) || undefined,
             wholesalePrice: wholesalePrice,
-            wholesaleMinQuantity: wholesaleMinQuantity,
+            wholesaleMinQuantity: wholesaleMinQuantity === undefined ? undefined : normalizeQty(wholesaleMinQuantity, unit),
             imageUrl: cleanStr(g('imagen_url')) || undefined,
             errors,
           };
@@ -117,9 +143,10 @@ export function parseProductsCsv(text: string): Promise<ParsedProductRow[]> {
   });
 }
 
-/** CSV de plantilla con una fila de ejemplo. */
+/** CSV de plantilla con dos filas de ejemplo: una por pieza y otra por peso,
+ *  para que el formato de la columna `unidad` se explique solo. */
 export function buildTemplateCsv(): string {
-  const example: Record<string, string> = {
+  const porPieza: Record<string, string> = {
     codigo: 'ABC123',
     nombre: 'Camisa polo',
     descripcion: 'Talla M, azul',
@@ -129,12 +156,31 @@ export function buildTemplateCsv(): string {
     precio: '650',
     itbis: 'si',
     existencias: '20',
+    unidad: 'und',
+    maneja_inventario: 'si',
     ubicacion: 'Almacén A',
     precio_mayoreo: '550',
     cant_min_mayoreo: '6',
     imagen_url: '',
   };
-  return Papa.unparse({ fields: [...CSV_HEADERS], data: [example] });
+  const porPeso: Record<string, string> = {
+    codigo: 'FER-CEM',
+    nombre: 'Cemento a granel',
+    descripcion: 'Usa punto para los decimales',
+    categoria: 'Materiales',
+    proveedor: '',
+    costo: '12',
+    precio: '18',
+    itbis: 'si',
+    existencias: '250.5',
+    unidad: 'lb',
+    maneja_inventario: 'si',
+    ubicacion: '',
+    precio_mayoreo: '',
+    cant_min_mayoreo: '',
+    imagen_url: '',
+  };
+  return Papa.unparse({ fields: [...CSV_HEADERS], data: [porPieza, porPeso] });
 }
 
 /** Exporta el catálogo actual a CSV (mismos encabezados que la plantilla). */
@@ -157,10 +203,13 @@ export function buildExportCsv(
     costo: String(p.cost ?? 0),
     precio: String(p.price ?? 0),
     itbis: p.itbis ? 'si' : 'no',
-    existencias: String(p.stock ?? 0),
+    // formatQty y no String(): un stock de 12.299999999999999 saldría entero al CSV.
+    existencias: formatQty(p.stock ?? 0),
+    unidad: p.unit ?? DEFAULT_UNIT_CODE,
+    maneja_inventario: (p.tracksStock ?? true) ? 'si' : 'no',
     ubicacion: p.locationId ? locName.get(p.locationId) ?? '' : '',
     precio_mayoreo: p.wholesalePrice != null ? String(p.wholesalePrice) : '',
-    cant_min_mayoreo: p.wholesaleMinQuantity != null ? String(p.wholesaleMinQuantity) : '',
+    cant_min_mayoreo: p.wholesaleMinQuantity != null ? formatQty(p.wholesaleMinQuantity) : '',
     imagen_url: p.image && /^(https?:|data:)/i.test(p.image) ? p.image : '',
   }));
 

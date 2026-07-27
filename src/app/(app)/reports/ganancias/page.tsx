@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/utils';
+import { formatQty } from '@/lib/units';
 import { useSales } from '@/context/sales-provider';
 import { useExpenses } from '@/context/expense-provider';
 import { useProducts } from '@/context/product-provider';
@@ -23,7 +24,9 @@ import { ExportButton } from '@/components/reports/export-button';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
 export default function GananciasReportPage() {
-  const { sales: allSales } = useSales();
+  const { sales: allSalesRaw } = useSales();
+  // Las ventas anuladas no cuentan como ingreso ni como costo.
+  const allSales = React.useMemo(() => allSalesRaw.filter((s) => !s.cancelledAt), [allSalesRaw]);
   const { expenses: allExpenses } = useExpenses();
   const { products: allProducts } = useProducts();
   const { branches: allBranches } = useBranches();
@@ -221,7 +224,7 @@ export default function GananciasReportPage() {
             rows={productProfitability}
             columns={[
               { header: 'Producto', value: (row) => row.name },
-              { header: 'Cant. Vendida', value: (row) => row.qty },
+              { header: 'Cant. Vendida', value: (row) => formatQty(row.qty) },
               { header: 'Ventas Totales (RD$)', value: (row) => row.revenue },
               { header: 'Costo Total (RD$)', value: (row) => row.cost },
               { header: 'Ganancia Bruta (RD$)', value: (row) => row.profit },
@@ -394,7 +397,7 @@ export default function GananciasReportPage() {
                   productProfitability.map((item, idx) => (
                     <TableRow key={idx} className="hover:bg-muted/10">
                       <TableCell className="font-semibold">{item.name}</TableCell>
-                      <TableCell className="text-center">{item.qty}</TableCell>
+                      <TableCell className="text-center">{formatQty(item.qty)}</TableCell>
                       <TableCell className="text-right">{formatCurrency(item.revenue)}</TableCell>
                       <TableCell className="text-right text-muted-foreground">{formatCurrency(item.cost)}</TableCell>
                       <TableCell className="text-right text-emerald-500 font-bold">{formatCurrency(item.profit)}</TableCell>

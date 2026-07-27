@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
 // las ventas con este cliente se guardan con customer_id NULL en la base.
 export const GENERIC_CUSTOMER: Customer = {
   id: '0',
-  name: 'Cliente Genérico',
+  name: 'Consumidor Final',
   phone: '',
   rnc: '',
   ncfType: 'consumer',

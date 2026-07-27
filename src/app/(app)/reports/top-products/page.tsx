@@ -7,24 +7,32 @@ import { useProducts } from '@/context/product-provider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/utils';
+import { formatQuantity, roundQty } from '@/lib/units';
 import { BarChart } from 'lucide-react';
 import { ExportButton } from '@/components/reports/export-button';
 import { SalesChart } from '@/components/reports/sales-chart';
 
 export default function TopProductsReportPage() {
-  const { sales } = useSales();
+  const { sales: salesRaw } = useSales();
+  // Las ventas anuladas no cuentan en la rotación de productos.
+  const sales = useMemo(() => salesRaw.filter((s) => !s.cancelledAt), [salesRaw]);
   const { products } = useProducts();
 
   const topProducts = useMemo(() => {
-    const productSales = new Map<string, { quantity: number; revenue: number }>();
+    // La unidad se arrastra desde la línea vendida para poder mostrar "12.5 lb"
+    // y no un "12.5" suelto. Ojo: el ranking suma cantidades de unidades
+    // distintas, así que compara libras con cajas; ordenar por ingreso sería lo
+    // correcto, mostrar la unidad al menos lo hace evidente.
+    const productSales = new Map<string, { quantity: number; revenue: number; unit?: string }>();
 
     sales.forEach(sale => {
       sale.items.forEach(item => {
-        const currentSales = productSales.get(item.product.id) || { quantity: 0, revenue: 0 };
+        const currentSales = productSales.get(item.product.id) || { quantity: 0, revenue: 0, unit: item.product.unit };
         const price = item.customPrice ?? item.product.price;
         productSales.set(item.product.id, {
-          quantity: currentSales.quantity + item.quantity,
+          quantity: roundQty(currentSales.quantity + item.quantity),
           revenue: currentSales.revenue + (price * item.quantity),
+          unit: currentSales.unit ?? item.product.unit,
         });
       });
     });
@@ -52,7 +60,7 @@ export default function TopProductsReportPage() {
           rows={topProducts}
           columns={[
             { header: 'Producto', value: (p) => p.productName },
-            { header: 'Unidades vendidas', value: (p) => p.quantity },
+            { header: 'Cantidad vendida', value: (p) => formatQuantity(p.quantity, p.unit) },
             { header: 'Ingresos', value: (p) => p.revenue },
           ]}
         />
@@ -82,7 +90,7 @@ export default function TopProductsReportPage() {
               <TableRow>
                 <TableHead className="w-[50px]">#</TableHead>
                 <TableHead>Producto</TableHead>
-                <TableHead className="text-right">Unidades Vendidas</TableHead>
+                <TableHead className="text-right">Cantidad Vendida</TableHead>
                 <TableHead className="text-right">Ingresos Generados</TableHead>
               </TableRow>
             </TableHeader>
@@ -92,7 +100,7 @@ export default function TopProductsReportPage() {
                   <TableRow key={p.productName}>
                     <TableCell className="font-medium">{index + 1}</TableCell>
                     <TableCell>{p.productName}</TableCell>
-                    <TableCell className="text-right font-bold">{p.quantity}</TableCell>
+                    <TableCell className="text-right font-bold">{formatQuantity(p.quantity, p.unit)}</TableCell>
                     <TableCell className="text-right">{formatCurrency(p.revenue)}</TableCell>
                   </TableRow>
                 ))

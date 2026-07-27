@@ -17,6 +17,7 @@ import { useCategories } from '@/context/category-provider';
 import { useSuppliers } from '@/context/supplier-provider';
 import { useLocations } from '@/context/location-provider';
 import { formatCurrency } from '@/lib/utils';
+import { formatQty } from '@/lib/units';
 import { buildExportCsv, downloadTextFile } from '@/lib/inventory-csv';
 import { useToast } from '@/hooks/use-toast';
 
@@ -29,8 +30,11 @@ export default function InventoryPage() {
   const [importOpen, setImportOpen] = useState(false);
 
   const differentItems = products.length;
-  const totalStock = products.reduce((acc, product) => acc + product.stock, 0);
-  const totalInvestment = products.reduce((acc, product) => acc + (product.cost * product.stock), 0);
+  // Los productos sin inventario (platos, servicios) no suman existencias ni
+  // inversión: su stock es siempre 0 y no representa mercancía en almacén.
+  const stocked = products.filter((p) => p.tracksStock);
+  const totalStock = stocked.reduce((acc, product) => acc + product.stock, 0);
+  const totalInvestment = stocked.reduce((acc, product) => acc + (product.cost * product.stock), 0);
 
   const handleExport = () => {
     if (products.length === 0) {
@@ -104,8 +108,10 @@ export default function InventoryPage() {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalStock}</div>
-            <p className="text-xs text-muted-foreground">unidades físicas totales</p>
+            <div className="text-2xl font-bold">{formatQty(totalStock)}</div>
+            {/* Se suman existencias de unidades distintas (libras + cajas…):
+                es un conteo bruto, no una magnitud comparable. */}
+            <p className="text-xs text-muted-foreground">suma de existencias (unidades mixtas)</p>
           </CardContent>
         </Card>
 

@@ -342,7 +342,7 @@ export default function CompanyProfilePage() {
                   </Button>
                 </div>
                 {branchLogoUrl && (
-                  <div className="mt-2 w-16 h-16 border rounded-md overflow-hidden bg-muted">
+                  <div className="mt-2 w-44 h-32 border rounded-md overflow-hidden bg-muted shadow-sm">
                     <img src={branchLogoUrl} alt="Vista previa logo sucursal" className="object-contain w-full h-full" />
                   </div>
                 )}
@@ -392,7 +392,7 @@ export default function CompanyProfilePage() {
                   </Button>
                 </div>
                 {branchTicketLogoUrl && (
-                  <div className="mt-2 w-16 h-16 border rounded-md overflow-hidden bg-muted p-1">
+                  <div className="mt-2 w-44 h-32 border rounded-md overflow-hidden bg-muted p-1 shadow-sm">
                     <img
                       src={branchTicketLogoUrl}
                       alt="Vista previa logo ticket sucursal"

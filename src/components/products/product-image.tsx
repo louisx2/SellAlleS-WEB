@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { cn } from '@/lib/utils';
 import { PlaceHolderImages } from '@/lib/placeholder-images';
 
-const FALLBACK = 'https://picsum.photos/seed/placeholder/400/400';
+const FALLBACK = '/cardboard_box.png';
 
 // Resuelve el valor guardado en product.image a una URL mostrable:
 // - URL real (http/https/data) => se usa tal cual (subida a Storage o pegada).

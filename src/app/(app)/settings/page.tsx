@@ -13,9 +13,10 @@ import { useModules } from '@/context/modules-provider';
 
 export default function SettingsPage() {
   const { isModuleEnabled } = useModules();
-  // El POS calcula el ITBIS y Reportes expone su control fiscal. Si alguno
-  // está apagado, la configuración se conserva en la sucursal pero se oculta.
-  const canConfigureTaxes = isModuleEnabled('pos') && isModuleEnabled('reports');
+  // El modo de ITBIS solo surte efecto donde se cobran precios: el carrito del
+  // POS y las cotizaciones que salen de él. Con esos módulos apagados la
+  // configuración se conserva en la sucursal, pero no se muestra.
+  const canConfigureTaxes = isModuleEnabled('pos') || isModuleEnabled('quotes');
 
   return (
     <>

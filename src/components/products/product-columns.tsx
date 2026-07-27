@@ -3,6 +3,7 @@
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Product } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
+import { formatQuantity } from '@/lib/units';
 import { Badge } from '@/components/ui/badge';
 import { ProductActions } from './product-actions';
 import { cn } from '@/lib/utils';
@@ -31,13 +32,18 @@ export const productColumns: ColumnDef<Product>[] = [
     header: 'Inventario',
     cell: ({ row }) => {
       const stock = row.getValue('stock') as number;
+      // Un plato preparado o servicio no lleva existencias: mostrar "0 unidades"
+      // en rojo permanente sería ruido.
+      if (!row.original.tracksStock) {
+        return <span className="text-muted-foreground">No aplica</span>;
+      }
       return (
         <span
           className={cn({
             'text-destructive font-bold': stock <= 5,
           })}
         >
-          {stock} unidades
+          {formatQuantity(stock, row.original.unit)}
         </span>
       );
     },

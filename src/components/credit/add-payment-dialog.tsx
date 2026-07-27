@@ -46,12 +46,14 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
   const [userBranch, setUserBranch] = useState('Desconocida');
   const [receipt, setReceipt] = useState<PaymentReceiptData | null>(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [selectedBank, setSelectedBank] = useState('Banreservas');
 
   useEffect(() => {
     if (open) {
         setAmount('');
         setMethod(cashBlocked ? 'card' : 'cash');
         setReference('');
+        setSelectedBank('Banreservas');
         setNotes('');
         const branch = localStorage.getItem('userBranch') || 'Desconocida';
         setUserBranch(branch);
@@ -82,9 +84,12 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
 
     setSaving(true);
     try {
+      const finalReference = method === 'transfer' && reference.trim()
+        ? `${selectedBank} - Ref: ${reference.trim()}`
+        : reference.trim();
       // RPC atómica: registra el abono, lo aplica FIFO a las ventas a crédito
       // abiertas del cliente y actualiza su balance en una sola transacción.
-      const result = await payCustomerDebt(customer.id, paymentAmount, method, userBranch, notes.trim() || undefined, reference.trim() || undefined);
+      const result = await payCustomerDebt(customer.id, paymentAmount, method, userBranch, notes.trim() || undefined, finalReference || undefined);
       await reloadCustomers();
 
       toast({
@@ -157,12 +162,36 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
             {cashBlocked && (
               <p className="text-xs text-amber-600 dark:text-amber-400">No hay caja abierta en esta sucursal: no puedes cobrar en efectivo.</p>
             )}
-            {(method === 'transfer' || method === 'card') && (
-              <div className="space-y-2">
-                <Label htmlFor="payment-reference">{method === 'transfer' ? 'Referencia de transferencia' : 'Referencia / aprobación'}</Label>
-                <Input id="payment-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder={method === 'transfer' ? 'No. de transferencia' : 'No. de aprobación'} />
-              </div>
-            )}
+             {method === 'card' && (
+               <div className="space-y-2">
+                 <Label htmlFor="payment-reference">Referencia / aprobación</Label>
+                 <Input id="payment-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="No. de aprobación" />
+               </div>
+             )}
+             {method === 'transfer' && (
+               <div className="space-y-4">
+                 <div className="space-y-2">
+                   <Label htmlFor="bank">Banco</Label>
+                   <Select value={selectedBank} onValueChange={setSelectedBank}>
+                     <SelectTrigger id="bank"><SelectValue /></SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="Banreservas">Banreservas</SelectItem>
+                       <SelectItem value="Banco Popular">Banco Popular</SelectItem>
+                       <SelectItem value="BHD">BHD</SelectItem>
+                       <SelectItem value="Scotiabank">Scotiabank</SelectItem>
+                       <SelectItem value="APAP">Asociación Popular (APAP)</SelectItem>
+                       <SelectItem value="Banco Santa Cruz">Banco Santa Cruz</SelectItem>
+                       <SelectItem value="Banco Promerica">Banco Promerica</SelectItem>
+                       <SelectItem value="Otro">Otro / Internacional</SelectItem>
+                     </SelectContent>
+                   </Select>
+                 </div>
+                 <div className="space-y-2">
+                   <Label htmlFor="payment-reference">Referencia de transferencia</Label>
+                   <Input id="payment-reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="No. de transferencia" />
+                 </div>
+               </div>
+             )}
             <div className="space-y-2">
               <Label htmlFor="payment-notes">Notas (Opcional)</Label>
               <Textarea

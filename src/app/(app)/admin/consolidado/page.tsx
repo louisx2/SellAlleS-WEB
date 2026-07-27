@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { ExportButton } from '@/components/reports/export-button';
 import { formatCurrency } from '@/lib/utils';
+import { formatQty } from '@/lib/units';
 import { FileBarChart, Printer } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -256,7 +257,7 @@ export default function ConsolidatedDashboardPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-xl font-bold">{formatCurrency(stats.inventoryCostValue)}</div>
-                    <p className="text-3xs text-muted-foreground mt-1">{stats.inventoryUnits} unidades — saldo actual</p>
+                    <p className="text-3xs text-muted-foreground mt-1">{formatQty(stats.inventoryUnits)} en existencias — saldo actual</p>
                   </CardContent>
                 </Card>
                 <Card className="bg-card/40 backdrop-blur-sm border-muted/50 bg-gradient-to-br from-indigo-500/5 to-transparent">

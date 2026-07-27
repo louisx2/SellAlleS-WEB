@@ -66,6 +66,50 @@ con `ncf` NULL. Para empezar a emitir: activar `ncf_enabled` en la empresa y
 cargar filas en `ncf_sequences` (tipo 'consumer' prefix 'B02', tipo 'fiscal'
 prefix 'B01', con su rango autorizado por DGII).
 
+## Unidad de medida y cantidades decimales (migración `products_unit_of_measure`)
+
+`products.unit` (text + CHECK, default `'und'`) define la unidad de medida del
+producto y con ella si admite cantidades fraccionadas: las contables (`und`,
+`caja`, `doc`, `par`, `rollo`, `saco`, `paq`) solo enteros; las medibles (`lb`,
+`kg`, `g`, `oz`, `qq`, `m`, `pie`, `yd`, `plg`, `gal`, `l`, `ml`) hasta 3
+decimales. Esa escala no es casual: `products.stock` y `sale_items.quantity`
+ya eran `numeric(12,3)`, así que **la base siempre admitió decimales** — lo que
+faltaba era el catálogo y desbloquear la captura en el cliente.
+
+El catálogo vive en el código (`src/lib/units.ts`), no en una tabla editable;
+el CHECK es red de seguridad. `sale_items.unit` y `quote_items.unit` guardan
+una **copia** de la unidad al vender/cotizar (sin CHECK) para que un recibo
+histórico se reimprima igual aunque el producto cambie de unidad o se elimine.
+
+Reglas al tocar cantidades: toda aritmética pasa por `roundQty` (3 decimales,
+la misma escala de la columna) y todo render por `formatQty`/`formatQuantity`.
+`numeric(12,3)` redondea en silencio **antes** de que el trigger antisobreventa
+lea `NEW.quantity`, así que si el cliente admitiera 4 decimales el stock
+descontado no sería el mostrado.
+
+⚠️ `create_sale_with_items` necesita castear `payment_method`, `payment_status`
+y `ncf_type` a sus ENUM: el cuerpo de una función plpgsql no se valida al
+crearla, así que omitir los casts solo revienta al vender (ver migración
+`fix_create_sale_with_items_enum_casts`).
+
+## Productos sin inventario (migración `products_without_stock`)
+
+`products.tracks_stock` (default `true`). En `false` el producto no maneja
+existencias — plato preparado, servicio, tarifa —: se vende siempre, no
+descuenta stock y nunca aparece agotado. Su `stock` queda en 0 y no representa
+mercancía, así que se excluye de la valorización de inventario y de las
+alertas de bajo stock.
+
+Cuatro puntos de la base lo respetan: el trigger `decrement_product_stock_for_sale_item`
+(sale temprano, igual que con las líneas sin producto), `annul_sale` (no repone
+lo que nunca se descontó), `handle_service_item_stock` y `create_supplier_invoice`
+(no suman existencias). En el cliente hay que mirar `tracksStock` antes de
+cualquier comparación contra `stock`.
+
+Fase 1 de la idea de restaurante. La fase 2 son las **recetas**: vender una
+hamburguesa descontaría 1 pan y 150 g de carne, mediante una tabla
+producto→ingredientes; se construirá sobre esta misma bandera.
+
 ## Precios con ITBIS incluido (migración `branch_itbis_included`)
 
 `branches.itbis_included` (default false) configura por sucursal si los
@@ -76,6 +120,12 @@ encima (comportamiento clásico). El modo se congela por venta en
 igual. El cálculo vive en el cliente (`useCart` en
 `src/context/cart-provider.tsx`); `sales.subtotal` guarda siempre la base
 sin impuesto y `sales.itbis_amount` el ITBIS, en ambos modos.
+
+Se configura en Ajustes → "Impuestos de la sucursal actual"
+(`src/components/company-profile/tax-settings-card.tsx`), con un diálogo para
+el resto de las sucursales. La tarjeta solo aparece con el módulo POS o
+Cotizaciones activo (son los únicos que cobran con ITBIS) y solo los
+administradores pueden cambiar el modo.
 
 ## Cuentas por Pagar / Compras (migración `payables_module`)
 

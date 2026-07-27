@@ -5,9 +5,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import type { Service, ServiceItem, Product } from '@/lib/types';
-import { rowToService, rowToServiceItem } from '@/lib/supabase/mappers';
+import { rowToService, rowToServiceItem, rowToProduct } from '@/lib/supabase/mappers';
 import { Trash } from 'lucide-react';
 import { Input } from '@/components/ui/input';
+import { formatQuantity, formatQtyCompact, normalizeQty, roundQty, unitAllowsDecimals } from '@/lib/units';
 
 interface ServiceDetailSheetProps {
   serviceId: string | null;
@@ -23,6 +24,9 @@ export function ServiceDetailSheet({ serviceId, onClose, onUpdate }: ServiceDeta
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState('');
   const [qty, setQty] = useState(1);
+  const selectedUnitAllowsDecimals = unitAllowsDecimals(
+    products.find((p) => p.id === selectedProduct)?.unit
+  );
 
   useEffect(() => {
     if (serviceId) {
@@ -46,7 +50,7 @@ export function ServiceDetailSheet({ serviceId, onClose, onUpdate }: ServiceDeta
         // load items
         const { data: itemsData } = await supabase
             .from('service_items')
-            .select('*, products(id,name,price,stock,code)')
+            .select('*, products(id,name,price,stock,code,unit)')
             .eq('service_id', id);
         if (itemsData) setItems(itemsData.map(rowToServiceItem));
     }
@@ -54,9 +58,16 @@ export function ServiceDetailSheet({ serviceId, onClose, onUpdate }: ServiceDeta
   };
 
   const loadProducts = async () => {
-    const { data } = await supabase.from('products').select('id,name,price,stock,cost,code').gt('stock', 0);
+    // Repuestos con existencias, más los que no manejan inventario (mano de
+    // obra, insumos a granel): esos siempre están disponibles.
+    // select('*') + rowToProduct en vez de una lista corta con cast: así toda
+    // columna nueva (unidad, tracks_stock…) llega mapeada y no como undefined.
+    const { data } = await supabase
+      .from('products')
+      .select('*')
+      .or('stock.gt.0,tracks_stock.eq.false');
     if (data) {
-        setProducts(data as Product[]);
+        setProducts(data.map(rowToProduct));
     }
   };
 
@@ -76,15 +87,20 @@ export function ServiceDetailSheet({ serviceId, onClose, onUpdate }: ServiceDeta
       if (!service || !selectedProduct) return;
       const product = products.find(p => p.id === selectedProduct);
       if (!product) return;
-      if (qty > product.stock) {
-          toast({ title: 'Stock insuficiente', variant: 'destructive' });
+      const qtyForUnit = normalizeQty(qty, product.unit);
+      if (!Number.isFinite(qtyForUnit) || qtyForUnit <= 0) {
+          toast({ title: 'Cantidad inválida', variant: 'destructive' });
+          return;
+      }
+      if (product.tracksStock && roundQty(qtyForUnit) > product.stock) {
+          toast({ title: 'Stock insuficiente', description: `Solo hay ${formatQuantity(product.stock, product.unit)}.`, variant: 'destructive' });
           return;
       }
 
       const { error } = await supabase.from('service_items').insert({
           service_id: service.id,
           product_id: product.id,
-          quantity: qty,
+          quantity: qtyForUnit,
           price: product.price,
           cost: product.cost || 0
       });
@@ -176,12 +192,21 @@ export function ServiceDetailSheet({ serviceId, onClose, onUpdate }: ServiceDeta
                             <SelectContent>
                                 {products.map(p => (
                                     <SelectItem key={p.id} value={p.id}>
-                                        {p.name} (Stock: {p.stock}) - ${p.price}
+                                        {p.name}{p.tracksStock ? ` (Stock: ${formatQuantity(p.stock, p.unit)})` : ''} - ${p.price}
                                     </SelectItem>
                                 ))}
                             </SelectContent>
                         </Select>
-                        <Input type="number" min="1" value={qty} onChange={e => setQty(Number(e.target.value))} className="w-20" />
+                        {/* El paso lo dicta la unidad del repuesto elegido: 2.5 m
+                            de cable es válido, 2.5 tornillos no. */}
+                        <Input
+                            type="number"
+                            min={selectedUnitAllowsDecimals ? '0.001' : '1'}
+                            step={selectedUnitAllowsDecimals ? '0.001' : '1'}
+                            value={qty}
+                            onChange={e => setQty(Number(e.target.value))}
+                            className="w-24"
+                        />
                         <Button onClick={addItem} disabled={!selectedProduct}>Añadir</Button>
                     </div>
                 )}
@@ -191,7 +216,7 @@ export function ServiceDetailSheet({ serviceId, onClose, onUpdate }: ServiceDeta
                         <div key={item.id} className="flex justify-between items-center bg-muted/50 p-2 rounded text-sm">
                             <div>
                                 <span className="font-medium">{item.product.name}</span>
-                                <span className="text-muted-foreground ml-2">x{item.quantity}</span>
+                                <span className="text-muted-foreground ml-2">x{formatQtyCompact(item.quantity, item.product.unit)}</span>
                             </div>
                             <div className="flex items-center gap-4">
                                 <span>${item.price * item.quantity}</span>

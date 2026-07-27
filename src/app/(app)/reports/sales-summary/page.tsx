@@ -26,13 +26,15 @@ export default function SalesSummaryReportPage() {
   }, [appUser]);
 
   const filteredSales = useMemo(() => {
+    // Las ventas anuladas no cuentan como ingreso.
+    const active = allSales.filter(sale => !sale.cancelledAt);
     if (appUser?.role !== 'admin') {
-      return allSales.filter(sale => sale.branchId === appUser?.branch);
+      return active.filter(sale => sale.branchId === appUser?.branch);
     }
     if (selectedBranch === 'all') {
-      return allSales;
+      return active;
     }
-    return allSales.filter(sale => sale.branchId === selectedBranch);
+    return active.filter(sale => sale.branchId === selectedBranch);
   }, [allSales, selectedBranch, appUser]);
 
   const totalRevenue = filteredSales.reduce((acc, sale) => acc + sale.total, 0);

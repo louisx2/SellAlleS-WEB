@@ -60,6 +60,9 @@ export const salesColumns: ColumnDef<Sale>[] = [
     accessorKey: 'paymentStatus',
     header: 'Estado',
     cell: ({ row }) => {
+      if (row.original.cancelledAt) {
+        return <Badge variant="destructive">Anulada</Badge>;
+      }
       const status: Sale['paymentStatus'] = row.getValue('paymentStatus');
       const isCredit = status === 'credit' || status === 'in_financing';
       return (
@@ -75,7 +78,11 @@ export const salesColumns: ColumnDef<Sale>[] = [
   {
     accessorKey: 'total',
     header: 'Total',
-    cell: ({ row }) => formatCurrency(row.getValue('total')),
+    cell: ({ row }) => (
+      <span className={cn(row.original.cancelledAt && 'line-through text-muted-foreground')}>
+        {formatCurrency(row.getValue('total'))}
+      </span>
+    ),
   },
   {
     accessorKey: 'userName',

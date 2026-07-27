@@ -3,9 +3,8 @@
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Expense } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { MoreHorizontal } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { ExpenseActions } from './expense-actions';
 
 export const expenseColumns: ColumnDef<Expense>[] = [
   {
@@ -25,8 +24,19 @@ export const expenseColumns: ColumnDef<Expense>[] = [
     header: 'Categoría',
     cell: ({ row }) => {
       const category = row.getValue('category') as string;
-      return <Badge variant="outline">{category}</Badge>;
+      return category ? <Badge variant="outline">{category}</Badge> : '—';
     }
+  },
+  {
+    accessorKey: 'ncf',
+    header: 'NCF',
+    cell: ({ row }) => {
+      const ncf = row.original.ncf;
+      // Con NCF el gasto entra al Formato 606 del período.
+      return ncf
+        ? <Badge variant="secondary" className="font-mono text-[11px]">{ncf}</Badge>
+        : <span className="text-muted-foreground text-xs">Sin comprobante</span>;
+    },
   },
   {
     accessorKey: 'amount',
@@ -36,14 +46,10 @@ export const expenseColumns: ColumnDef<Expense>[] = [
   {
     accessorKey: 'branchId',
     header: 'Sucursal',
+    cell: ({ getValue }) => getValue<string>() || '—',
   },
   {
     id: 'actions',
-    cell: () => (
-      <Button variant="ghost" className="h-8 w-8 p-0" disabled>
-        <span className="sr-only">Abrir menú</span>
-        <MoreHorizontal className="h-4 w-4" />
-      </Button>
-    ),
+    cell: ({ row }) => <ExpenseActions expense={row.original} />,
   },
 ];

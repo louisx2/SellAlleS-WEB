@@ -9,6 +9,7 @@ import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetT
 import { MoreHorizontal, Trash2 } from 'lucide-react';
 import type { CartItem } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
+import { formatQty, getUnit, parseQtyInput, qtyInputRegex, unitAllowsDecimals } from '@/lib/units';
 import { useToast } from '@/hooks/use-toast';
 import { Separator } from '../ui/separator';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -51,7 +52,9 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
     if (isOpen) {
       const currentPrice = getEffectiveUnitPrice(cartItem, activeCart?.selectedCustomer);
       setNewPrice(currentPrice);
-      setNewQuantity(cartItem.quantity);
+      // formatQty y no el número crudo: si no, la hoja puede abrir mostrando
+      // algo como 0.7000000000000002.
+      setNewQuantity(formatQty(cartItem.quantity));
       const discount = calculateDiscount(currentPrice);
       setDiscountPercentage(discount > 0.01 ? discount.toFixed(2) : '');
     }
@@ -74,11 +77,15 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
       return;
     }
 
-    const quantityValue = Number(newQuantity);
-     if (isNaN(quantityValue) || quantityValue <= 0 || !Number.isInteger(quantityValue)) {
+    const unit = cartItem.product.unit;
+    const allowsDecimals = unitAllowsDecimals(unit);
+    const quantityValue = parseQtyInput(String(newQuantity));
+    if (!Number.isFinite(quantityValue) || quantityValue <= 0 || (!allowsDecimals && !Number.isInteger(quantityValue))) {
       toast({
         title: 'Cantidad inválida',
-        description: 'Por favor, introduce un número entero positivo para la cantidad.',
+        description: allowsDecimals
+          ? 'Introduce una cantidad mayor que cero (hasta 3 decimales).'
+          : `«${getUnit(unit).plural}» solo admite cantidades enteras.`,
         variant: 'destructive',
       });
       return;
@@ -105,8 +112,8 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
 
   const handleQuantityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
-    const intRegex = /^\d*$/; // Only allow integers
-    if (intRegex.test(value) && value.length <= 6) {
+    // La máscara depende de la unidad: en una contable el punto ni se teclea.
+    if (qtyInputRegex(cartItem.product.unit).test(value) && value.length <= 8) {
       setNewQuantity(value);
     }
   };
@@ -133,7 +140,7 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
     <div className="grid gap-6 py-4">
         <div className="grid gap-4">
              <div className="grid grid-cols-3 items-center gap-4">
-                <Label htmlFor="quantity">Cantidad</Label>
+                <Label htmlFor="quantity">Cantidad ({getUnit(cartItem.product.unit).short})</Label>
                 <Input
                 id="quantity"
                 value={newQuantity}
@@ -141,11 +148,11 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
                 className="col-span-2 h-8"
                 onFocus={e => e.target.select()}
                 type="text"
-                inputMode="numeric"
+                inputMode={unitAllowsDecimals(cartItem.product.unit) ? 'decimal' : 'numeric'}
                 />
             </div>
             <div className="grid grid-cols-3 items-center gap-4">
-                <Label htmlFor="price">Precio Unitario</Label>
+                <Label htmlFor="price">Precio por {getUnit(cartItem.product.unit).singular}</Label>
                 <Input
                 id="price"
                 value={newPrice}

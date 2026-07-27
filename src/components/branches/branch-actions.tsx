@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,6 +23,7 @@ interface BranchActionsProps {
 export function BranchActions({ branch }: BranchActionsProps) {
   const { toast } = useToast();
   const { appUser } = useAuth();
+  const [editOpen, setEditOpen] = useState(false);
   
   const handleDelete = () => {
     toast({
@@ -32,7 +34,7 @@ export function BranchActions({ branch }: BranchActionsProps) {
   };
 
   return (
-    <BranchDialog branch={branch}>
+    <>
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="h-8 w-8 p-0">
@@ -43,11 +45,9 @@ export function BranchActions({ branch }: BranchActionsProps) {
         <DropdownMenuContent align="end">
           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          <DropdownMenuItem asChild>
-            <div>
-              <Pencil className="mr-2 h-4 w-4" />
-              <span>Editar</span>
-            </div>
+          <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+            <Pencil className="mr-2 h-4 w-4" />
+            <span>Editar</span>
           </DropdownMenuItem>
           {appUser?.isSuperAdmin && (
             <DropdownMenuItem onClick={handleDelete} className="text-destructive">
@@ -57,6 +57,7 @@ export function BranchActions({ branch }: BranchActionsProps) {
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-    </BranchDialog>
+      <BranchDialog branch={branch} open={editOpen} onOpenChange={setEditOpen} />
+    </>
   );
 }

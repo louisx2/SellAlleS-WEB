@@ -52,7 +52,7 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
   'service-types': 'services',
 };
 
-// Los 7 reportes individuales (src/app/(app)/reports/*), controlables por
+// Los reportes individuales (src/app/(app)/reports/*), controlables por
 // separado dentro de un rol vía permissions.reports_visible.
 export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'sales-summary', label: 'Resumen de Ventas' },
@@ -64,6 +64,8 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'taxes', label: 'Impuestos' },
   { slug: 'ganancias', label: 'Reporte de Ganancias' },
   { slug: 'compras-606', label: 'Compras (Formato 606)' },
+  { slug: 'ventas-607', label: 'Ventas (Formato 607)' },
+  { slug: 'anulados-608', label: 'NCF Anulados (Formato 608)' },
 ];
 
 // Red de seguridad: si por algún motivo no aparece la fila del rol de

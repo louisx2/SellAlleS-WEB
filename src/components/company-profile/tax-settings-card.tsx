@@ -30,8 +30,12 @@ export function TaxSettingsCard() {
   const [savingId, setSavingId] = useState<string | null>(null);
 
   const activeBranch = branches.find((item) => item.id === appUser?.activeBranchId);
+  // Cambiar el modo altera cuánto se cobra: solo lo tocan administradores;
+  // el resto ve la configuración vigente en modo lectura.
+  const canEdit = appUser?.role === 'admin';
 
   const setItbisMode = async (branchId: string, itbisIncluded: boolean) => {
+    if (!canEdit) return;
     const branch = branches.find((item) => item.id === branchId);
     if (!branch) return;
 
@@ -98,7 +102,7 @@ export function TaxSettingsCard() {
                         {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
                         <Switch
                           checked={branch.itbisIncluded ?? false}
-                          disabled={saving}
+                          disabled={saving || !canEdit}
                           onCheckedChange={(value) => setItbisMode(branch.id, value)}
                           aria-label={`Precio con ITBIS incluido para ${branch.name}`}
                         />
@@ -136,7 +140,7 @@ export function TaxSettingsCard() {
                   {saving && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
                   <Switch
                     checked={branch.itbisIncluded ?? false}
-                    disabled={saving}
+                    disabled={saving || !canEdit}
                     onCheckedChange={(value) => setItbisMode(branch.id, value)}
                     aria-label={`Precio con ITBIS incluido para ${branch.name}`}
                   />

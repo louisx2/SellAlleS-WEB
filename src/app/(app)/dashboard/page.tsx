@@ -35,10 +35,12 @@ function KpiCard({ title, value, subtitle, icon: Icon, accentClass }: {
 }
 
 export default function DashboardPage() {
-  const { sales: allSales } = useSales();
+  const { sales: allSalesRaw } = useSales();
   const { branches: allBranches } = useBranches();
   const { appUser } = useAuth();
   const isAdmin = appUser?.role === 'admin';
+  // Las ventas anuladas no cuentan como ingreso en el panel.
+  const allSales = useMemo(() => allSalesRaw.filter((s) => !s.cancelledAt), [allSalesRaw]);
 
   const [selectedBranch, setSelectedBranch] = useState('all');
   const [config, setConfig] = useState<DashboardConfig>(defaultDashboardConfig());
@@ -54,6 +56,23 @@ export default function DashboardPage() {
     saveDashboardConfig(c, appUser?.companyId, appUser?.id);
   };
 
+  // Sucursales permitidas para este usuario
+  const allowedBranches = useMemo(() => {
+    if (appUser?.isSuperAdmin) {
+      return allBranches;
+    }
+    return appUser?.branches || [];
+  }, [allBranches, appUser]);
+
+  // Selección automática si solo tiene 1 sucursal asignada
+  useEffect(() => {
+    if (allowedBranches.length === 1) {
+      setSelectedBranch(allowedBranches[0].name);
+    } else if (allowedBranches.length > 1 && selectedBranch !== 'all' && !allowedBranches.find(b => b.name === selectedBranch)) {
+      setSelectedBranch('all');
+    }
+  }, [allowedBranches, selectedBranch]);
+
   useEffect(() => {
     if (!isAdmin && appUser?.branch) setSelectedBranch(appUser.branch);
   }, [isAdmin, appUser?.branch]);
@@ -66,9 +85,15 @@ export default function DashboardPage() {
   }), [allSales, today]);
 
   const filteredSales = useMemo(() => {
-    if (selectedBranch === 'all' && isAdmin) return salesToday;
+    if (selectedBranch === 'all') {
+      if (appUser?.isSuperAdmin) {
+        return salesToday;
+      }
+      const allowedNames = allowedBranches.map(b => b.name);
+      return salesToday.filter((s) => allowedNames.includes(s.branchId));
+    }
     return salesToday.filter((s) => s.branchId === selectedBranch);
-  }, [salesToday, selectedBranch, isAdmin]);
+  }, [salesToday, selectedBranch, allowedBranches, appUser]);
 
   const totalRevenueToday = filteredSales.filter((s) => s.paymentStatus === 'paid').reduce((a, s) => a + s.amountPaid, 0);
   const totalCreditToday = filteredSales.filter((s) => s.paymentStatus === 'credit').reduce((a, s) => a + s.total, 0);
@@ -87,9 +112,14 @@ export default function DashboardPage() {
 
   const byBranchData = useMemo(() => {
     const acc: Record<string, number> = {};
-    salesToday.forEach((s) => { acc[s.branchId] = (acc[s.branchId] ?? 0) + s.total; });
+    const allowedNames = allowedBranches.map(b => b.name);
+    salesToday.forEach((s) => {
+      if (appUser?.isSuperAdmin || allowedNames.includes(s.branchId)) {
+        acc[s.branchId] = (acc[s.branchId] ?? 0) + s.total;
+      }
+    });
     return Object.entries(acc).map(([name, total]) => ({ name, total }));
-  }, [salesToday]);
+  }, [salesToday, allowedBranches, appUser]);
 
   const v = config.visible;
   const anyKpi = v.kpi_revenue || v.kpi_sales_count || v.kpi_credit || v.kpi_credit_tx;
@@ -99,14 +129,14 @@ export default function DashboardPage() {
       <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-4 mb-6">
         <div>
           <PageHeader title="Vista General de Hoy" />
-          {isAdmin && (
+          {isAdmin && allowedBranches.length > 1 && (
             <Select value={selectedBranch} onValueChange={setSelectedBranch}>
               <SelectTrigger className="w-full sm:w-[240px]">
                 <SelectValue placeholder="Filtrar por sucursal" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas las sucursales</SelectItem>
-                {allBranches.map((b) => <SelectItem key={b.id} value={b.name}>{b.name}</SelectItem>)}
+                {allowedBranches.map((b) => <SelectItem key={b.id} value={b.name}>{b.name}</SelectItem>)}
               </SelectContent>
             </Select>
           )}

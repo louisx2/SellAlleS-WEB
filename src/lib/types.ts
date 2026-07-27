@@ -1,3 +1,5 @@
+import type { UnitCode } from './units';
+
 export type Product = {
   id: string;
   code: string;
@@ -10,6 +12,12 @@ export type Product = {
   itbis: boolean;
   image: string;
   stock: number;
+  // Unidad de medida: decide si el producto se vende en cantidades
+  // fraccionadas (libra, metro…) o solo enteras (unidad, caja…).
+  unit: UnitCode;
+  // false = no maneja existencias (plato preparado, servicio, tarifa): se
+  // vende siempre, no descuenta stock y nunca aparece agotado.
+  tracksStock: boolean;
   locationId?: string;
   entryDate?: string;
   modificationDate?: string;
@@ -27,6 +35,11 @@ export type ProductLocation = {
   name: string;
 };
 
+// Tipo de comprobante que pide el cliente en sus compras. Mapea a la serie
+// del NCF: B02 consumidor final, B01 crédito fiscal, B15 gubernamental,
+// B14 regímenes especiales. Las secuencias viven en ncf_sequences por tipo.
+export type NcfType = 'consumer' | 'fiscal' | 'gubernamental' | 'regimen_especial';
+
 export type Customer = {
   id: string;
   name: string;
@@ -35,7 +48,7 @@ export type Customer = {
   address?: string;
   rnc?: string;
   birthdate?: string;
-  ncfType: 'consumer' | 'fiscal';
+  ncfType: NcfType;
   notes?: string;
   creditBalance: number;
   creditLimit?: number | null; // null/undefined = sin límite
@@ -224,10 +237,45 @@ export type Sale = {
   userName?: string;
   userEmail?: string;
   ncf?: string;
-  ncfType: 'consumer' | 'fiscal';
+  ncfType: NcfType;
   quoteId?: string; // cotización de origen (se marca convertida al cobrar)
   couponId?: string; // cupón de fidelidad canjeado en esta venta
   coupon?: Coupon; // objeto completo, solo para mostrarlo en el recibo (no se persiste aparte de couponId)
+  // Venta anulada con nota de crédito (RPC annul_sale). La venta no se borra:
+  // los reportes de ingresos la filtran y el 607 la reporta junto a su NC.
+  cancelledAt?: Date;
+};
+
+// NCF anulado sin efecto (Formato 608): comprobante quemado por deterioro,
+// error de impresión/digitación, etc. Registro manual de la empresa; las
+// ventas anuladas con NC B04 NO van aquí (se reportan en el 607).
+export type VoidedNcf = {
+  id: string;
+  ncf: string;
+  voidedDate: string;   // yyyy-mm-dd
+  reasonCode: string;   // '01'..'09' (catálogo en src/lib/dgii-608.ts)
+  notes?: string;
+  userName?: string;
+  createdAt: Date;
+};
+
+// Nota de crédito (B04) emitida al anular una venta. Solo la escribe la RPC
+// annul_sale; el cliente la lee para el historial y el Formato 607.
+export type CreditNote = {
+  id: string;
+  saleId: string;
+  customerId?: string;
+  customerName?: string;
+  customerRnc?: string;
+  ncf?: string;         // B04; ausente en empresas sin NCF
+  ncfModified?: string; // NCF de la venta original
+  subtotal: number;
+  itbisAmount: number;
+  total: number;
+  refundMethod?: PaymentMethod;
+  reason?: string;
+  userName?: string;
+  createdAt: Date;
 };
 
 export type QuoteStatus = 'pending' | 'sent' | 'accepted' | 'rejected' | 'converted';
@@ -445,13 +493,22 @@ export type Supplier = {
     rnc?: string;
 };
 
+// Gasto del negocio. Los campos fiscales son opcionales: un gasto con NCF y
+// RNC del suplidor entra al Formato 606 junto a las facturas de CxP.
 export type Expense = {
     id: string;
     date: Date;
     description: string;
-    amount: number;
+    amount: number;         // total pagado (con ITBIS incluido, si aplica)
     category: string;
-    branchId: string;
+    branchId: string;       // nombre de sucursal (misma convención que Sale)
+    rnc?: string;           // RNC/cédula del suplidor del gasto
+    ncf?: string;           // NCF del comprobante recibido
+    expenseType?: string;   // tipo bienes/servicios 606 ('01'..'11')
+    itbisAmount: number;    // parte de amount que es ITBIS
+    isGoods: boolean;       // true = bienes, false = servicios (casillas 8/9 del 606)
+    paymentForm?: string;   // forma de pago 606 ('01'..'07')
+    userName?: string;
 };
 
 // ---------- Cuentas por Pagar (facturas de suplidores, Formato 606 DGII) ----------

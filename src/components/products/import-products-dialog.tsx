@@ -176,6 +176,8 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
           price: r.price,
           itbis: r.itbis,
           stock: r.stock,
+          unit: r.unit,
+          tracksStock: r.tracksStock,
           locationId: r.locationName ? locId.get(normName(r.locationName)) : undefined,
           wholesalePrice: r.wholesalePrice,
           wholesaleMinQuantity: r.wholesaleMinQuantity,
@@ -228,7 +230,13 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
             <Button variant="outline" onClick={() => downloadTextFile('plantilla_inventario.csv', buildTemplateCsv())}>
               <Download className="mr-2 h-4 w-4" /> Descargar plantilla CSV
             </Button>
-            <p className="text-sm text-muted-foreground">Columnas: codigo, nombre, categoria, proveedor, costo, precio, itbis, existencias, ubicacion…</p>
+            <div className="space-y-1 text-center">
+              <p className="text-sm text-muted-foreground">Columnas: codigo, nombre, categoria, proveedor, costo, precio, itbis, existencias, unidad, ubicacion…</p>
+              <p className="text-xs text-muted-foreground">
+                Unidades válidas: und, caja, doc, par, rollo, saco, paq, lb, kg, g, oz, qq, m, pie, yd, plg, gal, l, ml.
+                En blanco = unidades. Usa <span className="font-mono">punto</span> para los decimales (1.7), no coma.
+              </p>
+            </div>
             <Button onClick={() => fileRef.current?.click()}>
               <FileUp className="mr-2 h-4 w-4" /> Elegir archivo CSV
             </Button>

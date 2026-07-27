@@ -1,5 +1,6 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
+import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
 
 // ---------- Role ----------
 export const rowToRole = (r: any): Role => ({
@@ -21,9 +22,11 @@ export const rowToProduct = (r: any): Product => ({
   supplierId: r.supplier_id ?? undefined,
   price: Number(r.price), 
   cost: Number(r.cost),
-  itbis: !!r.itbis, 
-  image: r.image ?? '', 
+  itbis: !!r.itbis,
+  image: r.image ?? '',
   stock: Number(r.stock),
+  unit: normalizeUnitCode(r.unit),
+  tracksStock: r.tracks_stock ?? true,
   locationId: r.location_id ?? undefined,
   entryDate: r.entry_date ?? undefined,
   modificationDate: r.modification_date ?? undefined,
@@ -38,9 +41,11 @@ export const productToRow = (p: Partial<Product>) => ({
   supplier_id: p.supplierId ?? null,
   price: p.price, 
   cost: p.cost,
-  itbis: p.itbis ?? false, 
-  image: p.image ?? null, 
+  itbis: p.itbis ?? false,
+  image: p.image ?? null,
   stock: p.stock ?? 0,
+  unit: p.unit ?? DEFAULT_UNIT_CODE,
+  tracks_stock: p.tracksStock ?? true,
   location_id: p.locationId ?? null,
   entry_date: p.entryDate ?? null,
   modification_date: p.modificationDate ?? null,
@@ -205,7 +210,30 @@ export const rowToSupplierPaymentResult = (r: any): SupplierPaymentResult => ({
 // ---------- Expense ----------
 export const rowToExpense = (r: any): Expense => ({
   id: r.id, date: new Date(r.date), description: r.description, amount: Number(r.amount),
-  category: r.category ?? '', branchId: r.branch_id ?? '',
+  // branchId es el NOMBRE de la sucursal (join branches(name)), igual que Sale.
+  category: r.category ?? '', branchId: r.branches?.name ?? '',
+  rnc: r.rnc ?? undefined, ncf: r.ncf ?? undefined,
+  expenseType: r.expense_type ?? undefined,
+  itbisAmount: Number(r.itbis_amount ?? 0),
+  isGoods: !!r.is_goods,
+  paymentForm: r.payment_form ?? undefined,
+  userName: r.user_name ?? undefined,
+});
+
+// branchUuid ya resuelto por el provider (nombre → uuid).
+export const expenseToRow = (e: Omit<Expense, 'id'>, branchUuid: string | null) => ({
+  date: e.date.toISOString(),
+  description: e.description,
+  amount: e.amount,
+  category: e.category || null,
+  branch_id: branchUuid,
+  rnc: e.rnc?.trim() || null,
+  ncf: e.ncf?.trim().toUpperCase() || null,
+  expense_type: e.expenseType || null,
+  itbis_amount: e.itbisAmount ?? 0,
+  is_goods: e.isGoods ?? false,
+  payment_form: e.paymentForm || null,
+  user_name: e.userName ?? null,
 });
 
 // ---------- CompanyProfile ----------
@@ -234,13 +262,17 @@ export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
 });
 
 // ---------- Sale (con sale_items y customer embebidos) ----------
+// La unidad viene de la copia guardada en la línea, no del producto actual: el
+// recibo histórico debe reimprimirse igual aunque el producto haya cambiado.
 const rowToCartItem = (i: any): CartItem => ({
   cartItemId: i.id,
   quantity: Number(i.quantity),
   customPrice: i.custom_price != null ? Number(i.custom_price) : undefined,
   product: {
     id: i.product_id ?? '', name: i.product_name, price: Number(i.price), cost: 0,
-    itbis: !!i.itbis, image: '', stock: 0, code: '',
+    itbis: !!i.itbis, image: '', stock: 0, code: '', unit: normalizeUnitCode(i.unit),
+    // Línea ya vendida: el inventario no se recalcula desde aquí.
+    tracksStock: true,
   },
 });
 
@@ -304,6 +336,36 @@ export const rowToSale = (r: any): Sale => ({
   ncf: r.ncf ?? undefined, ncfType: r.ncf_type,
   quoteId: r.quote_id ?? undefined,
   couponId: r.coupon_id ?? undefined,
+  cancelledAt: r.cancelled_at ? new Date(r.cancelled_at) : undefined,
+});
+
+// ---------- NCF anulado (Formato 608) ----------
+export const rowToVoidedNcf = (r: any): VoidedNcf => ({
+  id: r.id,
+  ncf: r.ncf,
+  voidedDate: r.voided_date,
+  reasonCode: r.reason_code,
+  notes: r.notes ?? undefined,
+  userName: r.user_name ?? undefined,
+  createdAt: new Date(r.created_at),
+});
+
+// ---------- Nota de crédito (anulación de venta) ----------
+export const rowToCreditNote = (r: any): CreditNote => ({
+  id: r.id,
+  saleId: r.sale_id,
+  customerId: r.customer_id ?? undefined,
+  customerName: r.customers?.name ?? undefined,
+  customerRnc: r.customers?.rnc ?? undefined,
+  ncf: r.ncf ?? undefined,
+  ncfModified: r.ncf_modified ?? undefined,
+  subtotal: Number(r.subtotal ?? 0),
+  itbisAmount: Number(r.itbis_amount ?? 0),
+  total: Number(r.total ?? 0),
+  refundMethod: r.refund_method ?? undefined,
+  reason: r.reason ?? undefined,
+  userName: r.user_name ?? undefined,
+  createdAt: new Date(r.created_at),
 });
 
 // branchUuid ya resuelto por el provider (nombre → uuid).
@@ -344,7 +406,9 @@ const rowToQuoteItem = (i: any): CartItem => ({
   customPrice: i.custom_price != null ? Number(i.custom_price) : undefined,
   product: {
     id: i.product_id ?? '', name: i.product_name, price: Number(i.price), cost: 0,
-    itbis: !!i.itbis, image: '', stock: 0, code: '',
+    itbis: !!i.itbis, image: '', stock: 0, code: '', unit: normalizeUnitCode(i.unit),
+    // Línea ya vendida: el inventario no se recalcula desde aquí.
+    tracksStock: true,
   },
 });
 
@@ -376,12 +440,14 @@ export const quoteItemToRow = (item: CartItem, quoteId: string) => ({
   quote_id: quoteId, product_id: item.product.id || null, product_name: item.product.name,
   quantity: item.quantity, price: item.product.price,
   custom_price: item.customPrice ?? null, itbis: item.product.itbis,
+  unit: item.product.unit ?? DEFAULT_UNIT_CODE,
 });
 
 export const saleItemToRow = (item: CartItem, saleId: string) => ({
   sale_id: saleId, product_id: item.product.id || null, product_name: item.product.name,
   quantity: item.quantity, price: item.product.price,
   custom_price: item.customPrice ?? null, itbis: item.product.itbis,
+  unit: item.product.unit ?? DEFAULT_UNIT_CODE,
 });
 
 // ---------- Services ----------

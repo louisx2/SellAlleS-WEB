@@ -15,6 +15,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
+import { formatQtyCompact } from '@/lib/units';
 import { useToast } from '@/hooks/use-toast';
 import type { Sale, FinancingDetails } from '@/lib/types';
 import { useProducts } from '@/context/product-provider';
@@ -62,6 +63,8 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const [change, setChange] = useState(0);
   const { toast } = useToast();
   const [isFinancingOpen, setFinancingOpen] = useState(false);
+  const [selectedBank, setSelectedBank] = useState('Banreservas');
+  const [selectedDownPaymentBank, setSelectedDownPaymentBank] = useState('Banreservas');
 
 
   useEffect(() => {
@@ -125,15 +128,24 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
 
     const finalPaymentMethod = financingDetails ? 'financing' : paymentMethod;
     const effectiveDownPaymentMethod = downPaymentMethodOverride ?? downPaymentMethod;
-    const effectiveDownPaymentReference = downPaymentReferenceOverride ?? downPaymentReference;
+    
+    // Construct final references with bank prefix if transfer method is selected
+    const finalPaymentReference = paymentMethod === 'transfer' && paymentReference.trim()
+      ? `${selectedBank} - Ref: ${paymentReference.trim()}`
+      : paymentReference.trim();
+
+    const rawDownPaymentRef = downPaymentReferenceOverride ?? downPaymentReference;
+    const finalDownPaymentReference = effectiveDownPaymentMethod === 'transfer' && rawDownPaymentRef.trim()
+      ? `${selectedDownPaymentBank} - Ref: ${rawDownPaymentRef.trim()}`
+      : rawDownPaymentRef.trim();
 
     const sale = createSale({
       paymentMethod: finalPaymentMethod,
       branchId: appUser.branch,
       amountPaid: downPaymentOverride !== undefined ? downPaymentOverride : Number(amountPaid),
-      paymentReference,
+      paymentReference: finalPaymentReference || undefined,
       downPaymentMethod: effectiveDownPaymentMethod,
-      downPaymentReference: effectiveDownPaymentReference.trim() || undefined,
+      downPaymentReference: finalDownPaymentReference || undefined,
       financingDetails,
       notes: saleNotes,
       userName: appUser.name,
@@ -325,11 +337,9 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                     </div>
                     )}
 
-                {(paymentMethod === 'card' || paymentMethod === 'transfer') && (
+                {paymentMethod === 'card' && (
                     <div className="space-y-2">
-                    <Label htmlFor="payment-reference">
-                        {paymentMethod === 'card' ? 'Referencia de Tarjeta' : 'Referencia de Transferencia'}
-                    </Label>
+                    <Label htmlFor="payment-reference">Referencia de Tarjeta</Label>
                     <Input
                         id="payment-reference"
                         type="text"
@@ -338,6 +348,37 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                         onChange={(e) => setPaymentReference(e.target.value)}
                     />
                     </div>
+                )}
+
+                {paymentMethod === 'transfer' && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="bank">Banco</Label>
+                      <Select value={selectedBank} onValueChange={setSelectedBank}>
+                        <SelectTrigger id="bank"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Banreservas">Banreservas</SelectItem>
+                          <SelectItem value="Banco Popular">Banco Popular</SelectItem>
+                          <SelectItem value="BHD">BHD</SelectItem>
+                          <SelectItem value="Scotiabank">Scotiabank</SelectItem>
+                          <SelectItem value="APAP">Asociación Popular (APAP)</SelectItem>
+                          <SelectItem value="Banco Santa Cruz">Banco Santa Cruz</SelectItem>
+                          <SelectItem value="Banco Promerica">Banco Promerica</SelectItem>
+                          <SelectItem value="Otro">Otro / Internacional</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="payment-reference">Referencia de Transferencia</Label>
+                      <Input
+                          id="payment-reference"
+                          type="text"
+                          placeholder="Introducir número de referencia"
+                          value={paymentReference}
+                          onChange={(e) => setPaymentReference(e.target.value)}
+                      />
+                    </div>
+                  </div>
                 )}
 
                 {paymentMethod === 'credit' && (
@@ -372,12 +413,34 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                         <SelectItem value="transfer">Transferencia</SelectItem>
                                     </SelectContent>
                                 </Select>
+                                {downPaymentMethod === 'transfer' && (
+                                    <div className="space-y-2">
+                                      <Label htmlFor="down-payment-bank">Banco de Transferencia</Label>
+                                      <Select value={selectedDownPaymentBank} onValueChange={setSelectedDownPaymentBank}>
+                                        <SelectTrigger id="down-payment-bank"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                          <SelectItem value="Banreservas">Banreservas</SelectItem>
+                                          <SelectItem value="Banco Popular">Banco Popular</SelectItem>
+                                          <SelectItem value="BHD">BHD</SelectItem>
+                                          <SelectItem value="Scotiabank">Scotiabank</SelectItem>
+                                          <SelectItem value="APAP">Asociación Popular (APAP)</SelectItem>
+                                          <SelectItem value="Banco Santa Cruz">Banco Santa Cruz</SelectItem>
+                                          <SelectItem value="Banco Promerica">Banco Promerica</SelectItem>
+                                          <SelectItem value="Otro">Otro / Internacional</SelectItem>
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                )}
                                 {(downPaymentMethod === 'transfer' || downPaymentMethod === 'card') && (
-                                    <Input
-                                        placeholder={downPaymentMethod === 'transfer' ? 'No. de transferencia / referencia' : 'No. de aprobación / referencia'}
-                                        value={downPaymentReference}
-                                        onChange={(e) => setDownPaymentReference(e.target.value)}
-                                    />
+                                    <div className="space-y-2">
+                                      {downPaymentMethod === 'transfer' && <Label htmlFor="down-payment-reference">Referencia</Label>}
+                                      <Input
+                                          id="down-payment-reference"
+                                          placeholder={downPaymentMethod === 'transfer' ? 'No. de transferencia / referencia' : 'No. de aprobación / referencia'}
+                                          value={downPaymentReference}
+                                          onChange={(e) => setDownPaymentReference(e.target.value)}
+                                      />
+                                    </div>
                                 )}
                                 {isDownPaymentCashBlocked && (
                                     <p className="text-xs text-amber-600 dark:text-amber-400">No hay caja abierta: no puedes recibir el abono inicial en efectivo.</p>
@@ -423,7 +486,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                   <p className="font-medium text-sm">{item.product.name}</p>
                                   <div className="flex items-center gap-2 mt-0.5">
                                       <span className="text-xs text-muted-foreground">
-                                          {item.quantity} x {formatCurrency(unitPrice)}
+                                          {formatQtyCompact(item.quantity, item.product.unit)} x {formatCurrency(unitPrice)}
                                       </span>
                                       {hasDiscount && (
                                           <span className="text-[10px] bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1.5 py-0.5 rounded font-medium animate-pulse">

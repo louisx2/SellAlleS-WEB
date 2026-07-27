@@ -141,10 +141,13 @@ function LoginForm() {
     <div className="relative flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <div className="flex justify-center items-center mb-4">
+          <a
+            href={process.env.NEXT_PUBLIC_LANDING_URL || 'https://sellalles.com'}
+            className="flex justify-center items-center mb-4 hover:opacity-80 transition-opacity"
+          >
             <Store className="h-8 w-8 text-primary" />
             <span className="ml-2 font-bold text-2xl">SellAlleS</span>
-          </div>
+          </a>
           <CardTitle>
             {mode === 'register' ? 'Crea tu cuenta gratis' : mode === 'recover' ? 'Recuperar Contraseña' : 'Iniciar Sesión'}
           </CardTitle>

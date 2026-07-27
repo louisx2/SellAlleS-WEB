@@ -13,9 +13,20 @@ interface SalesContextType {
   paySale: (saleId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string, reference?: string) => Promise<PaymentResult>;
   /** Abono a la deuda general del cliente; la base lo aplica FIFO a sus ventas a crédito. */
   payCustomerDebt: (customerId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string, reference?: string) => Promise<PaymentResult>;
+  /** Anula una venta pagada: emite nota de crédito B04 (si llevó NCF), repone
+   *  inventario y registra la salida de caja si se devuelve efectivo. */
+  annulSale: (saleId: string, reason?: string, refundMethod?: PaymentMethod) => Promise<AnnulSaleResult>;
   reload: () => Promise<void>;
   loading: boolean;
 }
+
+export type AnnulSaleResult = {
+  creditNoteId: string;
+  ncf?: string;
+  ncfModified?: string;
+  total: number;
+  refundMethod: PaymentMethod;
+};
 
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
 
@@ -60,6 +71,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
         price: item.product.price,
         custom_price: item.customPrice ?? null,
         itbis: item.product.itbis,
+        unit: item.product.unit,
       })),
     });
     if (error) throw error;
@@ -137,8 +149,27 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     return result;
   };
 
+  // La anulación completa (NCF B04, inventario, caja, cancelled_at) ocurre en
+  // una sola transacción dentro de la base; aquí solo se refresca el estado.
+  const annulSale = async (saleId: string, reason?: string, refundMethod?: PaymentMethod): Promise<AnnulSaleResult> => {
+    const { data, error } = await supabase.rpc('annul_sale', {
+      p_sale_id: saleId,
+      p_reason: reason ?? null,
+      p_refund_method: refundMethod ?? null,
+    });
+    if (error) throw error;
+    await load();
+    return {
+      creditNoteId: data.credit_note_id,
+      ncf: data.ncf ?? undefined,
+      ncfModified: data.ncf_modified ?? undefined,
+      total: Number(data.total ?? 0),
+      refundMethod: data.refund_method,
+    };
+  };
+
   return (
-    <SalesContext.Provider value={{ sales, addSale, paySale, payCustomerDebt, reload: load, loading }}>
+    <SalesContext.Provider value={{ sales, addSale, paySale, payCustomerDebt, annulSale, reload: load, loading }}>
       {children}
     </SalesContext.Provider>
   );

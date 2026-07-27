@@ -30,6 +30,7 @@ export function CustomerSearchDialog({ isOpen, onOpenChange, onCustomerSelected 
   const filteredCustomers = useMemo(() => {
     const isGeneric = (c: Customer) => 
       c.id === '0' || 
+      c.name.toLowerCase() === 'consumidor final' ||
       c.name.toLowerCase() === 'cliente genérico' || 
       c.name.toLowerCase() === 'cliente generico';
 

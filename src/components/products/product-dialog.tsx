@@ -14,9 +14,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import type { Product } from '@/lib/types';
+import {
+  UNITS, DEFAULT_UNIT_CODE, getUnit, unitAllowsDecimals, normalizeQty,
+  normalizeUnitCode, parseQtyInput, formatQty, type UnitCode,
+} from '@/lib/units';
 import { useToast } from '@/hooks/use-toast';
 import { useProducts } from '@/context/product-provider';
 import { useSuppliers } from '@/context/supplier-provider';
@@ -52,6 +57,44 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const [supplierId, setSupplierId] = useState<string>(product?.supplierId || '');
   const [categoryId, setCategoryId] = useState<string>(product?.categoryId || '');
   const [locationId, setLocationId] = useState<string>(product?.locationId || '');
+
+  // La unidad decide si el producto admite cantidades fraccionadas, así que
+  // existencias y cantidad mínima de mayoreo son controladas: su `step` cambia
+  // con la unidad y un type="number" con 1.7 y step=1 queda inválido y bloquea
+  // el submit con un mensaje nativo que no explica nada.
+  const [unit, setUnit] = useState<UnitCode>(product?.unit ?? DEFAULT_UNIT_CODE);
+  const [stockInput, setStockInput] = useState<string>(product ? formatQty(product.stock) : '');
+  const [minQtyInput, setMinQtyInput] = useState<string>(
+    product?.wholesaleMinQuantity != null ? formatQty(product.wholesaleMinQuantity) : ''
+  );
+  const allowsDecimals = unitAllowsDecimals(unit);
+  // Platos preparados, servicios y tarifas: se venden siempre y no llevan
+  // existencias, así que el formulario esconde stock, unidad y mayoreo.
+  const [tracksStock, setTracksStock] = useState(product?.tracksStock ?? true);
+
+  const handleUnitChange = (next: string) => {
+    const nextUnit = normalizeUnitCode(next);
+    setUnit(nextUnit);
+    if (unitAllowsDecimals(nextUnit)) return;
+    // Al pasar a una unidad contable no puede quedar stock fraccionado.
+    const stockValue = parseQtyInput(stockInput);
+    const minQtyValue = parseQtyInput(minQtyInput);
+    const fixes: string[] = [];
+    if (Number.isFinite(stockValue) && !Number.isInteger(stockValue)) {
+      setStockInput(String(Math.round(stockValue)));
+      fixes.push(`existencias a ${Math.round(stockValue)}`);
+    }
+    if (Number.isFinite(minQtyValue) && !Number.isInteger(minQtyValue)) {
+      setMinQtyInput(String(Math.round(minQtyValue)));
+      fixes.push(`cant. mín. mayoreo a ${Math.round(minQtyValue)}`);
+    }
+    if (fixes.length) {
+      toast({
+        title: `«${getUnit(nextUnit).plural}» no admite decimales`,
+        description: `Se redondeó ${fixes.join(' y ')}. Revisa antes de guardar.`,
+      });
+    }
+  };
 
   // Imagen: solo consideramos "real" una URL http/https/data; 'placeholder' o
   // ids de demo cuentan como "sin imagen" en el formulario.
@@ -97,7 +140,35 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    
+
+    // Nunca parseInt sobre una cantidad: parseInt('1.7') es 1 en silencio.
+    const stockValue = parseQtyInput(stockInput);
+    const minQtyValue = minQtyInput.trim() === '' ? undefined : parseQtyInput(minQtyInput);
+    const unitLabel = getUnit(unit).plural;
+
+    // Un producto sin inventario no pide existencias ni unidad: se guarda en
+    // cero y las validaciones de cantidad no aplican.
+    if (tracksStock) {
+      if (!Number.isFinite(stockValue) || stockValue < 0) {
+        toast({ title: 'Existencias inválidas', description: 'Escribe una cantidad válida mayor o igual que cero.', variant: 'destructive' });
+        return;
+      }
+      if (!allowsDecimals && !Number.isInteger(stockValue)) {
+        toast({ title: 'Cantidad inválida', description: `«${unitLabel}» solo admite cantidades enteras.`, variant: 'destructive' });
+        return;
+      }
+      if (minQtyValue !== undefined) {
+        if (!Number.isFinite(minQtyValue) || minQtyValue < 0) {
+          toast({ title: 'Cantidad mínima inválida', description: 'Escribe una cantidad válida o deja el campo vacío.', variant: 'destructive' });
+          return;
+        }
+        if (!allowsDecimals && !Number.isInteger(minQtyValue)) {
+          toast({ title: 'Cantidad inválida', description: `«${unitLabel}» solo admite cantidades enteras.`, variant: 'destructive' });
+          return;
+        }
+      }
+    }
+
     // We omit 'id' because Firestore/Supabase will generate it for new documents.
     const productData: Omit<Product, 'id'> = {
       code: formData.get('code') as string,
@@ -108,10 +179,12 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       price: parseFloat(formData.get('price') as string),
       cost: parseFloat(formData.get('cost') as string),
       itbis: formData.get('itbis') === 'on',
-      stock: parseInt(formData.get('stock') as string, 10),
+      stock: tracksStock ? normalizeQty(stockValue, unit) : 0,
+      unit: tracksStock ? unit : DEFAULT_UNIT_CODE,
+      tracksStock,
       locationId: (locationId && locationId !== 'none') ? locationId : undefined,
-      wholesalePrice: formData.get('wholesalePrice') ? parseFloat(formData.get('wholesalePrice') as string) : undefined,
-      wholesaleMinQuantity: formData.get('wholesaleMinQuantity') ? parseInt(formData.get('wholesaleMinQuantity') as string, 10) : undefined,
+      wholesalePrice: tracksStock && formData.get('wholesalePrice') ? parseFloat(formData.get('wholesalePrice') as string) : undefined,
+      wholesaleMinQuantity: !tracksStock || minQtyValue === undefined ? undefined : normalizeQty(minQtyValue, unit),
       image: imageUrl.trim() || 'placeholder',
     };
 
@@ -260,11 +333,55 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
               <Input id="price" name="price" type="number" step="0.01" defaultValue={product?.price} required/>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="stock">Existencias</Label>
-              <Input id="stock" name="stock" type="number" defaultValue={product?.stock} required />
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-3 md:col-span-2">
+              <div>
+                <p className="text-sm font-medium">Maneja existencias</p>
+                <p className="text-xs text-muted-foreground">
+                  Apágalo para platos preparados, servicios o tarifas: se venden siempre,
+                  no descuentan inventario y nunca aparecen agotados.
+                </p>
+              </div>
+              <Switch checked={tracksStock} onCheckedChange={setTracksStock} />
             </div>
-            <div className="flex flex-col justify-center gap-2">
+
+            {tracksStock && (
+            <>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="stock">Existencias ({getUnit(unit).short})</Label>
+              <Input
+                id="stock"
+                name="stock"
+                type="number"
+                min="0"
+                step={allowsDecimals ? '0.001' : '1'}
+                value={stockInput}
+                onChange={(e) => setStockInput(e.target.value)}
+                required
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="unit">Unidad de medida</Label>
+              <Select value={unit} onValueChange={handleUnitChange}>
+                <SelectTrigger id="unit"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>Se venden por pieza (solo enteros)</SelectLabel>
+                    {UNITS.filter((u) => u.group === 'contable').map((u) => (
+                      <SelectItem key={u.code} value={u.code}>{u.singular} ({u.short})</SelectItem>
+                    ))}
+                  </SelectGroup>
+                  <SelectGroup>
+                    <SelectLabel>Se venden por medida (admiten decimales)</SelectLabel>
+                    {UNITS.filter((u) => u.group === 'medible').map((u) => (
+                      <SelectItem key={u.code} value={u.code}>{u.singular} ({u.short})</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            </>
+            )}
+            <div className="flex flex-col justify-center gap-2 md:col-span-2">
               <Label htmlFor="itbis" className="mb-1">ITBIS</Label>
               <div className="flex items-center space-x-2 h-10">
                 <Checkbox id="itbis" name="itbis" defaultChecked={product?.itbis} />
@@ -291,14 +408,26 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
               </Select>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="wholesalePrice">Precio Mayoreo</Label>
-              <Input id="wholesalePrice" name="wholesalePrice" type="number" step="0.01" defaultValue={product?.wholesalePrice} />
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="wholesaleMinQuantity">Cant. Mín. Mayor.</Label>
-              <Input id="wholesaleMinQuantity" name="wholesaleMinQuantity" type="number" defaultValue={product?.wholesaleMinQuantity} />
-            </div>
+            {tracksStock && (
+              <>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="wholesalePrice">Precio Mayoreo</Label>
+                  <Input id="wholesalePrice" name="wholesalePrice" type="number" step="0.01" defaultValue={product?.wholesalePrice} />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="wholesaleMinQuantity">Cant. Mín. Mayor. ({getUnit(unit).short})</Label>
+                  <Input
+                    id="wholesaleMinQuantity"
+                    name="wholesaleMinQuantity"
+                    type="number"
+                    min="0"
+                    step={allowsDecimals ? '0.001' : '1'}
+                    value={minQtyInput}
+                    onChange={(e) => setMinQtyInput(e.target.value)}
+                  />
+                </div>
+              </>
+            )}
           </div>
           
           <DialogFooter className="mt-4">

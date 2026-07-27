@@ -10,6 +10,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import type { SupplierInvoice } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
+import { formatQty } from '@/lib/units';
 import { EXPENSE_TYPES_606, ISR_RETENTION_TYPES_606, PAYMENT_FORMS_606 } from '@/lib/dgii-606';
 
 interface PayableDetailDialogProps {
@@ -92,7 +93,7 @@ export function PayableDetailDialog({ invoice, open, onOpenChange }: PayableDeta
                 <div key={item.id} className="flex justify-between gap-4 text-sm">
                   <span>
                     {item.description}
-                    <span className="text-muted-foreground"> × {item.quantity}</span>
+                    <span className="text-muted-foreground"> × {formatQty(item.quantity)}</span>
                   </span>
                   <span className="font-medium">{formatCurrency(item.quantity * item.unitCost)}</span>
                 </div>

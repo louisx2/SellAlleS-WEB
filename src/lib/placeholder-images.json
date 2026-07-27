@@ -63,7 +63,7 @@
     {
       "id": "placeholder",
       "description": "Generic placeholder image",
-      "imageUrl": "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHwxfHxwcm9kdWN0fGVufDB8fHx8MTc1OTMwNDc3Nnww&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageUrl": "/cardboard_box.png",
       "imageHint": "product"
     }
   ]
