@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sellalles-landing",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "sellalles-landing", "run", "dev"],
+      "port": 3000
+    },
+    {
+      "name": "sellalles-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "SellAlleS-WEB", "run", "dev", "--", "-p", "3001"],
+      "port": 3001
+    }
+  ]
+}

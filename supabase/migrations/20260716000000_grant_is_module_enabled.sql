@@ -1,0 +1,1 @@
+GRANT EXECUTE ON FUNCTION public.is_module_enabled(uuid, text, boolean) TO authenticated, anon;

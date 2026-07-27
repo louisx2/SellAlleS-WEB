@@ -1,0 +1,19 @@
+# Las dos apps son repos git independientes con su propio remoto:
+#   SellAlleS-WEB    -> github.com/louisx2/SellAlleS-WEB
+#   sellalles-landing -> github.com/louisx2/landingpos
+# Este repo versiona SOLO el backend (supabase/) y la documentación.
+/SellAlleS-WEB/
+/sellalles-landing/
+
+# Estado local del CLI de Supabase (versiones detectadas, proyecto vinculado).
+supabase/.temp/
+
+# Ajustes locales de Claude Code; launch.json sí se versiona.
+.claude/settings.local.json
+
+node_modules/
+
+# Nunca versionar secretos: las Edge Functions los leen de las variables de
+# entorno del proyecto Supabase, no de archivos.
+.env
+.env*.local
