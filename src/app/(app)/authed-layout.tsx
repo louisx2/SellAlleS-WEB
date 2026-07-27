@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText } from 'lucide-react';
+import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -19,12 +19,15 @@ import { moduleForRoute, type ModuleKey } from '@/lib/modules';
 import { hasPermission, isReportVisible, unionPermissions } from '@/lib/permissions';
 import type { PermissionResource } from '@/lib/types';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { usePlatformSettings } from '@/context/platform-settings-provider';
+import { waLink, supportMailto } from '@/lib/support-contact';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { supabase } from '@/lib/supabase/client';
 import { ProfileModal } from '@/components/profile/profile-modal';
+import { SupportDialog } from '@/components/support/support-dialog';
 
 interface NavItem {
   href: string;
@@ -62,6 +65,8 @@ const reportsNavItems = [
     { href: '/reports/taxes', label: 'Impuestos' },
     { href: '/reports/ganancias', label: 'Reporte de Ganancias' },
     { href: '/reports/compras-606', label: 'Compras (Formato 606)' },
+    { href: '/reports/ventas-607', label: 'Ventas (Formato 607)' },
+    { href: '/reports/anulados-608', label: 'NCF Anulados (Formato 608)' },
 ];
 
 const adminNavItems: NavItem[] = [
@@ -85,12 +90,28 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const { appUser, signOut, setImpersonatedCompany, setActiveBranch } = useAuth();
   const { isModuleEnabled, loading: modulesLoading } = useModules();
   const { profile } = useCompanyProfile();
+  // Canales de contacto configurables desde Configuración de la Plataforma.
+  const { support } = usePlatformSettings();
+  const activationWaLink = waLink(support, 'Hola, quiero activar mi cuenta de SellAlleS');
+  const supportMailLink = supportMailto(support);
   const isMobile = useIsMobile();
   const [openCollapsible, setOpenCollapsible] = useState<string | null>(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showSupportDialog, setShowSupportDialog] = useState(false);
   
   const { theme, setTheme } = useTheme();
+  
+  const handleThemeChange = (newTheme: string) => {
+    if (!document.startViewTransition) {
+      setTheme(newTheme);
+      return;
+    }
+    document.startViewTransition(() => {
+      setTheme(newTheme);
+    });
+  };
+
   const [mounted, setMounted] = useState(false);
   const [branchLogo, setBranchLogo] = useState<string | null>(null);
 
@@ -223,6 +244,10 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     // El 606 es un reporte fiscal DGII: aplica solo a empresas formalizadas y
     // depende de las facturas del módulo de Cuentas por Pagar.
     if (slug === 'compras-606' && (!profile.isFormalized || !isModuleEnabled('payables'))) return false;
+    // El 607 remite las ventas con NCF: solo aplica a empresas formalizadas.
+    if (slug === 'ventas-607' && !profile.isFormalized) return false;
+    // El 608 registra NCF anulados: solo aplica a empresas formalizadas.
+    if (slug === 'anulados-608' && !profile.isFormalized) return false;
     return isReportVisible(effectivePermissions, slug);
   });
 
@@ -289,14 +314,16 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
               ? '⚠️ Tu prueba gratis de 14 días terminó. Puedes ver tus datos, pero no modificarlos hasta activar tu cuenta.'
               : '⚠️ Tu suscripción venció. Puedes ver tus datos, pero no modificarlos hasta renovar tu pago.'}
           </span>
-          <a
-            href="https://wa.me/18299333226?text=Hola,%20quiero%20activar%20mi%20cuenta%20de%20SellAlleS"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="bg-white text-red-600 px-3 py-0.5 rounded-full hover:bg-red-50 transition-colors whitespace-nowrap"
-          >
-            Activar por WhatsApp
-          </a>
+          {activationWaLink && (
+            <a
+              href={activationWaLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="bg-white text-red-600 px-3 py-0.5 rounded-full hover:bg-red-50 transition-colors whitespace-nowrap"
+            >
+              Activar por WhatsApp
+            </a>
+          )}
         </div>
       )}
       <header className={cn(
@@ -307,7 +334,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
           <SidebarTrigger className="md:hidden" />
           <Link href={logoLink} className="flex items-center gap-2">
             {logoImgUrl ? (
-              <img src={logoImgUrl} alt="Logo" className="h-6 w-auto object-contain max-w-[120px]" />
+              <img src={logoImgUrl} alt="Logo" className="h-8 w-auto object-contain max-w-[140px]" />
             ) : (
               <Store className="h-6 w-6 text-primary" />
             )}
@@ -363,15 +390,15 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                         <span>Tema: {theme === 'light' ? 'Claro' : theme === 'dark' ? 'Oscuro' : 'Sistema'}</span>
                       </DropdownMenuSubTrigger>
                       <DropdownMenuSubContent>
-                        <DropdownMenuItem onSelect={() => setTheme('light')}>
+                        <DropdownMenuItem onSelect={() => handleThemeChange('light')}>
                           <Sun className="mr-2 h-4 w-4 text-orange-500" />
                           <span>Claro</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => setTheme('dark')}>
+                        <DropdownMenuItem onSelect={() => handleThemeChange('dark')}>
                           <Moon className="mr-2 h-4 w-4 text-yellow-300" />
                           <span>Oscuro</span>
                         </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => setTheme('system')}>
+                        <DropdownMenuItem onSelect={() => handleThemeChange('system')}>
                           <Settings className="mr-2 h-4 w-4" />
                           <span>Sistema</span>
                         </DropdownMenuItem>
@@ -494,6 +521,26 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
+            {isSuperAdmin && (
+              <SidebarMenuItem>
+                <Link href="/admin/soporte" passHref>
+                  <SidebarMenuButton isActive={pathname.startsWith('/admin/soporte')} tooltip="Bandeja de Soporte">
+                    <LifeBuoy />
+                    <span className="group-data-[collapsible=icon]:hidden">Soporte</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            )}
+            {isSuperAdmin && (
+              <SidebarMenuItem>
+                <Link href="/admin/plataforma" passHref>
+                  <SidebarMenuButton isActive={pathname.startsWith('/admin/plataforma')} tooltip="Configuración de la Plataforma">
+                    <Settings />
+                    <span className="group-data-[collapsible=icon]:hidden">Configuración de la Plataforma</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            )}
             {visibleDashboard && (
               <SidebarMenuItem>
                 <Link href={dashboardNavItem.href} passHref>
@@ -608,6 +655,14 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
         </SidebarContent>
         <Separator />
         <SidebarFooter className="p-4 flex flex-col gap-2">
+          {/* Abre el diálogo de soporte (ticket + WhatsApp). Si los dos canales
+              están apagados no se muestra nada, en vez de un botón sin salida. */}
+          {(supportMailLink || activationWaLink) && (
+            <SidebarMenuButton onClick={() => setShowSupportDialog(true)} tooltip="Soporte Técnico">
+              <LifeBuoy className="h-4 w-4 text-primary" />
+              <span className="group-data-[collapsible=icon]:hidden">Soporte Técnico</span>
+            </SidebarMenuButton>
+          )}
           <SidebarMenuButton onClick={() => setShowLogoutConfirm(true)} tooltip="Cerrar Sesión">
             <LogOut />
             <span className="group-data-[collapsible=icon]:hidden">Cerrar Sesión</span>
@@ -663,6 +718,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
       </AlertDialog>
       
       <ProfileModal open={showProfileModal} onOpenChange={setShowProfileModal} />
+      <SupportDialog open={showSupportDialog} onOpenChange={setShowSupportDialog} />
     </div>
   );
 }

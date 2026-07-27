@@ -9,6 +9,8 @@ import { supabase } from '@/lib/supabase/client';
 import { rowToSubscriptionPayment } from '@/lib/supabase/mappers';
 import type { SubscriptionPayment } from '@/lib/types';
 import { useAuth } from '@/context/auth-provider';
+import { usePlatformSettings } from '@/context/platform-settings-provider';
+import { waLink } from '@/lib/support-contact';
 import { formatCurrency } from '@/lib/utils';
 import { CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
 
@@ -26,6 +28,8 @@ function fmtDate(s?: string) {
 
 export default function SuscripcionPage() {
   const { appUser } = useAuth();
+  const { support } = usePlatformSettings();
+  const activationWaLink = waLink(support, 'Hola, quiero activar mi cuenta de SellAlleS');
   const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
   const [payments, setPayments] = useState<SubscriptionPayment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,9 +114,9 @@ export default function SuscripcionPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {estado.desc && <p className="text-sm text-muted-foreground">{estado.desc}</p>}
-            {(isReadOnly || status === 'trial') && (
+            {(isReadOnly || status === 'trial') && activationWaLink && (
               <a
-                href="https://wa.me/18299333226?text=Hola,%20quiero%20activar%20mi%20cuenta%20de%20SellAlleS"
+                href={activationWaLink}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 transition-colors"

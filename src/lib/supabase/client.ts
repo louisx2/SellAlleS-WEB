@@ -41,8 +41,11 @@ export const supabase = createClient(
 // Es una barrera de UI (no de seguridad); el objetivo es que el usuario en
 // prueba vencida no pueda modificar datos hasta activar su cuenta.
 // =============================================================================
+// Sin número de contacto: este string vive fuera de React y no puede leer
+// platform_settings. El canal vigente lo muestra la UI (banner superior,
+// pantalla de suspensión, botón de Soporte), que sí lee el provider.
 export const READONLY_MESSAGE =
-  'Tu prueba gratis de 14 días terminó. Activa tu cuenta por WhatsApp (829-933-3226) para seguir registrando o modificando datos.';
+  'Tu prueba gratis de 14 días terminó. Activa tu cuenta desde el botón de Soporte para seguir registrando o modificando datos.';
 
 let readOnlyMode = false;
 export function setReadOnlyMode(value: boolean) { readOnlyMode = value; }

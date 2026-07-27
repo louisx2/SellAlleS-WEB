@@ -4,6 +4,7 @@ import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { cn } from '@/lib/utils';
 import { AuthProvider } from '@/context/auth-provider';
+import { PlatformSettingsProvider } from '@/context/platform-settings-provider';
 import { PWARegister } from '@/components/pwa-register';
 
 const ptSans = PT_Sans({
@@ -49,11 +50,13 @@ export default function RootLayout({
             __html: `if(location.pathname==='/reset-password'&&location.hash.length>1){try{sessionStorage.setItem('pwRecoveryHash',location.hash.slice(1));}catch(e){}history.replaceState(null,'',location.pathname+location.search);}`,
           }}
         />
-        <AuthProvider>
-          <PWARegister />
-          {children}
-          <Toaster />
-        </AuthProvider>
+        <PlatformSettingsProvider>
+          <AuthProvider>
+            <PWARegister />
+            {children}
+            <Toaster />
+          </AuthProvider>
+        </PlatformSettingsProvider>
       </body>
     </html>
   );
