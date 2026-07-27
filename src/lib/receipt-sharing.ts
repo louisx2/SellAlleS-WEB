@@ -77,6 +77,14 @@ export function shareSaleViaWhatsApp(sale: Sale, companyName?: string) {
   abrirWhatsApp(buildSaleReceiptText(sale, companyName), telefonoParaWhatsApp(sale));
 }
 
+/** base64 -> Blob PDF, para poder subirlo como archivo en vez de como texto. */
+function base64APdf(base64: string): Blob {
+  const binario = atob(base64);
+  const bytes = new Uint8Array(binario.length);
+  for (let i = 0; i < binario.length; i++) bytes[i] = binario.charCodeAt(i);
+  return new Blob([bytes], { type: 'application/pdf' });
+}
+
 /**
  * Sube el PDF y abre WhatsApp con un enlace de descarga temporal.
  *
@@ -93,14 +101,28 @@ export async function shareSalePdfLinkViaWhatsApp(
   sale: Sale,
   companyName?: string,
 ): Promise<{ url: string; diasValidez: number }> {
+  // El PDF NO viaja dentro del JSON de la función: por ahí no cabía y la
+  // petición ni siquiera llegaba ("Failed to send a request to the Edge
+  // Function"). La función solo entrega dos URLs firmadas — una para subir y
+  // otra para descargar — y el archivo va directo a Storage.
   const { data, error } = await supabase.functions.invoke('receipt-link', {
-    body: { saleId, pdfBase64 },
+    body: { saleId },
   });
 
   const msg = (data as { error?: string })?.error ?? error?.message;
   if (msg) throw new Error(msg);
 
-  const { url, diasValidez } = data as { url: string; diasValidez: number };
+  const { ruta, uploadToken, url, diasValidez } = data as {
+    ruta: string; uploadToken: string; url: string; diasValidez: number;
+  };
+
+  const { error: upErr } = await supabase.storage
+    .from('comprobantes')
+    .uploadToSignedUrl(ruta, uploadToken, base64APdf(pdfBase64), {
+      contentType: 'application/pdf',
+      upsert: true,
+    });
+  if (upErr) throw new Error(`No se pudo guardar el PDF: ${upErr.message}`);
 
   const negocio = companyName ?? 'nuestro negocio';
   const texto =
