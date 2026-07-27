@@ -6,15 +6,16 @@ import { useReactToPrint } from 'react-to-print';
 import { useSales } from '@/context/sales-provider';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Printer, ArrowLeft, MessageSquare, Mail, Loader2, Send, Download } from 'lucide-react';
+import { Printer, ArrowLeft, MessageSquare, Mail, Loader2, Send, Download, Link as LinkIcon } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
 import { ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from '@/components/pos/receipt-content';
-import { 
-  shareSaleViaWhatsApp, 
-  generateReceiptPdf, 
-  downloadReceiptPdfFile, 
-  sendReceiptViaResendEmail 
+import {
+  shareSaleViaWhatsApp,
+  shareSalePdfLinkViaWhatsApp,
+  generateReceiptPdf,
+  downloadReceiptPdfFile,
+  sendReceiptViaResendEmail
 } from '@/lib/receipt-sharing';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useToast } from '@/hooks/use-toast';
@@ -34,6 +35,7 @@ export default function SaleReceiptClient() {
   const [activeDialog, setActiveDialog] = useState<'none' | 'email' | 'whatsapp'>('none');
   const [emailAddress, setEmailAddress] = useState('');
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [sendingLink, setSendingLink] = useState(false);
 
   useEffect(() => {
     if (sale) {
@@ -61,6 +63,32 @@ export default function SaleReceiptClient() {
   }
 
   const filename = `factura_${sale.ncf || sale.id.slice(0, 8)}.pdf`;
+
+  // Sube el PDF y abre WhatsApp con el enlace de descarga. WhatsApp no deja
+  // adjuntar archivos desde un enlace, así que sin esto el cajero tiene que
+  // descargar y adjuntar a mano en cada venta.
+  const handleSharePdfLink = async () => {
+    if (!pdfContentRef.current) return;
+    setSendingLink(true);
+    try {
+      const pdfBase64 = await generateReceiptPdf(pdfContentRef.current, filename);
+      const { diasValidez } = await shareSalePdfLinkViaWhatsApp(sale.id, pdfBase64, sale, profile.name);
+      toast({
+        title: 'WhatsApp abierto con el mensaje listo',
+        description: `Revísalo y dale enviar. El enlace de descarga del PDF funciona por ${diasValidez} días.`,
+      });
+      setActiveDialog('none');
+    } catch (error: any) {
+      console.error(error);
+      toast({
+        title: 'No se pudo generar el enlace',
+        description: error?.message || 'Intenta de nuevo.',
+        variant: 'destructive',
+      });
+    } finally {
+      setSendingLink(false);
+    }
+  };
 
   const handleSendEmail = async () => {
     if (!emailAddress.trim() || !emailAddress.includes('@')) {
@@ -218,9 +246,11 @@ export default function SaleReceiptClient() {
               ¿Cómo deseas compartir el comprobante de esta venta?
             </DialogDescription>
             <div className="flex flex-col gap-3 pt-2">
-              <Button 
-                variant="outline" 
-                className="justify-start h-auto py-3 px-4 border-emerald-200 dark:border-emerald-900 bg-emerald-50/10 hover:bg-emerald-50/20"
+              {/* whitespace-normal: el Button base trae whitespace-nowrap y
+                  estas descripciones largas se salían del botón. */}
+              <Button
+                variant="outline"
+                className="justify-start h-auto py-3 px-4 whitespace-normal border-emerald-200 dark:border-emerald-900 bg-emerald-50/10 hover:bg-emerald-50/20"
                 onClick={() => {
                   shareSaleViaWhatsApp(sale, profile.name);
                   setActiveDialog('none');
@@ -228,17 +258,35 @@ export default function SaleReceiptClient() {
               >
                 <div className="text-left">
                   <p className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center">
-                    <MessageSquare className="mr-2 h-4 w-4" /> Enviar Texto Detallado
+                    <MessageSquare className="mr-2 h-4 w-4 shrink-0" /> Texto detallado
                   </p>
                   <p className="text-xs text-muted-foreground font-normal mt-0.5">
-                    Abre el chat de WhatsApp con un mensaje pre-escrito de la lista de productos y totales.
+                    Abre el chat del cliente en WhatsApp con la lista de productos y totales ya escrita. Tú solo le das enviar.
                   </p>
                 </div>
               </Button>
 
-              <Button 
-                variant="outline" 
-                className="justify-start h-auto py-3 px-4"
+              <Button
+                variant="outline"
+                className="justify-start h-auto py-3 px-4 whitespace-normal border-emerald-200 dark:border-emerald-900"
+                disabled={sendingLink}
+                onClick={handleSharePdfLink}
+              >
+                <div className="text-left">
+                  <p className="font-semibold flex items-center">
+                    <LinkIcon className="mr-2 h-4 w-4 shrink-0" />
+                    {sendingLink ? 'Generando enlace...' : 'Enlace de descarga del PDF'}
+                  </p>
+                  <p className="text-xs text-muted-foreground font-normal mt-0.5">
+                    Abre el chat del cliente en WhatsApp con un mensaje listo que incluye el enlace
+                    para descargar la factura en PDF. El enlace funciona por 15 días.
+                  </p>
+                </div>
+              </Button>
+
+              <Button
+                variant="outline"
+                className="justify-start h-auto py-3 px-4 whitespace-normal"
                 onClick={async () => {
                   await handleDownloadPdf();
                   shareSaleViaWhatsApp(sale, profile.name);
@@ -247,10 +295,10 @@ export default function SaleReceiptClient() {
               >
                 <div className="text-left">
                   <p className="font-semibold flex items-center">
-                    <Download className="mr-2 h-4 w-4" /> Descargar PDF y Abrir Chat
+                    <Download className="mr-2 h-4 w-4 shrink-0" /> Descargar PDF y abrir chat
                   </p>
                   <p className="text-xs text-muted-foreground font-normal mt-0.5">
-                    Descarga el archivo PDF de la factura al dispositivo y abre WhatsApp para que lo puedas adjuntar.
+                    Descarga el PDF a este dispositivo y abre WhatsApp para que lo adjuntes tú mismo.
                   </p>
                 </div>
               </Button>
