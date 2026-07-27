@@ -84,6 +84,55 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
     }
   }, [company, defaultPlanName, load]);
 
+  // Manda el recibo al administrador de la empresa. La deduplicación real vive
+  // en send-lifecycle-email (clave única en platform_email_log); aquí la clave
+  // se arma con el id del pago cuando la RPC lo devuelve, y si no, con fecha y
+  // monto: registrar dos veces el mismo pago el mismo día es justo lo que se
+  // quiere evitar.
+  const enviarReciboPorCorreo = async (pagoId: string | null, monto: number) => {
+    if (!company) return;
+    try {
+      const { data: admins } = await supabase
+        .from('profiles')
+        .select('name, email')
+        .eq('company_id', company.id)
+        .eq('role', 'admin')
+        .not('email', 'is', null)
+        .limit(1);
+      const destinatario = admins?.[0];
+      if (!destinatario?.email) return;
+
+      const clave = pagoId
+        ? `${company.id}:pago:${pagoId}`
+        : `${company.id}:pago:${paidAt || today()}:${monto}`;
+
+      const { data, error } = await supabase.functions.invoke('send-lifecycle-email', {
+        body: {
+          template: 'recibo-suscripcion',
+          to: destinatario.email,
+          companyId: company.id,
+          dedupeKey: clave,
+          vars: {
+            companyName: company.name,
+            userName: destinatario.name,
+            amount: monto,
+            method: METHOD_LABEL[method] ?? method,
+            paidAt: paidAt || today(),
+            paidUntil: periodEnd || null,
+          },
+        },
+      });
+      const msg = (data as { error?: string })?.error ?? error?.message;
+      if (msg) throw new Error(msg);
+    } catch (err: any) {
+      toast({
+        title: 'El pago se registró, pero no se envió el recibo',
+        description: err?.message ?? 'Error enviando el correo.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!company) return;
@@ -94,7 +143,7 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
     }
     setSaving(true);
     try {
-      const { error } = await supabase.rpc('record_subscription_payment', {
+      const { data: pagoId, error } = await supabase.rpc('record_subscription_payment', {
         p_company_id: company.id,
         p_amount: value,
         p_paid_at: paidAt || today(),
@@ -111,6 +160,12 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
         title: 'Pago registrado',
         description: activate ? `${company.name}: pago registrado y empresa activada.` : `${company.name}: pago registrado.`,
       });
+
+      // El recibo por correo es un extra: si falla, el pago YA quedó registrado
+      // y no se debe hacer creer lo contrario. Por eso va en su propio try y
+      // solo avisa, sin revertir nada.
+      void enviarReciboPorCorreo(pagoId as string | null, value);
+
       setShowForm(false);
       await load();
       onRecorded?.();

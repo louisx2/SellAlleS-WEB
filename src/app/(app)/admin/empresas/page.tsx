@@ -323,6 +323,9 @@ export default function CompaniesManagementPage() {
       };
 
       let companyId = editingId;
+      // Se guarda para el correo de bienvenida: la fecha de fin de prueba la
+      // pone la base, no este formulario.
+      let trialEndsAt: string | null = null;
       if (editingId) {
         const { error } = await supabase.from('companies').update(payload).eq('id', editingId);
         if (error) throw error;
@@ -330,6 +333,7 @@ export default function CompaniesManagementPage() {
         const { data, error } = await supabase.from('companies').insert(payload).select().single();
         if (error) throw error;
         companyId = data.id;
+        trialEndsAt = data.trial_ends_at ?? null;
       }
 
       if (editingId) {
@@ -459,6 +463,39 @@ export default function CompaniesManagementPage() {
       }
 
       toast({ title: editingId ? 'Empresa actualizada' : 'Empresa creada con su administrador', description: form.name });
+
+      // Bienvenida solo al crear, y nunca a las empresas demo: se borran solas
+      // a las pocas horas y escribirles solo gasta cupo del plan de correo.
+      // Va sin await y con su propio manejo de error: la empresa YA quedó
+      // creada, y un fallo de correo no debe hacer parecer lo contrario.
+      if (!editingId && companyId && !form.isDemo && form.adminEmail.trim()) {
+        void (async () => {
+          try {
+            const { data, error } = await supabase.functions.invoke('send-lifecycle-email', {
+              body: {
+                template: 'bienvenida',
+                to: form.adminEmail.trim(),
+                companyId,
+                dedupeKey: `${companyId}:bienvenida`,
+                vars: {
+                  companyName: form.name.trim(),
+                  userName: form.adminName.trim() || null,
+                  trialEndsAt,
+                },
+              },
+            });
+            const msg = (data as { error?: string })?.error ?? error?.message;
+            if (msg) throw new Error(msg);
+          } catch (e: any) {
+            toast({
+              title: 'La empresa se creó, pero no se envió la bienvenida',
+              description: e?.message ?? 'Error enviando el correo.',
+              variant: 'destructive',
+            });
+          }
+        })();
+      }
+
       setOpen(false);
       await load();
     } catch (err: any) {
