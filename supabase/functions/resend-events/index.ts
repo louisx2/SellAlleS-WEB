@@ -79,12 +79,18 @@ Deno.serve(async (req) => {
   const destinatarios = Array.isArray(data.to) ? (data.to as string[]) : [String(data.to ?? '')];
   const emailId = (data.email_id ?? data.id ?? null) as string | null;
 
-  // Un rebote "soft" es transitorio (buzón lleno, servidor caído) y no debe
-  // bloquear la dirección: solo los duros significan que no existe.
+  // Resend hereda la nomenclatura de SES: los tipos son Permanent, Transient y
+  // Undetermined — NO "hard"/"soft". Solo Permanent significa que la dirección
+  // no existe; Transient es pasajero (buzón lleno, servidor caído) y bloquear
+  // por eso dejaría sin correos a alguien por un problema de un día.
+  // Undetermined se trata como pasajero a propósito: ante la duda, no se
+  // bloquea a un cliente que sí puede recibir.
   const bounce = (data.bounce ?? {}) as Record<string, unknown>;
+  const tipoBounce = String(bounce.type ?? '').toLowerCase();
+  const subTipo = String(bounce.subType ?? '').toLowerCase();
   const esDuro = tipo === 'email.complained' ||
-    String(bounce.type ?? '').toLowerCase() === 'hard' ||
-    String(bounce.subType ?? '').toLowerCase().includes('suppressed');
+    tipoBounce === 'permanent' ||
+    subTipo === 'suppressed';   // ya en la lista de supresión de SES
 
   const admin = createClient(
     Deno.env.get('SUPABASE_URL')!,
