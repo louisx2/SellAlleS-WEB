@@ -73,27 +73,27 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
   const handleSetPassword = async () => {
     if (!selectedUser) return;
     if (newPwd.length < 8) {
-      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe tener al menos 8 caracteres.', variant: 'destructive' });
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe tener al menos 8 caracteres.', variant: 'destructive' });
       return;
     }
     if (!/[A-Z]/.test(newPwd)) {
-      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos una letra mayÃƒÂºscula.', variant: 'destructive' });
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra mayúscula.', variant: 'destructive' });
       return;
     }
     if (!/[a-z]/.test(newPwd)) {
-      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos una letra minÃƒÂºscula.', variant: 'destructive' });
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos una letra minúscula.', variant: 'destructive' });
       return;
     }
     if (!/\d/.test(newPwd)) {
-      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos un nÃƒÂºmero.', variant: 'destructive' });
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un número.', variant: 'destructive' });
       return;
     }
     if (!/[@$!%*?&._\-\/#]/.test(newPwd)) {
-      toast({ title: 'ContraseÃƒÂ±a dÃƒÂ©bil', description: 'La contraseÃƒÂ±a debe incluir al menos un carÃƒÂ¡cter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
+      toast({ title: 'Contraseña débil', description: 'La contraseña debe incluir al menos un carácter especial (ej: @$!%*?&._-/#).', variant: 'destructive' });
       return;
     }
     if (newPwd !== confirmPwd) {
-      toast({ title: 'ContraseÃƒÂ±as no coinciden', description: 'Las contraseÃƒÂ±as ingresadas no son iguales.', variant: 'destructive' });
+      toast({ title: 'Contraseñas no coinciden', description: 'Las contraseñas ingresadas no son iguales.', variant: 'destructive' });
       return;
     }
 
@@ -105,7 +105,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
       if (error) throw new Error((data as any)?.error ?? error.message);
       if ((data as any)?.error) throw new Error((data as any).error);
 
-      toast({ title: 'ContraseÃƒÂ±a actualizada', description: `Se fijÃƒÂ³ una nueva contraseÃƒÂ±a para ${selectedUser.name}.` });
+      toast({ title: 'Contraseña actualizada', description: `Se fijó una nueva contraseña para ${selectedUser.name}.` });
       setPwdOpen(false);
       setNewPwd('');
       setConfirmPwd('');
@@ -119,16 +119,16 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
     }
   };
 
-  // Enviar el correo de "olvidÃƒÂ© mi contraseÃƒÂ±a" Ã¢â‚¬â€ funciona sin importar si el
-  // usuario ya confirmÃƒÂ³ su correo o no; simplemente le manda el enlace de
-  // /reset-password para que fije una contraseÃƒÂ±a nueva ÃƒÂ©l mismo.
+  // Enviar el correo de "olvidé mi contraseña" — funciona sin importar si el
+  // usuario ya confirmó su correo o no; simplemente le manda el enlace de
+  // /reset-password para que fije una contraseña nueva él mismo.
   const handleSendReset = async (u: PlatformUser) => {
     setEmailActionBusyId(u.id);
     try {
       const redirectTo = `${window.location.origin}/reset-password`;
       const { error } = await supabase.auth.resetPasswordForEmail(u.email, { redirectTo });
       if (error) throw error;
-      toast({ title: 'Enlace enviado', description: `Se enviÃƒÂ³ un correo a ${u.email} para restablecer su contraseÃƒÂ±a.` });
+      toast({ title: 'Enlace enviado', description: `Se envió un correo a ${u.email} para restablecer su contraseña.` });
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo enviar el correo.', variant: 'destructive' });
     } finally {
@@ -136,8 +136,8 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
     }
   };
 
-  // ReenvÃƒÂ­a el correo de confirmaciÃƒÂ³n de cuenta (solo tiene sentido si el
-  // usuario todavÃƒÂ­a no confirmÃƒÂ³ Ã¢â‚¬â€ se oculta cuando ya estÃƒÂ¡ verificado).
+  // Reenvía el correo de confirmación de cuenta (solo tiene sentido si el
+  // usuario todavía no confirmó — se oculta cuando ya está verificado).
   const handleResendConfirm = async (u: PlatformUser) => {
     setEmailActionBusyId(u.id);
     try {
@@ -147,7 +147,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
         options: { emailRedirectTo: `${window.location.origin}/login` },
       });
       if (error) throw error;
-      toast({ title: 'Correo de confirmaciÃƒÂ³n enviado', description: `Se reenviÃƒÂ³ el enlace a ${u.email}.` });
+      toast({ title: 'Correo de confirmación enviado', description: `Se reenvió el enlace a ${u.email}.` });
     } catch (err: any) {
       toast({ title: 'Error al enviar', description: err?.message ?? 'No se pudo reenviar el correo.', variant: 'destructive' });
     } finally {
@@ -228,7 +228,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
               <TableHead>Sucursal</TableHead>
               <TableHead>Rol</TableHead>
               <TableHead>Roles adicionales</TableHead>
-              <TableHead>VerificaciÃƒÂ³n</TableHead>
+              <TableHead>Verificación</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -254,13 +254,13 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                   <TableCell className="py-3">
                     <div className="flex items-center gap-1.5 text-sm">
                       <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                      {u.companyId ? (companyName[u.companyId] ?? 'Ã¢â‚¬â€') : 'Ã¢â‚¬â€'}
+                      {u.companyId ? (companyName[u.companyId] ?? '—') : '—'}
                     </div>
                   </TableCell>
                   <TableCell className="py-3">
                     <div className="flex items-center gap-1.5 text-sm">
                       <Store className="h-3.5 w-3.5 text-muted-foreground" />
-                      {u.branchName || 'Ã¢â‚¬â€'}
+                      {u.branchName || '—'}
                     </div>
                   </TableCell>
                   <TableCell className="py-3">
@@ -275,7 +275,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                           <Badge key={r.id} variant="outline" className="text-[10px]">{r.name}</Badge>
                         ))
                       ) : (
-                        <span className="text-xs text-muted-foreground">Ã¢â‚¬â€</span>
+                        <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </div>
                   </TableCell>
@@ -291,7 +291,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                     <DropdownMenu modal={false}>
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" className="h-8 w-8 p-0">
-                          <span className="sr-only">Abrir menÃƒÂº</span>
+                          <span className="sr-only">Abrir menú</span>
                           <MoreHorizontal className="h-4 w-4" />
                         </Button>
                       </DropdownMenuTrigger>
@@ -304,7 +304,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => { setSelectedUser(u); setPwdOpen(true); }}>
                           <KeyRound className="mr-2 h-4 w-4" />
-                          <span>Fijar contraseÃƒÂ±a</span>
+                          <span>Fijar contraseña</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           onSelect={() => setTimeout(() => handleSendReset(u), 0)}
@@ -319,7 +319,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
                             disabled={emailActionBusyId === u.id}
                           >
                             <Mail className="mr-2 h-4 w-4 text-amber-500" />
-                            <span className="text-amber-500 font-medium">Reenviar confirmaciÃƒÂ³n</span>
+                            <span className="text-amber-500 font-medium">Reenviar confirmación</span>
                           </DropdownMenuItem>
                         )}
                         <DropdownMenuSeparator />
@@ -343,34 +343,34 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
       <Dialog open={pwdOpen} onOpenChange={(o) => { setPwdOpen(o); if (!o) { setNewPwd(''); setConfirmPwd(''); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Fijar contraseÃƒÂ±a</DialogTitle>
+            <DialogTitle>Fijar contraseña</DialogTitle>
             <DialogDescription>
-              Escribe la nueva contraseÃƒÂ±a para {selectedUser?.name}. El usuario podrÃƒÂ¡ entrar con ella de inmediato.
+              Escribe la nueva contraseña para {selectedUser?.name}. El usuario podrá entrar con ella de inmediato.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label htmlFor="newPwd">Nueva contraseÃƒÂ±a</Label>
+              <Label htmlFor="newPwd">Nueva contraseña</Label>
               <PasswordInput
                 id="newPwd" value={newPwd}
                 onChange={(e) => setNewPwd(e.target.value)}
-                placeholder="MÃƒÂ­nimo 8 caracteres, mayÃƒÂºscula, especial"
+                placeholder="Mínimo 8 caracteres, mayúscula, especial"
                 autoComplete="new-password"
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="confirmPwd">Confirmar contraseÃƒÂ±a</Label>
+              <Label htmlFor="confirmPwd">Confirmar contraseña</Label>
               <PasswordInput
                 id="confirmPwd" value={confirmPwd}
                 onChange={(e) => setConfirmPwd(e.target.value)}
-                placeholder="Repite la contraseÃƒÂ±a"
+                placeholder="Repite la contraseña"
                 autoComplete="new-password"
               />
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPwdOpen(false)} disabled={working}>Cancelar</Button>
-            <Button onClick={handleSetPassword} disabled={working}>{working ? 'GuardandoÃ¢â‚¬Â¦' : 'Guardar'}</Button>
+            <Button onClick={handleSetPassword} disabled={working}>{working ? 'Guardando…' : 'Guardar'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -378,9 +378,9 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Ã‚Â¿Eliminar a {selectedUser?.name}?</AlertDialogTitle>
+            <AlertDialogTitle>¿Eliminar a {selectedUser?.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Se eliminarÃƒÂ¡ su cuenta por completo (perfil y acceso). Esta acciÃƒÂ³n no se puede deshacer.
+              Se eliminará su cuenta por completo (perfil y acceso). Esta acción no se puede deshacer.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -390,7 +390,7 @@ export function PlatformUsersTable({ users, companies, branches, loading, onEdit
               disabled={working}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {working ? 'EliminandoÃ¢â‚¬Â¦' : 'Eliminar'}
+              {working ? 'Eliminando…' : 'Eliminar'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

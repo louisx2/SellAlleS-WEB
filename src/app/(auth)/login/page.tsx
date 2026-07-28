@@ -16,10 +16,10 @@ import { PasswordInput } from '@/components/ui/password-input';
 type Mode = 'login' | 'register' | 'recover';
 
 const AUTH_TRANSLATIONS: Record<string, string> = {
-  'Email not confirmed': 'El correo electrÃƒÂ³nico no ha sido confirmado. Por favor, revisa tu bandeja de entrada o carpeta de spam.',
-  'Invalid login credentials': 'El correo o la contraseÃƒÂ±a son incorrectos. IntÃƒÂ©ntalo de nuevo.',
-  'User already registered': 'Este correo electrÃƒÂ³nico ya estÃƒÂ¡ registrado en la plataforma.',
-  'Password should be at least 6 characters': 'La contraseÃƒÂ±a debe tener al menos 6 caracteres.',
+  'Email not confirmed': 'El correo electrónico no ha sido confirmado. Por favor, revisa tu bandeja de entrada o carpeta de spam.',
+  'Invalid login credentials': 'El correo o la contraseña son incorrectos. Inténtalo de nuevo.',
+  'User already registered': 'Este correo electrónico ya está registrado en la plataforma.',
+  'Password should be at least 6 characters': 'La contraseña debe tener al menos 6 caracteres.',
 };
 
 function translateError(msg: string): string {
@@ -46,10 +46,10 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [keepSession, setKeepSession] = useState(true);
 
-  // Auto-login desde la demo del landing: si llega la sesiÃƒÂ³n en el hash de la
+  // Auto-login desde la demo del landing: si llega la sesión en el hash de la
   // URL (#access_token=...&refresh_token=...), la establecemos y el
   // AuthProvider redirige solo al dashboard. Los tokens en el hash no viajan al
-  // servidor (patrÃƒÂ³n estÃƒÂ¡ndar de Supabase para handoff de sesiÃƒÂ³n entre dominios).
+  // servidor (patrón estándar de Supabase para handoff de sesión entre dominios).
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
@@ -64,9 +64,9 @@ function LoginForm() {
       supabase.auth.setSession({ access_token, refresh_token }).then(({ error: sessErr }) => {
         if (sessErr) {
           setIsLoading(false);
-          setError('No se pudo iniciar la sesiÃƒÂ³n de prueba. Inicia sesiÃƒÂ³n con las credenciales que te dimos.');
+          setError('No se pudo iniciar la sesión de prueba. Inicia sesión con las credenciales que te dimos.');
         }
-        // Ãƒâ€°xito: el AuthProvider detecta la sesiÃƒÂ³n y redirige; mantenemos el overlay.
+        // Éxito: el AuthProvider detecta la sesión y redirige; mantenemos el overlay.
       });
     }
   }, []);
@@ -79,41 +79,41 @@ function LoginForm() {
     try {
       if (mode === 'register') {
         if (password.length < 8) {
-          throw new Error('La contraseÃƒÂ±a debe tener al menos 8 caracteres.');
+          throw new Error('La contraseña debe tener al menos 8 caracteres.');
         }
         if (!/[A-Z]/.test(password)) {
-          throw new Error('La contraseÃƒÂ±a debe incluir al menos una letra mayÃƒÂºscula.');
+          throw new Error('La contraseña debe incluir al menos una letra mayúscula.');
         }
         if (!/[a-z]/.test(password)) {
-          throw new Error('La contraseÃƒÂ±a debe incluir al menos una letra minÃƒÂºscula.');
+          throw new Error('La contraseña debe incluir al menos una letra minúscula.');
         }
         if (!/\d/.test(password)) {
-          throw new Error('La contraseÃƒÂ±a debe incluir al menos un nÃƒÂºmero.');
+          throw new Error('La contraseña debe incluir al menos un número.');
         }
         if (!/[@$!%*?&._\-\/#]/.test(password)) {
-          throw new Error('La contraseÃƒÂ±a debe incluir al menos un carÃƒÂ¡cter especial (ej: @, $, !, %, *, ?, &, ., _, -, /).');
+          throw new Error('La contraseña debe incluir al menos un carácter especial (ej: @, $, !, %, *, ?, &, ., _, -, /).');
         }
         if (password !== confirmPassword) {
-          throw new Error('Las contraseÃƒÂ±as no coinciden.');
+          throw new Error('Las contraseñas no coinciden.');
         }
         const { needsConfirmation } = await signUp(name, email, password, businessName);
         if (needsConfirmation) {
           toast({
-            title: 'Cuenta creada Ã°Å¸Å½â€°',
-            description: 'Te enviamos un correo para confirmar tu cuenta. Revisa tu bandeja (y la carpeta de spam) y luego inicia sesiÃƒÂ³n.',
+            title: 'Cuenta creada 🎉',
+            description: 'Te enviamos un correo para confirmar tu cuenta. Revisa tu bandeja (y la carpeta de spam) y luego inicia sesión.',
           });
           setMode('login');
           setIsLoading(false);
           return;
         }
-        toast({ title: 'Ã‚Â¡Bienvenido!', description: 'Tu cuenta fue creada. Empieza tu prueba gratis.' });
-        // Hay sesiÃƒÂ³n: el AuthProvider mostrarÃƒÂ¡ el skeleton y redirige.
+        toast({ title: '¡Bienvenido!', description: 'Tu cuenta fue creada. Empieza tu prueba gratis.' });
+        // Hay sesión: el AuthProvider mostrará el skeleton y redirige.
       } else if (mode === 'recover') {
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: `${window.location.origin}/reset-password`,
         });
         if (resetError) throw resetError;
-        toast({ title: 'Enlace enviado', description: 'Revisa tu correo para recuperar tu contraseÃƒÂ±a.' });
+        toast({ title: 'Enlace enviado', description: 'Revisa tu correo para recuperar tu contraseña.' });
         setMode('login');
         setIsLoading(false);
       } else {
@@ -125,10 +125,10 @@ function LoginForm() {
           localStorage.setItem('keepSession', 'true');
         }
         await signIn(email, password);
-        // Ãƒâ€°xito: mantener el overlay activo hasta que el AuthProvider tome el control.
+        // Éxito: mantener el overlay activo hasta que el AuthProvider tome el control.
       }
     } catch (err: any) {
-      const rawMsg = err?.message ?? 'OcurriÃƒÂ³ un error inesperado.';
+      const rawMsg = err?.message ?? 'Ocurrió un error inesperado.';
       const msg = translateError(rawMsg);
       setError(msg);
       toast({ title: 'Error', description: msg, variant: 'destructive' });
@@ -150,10 +150,10 @@ function LoginForm() {
             <span className="ml-2 font-bold text-2xl">SellAlleS</span>
           </a>
           <CardTitle>
-            {mode === 'register' ? 'Crea tu cuenta gratis' : mode === 'recover' ? 'Recuperar ContraseÃƒÂ±a' : 'Iniciar SesiÃƒÂ³n'}
+            {mode === 'register' ? 'Crea tu cuenta gratis' : mode === 'recover' ? 'Recuperar Contraseña' : 'Iniciar Sesión'}
           </CardTitle>
           <CardDescription>
-            {mode === 'register' ? 'Prueba todas las funciones 14 dÃƒÂ­as. Sin tarjeta de crÃƒÂ©dito.' : mode === 'recover' ? 'Ingresa tu correo para recibir un enlace de recuperaciÃƒÂ³n' : 'Accede a tu cuenta para continuar'}
+            {mode === 'register' ? 'Prueba todas las funciones 14 días. Sin tarjeta de crédito.' : mode === 'recover' ? 'Ingresa tu correo para recibir un enlace de recuperación' : 'Accede a tu cuenta para continuar'}
           </CardDescription>
         </CardHeader>
         <form onSubmit={handleSubmit}>
@@ -175,7 +175,7 @@ function LoginForm() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="business-name">Nombre del negocio</Label>
-                      <Input id="business-name" type="text" placeholder="Ej: FerreterÃƒÂ­a Don Luis" value={businessName}
+                      <Input id="business-name" type="text" placeholder="Ej: Ferretería Don Luis" value={businessName}
                         onChange={(e) => setBusinessName(e.target.value)} required minLength={2} disabled={isLoading} />
                     </div>
                   </>
@@ -187,17 +187,17 @@ function LoginForm() {
                 </div>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <Label htmlFor="password">ContraseÃƒÂ±a</Label>
+                    <Label htmlFor="password">Contraseña</Label>
                     {!isRegister && (
                       <Button variant="link" size="sm" type="button" className="h-auto p-0 text-xs" onClick={() => setMode('recover')}>
-                        Ã‚Â¿Olvidaste tu contraseÃƒÂ±a?
+                        ¿Olvidaste tu contraseña?
                       </Button>
                     )}
                   </div>
                   <div className="relative">
                     <Input id="password" type={showPassword ? 'text' : 'password'} value={password}
                       onChange={(e) => setPassword(e.target.value)} required disabled={isLoading}
-                      placeholder={isRegister ? 'MÃƒÂ­nimo 8 caracteres' : undefined} />
+                      placeholder={isRegister ? 'Mínimo 8 caracteres' : undefined} />
                     <Button
                       type="button"
                       variant="ghost"
@@ -211,17 +211,17 @@ function LoginForm() {
                 </div>
                 {isRegister && (
                   <div className="space-y-2">
-                    <Label htmlFor="confirmPassword">Confirmar ContraseÃƒÂ±a</Label>
+                    <Label htmlFor="confirmPassword">Confirmar Contraseña</Label>
                     <PasswordInput id="confirmPassword" value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)} required disabled={isLoading}
-                      placeholder="Repite tu contraseÃƒÂ±a" />
+                      placeholder="Repite tu contraseña" />
                   </div>
                 )}
                 {!isRegister && (
                   <div className="flex items-center space-x-2">
                     <Checkbox id="keepSession" checked={keepSession} onCheckedChange={(c) => setKeepSession(c as boolean)} />
                     <Label htmlFor="keepSession" className="text-sm font-normal">
-                      Mantener sesiÃƒÂ³n activa
+                      Mantener sesión activa
                     </Label>
                   </div>
                 )}
@@ -243,12 +243,12 @@ function LoginForm() {
             {mode === 'recover' ? (
               <Button type="button" variant="link" size="sm" className="text-amber-500 hover:text-amber-600 font-semibold"
                 onClick={() => { setError(null); setMode('login'); }}>
-                Volver a Iniciar SesiÃƒÂ³n
+                Volver a Iniciar Sesión
               </Button>
             ) : (
               <Button type="button" variant="link" size="sm" className="text-amber-500 hover:text-amber-600 font-semibold"
                 onClick={() => { setError(null); setMode(isRegister ? 'login' : 'register'); }}>
-                {isRegister ? 'Ã‚Â¿Ya tienes cuenta? Inicia sesiÃƒÂ³n' : 'Ã‚Â¿No tienes cuenta? RegÃƒÂ­strate gratis'}
+                {isRegister ? '¿Ya tienes cuenta? Inicia sesión' : '¿No tienes cuenta? Regístrate gratis'}
               </Button>
             )}
           </CardFooter>
