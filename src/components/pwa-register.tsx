@@ -24,11 +24,34 @@ export function PWARegister() {
       window.location.reload();
     });
 
+    // La tablet del mostrador se queda abierta horas sin navegar, y el
+    // navegador solo comprueba si hay Service Worker nuevo al navegar o, por su
+    // cuenta, como mucho cada 24 horas. Sin esto, el aviso de versión nueva
+    // puede tardar un día en aparecer justo en el dispositivo donde más falta
+    // hace, porque es el que nunca se recarga.
+    let registroActual: ServiceWorkerRegistration | null = null;
+    let ultimaComprobacion = 0;
+    const MINIMO_ENTRE_COMPROBACIONES = 60_000;
+
+    const alVolverAPrimerPlano = () => {
+      if (document.visibilityState !== 'visible' || !registroActual) return;
+      // Cambiar de app y volver dispara esto a cada rato; cada comprobación es
+      // una petición de red. Una por minuto es de sobra.
+      const ahora = Date.now();
+      if (ahora - ultimaComprobacion < MINIMO_ENTRE_COMPROBACIONES) return;
+      ultimaComprobacion = ahora;
+      registroActual.update().catch(() => {
+        // Sin conexión no hay nada que comprobar; se reintenta la próxima vez.
+      });
+    };
+
     const registrar = () => {
       navigator.serviceWorker
         .register('/sw.js')
         .then((registro) => {
           console.log('[PWA] Service Worker registrado con scope:', registro.scope);
+          registroActual = registro;
+          document.addEventListener('visibilitychange', alVolverAPrimerPlano);
 
           // Ya había uno esperando de una visita anterior.
           if (registro.waiting && navigator.serviceWorker.controller) {
@@ -54,10 +77,13 @@ export function PWARegister() {
 
     if (document.readyState === 'complete') {
       registrar();
-      return;
+      return () => document.removeEventListener('visibilitychange', alVolverAPrimerPlano);
     }
     window.addEventListener('load', registrar);
-    return () => window.removeEventListener('load', registrar);
+    return () => {
+      window.removeEventListener('load', registrar);
+      document.removeEventListener('visibilitychange', alVolverAPrimerPlano);
+    };
   }, []);
 
   return null;
