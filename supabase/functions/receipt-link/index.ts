@@ -3,7 +3,7 @@
 //
 //   1) paso 'subida' -> URL firmada para SUBIR el PDF a Storage.
 //   2) el navegador sube el archivo directo a Storage.
-//   3) paso 'enlace' -> URL firmada de DESCARGA, la que va en el mensaje.
+//   3) paso 'enlace' -> el enlace corto que va en el mensaje.
 //
 // No se puede firmar la descarga en el mismo viaje que la subida: Storage
 // exige que el objeto exista para firmarlo y responde 400 "Object not found"
@@ -36,6 +36,38 @@ function json(status: number, obj: unknown) {
 /** Dias que vive el enlace de descarga. Suficiente para que el cliente lo abra
  *  con calma, corto para que un reenvio no lo deje expuesto indefinidamente. */
 const DIAS_VALIDEZ = 15;
+
+/** Dominio del enlace que recibe el cliente. Va en el worker de la landing, que
+ *  atiende /<empresa>/c/<codigo> y se lo pasa a la funcion `c`. Se puede mover
+ *  de dominio sin invalidar lo ya enviado: lo que manda es el codigo. */
+const BASE_ENLACE = Deno.env.get('RECEIPT_BASE_URL') ?? 'https://sellalles.com';
+
+/** Sin los caracteres que se confunden al leerlos o dictarlos: 0/O, 1/l/I. */
+const ALFABETO = '23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ';
+
+/** 8 caracteres de 56 = ~9.6e13 combinaciones. El codigo es lo unico que
+ *  protege el comprobante, asi que se saca del generador criptografico, no de
+ *  Math.random(). */
+function codigoNuevo() {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (b) => ALFABETO[b % ALFABETO.length]).join('');
+}
+
+/** El nombre de la empresa en la URL es decorativo: le dice al cliente de quien
+ *  es el comprobante antes de abrirlo. Se guarda tal como estaba al compartir,
+ *  para que un cambio de nombre no rompa los enlaces ya enviados. */
+function slug(nombre: string | null | undefined) {
+  const limpio = (nombre ?? '')
+    .normalize('NFD')
+    // Rango de las marcas diacriticas: separada la tilde por NFD, se descarta.
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/, '');
+  return limpio || 'comprobante';
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
@@ -93,19 +125,68 @@ Deno.serve(async (req) => {
       return json(200, { ok: true, ruta, uploadToken: subida.token });
     }
 
+    // paso 'enlace': se guarda un codigo corto y se devuelve la direccion que
+    // ve el cliente. Antes se devolvia la URL firmada de Storage, que mide 559
+    // caracteres y apunta a un dominio que el cliente no reconoce: ilegible en
+    // un mensaje y con pinta de estafa. Firmar la descarga es ahora tarea de la
+    // funcion `c`, en el momento en que alguien abre el enlace.
+    const { data: empresa } = await admin
+      .from('companies')
+      .select('name')
+      .eq('id', sale.company_id)
+      .maybeSingle();
+
     // El nombre de descarga hace que al cliente le llegue "comprobante-B01...pdf"
     // y no el uuid de la venta.
-    const { data: firmada, error: signErr } = await admin.storage
-      .from('comprobantes')
-      .createSignedUrl(ruta, DIAS_VALIDEZ * 24 * 60 * 60, {
-        download: `comprobante${sale.ncf ? `-${sale.ncf}` : ''}.pdf`,
-      });
-    if (signErr || !firmada?.signedUrl) {
-      console.error('Fallo firmando la descarga:', signErr?.message);
-      return json(502, { error: `No se pudo generar el enlace: ${signErr?.message ?? 'desconocido'}` });
+    const nombreArchivo = `comprobante${sale.ncf ? `-${sale.ncf}` : ''}.pdf`;
+    const empresaSlug = slug(empresa?.name);
+    const vence = new Date(Date.now() + DIAS_VALIDEZ * 24 * 60 * 60 * 1000);
+
+    // Si esta venta ya tiene un enlace vigente se reutiliza, para que reenviar
+    // el comprobante no le cambie la direccion al cliente que ya la tiene.
+    const { data: existente } = await admin
+      .from('receipt_links')
+      .select('code')
+      .eq('sale_id', sale.id)
+      .gt('expires_at', new Date().toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let code = existente?.code as string | undefined;
+
+    if (!code) {
+      // Reintentos por si el codigo aleatorio ya existe. Con 9.6e13
+      // combinaciones no va a pasar, pero chocar y fallar seria peor que
+      // volver a tirar el dado.
+      for (let intento = 0; intento < 3 && !code; intento++) {
+        const candidato = codigoNuevo();
+        const { error: insErr } = await admin.from('receipt_links').insert({
+          code: candidato,
+          sale_id: sale.id,
+          company_id: sale.company_id,
+          company_slug: empresaSlug,
+          storage_path: ruta,
+          download_name: nombreArchivo,
+          expires_at: vence.toISOString(),
+          created_by: caller.user.id,
+        });
+        if (!insErr) code = candidato;
+        else if (insErr.code !== '23505') {
+          console.error('Fallo guardando el enlace corto:', insErr.message);
+          return json(502, { error: `No se pudo generar el enlace: ${insErr.message}` });
+        }
+      }
     }
 
-    return json(200, { ok: true, ruta, url: firmada.signedUrl, diasValidez: DIAS_VALIDEZ });
+    if (!code) return json(502, { error: 'No se pudo generar el enlace. Intenta de nuevo.' });
+
+    return json(200, {
+      ok: true,
+      ruta,
+      url: `${BASE_ENLACE}/${empresaSlug}/c/${code}`,
+      diasValidez: DIAS_VALIDEZ,
+    });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('receipt-link:', msg);
