@@ -22,6 +22,12 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 const impersonatedCompany =
   typeof window !== 'undefined' ? window.localStorage.getItem('userImpersonatedCompany') : null;
 
+/** Lo que se horneó al cargar este módulo, para que el resto de la app pueda
+ *  detectar que ya no corresponde. Al iniciar sesión no puede haber ninguna
+ *  impersonación en curso: si esto trae valor, viene de la sesión anterior y
+ *  hay que rehacer el módulo con una recarga dura. */
+export const cabeceraImpersonacionHorneada = impersonatedCompany;
+
 export const supabase = createClient(
   supabaseUrl,
   supabaseAnonKey,

@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, Rea
 import { useRouter, usePathname } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
 import type { User as AppUser, RolePermissions } from '@/lib/types';
-import { supabase, setReadOnlyMode } from '@/lib/supabase/client';
+import { supabase, setReadOnlyMode, cabeceraImpersonacionHorneada } from '@/lib/supabase/client';
 import { DEFAULT_ADMIN_PERMISSIONS, DEFAULT_CASHIER_PERMISSIONS } from '@/lib/permissions';
 import { resetCartStore } from '@/context/cart-provider';
 import { AppSkeleton } from '@/components/ui/app-skeleton';
@@ -472,6 +472,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signIn = async (email: string, pass: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
+
+    // Red de seguridad para la cabecera de impersonación, que el cliente de
+    // Supabase hornea al cargar su módulo. Cerrar sesión con el botón ya
+    // recarga duro, pero hay caminos que no pasan por ahí — una sesión que
+    // caduca sola redirige a /login sin recargar — y por ellos la cabecera de
+    // la sesión anterior llegaría hasta esta. Quien acaba de entrar no puede
+    // estar impersonando nada, así que si quedó algo horneado, sobra.
+    if (cabeceraImpersonacionHorneada) {
+      localStorage.removeItem('userImpersonatedCompany');
+      localStorage.removeItem('userImpersonatedCompanyName');
+      // Sin la clave en localStorage, el módulo nace ya sin cabecera: no puede
+      // volver a entrar aquí ni quedarse recargando en bucle.
+      window.location.reload();
+    }
   };
 
   const signUp = async (name: string, email: string, pass: string, businessName: string) => {
@@ -499,7 +513,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('pwRecoveryPending');
     setAppUser(null);
     setSession(null);
-    router.replace('/login');
+    // Recarga dura, no router.replace. El cliente de Supabase hornea la
+    // cabecera `x-impersonate-company` UNA sola vez, cuando se carga su módulo
+    // (ver lib/supabase/client.ts). Con una navegación del lado del cliente el
+    // módulo sobrevive al cierre de sesión y la cabecera vieja se va pegada a
+    // la sesión siguiente: la base ve a un super admin "impersonando", con
+    // is_super_admin() en falso, y el panel de Empresas le muestra dos empresas
+    // en vez de todas hasta que alguien recarga a mano.
+    //
+    // Entrar a impersonar ya usaba location.href por esta misma razón; salir se
+    // había quedado sin ella. De paso, empezar de cero es lo que uno quiere al
+    // cambiar de cuenta: no queda nada del usuario anterior en memoria.
+    window.location.replace('/login');
   };
 
   const refreshProfile = useCallback(async () => {
