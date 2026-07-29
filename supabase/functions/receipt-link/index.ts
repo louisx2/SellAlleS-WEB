@@ -1,5 +1,6 @@
-// Entrega al navegador lo necesario para compartir el comprobante de una venta
-// por WhatsApp. Son DOS llamadas, y el orden importa:
+// Entrega al navegador lo necesario para compartir un comprobante por WhatsApp
+// — de una venta (`saleId`) o de un prestamo (`loanId`). Son DOS llamadas, y el
+// orden importa:
 //
 //   1) paso 'subida' -> URL firmada para SUBIR el PDF a Storage.
 //   2) el navegador sube el archivo directo a Storage.
@@ -16,8 +17,8 @@
 // Function"): un comprobante pesa mas de lo que admite ese cuerpo.
 //
 // Tampoco se le dan permisos de escritura al cliente sobre el bucket: sube con
-// una URL firmada de un solo uso que se emite aqui, despues de comprobar que la
-// venta es de su empresa. El bucket sigue privado y sin policies.
+// una URL firmada de un solo uso que se emite aqui, despues de comprobar que el
+// documento es de su empresa. El bucket sigue privado y sin policies.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const cors = {
@@ -98,22 +99,51 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => null);
     const saleId = body?.saleId;
-    if (!saleId) return json(400, { error: 'Se requiere saleId.' });
+    const loanId = body?.loanId;
+    if (!saleId && !loanId) return json(400, { error: 'Se requiere saleId o loanId.' });
+    if (saleId && loanId) return json(400, { error: 'Se espera saleId o loanId, no ambos.' });
     const paso = body?.paso === 'enlace' ? 'enlace' : 'subida';
 
-    const { data: sale } = await admin
-      .from('sales')
-      .select('id, company_id, ncf')
-      .eq('id', saleId)
-      .maybeSingle();
-    if (!sale) return json(404, { error: 'Venta no encontrada.' });
-    if (perfil.is_super_admin !== true && perfil.company_id !== sale.company_id) {
-      return json(403, { error: 'No tienes permiso para acceder a esta venta.' });
-    }
+    // Venta y prestamo se comportan igual de aqui en adelante; lo unico que
+    // cambia es de donde sale el company_id y como se llama el archivo.
+    let companyId: string;
+    let ruta: string;
+    let nombreArchivo: string;
 
-    // Ruta por empresa: los archivos quedan separados y es evidente de quien es
-    // cada uno si algun dia hay que limpiar.
-    const ruta = `${sale.company_id}/${sale.id}.pdf`;
+    if (saleId) {
+      const { data: sale } = await admin
+        .from('sales')
+        .select('id, company_id, ncf')
+        .eq('id', saleId)
+        .maybeSingle();
+      if (!sale) return json(404, { error: 'Venta no encontrada.' });
+      if (perfil.is_super_admin !== true && perfil.company_id !== sale.company_id) {
+        return json(403, { error: 'No tienes permiso para acceder a esta venta.' });
+      }
+      companyId = sale.company_id;
+      // Ruta por empresa: los archivos quedan separados y es evidente de quien
+      // es cada uno si algun dia hay que limpiar.
+      ruta = `${sale.company_id}/${sale.id}.pdf`;
+      // El nombre de descarga hace que al cliente le llegue
+      // "comprobante-B01...pdf" y no el uuid de la venta.
+      nombreArchivo = `comprobante${sale.ncf ? `-${sale.ncf}` : ''}.pdf`;
+    } else {
+      const { data: loan } = await admin
+        .from('loans')
+        .select('id, company_id')
+        .eq('id', loanId)
+        .maybeSingle();
+      if (!loan) return json(404, { error: 'Prestamo no encontrado.' });
+      if (perfil.is_super_admin !== true && perfil.company_id !== loan.company_id) {
+        return json(403, { error: 'No tienes permiso para acceder a este prestamo.' });
+      }
+      companyId = loan.company_id;
+      // Prefijo en el nombre y no en una carpeta aparte: la limpieza y las
+      // reglas del bucket miran la ruta completa, y asi un prestamo no puede
+      // pisar el PDF de una venta aunque compartieran uuid.
+      ruta = `${loan.company_id}/prestamo-${loan.id}.pdf`;
+      nombreArchivo = `comprobante-prestamo-${String(loan.id).slice(0, 8)}.pdf`;
+    }
 
     if (paso === 'subida') {
       // upsert para que reimprimir o reenviar el comprobante de la misma venta
@@ -139,21 +169,19 @@ Deno.serve(async (req) => {
     const { data: empresa } = await admin
       .from('companies')
       .select('name, link_slug')
-      .eq('id', sale.company_id)
+      .eq('id', companyId)
       .maybeSingle();
 
-    // El nombre de descarga hace que al cliente le llegue "comprobante-B01...pdf"
-    // y no el uuid de la venta.
-    const nombreArchivo = `comprobante${sale.ncf ? `-${sale.ncf}` : ''}.pdf`;
     const empresaSlug = empresa?.link_slug?.trim() || slug(empresa?.name);
     const vence = new Date(Date.now() + DIAS_VALIDEZ * 24 * 60 * 60 * 1000);
 
-    // Si esta venta ya tiene un enlace vigente se reutiliza, para que reenviar
-    // el comprobante no le cambie la direccion al cliente que ya la tiene.
+    // Si este documento ya tiene un enlace vigente se reutiliza, para que
+    // reenviar el comprobante no le cambie la direccion al cliente que ya la
+    // tiene.
     const { data: existente } = await admin
       .from('receipt_links')
       .select('code')
-      .eq('sale_id', sale.id)
+      .eq(saleId ? 'sale_id' : 'loan_id', saleId ?? loanId)
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1)
@@ -169,8 +197,9 @@ Deno.serve(async (req) => {
         const candidato = codigoNuevo();
         const { error: insErr } = await admin.from('receipt_links').insert({
           code: candidato,
-          sale_id: sale.id,
-          company_id: sale.company_id,
+          sale_id: saleId ?? null,
+          loan_id: loanId ?? null,
+          company_id: companyId,
           company_slug: empresaSlug,
           storage_path: ruta,
           download_name: nombreArchivo,

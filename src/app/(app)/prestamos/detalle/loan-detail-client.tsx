@@ -114,9 +114,11 @@ export default function LoanDetailClient() {
           </Link>
         </Button>
         <div className="flex flex-wrap gap-2">
+        {/* Ya no solo imprime: desde el comprobante se manda por WhatsApp, por
+            correo y se descarga el PDF. */}
         <Button variant="outline" onClick={() => setTicketOpen(true)}>
           <Printer className="mr-2 h-4 w-4" />
-          Imprimir comprobante
+          Comprobante
         </Button>
         {status.pendingBalance > 0 && (
           <RegisterLoanPaymentDialog loan={loan}>
