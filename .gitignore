@@ -32,3 +32,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# supabase: estado local del CLI (proyecto vinculado, versiones detectadas).
+# Los secretos de las Edge Functions viven en las variables de entorno del
+# proyecto Supabase, nunca en archivos.
+supabase/.temp/
+
+# ajustes locales de Claude Code; launch.json sí se versiona
+.claude/settings.local.json

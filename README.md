@@ -2,6 +2,22 @@
 
 POS web moderno para el mercado de República Dominicana, construido con **Next.js 14** y **TypeScript**. SaaS multi-empresa sobre **Supabase**.
 
+## Qué hay en este repo
+
+Desde julio de 2026 este repo contiene **la app y su backend**, que antes vivían en repos separados:
+
+| Carpeta | Contenido |
+|---|---|
+| `src/` | la app Next.js |
+| `supabase/migrations/` | el esquema de la base, en migraciones |
+| `supabase/functions/` | las Edge Functions (correos, portal del cliente, comprobantes, soporte) |
+| `docs/` | factibilidad, arquitectura, modelo de datos, roadmap, roles |
+
+Así un cambio de esquema y el código que lo usa entran en el mismo commit. El
+proyecto Supabase es **SellAlleS** (`qwpjclqinruhtxgkrxwr`) y los comandos del CLI
+(`supabase functions deploy`, `supabase db push`) se corren desde la raíz de este
+repo. La landing va aparte: [louisx2/landingpos](https://github.com/louisx2/landingpos).
+
 ## Estado actual (2026-07-06)
 
 **La app está conectada a Supabase**: autenticación (Supabase Auth + perfiles con rol y sucursal), productos, clientes, ventas, sucursales, gastos, suplidores, usuarios y roles leen/escriben en la base con RLS multi-empresa. El carrito vive en el navegador (Zustand + localStorage) hasta el cobro; al confirmar, la venta se inserta en `sales`/`sale_items` y el **NCF lo asigna la base** (trigger `set_sale_ncf` sobre `ncf_sequences`, solo si la empresa tiene `ncf_enabled`). Los abonos de crédito/financiamiento se guardan en `credit_payments`.
