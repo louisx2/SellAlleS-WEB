@@ -1,0 +1,18 @@
+# Cabeceras que aplica Cloudflare a los archivos estáticos.
+#
+# El Service Worker es el archivo del que depende que un dispositivo se entere
+# de que hay una versión nueva: el navegador lo compara byte a byte y solo
+# instala uno nuevo si cambió. Justo después de desplegar se vio al borde
+# sirviendo dos copias distintas del mismo archivo (dos ETags, uno con la
+# versión nueva y otro con la anterior), y a quien le tocara la vieja se
+# quedaba sin actualizar.
+#
+# `no-cache` no significa "no lo guardes", sino "revalídalo antes de usarlo",
+# que es exactamente lo que hace falta aquí.
+/sw.js
+  Cache-Control: no-cache
+
+# Mismo motivo para el manifiesto: si cambia el nombre o los iconos de la app
+# instalada, el dispositivo tiene que verlo.
+/manifest.json
+  Cache-Control: no-cache
