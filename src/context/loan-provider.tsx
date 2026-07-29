@@ -13,6 +13,8 @@ interface NewLoanInput {
   interestRate: number;
   installmentsCount: number;
   paymentFrequency: LoanFrequency;
+  disbursementMethod?: 'cash' | 'transfer';
+  disbursementReference?: string;
   notes?: string;
 }
 

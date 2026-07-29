@@ -401,6 +401,10 @@ export type Loan = {
   totalWithInterest: number;
   amountPaid: number;
   status: 'active' | 'paid' | 'cancelled';
+  // Cómo se le entregó el dinero al cliente. Solo el efectivo mueve la caja de
+  // la sucursal; la transferencia sale del banco y no toca la gaveta.
+  disbursementMethod: 'cash' | 'transfer';
+  disbursementReference?: string;
   notes?: string;
   userName?: string;
   createdAt: Date;
@@ -436,6 +440,9 @@ export type CajaBreakdown = {
   cashSales: number;
   creditCashPayments: number;
   loanCashPayments: number;
+  // Capital entregado en efectivo por préstamos del turno. Opcional: los
+  // cierres anteriores a que esto existiera no lo traen en su desglose.
+  loanDisbursements?: number;
   movementsIn: number;
   movementsOut: number;
   expected: number;

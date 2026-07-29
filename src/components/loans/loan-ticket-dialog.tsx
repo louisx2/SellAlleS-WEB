@@ -56,6 +56,13 @@ function TicketBody({ loan }: { loan: Loan }) {
           <span>{formatCurrency(loan.principal)}</span>
         </div>
         <div className="flex justify-between text-xs">
+          <span>Entregado en:</span>
+          <span>
+            {loan.disbursementMethod === 'transfer' ? 'Transferencia' : 'Efectivo'}
+            {loan.disbursementReference ? ` (${loan.disbursementReference})` : ''}
+          </span>
+        </div>
+        <div className="flex justify-between text-xs">
           <span>Interés ({loan.interestRate}% mensual):</span>
           <span>{formatCurrency(interest)}</span>
         </div>

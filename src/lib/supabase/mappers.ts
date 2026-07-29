@@ -568,6 +568,8 @@ export const rowToLoan = (r: any): Loan => ({
   totalWithInterest: Number(r.total_with_interest),
   amountPaid: Number(r.amount_paid),
   status: r.status,
+  disbursementMethod: r.disbursement_method ?? 'cash',
+  disbursementReference: r.disbursement_reference ?? undefined,
   notes: r.notes ?? undefined,
   userName: r.user_name ?? undefined,
   createdAt: new Date(r.created_at),
@@ -579,6 +581,7 @@ export const rowToLoan = (r: any): Loan => ({
 export const loanToRow = (l: {
   branchId: string; customerId: string; principal: number; interestRate: number;
   installmentsCount: number; paymentFrequency: string; notes?: string; userName?: string;
+  disbursementMethod?: 'cash' | 'transfer'; disbursementReference?: string;
 }) => ({
   branch_id: l.branchId,
   customer_id: l.customerId,
@@ -586,6 +589,8 @@ export const loanToRow = (l: {
   interest_rate: l.interestRate,
   installments_count: l.installmentsCount,
   payment_frequency: l.paymentFrequency,
+  disbursement_method: l.disbursementMethod ?? 'cash',
+  disbursement_reference: l.disbursementReference ?? null,
   notes: l.notes ?? null,
   user_name: l.userName ?? null,
 });

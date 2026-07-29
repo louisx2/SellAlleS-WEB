@@ -15,6 +15,8 @@ import { useLoans } from '@/context/loan-provider';
 import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useModules } from '@/context/modules-provider';
+import { useCaja } from '@/context/caja-provider';
 import { formatCurrency } from '@/lib/utils';
 import { CustomerSearchDialog } from '@/components/pos/customer-search-dialog';
 import type { Customer, LoanFrequency } from '@/lib/types';
@@ -44,6 +46,8 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const { branches } = useBranches();
   const { appUser } = useAuth();
   const { profile } = useCompanyProfile();
+  const { isModuleEnabled } = useModules();
+  const { isOpen: isCajaOpen } = useCaja();
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
@@ -54,10 +58,19 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const [interestRate, setInterestRate] = useState<string>(String(profile.defaultLoanInterestRate));
   const [frequency, setFrequency] = useState<LoanFrequency>('monthly');
   const [installments, setInstallments] = useState<string>('12');
+  const [disbursement, setDisbursement] = useState<'cash' | 'transfer'>('cash');
+  const [disbursementReference, setDisbursementReference] = useState('');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
   const activeBranches = useMemo(() => branches.filter((b) => b.isActive), [branches]);
+
+  // Entregar efectivo mueve la caja de la sucursal, así que exige una abierta
+  // (lo comprueba trg_before_loan_checks). El provider de caja solo conoce la
+  // sucursal activa del usuario: si el préstamo se registra para otra, aquí no
+  // se sabe y se deja que responda el servidor.
+  const cashBlocked =
+    isModuleEnabled('caja') && !isCajaOpen && !!branchId && branchId === appUser?.activeBranchId;
 
   useEffect(() => {
     if (open) {
@@ -67,9 +80,17 @@ export function LoanDialog({ children }: LoanDialogProps) {
       setInterestRate(String(profile.defaultLoanInterestRate));
       setFrequency('monthly');
       setInstallments('12');
+      setDisbursement('cash');
+      setDisbursementReference('');
       setNotes('');
     }
   }, [open, appUser?.activeBranchId, profile.defaultLoanInterestRate]);
+
+  // Con la caja cerrada el efectivo no es una opción: se cambia a
+  // transferencia en vez de dejar seleccionado algo que va a fallar al guardar.
+  useEffect(() => {
+    if (cashBlocked && disbursement === 'cash') setDisbursement('transfer');
+  }, [cashBlocked, disbursement]);
 
   const preview = useMemo(() => {
     const p = Number(principal) || 0;
@@ -87,7 +108,9 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const nInstallments = Number(installments) || 0;
   const isPrincipalInvalid = !principal || Number(principal) <= 0;
   const isInstallmentsInvalid = nInstallments < 1 || nInstallments > 60;
-  const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isInstallmentsInvalid && preview.installmentAmount > 0;
+  const isReferenceMissing = disbursement === 'transfer' && !disbursementReference.trim();
+  const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isInstallmentsInvalid
+    && preview.installmentAmount > 0 && !isReferenceMissing && !(disbursement === 'cash' && cashBlocked);
 
   const handleSubmit = async () => {
     if (!canSubmit || !customer) return;
@@ -100,6 +123,8 @@ export function LoanDialog({ children }: LoanDialogProps) {
         interestRate: Number(interestRate) || 0,
         installmentsCount: nInstallments,
         paymentFrequency: frequency,
+        disbursementMethod: disbursement,
+        disbursementReference: disbursement === 'transfer' ? disbursementReference.trim() : undefined,
         notes: notes.trim() || undefined,
       });
       toast({ title: 'Préstamo creado', description: `${formatCurrency(Number(principal))} a ${customer.name}.` });
@@ -184,6 +209,42 @@ export function LoanDialog({ children }: LoanDialogProps) {
                 {isInstallmentsInvalid && installments !== '' && <p className="text-xs text-destructive">Entre 1 y 60 cuotas.</p>}
               </div>
             </div>
+
+            <div className="grid gap-2">
+              <Label>Cómo entregas el dinero</Label>
+              <Select value={disbursement} onValueChange={(v) => setDisbursement(v as 'cash' | 'transfer')}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash" disabled={cashBlocked}>Efectivo</SelectItem>
+                  <SelectItem value="transfer">Transferencia</SelectItem>
+                </SelectContent>
+              </Select>
+              {cashBlocked && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  No hay caja abierta en esta sucursal: no puedes entregar efectivo.
+                </p>
+              )}
+              {disbursement === 'cash' && !cashBlocked && (
+                <p className="text-xs text-muted-foreground">
+                  Sale de la caja de la sucursal y se descuenta en el cierre del turno.
+                </p>
+              )}
+            </div>
+
+            {disbursement === 'transfer' && (
+              <div className="grid gap-2">
+                <Label htmlFor="disbursement-reference">Referencia de la transferencia</Label>
+                <Input
+                  id="disbursement-reference"
+                  value={disbursementReference}
+                  onChange={(e) => setDisbursementReference(e.target.value)}
+                  placeholder="No. de transferencia"
+                />
+                {isReferenceMissing && (
+                  <p className="text-xs text-destructive">Indica por dónde salió el dinero.</p>
+                )}
+              </div>
+            )}
 
             <div className="grid gap-2">
               <Label htmlFor="notes">Notas (opcional)</Label>

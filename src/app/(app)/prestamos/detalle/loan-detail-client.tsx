@@ -154,6 +154,15 @@ export default function LoanDetailClient() {
               <p className="font-semibold">{formatCurrency(loan.principal)}</p>
             </div>
             <div>
+              <p className="text-muted-foreground">Entregado</p>
+              <p className="font-semibold">
+                {loan.disbursementMethod === 'transfer' ? 'Transferencia' : 'Efectivo'}
+                {loan.disbursementReference && (
+                  <span className="text-muted-foreground font-normal"> · {loan.disbursementReference}</span>
+                )}
+              </p>
+            </div>
+            <div>
               <p className="text-muted-foreground">Tasa mensual / Cuotas</p>
               <p className="font-semibold">{loan.interestRate}% · {loan.installmentsCount} cuotas ({FREQUENCY_LABEL[loan.paymentFrequency] ?? 'Mensual'})</p>
             </div>
