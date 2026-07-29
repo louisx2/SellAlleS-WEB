@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail } from 'lucide-react';
+import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -28,6 +28,7 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { ProfileModal } from '@/components/profile/profile-modal';
 import { SupportDialog } from '@/components/support/support-dialog';
+import { useActualizacionDisponible, aplicarActualizacion, VERSION } from '@/lib/pwa-update';
 
 interface NavItem {
   href: string;
@@ -88,6 +89,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const router = useRouter();
   const pathname = usePathname();
   const { appUser, signOut, setImpersonatedCompany, setActiveBranch } = useAuth();
+  const hayActualizacion = useActualizacionDisponible();
   const { isModuleEnabled, loading: modulesLoading } = useModules();
   const { profile } = useCompanyProfile();
   // Canales de contacto configurables desde Configuración de la Plataforma.
@@ -660,7 +662,21 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
             "text-[10px] text-muted-foreground text-center mt-auto pt-2 pb-1 -mb-4 transition-opacity duration-200",
             state === 'expanded' ? 'opacity-100 delay-150' : 'opacity-0 pointer-events-none'
           )}>
+            {/* La versión no es adorno: mirando esta línea en la pantalla de
+                alguien se sabe qué build está usando de verdad, que no siempre
+                es el último — el navegador puede estar sirviendo uno viejo. */}
             SellAlleS Web <span className="opacity-70">by SmartCore</span>
+            <div className="opacity-60">v{VERSION}</div>
+            {hayActualizacion && (
+              <button
+                type="button"
+                onClick={aplicarActualizacion}
+                className="mt-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20"
+              >
+                <RefreshCw className="h-3 w-3" />
+                Versión nueva · Actualizar
+              </button>
+            )}
           </div>
         </SidebarContent>
         <Separator />

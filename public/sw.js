@@ -1,9 +1,13 @@
-// Bumpear esta versión purga el caché acumulado del bucket anterior (el
-// `activate` de abajo borra cualquier caché con nombre distinto a este). La
-// protección real contra builds desincronizados es el listener de
-// controllerchange en pwa-register.tsx, que recarga automáticamente cuando
-// un Service Worker nuevo toma control de una pestaña ya abierta.
-const CACHE_NAME = 'sellalles-cache-v3';
+// __VERSION__ lo sustituye scripts/version-sw.mjs sobre la copia de out/ al
+// desplegar. Antes este nombre estaba fijo a mano ('...-v3'), así que este
+// archivo era idéntico byte a byte en todos los despliegues: el navegador solo
+// instala un Service Worker nuevo si el archivo cambió, de modo que nunca se
+// instalaba ninguno y la app seguía sirviendo código viejo hasta que alguien
+// hacía Ctrl+F5. Con la versión dentro, cada despliegue es un archivo distinto.
+//
+// El `activate` de abajo borra cualquier caché con nombre distinto a este, así
+// que cambiar de versión purga de paso lo que quedó del build anterior.
+const CACHE_NAME = 'sellalles-cache-__VERSION__';
 const PRECACHE_ASSETS = [
   '/',
   '/login',
@@ -14,13 +18,25 @@ const PRECACHE_ASSETS = [
 ];
 
 // Install Service Worker and cache core shell assets
+//
+// SIN skipWaiting a propósito: el Service Worker nuevo se queda esperando en
+// vez de tomar el control solo. Quien decide cuándo entra es el cajero, desde
+// el aviso de "versión nueva" del menú lateral (ver pwa-register.tsx).
+// Recargarle la pantalla a alguien a mitad de un cobro es peor que dejarlo un
+// rato más con la versión anterior.
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       console.log('[Service Worker] Pre-caching static app shell');
       return cache.addAll(PRECACHE_ASSETS);
-    }).then(() => self.skipWaiting())
+    })
   );
+});
+
+// La app pide el relevo cuando el usuario acepta actualizar. Al activarse este
+// Service Worker cambia el controller de la pestaña, y pwa-register.tsx recarga.
+self.addEventListener('message', (event) => {
+  if (event.data === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // Activate Service Worker and clean up old caches

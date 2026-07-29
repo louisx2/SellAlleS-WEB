@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "deploy": "next build && wrangler deploy"
+    "deploy": "next build && node scripts/version-sw.mjs && wrangler deploy"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",

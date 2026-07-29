@@ -1,42 +1,63 @@
 'use client';
 
 import { useEffect } from 'react';
+import { marcarActualizacionDisponible } from '@/lib/pwa-update';
 
 export function PWARegister() {
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      // Cuando un Service Worker NUEVO (de un deploy nuevo) toma control de
-      // la página, el JS que ya está corriendo en memoria queda desincronizado
-      // del build activo — una navegación del lado del cliente puede pedir un
-      // chunk que ya no coincide y explota con un client-side exception en
-      // blanco. Recargar una sola vez apenas cambia el controller garantiza
-      // que la pestaña siempre corre un build consistente de punta a punta.
-      let reloaded = false;
-      navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (reloaded) return;
-        reloaded = true;
-        window.location.reload();
-      });
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
-      // Register the service worker after the page load
-      const handleRegister = () => {
-        navigator.serviceWorker
-          .register('/sw.js')
-          .then((registration) => {
-            console.log('[PWA] Service Worker registrado exitosamente con scope:', registration.scope);
-          })
-          .catch((error) => {
-            console.error('[PWA] Error registrando el Service Worker:', error);
+    // Cuando el Service Worker nuevo toma el control, el JS que ya está
+    // corriendo en memoria queda desincronizado del build activo — una
+    // navegación del lado del cliente puede pedir un chunk que ya no coincide y
+    // explota con una pantalla en blanco. Recargar una vez apenas cambia el
+    // controller garantiza que la pestaña corre un build consistente.
+    //
+    // Antes esto pasaba solo (el Service Worker se instalaba con skipWaiting) y
+    // podía recargarle la pantalla a un cajero a mitad de un cobro. Ahora el
+    // relevo solo ocurre cuando alguien acepta el aviso de versión nueva, así
+    // que esta recarga es siempre algo que el usuario pidió.
+    let recargado = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (recargado) return;
+      recargado = true;
+      window.location.reload();
+    });
+
+    const registrar = () => {
+      navigator.serviceWorker
+        .register('/sw.js')
+        .then((registro) => {
+          console.log('[PWA] Service Worker registrado con scope:', registro.scope);
+
+          // Ya había uno esperando de una visita anterior.
+          if (registro.waiting && navigator.serviceWorker.controller) {
+            marcarActualizacionDisponible(registro);
+          }
+
+          registro.addEventListener('updatefound', () => {
+            const entrante = registro.installing;
+            if (!entrante) return;
+            entrante.addEventListener('statechange', () => {
+              // `controller` nulo = primera visita: el Service Worker se está
+              // instalando por primera vez y no hay nada que actualizar.
+              if (entrante.state === 'installed' && navigator.serviceWorker.controller) {
+                marcarActualizacionDisponible(registro);
+              }
+            });
           });
-      };
+        })
+        .catch((error) => {
+          console.error('[PWA] Error registrando el Service Worker:', error);
+        });
+    };
 
-      if (document.readyState === 'complete') {
-        handleRegister();
-      } else {
-        window.addEventListener('load', handleRegister);
-        return () => window.removeEventListener('load', handleRegister);
-      }
+    if (document.readyState === 'complete') {
+      registrar();
+      return;
     }
+    window.addEventListener('load', registrar);
+    return () => window.removeEventListener('load', registrar);
   }, []);
 
   return null;
