@@ -89,7 +89,7 @@ export default function SaleReceiptClient() {
         title: abrioWhatsApp ? 'WhatsApp abierto con el mensaje listo' : 'Enlace listo',
         description: abrioWhatsApp
           ? `Revísalo y dale enviar. El enlace de descarga del PDF funciona por ${diasValidez} días.`
-          : 'El navegador bloqueó la pestaña. Copia el enlace o vuelve a abrir WhatsApp desde aquí.',
+          : `Dale a "Abrir WhatsApp" para mandarlo. El enlace funciona por ${diasValidez} días.`,
       });
     } catch (error: any) {
       console.error(error);

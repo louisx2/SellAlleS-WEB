@@ -85,17 +85,30 @@ function abrirWhatsApp(text: string, phone: string, ventana?: Window | null): bo
   return window.open(url, '_blank') !== null;
 }
 
+/** Teléfono o tableta: sin ratón, la pantalla es táctil. */
+function esTactil(): boolean {
+  if (typeof window === 'undefined') return false;
+  return navigator.maxTouchPoints > 0 || window.matchMedia?.('(pointer: coarse)').matches === true;
+}
+
 /**
  * Abre una pestaña en blanco para llenarla después con el enlace de WhatsApp.
  *
- * El navegador solo deja abrir ventanas mientras dura el clic del usuario (en
- * Chrome, unos 5 segundos). Generar el PDF y subirlo tarda más que eso, así que
- * un `window.open` al final se bloquea. Se abre la pestaña en el clic y se le
- * cambia la dirección cuando el enlace está listo.
+ * En el escritorio hace falta: el navegador solo deja abrir ventanas mientras
+ * dura el clic del usuario (en Chrome, unos 5 segundos), y generar el PDF y
+ * subirlo tarda más que eso, así que un `window.open` al final se bloquea.
+ *
+ * En el teléfono NO se abre nada por adelantado, y esto es importante: Chrome
+ * para Android salta a la pestaña nueva al instante, deja el POS en segundo
+ * plano y congela lo que quedó a medias. En el log del servidor se veía llegar
+ * el preflight y el POST no salía nunca — el cajero solo veía "Failed to send a
+ * request to the Edge Function". Ahí el enlace se abre con el botón del final,
+ * que es un toque del usuario y no necesita permiso de ventanas emergentes.
  *
  * Llamar SIN await, como primera línea del manejador del clic.
  */
 export function abrirPestanaParaWhatsApp(): Window | null {
+  if (esTactil()) return null;
   return window.open('', '_blank');
 }
 
@@ -133,6 +146,12 @@ export async function shareSalePdfLinkViaWhatsApp(
   // Function"). La función entrega URLs firmadas y el archivo va directo a
   // Storage.
   //
+  // La caja se queda abierta horas sin recargar y el token vence: la función
+  // respondía 401 "Sesión inválida" y el cajero no entendía por qué. getSession
+  // renueva el token si hace falta, y si ya no hay sesión lo dice claro.
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Tu sesión expiró. Vuelve a entrar y repite el envío.');
+
   // Son dos llamadas y el orden no es negociable: Storage no firma la descarga
   // de un objeto que todavía no existe (responde "Object not found"), así que
   // primero se pide el permiso de subida, se sube, y recién ahí se pide el
