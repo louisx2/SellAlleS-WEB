@@ -101,10 +101,22 @@ export default function CompaniesManagementPage() {
   // Compartir entre sucursales (por módulo). Default OFF: cada sucursal aislada.
   const [sharing, setSharing] = useState({ clientes: false, credito: false, financiamiento: false, prestamos: false });
 
+  const esSuperAdmin = !!appUser?.isSuperAdmin;
+  // Los ids viajan como string y no como array: `appUser.companies` es un array
+  // nuevo en cada render y, puesto de dependencia, dispararía una consulta por
+  // render.
+  const idsEmpresas = (appUser?.companies?.map((c) => c.id) ?? []).join(',');
+
+  // Las dependencias tienen que estar completas. Con `[]`, esta función se
+  // quedaba con el `appUser` del primer render — nulo mientras se resolvía la
+  // sesión, o el de la cuenta anterior al cambiar de usuario — y seguía
+  // consultando con él aunque el efecto de abajo la volviera a llamar. Al
+  // entrar como super admin no salían todas las empresas hasta recargar la
+  // página a mano.
   const load = useCallback(async () => {
-    const compsQuery = appUser?.isSuperAdmin
+    const compsQuery = esSuperAdmin
       ? supabase.from('companies').select('*, branches(id, name, location, is_active)').order('created_at', { ascending: false })
-      : supabase.from('companies').select('*, branches(id, name, location, is_active)').in('id', appUser?.companies?.map((c) => c.id) || []).order('created_at', { ascending: false });
+      : supabase.from('companies').select('*, branches(id, name, location, is_active)').in('id', idsEmpresas ? idsEmpresas.split(',') : []).order('created_at', { ascending: false });
 
     const [
       { data: comps },
@@ -124,11 +136,14 @@ export default function CompaniesManagementPage() {
       setSubs(map);
     }
     setLoading(false);
-  }, []);
+  }, [esSuperAdmin, idsEmpresas]);
 
   const hasMultipleCompanies = !!(appUser?.companies && appUser.companies.length > 1);
 
-  useEffect(() => { if (appUser?.isSuperAdmin || hasMultipleCompanies) load(); }, [appUser, load, hasMultipleCompanies]);
+  // `load` ya cambia de identidad cuando cambia el usuario, así que este efecto
+  // se vuelve a disparar solo. `appUser` como dependencia sobraba: se recreaba
+  // en cada refresco de sesión y repetía la consulta sin que nada cambiara.
+  useEffect(() => { if (esSuperAdmin || hasMultipleCompanies) load(); }, [load, esSuperAdmin, hasMultipleCompanies]);
 
   const canAccess = appUser?.isSuperAdmin || hasMultipleCompanies;
   if (!canAccess) {
