@@ -1,39 +1,12 @@
 import type { Sale } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
+import { abrirWhatsApp, telefonoParaWhatsApp } from '@/lib/whatsapp';
 
 
 /** Qué se está compartiendo. Venta y préstamo siguen exactamente el mismo
  *  camino (PDF a Storage → enlace corto → WhatsApp); lo único que cambia es a
  *  qué apunta el enlace y qué dice el mensaje. */
 export type TipoComprobante = 'venta' | 'prestamo';
-
-/** Normaliza el teléfono del cliente al formato que espera WhatsApp. */
-function telefonoParaWhatsApp(phone?: string | null): string {
-  let limpio = phone ? phone.replace(/\D/g, '') : '';
-  if (limpio.length === 10 && (limpio.startsWith('809') || limpio.startsWith('829') || limpio.startsWith('849'))) {
-    limpio = '1' + limpio;
-  }
-  return limpio;
-}
-
-function urlDeWhatsApp(text: string, phone: string) {
-  return phone
-    ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`
-    : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-}
-
-/**
- * Abre WhatsApp. Si se le pasa una pestaña ya abierta, la reutiliza en vez de
- * abrir otra: ver `abrirPestanaParaWhatsApp`. Devuelve si logró abrirse.
- */
-function abrirWhatsApp(text: string, phone: string, ventana?: Window | null): boolean {
-  const url = urlDeWhatsApp(text, phone);
-  if (ventana && !ventana.closed) {
-    ventana.location.href = url;
-    return true;
-  }
-  return window.open(url, '_blank') !== null;
-}
 
 /**
  * Deja un texto en la forma que admite el enlace del comprobante:

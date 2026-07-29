@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
@@ -12,7 +13,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/utils';
-import { PlusCircle, HandCoins, Wallet, TrendingUp, PiggyBank, ArrowDownCircle, ArrowUpCircle } from 'lucide-react';
+import { PlusCircle, HandCoins, Wallet, TrendingUp, PiggyBank, ArrowDownCircle, ArrowUpCircle, ClipboardList } from 'lucide-react';
 
 export default function PrestamosPage() {
   const { loans, fund, fundMovements } = useLoans();
@@ -32,12 +33,20 @@ export default function PrestamosPage() {
   return (
     <div>
       <PageHeader title="Préstamos">
-        <LoanDialog>
-          <Button>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Nuevo préstamo
+        <div className="flex flex-wrap gap-2 justify-end">
+          <Button asChild variant="outline">
+            <Link href="/prestamos/cobros">
+              <ClipboardList className="mr-2 h-4 w-4" />
+              Cobros del día
+            </Link>
           </Button>
-        </LoanDialog>
+          <LoanDialog>
+            <Button>
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Nuevo préstamo
+            </Button>
+          </LoanDialog>
+        </div>
       </PageHeader>
 
       <div className={`grid gap-4 mb-6 ${fund ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-3'}`}>
