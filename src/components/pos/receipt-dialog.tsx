@@ -13,13 +13,15 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Loader2, Download, Send, Link as LinkIcon } from 'lucide-react';
+import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Loader2, Download, Send, Copy, Link as LinkIcon } from 'lucide-react';
 import { ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from './receipt-content';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   shareSaleViaWhatsApp,
   shareSalePdfLinkViaWhatsApp,
+  abrirPestanaParaWhatsApp,
+  abrirWhatsAppConEnlace,
   generateReceiptPdf,
   downloadReceiptPdfFile,
   sendReceiptViaResendEmail
@@ -49,12 +51,16 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
   const [emailAddress, setEmailAddress] = useState('');
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [sendingLink, setSendingLink] = useState(false);
-  
+  // Enlace ya generado: se deja a la vista para copiarlo o reabrir el chat si
+  // el navegador bloqueó la pestaña.
+  const [enlace, setEnlace] = useState<{ url: string; diasValidez: number } | null>(null);
+
   // Reset screen and prefill email on open
   useEffect(() => {
     if (isOpen && sale) {
       setActiveScreen('receipt');
       setEmailAddress(sale.customer?.email || '');
+      setEnlace(null);
     }
   }, [isOpen, sale]);
 
@@ -71,17 +77,26 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
   // cajero no tenga que descargar y adjuntar a mano.
   const handleSharePdfLink = async () => {
     if (!pdfContentRef.current) return;
+    // Se abre YA, dentro del clic. Generar y subir el PDF tarda más de lo que
+    // dura el permiso del navegador para abrir ventanas, así que dejarlo para
+    // el final hace que la bloquee.
+    const ventana = abrirPestanaParaWhatsApp();
     setSendingLink(true);
     try {
       const pdfBase64 = await generateReceiptPdf(pdfContentRef.current, filename);
-      const { diasValidez } = await shareSalePdfLinkViaWhatsApp(sale.id, pdfBase64, sale, profile.name);
+      const { url, diasValidez, abrioWhatsApp } = await shareSalePdfLinkViaWhatsApp(
+        sale.id, pdfBase64, sale, profile.name, ventana,
+      );
+      setEnlace({ url, diasValidez });
       toast({
-        title: 'WhatsApp abierto con el mensaje listo',
-        description: `Revísalo y dale enviar. El enlace de descarga del PDF funciona por ${diasValidez} días.`,
+        title: abrioWhatsApp ? 'WhatsApp abierto con el mensaje listo' : 'Enlace listo',
+        description: abrioWhatsApp
+          ? `Revísalo y dale enviar. El enlace de descarga del PDF funciona por ${diasValidez} días.`
+          : `El navegador bloqueó la pestaña. Copia el enlace o vuelve a abrir WhatsApp desde aquí.`,
       });
-      setActiveScreen('receipt');
     } catch (error: any) {
       console.error(error);
+      ventana?.close();
       toast({
         title: 'No se pudo generar el enlace',
         description: error?.message || 'Intenta de nuevo.',
@@ -89,6 +104,20 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
       });
     } finally {
       setSendingLink(false);
+    }
+  };
+
+  const handleCopiarEnlace = async () => {
+    if (!enlace) return;
+    try {
+      await navigator.clipboard.writeText(enlace.url);
+      toast({ title: 'Enlace copiado', description: 'Ya puedes pegarlo donde lo necesites.' });
+    } catch {
+      toast({
+        title: 'No se pudo copiar',
+        description: 'Selecciona el enlace y cópialo a mano.',
+        variant: 'destructive',
+      });
     }
   };
 
@@ -307,6 +336,30 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                     </p>
                   </div>
                 </Button>
+
+                {enlace && (
+                  <div className="rounded-md border bg-muted/40 p-3 space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Enlace generado (válido por {enlace.diasValidez} días):
+                    </p>
+                    <p className="text-xs break-all font-mono">{enlace.url}</p>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" className="flex-1" onClick={handleCopiarEnlace}>
+                        <Copy className="mr-1.5 h-3.5 w-3.5" />
+                        Copiar enlace
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => abrirWhatsAppConEnlace(sale, enlace.url, enlace.diasValidez, profile.name)}
+                      >
+                        <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+                        Abrir WhatsApp
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <Button
                   variant="outline"

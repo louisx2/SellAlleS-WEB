@@ -66,11 +66,37 @@ function telefonoParaWhatsApp(sale: Sale): string {
   return phone;
 }
 
-function abrirWhatsApp(text: string, phone: string) {
-  const url = phone
+function urlDeWhatsApp(text: string, phone: string) {
+  return phone
     ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`
     : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-  window.open(url, '_blank');
+}
+
+/**
+ * Abre WhatsApp. Si se le pasa una pestaña ya abierta, la reutiliza en vez de
+ * abrir otra: ver `abrirPestanaParaWhatsApp`. Devuelve si logró abrirse.
+ */
+function abrirWhatsApp(text: string, phone: string, ventana?: Window | null): boolean {
+  const url = urlDeWhatsApp(text, phone);
+  if (ventana && !ventana.closed) {
+    ventana.location.href = url;
+    return true;
+  }
+  return window.open(url, '_blank') !== null;
+}
+
+/**
+ * Abre una pestaña en blanco para llenarla después con el enlace de WhatsApp.
+ *
+ * El navegador solo deja abrir ventanas mientras dura el clic del usuario (en
+ * Chrome, unos 5 segundos). Generar el PDF y subirlo tarda más que eso, así que
+ * un `window.open` al final se bloquea. Se abre la pestaña en el clic y se le
+ * cambia la dirección cuando el enlace está listo.
+ *
+ * Llamar SIN await, como primera línea del manejador del clic.
+ */
+export function abrirPestanaParaWhatsApp(): Window | null {
+  return window.open('', '_blank');
 }
 
 export function shareSaleViaWhatsApp(sale: Sale, companyName?: string) {
@@ -100,21 +126,19 @@ export async function shareSalePdfLinkViaWhatsApp(
   pdfBase64: string,
   sale: Sale,
   companyName?: string,
-): Promise<{ url: string; diasValidez: number }> {
+  ventana?: Window | null,
+): Promise<{ url: string; diasValidez: number; abrioWhatsApp: boolean }> {
   // El PDF NO viaja dentro del JSON de la función: por ahí no cabía y la
   // petición ni siquiera llegaba ("Failed to send a request to the Edge
-  // Function"). La función solo entrega dos URLs firmadas — una para subir y
-  // otra para descargar — y el archivo va directo a Storage.
-  const { data, error } = await supabase.functions.invoke('receipt-link', {
-    body: { saleId },
-  });
-
-  const msg = (data as { error?: string })?.error ?? error?.message;
-  if (msg) throw new Error(msg);
-
-  const { ruta, uploadToken, url, diasValidez } = data as {
-    ruta: string; uploadToken: string; url: string; diasValidez: number;
-  };
+  // Function"). La función entrega URLs firmadas y el archivo va directo a
+  // Storage.
+  //
+  // Son dos llamadas y el orden no es negociable: Storage no firma la descarga
+  // de un objeto que todavía no existe (responde "Object not found"), así que
+  // primero se pide el permiso de subida, se sube, y recién ahí se pide el
+  // enlace.
+  const subida = await llamarReceiptLink({ saleId });
+  const { ruta, uploadToken } = subida as { ruta: string; uploadToken: string };
 
   const { error: upErr } = await supabase.storage
     .from('comprobantes')
@@ -124,14 +148,45 @@ export async function shareSalePdfLinkViaWhatsApp(
     });
   if (upErr) throw new Error(`No se pudo guardar el PDF: ${upErr.message}`);
 
+  const enlace = await llamarReceiptLink({ saleId, paso: 'enlace' });
+  const { url, diasValidez } = enlace as { url: string; diasValidez: number };
+
+  const abrioWhatsApp = abrirWhatsApp(
+    mensajeConEnlace(url, diasValidez, companyName),
+    telefonoParaWhatsApp(sale),
+    ventana,
+  );
+  return { url, diasValidez, abrioWhatsApp };
+}
+
+function mensajeConEnlace(url: string, diasValidez: number, companyName?: string) {
   const negocio = companyName ?? 'nuestro negocio';
-  const texto =
+  return (
     `¡Gracias por su compra en ${negocio}!\n\n` +
     `Aquí puede descargar su comprobante en PDF:\n${url}\n\n` +
-    `El enlace estará disponible por ${diasValidez} días.`;
+    `El enlace estará disponible por ${diasValidez} días.`
+  );
+}
 
-  abrirWhatsApp(texto, telefonoParaWhatsApp(sale));
-  return { url, diasValidez };
+/** Reintento manual: el enlace ya está generado y solo falta abrir el chat.
+ *  Sirve cuando el navegador bloqueó la pestaña la primera vez. */
+export function abrirWhatsAppConEnlace(
+  sale: Sale,
+  url: string,
+  diasValidez: number,
+  companyName?: string,
+) {
+  abrirWhatsApp(mensajeConEnlace(url, diasValidez, companyName), telefonoParaWhatsApp(sale));
+}
+
+/** Llama a la Edge Function y desenreda los dos sitios donde puede venir el
+ *  error: el transporte (`error`) y el cuerpo de la respuesta (`data.error`). */
+async function llamarReceiptLink(body: { saleId: string; paso?: 'enlace' }) {
+  const { data, error } = await supabase.functions.invoke('receipt-link', { body });
+  const msg = (data as { error?: string } | null)?.error ?? error?.message;
+  if (msg) throw new Error(msg);
+  if (!data) throw new Error('La función no devolvió respuesta.');
+  return data as Record<string, unknown>;
 }
 
 /** Tamaño real del recibo en milímetros, tomado de lo que se ve en pantalla.
