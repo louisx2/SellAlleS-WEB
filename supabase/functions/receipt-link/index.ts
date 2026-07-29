@@ -55,7 +55,10 @@ function codigoNuevo() {
 
 /** El nombre de la empresa en la URL es decorativo: le dice al cliente de quien
  *  es el comprobante antes de abrirlo. Se guarda tal como estaba al compartir,
- *  para que un cambio de nombre no rompa los enlaces ya enviados. */
+ *  para que un cambio de nombre no rompa los enlaces ya enviados.
+ *
+ *  Tiene que dar el mismo resultado que `slugParaEnlace` en el navegador, que
+ *  es la que le ensena al usuario como va a quedar antes de guardar. */
 function slug(nombre: string | null | undefined) {
   const limpio = (nombre ?? '')
     .normalize('NFD')
@@ -130,16 +133,19 @@ Deno.serve(async (req) => {
     // caracteres y apunta a un dominio que el cliente no reconoce: ilegible en
     // un mensaje y con pinta de estafa. Firmar la descarga es ahora tarea de la
     // funcion `c`, en el momento en que alguien abre el enlace.
+    // link_slug es lo que la empresa configuro para verse en el enlace. Si no
+    // configuro nada se deriva del nombre legal, que sirve pero rara vez es lo
+    // que el negocio quiere ensenarle al cliente ("...-srl", "inventar-io").
     const { data: empresa } = await admin
       .from('companies')
-      .select('name')
+      .select('name, link_slug')
       .eq('id', sale.company_id)
       .maybeSingle();
 
     // El nombre de descarga hace que al cliente le llegue "comprobante-B01...pdf"
     // y no el uuid de la venta.
     const nombreArchivo = `comprobante${sale.ncf ? `-${sale.ncf}` : ''}.pdf`;
-    const empresaSlug = slug(empresa?.name);
+    const empresaSlug = empresa?.link_slug?.trim() || slug(empresa?.name);
     const vence = new Date(Date.now() + DIAS_VALIDEZ * 24 * 60 * 60 * 1000);
 
     // Si esta venta ya tiene un enlace vigente se reutiliza, para que reenviar

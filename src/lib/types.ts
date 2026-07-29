@@ -318,6 +318,9 @@ export type CompanyProfile = {
   // Qué nombre encabeza el ticket: el de la empresa, el de la sucursal (o su
   // nombre comercial si lo tiene), o ambos.
   ticketNameDisplay: TicketNameDisplay;
+  // Cómo se ve el negocio en el enlace del comprobante que va por WhatsApp:
+  // sellalles.com/<linkSlug>/c/7Kq2Wp. Vacío = se deriva del nombre.
+  linkSlug: string;
   lateFeeRate: number;         // % de mora sobre la cuota vencida
   defaultInterestRate: number; // % de interés mensual sugerido en el POS
   loanLateFeeRate: number;         // % de mora de préstamos (independiente de lateFeeRate)

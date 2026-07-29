@@ -85,6 +85,26 @@ function abrirWhatsApp(text: string, phone: string, ventana?: Window | null): bo
   return window.open(url, '_blank') !== null;
 }
 
+/**
+ * Deja un texto en la forma que admite el enlace del comprobante:
+ * `sellalles.com/<esto>/c/7Kq2Wp`.
+ *
+ * Tiene que dar el mismo resultado que la función `slug` de la Edge Function
+ * receipt-link, que es la que arma el enlace de verdad. Aquí se usa para dos
+ * cosas: limpiar lo que el usuario escribe en la pantalla de la empresa, y
+ * enseñarle cómo va a quedar antes de guardar.
+ */
+export function slugParaEnlace(texto: string | null | undefined): string {
+  return (texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32)
+    .replace(/-+$/, '');
+}
+
 /** Teléfono o tableta: sin ratón, la pantalla es táctil. */
 function esTactil(): boolean {
   if (typeof window === 'undefined') return false;

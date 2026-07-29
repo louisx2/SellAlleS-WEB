@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Info, Loader2, Upload, Store, Building2 } from 'lucide-react';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
+import { slugParaEnlace } from '@/lib/receipt-sharing';
 
 export default function CompanyProfilePage() {
   const { profile, updateProfile } = useCompanyProfile();
@@ -441,6 +442,33 @@ export default function CompanyProfilePage() {
                     Solo un super administrador de la plataforma puede cambiar el nombre de la empresa global.
                   </p>
                 )}
+              </div>
+
+              {/* El nombre legal casi nunca es el que el negocio quiere que vea
+                  su cliente en el enlace ("...-srl", "inventar-io"), así que se
+                  configura aparte. Es decorativo: quien autoriza la descarga es
+                  el código, así que puede repetirse entre empresas y cambiarlo
+                  no rompe los enlaces ya enviados. */}
+              <div className="space-y-2">
+                <Label htmlFor="link-slug">Tu nombre en el enlace del comprobante</Label>
+                <Input
+                  id="link-slug"
+                  name="linkSlug"
+                  value={companyData.linkSlug || ''}
+                  onChange={(e) =>
+                    setCompanyData((prev) => ({ ...prev, linkSlug: slugParaEnlace(e.target.value) }))
+                  }
+                  placeholder={slugParaEnlace(companyData.name) || 'mi-negocio'}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Así le llega al cliente por WhatsApp:{' '}
+                  <span className="font-mono break-all">
+                    https://sellalles.com/{slugParaEnlace(companyData.linkSlug) || slugParaEnlace(companyData.name) || 'mi-negocio'}/c/7Kq2Wp
+                  </span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Déjalo vacío para usar el nombre de la empresa. Cambiarlo no daña los enlaces que ya enviaste.
+                </p>
               </div>
 
               <div className="grid sm:grid-cols-2 gap-4">

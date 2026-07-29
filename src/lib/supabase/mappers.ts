@@ -243,6 +243,7 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   socialMedia: { instagram: r.instagram ?? '', facebook: r.facebook ?? '' },
   logoUrl: r.logo_url ?? '', ticketLogoUrl: r.ticket_logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
   ticketNameDisplay: (r.ticket_name_display ?? 'company') as CompanyProfile['ticketNameDisplay'],
+  linkSlug: r.link_slug ?? '',
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
   loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
@@ -259,6 +260,9 @@ export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   instagram: p.socialMedia?.instagram ?? null, facebook: p.socialMedia?.facebook ?? null,
   logo_url: p.logoUrl ?? null, ticket_logo_url: p.ticketLogoUrl ?? null, receipt_footer: p.receiptFooter ?? null,
   ticket_name_display: p.ticketNameDisplay ?? 'company',
+  // Vacío se guarda como null, que es lo que la función interpreta como
+  // "derívalo del nombre". Guardar '' rompería el enlace: quedaría //c/.
+  link_slug: p.linkSlug?.trim() ? p.linkSlug.trim() : null,
 });
 
 // ---------- Sale (con sale_items y customer embebidos) ----------
