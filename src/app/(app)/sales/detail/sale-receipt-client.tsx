@@ -364,17 +364,22 @@ export default function SaleReceiptClient() {
         </DialogContent>
       </Dialog>
 
-      {/* Off-screen DOM element for clean PDF generation without scrollbars/buttons */}
+      {/* Elemento fuera de pantalla del que se saca el PDF: sin barras de
+          desplazamiento ni botones.
+
+          Va a 100 mm de ancho porque el recibo está diseñado como ticket
+          (globals.css lo imprime a 76 mm), no como hoja A4. Antes era un A4 con
+          `scale-[1.3] transform-origin-top-left`, y esa clase no existe en
+          Tailwind — la buena es `origin-top-left`. Al no aplicar el origen, el
+          scale crecía desde el centro y html2canvas recortaba lo que
+          sobresalía: el PDF salía sin el principio de cada línea ni el final de
+          los totales. */}
       <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
-        <div ref={pdfContentRef} className="bg-white text-black p-8 w-[210mm] min-h-[297mm] space-y-6">
-          <div className="scale-[1.3] transform-origin-top-left p-6">
-            <ReceiptHeader sale={sale} />
-            <div className="my-6">
-              <ReceiptItems sale={sale} />
-            </div>
-            <div className="border-t pt-4">
-              <ReceiptTotals sale={sale} />
-            </div>
+        <div ref={pdfContentRef} className="bg-white text-black w-[100mm] p-4 space-y-4">
+          <ReceiptHeader sale={sale} />
+          <ReceiptItems sale={sale} />
+          <div className="border-t pt-3">
+            <ReceiptTotals sale={sale} />
           </div>
         </div>
       </div>

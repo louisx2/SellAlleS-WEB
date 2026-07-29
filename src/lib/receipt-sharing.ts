@@ -209,16 +209,25 @@ function medidasDelRecibo(element: HTMLElement, canvas: HTMLCanvasElement) {
   };
 }
 
-export async function generateReceiptPdf(element: HTMLElement, filename: string): Promise<string> {
+/** Rasteriza el recibo y arma el PDF a su medida.
+ *
+ *  Lo comparten el envío y la descarga: antes cada uno hacía su propia versión
+ *  y salían distintas — al cliente le llegaba una y el cajero se descargaba
+ *  otra, estirada a A4.
+ *
+ *  scale 3: el recibo mide unos 100 mm de ancho, así que a menos resolución el
+ *  texto sale suave al ampliarlo en el teléfono o al imprimirlo. */
+async function renderizarRecibo(element: HTMLElement) {
   const jsPDF = (await import('jspdf')).default;
   const html2canvas = (await import('html2canvas')).default;
 
   const canvas = await html2canvas(element, {
-    scale: 1.5,
+    scale: 3,
     useCORS: true,
+    backgroundColor: '#ffffff',
   });
-  
-  const imgData = canvas.toDataURL('image/jpeg', 0.8);
+
+  const imgData = canvas.toDataURL('image/jpeg', 0.9);
   const { anchoMm, altoMm } = medidasDelRecibo(element, canvas);
 
   // Página a la medida exacta del recibo, en vez de A4. Forzar 210 mm estiraba
@@ -232,42 +241,19 @@ export async function generateReceiptPdf(element: HTMLElement, filename: string)
   });
 
   pdf.addImage(imgData, 'JPEG', 0, 0, anchoMm, altoMm);
+  return pdf;
+}
 
+export async function generateReceiptPdf(element: HTMLElement, filename: string): Promise<string> {
+  const pdf = await renderizarRecibo(element);
   return pdf.output('datauristring').split(',')[1];
 }
 
 export async function downloadReceiptPdfFile(element: HTMLElement, filename: string) {
-  const jsPDF = (await import('jspdf')).default;
-  const html2canvas = (await import('html2canvas')).default;
-
-  const canvas = await html2canvas(element, {
-    scale: 1.5,
-    useCORS: true,
-  });
-  
-  const imgData = canvas.toDataURL('image/jpeg', 0.8);
-  const pdf = new jsPDF({
-    orientation: 'portrait',
-    unit: 'mm',
-    format: 'a4',
-  });
-
-  const imgWidth = 210;
-  const pageHeight = 297;
-  const imgHeight = (canvas.height * imgWidth) / canvas.width;
-  let heightLeft = imgHeight;
-  let position = 0;
-
-  pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-  heightLeft -= pageHeight;
-
-  while (heightLeft >= 0) {
-    position = heightLeft - imgHeight;
-    pdf.addPage();
-    pdf.addImage(imgData, 'JPEG', 0, position, imgWidth, imgHeight);
-    heightLeft -= pageHeight;
-  }
-
+  // Antes forzaba A4 y paginaba: el recibo quedaba estirado a 210 mm de ancho
+  // y con media hoja en blanco debajo. Ahora sale igual que el que recibe el
+  // cliente, a la medida del recibo y en una sola página.
+  const pdf = await renderizarRecibo(element);
   pdf.save(filename);
 }
 
