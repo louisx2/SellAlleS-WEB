@@ -18,7 +18,6 @@ import { ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from './re
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  shareSaleViaWhatsApp,
   shareSalePdfLinkViaWhatsApp,
   abrirPestanaParaWhatsApp,
   abrirWhatsAppConEnlace,
@@ -220,6 +219,13 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                   <Mail className="mr-1.5 h-4 w-4" />
                   Correo
                 </Button>
+                {/* Vivía dentro de "Descargar PDF y abrir chat", en el diálogo
+                    de WhatsApp. Al quitar esa opción era la única forma de
+                    guardar el PDF en el dispositivo, así que sube al pie. */}
+                <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
+                  <Download className="mr-1.5 h-4 w-4" />
+                  Descargar PDF
+                </Button>
                 {sale.paymentMethod === 'financing' && (
                   <Button variant="outline" size="sm" onClick={() => setPlanOpen(true)}>
                     <CalendarClock className="mr-1.5 h-4 w-4" />
@@ -343,24 +349,6 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                   </div>
                 )}
 
-                <Button
-                  variant="outline"
-                  className="justify-start h-auto py-3 px-4 whitespace-normal"
-                  onClick={async () => {
-                    await handleDownloadPdf();
-                    shareSaleViaWhatsApp(sale, profile.name);
-                    setActiveScreen('receipt');
-                  }}
-                >
-                  <div className="text-left">
-                    <p className="font-semibold flex items-center">
-                      <Download className="mr-2 h-4 w-4 shrink-0" /> Descargar PDF y abrir chat
-                    </p>
-                    <p className="text-xs text-muted-foreground font-normal mt-0.5">
-                      Descarga el PDF a este dispositivo y abre WhatsApp para que lo adjuntes tú mismo.
-                    </p>
-                  </div>
-                </Button>
               </div>
             </div>
 
