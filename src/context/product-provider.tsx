@@ -3,6 +3,7 @@
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
 import type { Product } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
+import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { rowToProduct, productToRow } from '@/lib/supabase/mappers';
 
 export interface BulkImportItem {
@@ -42,6 +43,11 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // El stock lo baja un trigger en la base cada vez que alguien vende, desde
+  // cualquier dispositivo. Sin esto, la tablet de al lado seguía anunciando
+  // existencias que ya no estaban.
+  useRealtimeReload('products', load);
 
   const addProduct = async (productData: Omit<Product, 'id'>) => {
     const { data, error } = await supabase.from('products').insert(productToRow(productData)).select().single();

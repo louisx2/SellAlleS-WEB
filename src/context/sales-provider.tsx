@@ -3,6 +3,7 @@
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
 import type { Sale, PaymentMethod, PaymentResult } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
+import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { rowToSale, saleToRow, rowToPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
 
@@ -52,6 +53,10 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Una venta hecha en otra caja aparece aquí sola: en Movimientos, en el
+  // dashboard y en todo lo que lea de este provider.
+  useRealtimeReload('sales', load);
 
   const addSale = async (saleData: Omit<Sale, 'id'>): Promise<Sale> => {
     let branchUuid: string | null = null;
