@@ -3,8 +3,14 @@
 Estado del módulo hoy, diseño de las dos funciones pedidas (capital disponible y
 envío del comprobante), y el resto de huecos que aparecieron al revisarlo.
 
-Nada de esto está implementado todavía: es el estudio previo para decidir qué
-entra y en qué orden.
+**Estado:** de lo estudiado aquí ya está implementado el arreglo de la caja
+(§4), el comprobante por correo/WhatsApp/PDF (§3), el capital disponible (§2) y
+la ruta de cobro del día (§5.1). Lo que sigue abierto es el resto del §5.
+
+Las decisiones que quedaban por tomar en §2 se resolvieron así: el fondo es por
+empresa, la mora y el interés cobrados cuentan como disponible (para apartar
+ganancia se registra un retiro), y el sobregiro lo decide cada empresa con un
+switch — avisa por defecto, bloquea si se enciende.
 
 ---
 
@@ -263,13 +269,22 @@ Ordenadas por lo que le rinde a un prestamista contra lo que cuesta hacerlas.
 
 ---
 
-## 6. Orden que propongo
+## 6. Qué falta
 
-1. El fallo de la caja (§4) — es un fallo, y de paso deja el terreno listo.
-2. Comprobante por correo/WhatsApp/PDF (§3) — está acotado y es todo reúso.
-3. Capital disponible (§2) — antes hay que cerrar las tres decisiones abiertas.
-4. Ruta de cobro del día + recordatorio por WhatsApp (§5.1, §5.2).
-5. Saldar por adelantado y cancelar (§5.3, §5.4).
+Hecho: el fallo de la caja (§4, incluido el método de desembolso), el
+comprobante por correo/WhatsApp/PDF (§3), el capital disponible (§2) y la ruta
+de cobro del día con el recordatorio por WhatsApp (§5.1 y §5.2).
 
-Los puntos 1 a 3 son una tanda razonable; lo demás depende de qué tanto se apoya
-el negocio en el módulo.
+Pendiente, por el orden que propongo:
+
+1. Saldar por adelantado y cancelar un préstamo (§5.3, §5.4) — los dos huecos
+   que hoy no tienen salida ninguna.
+2. Avisar de la exposición del cliente al prestar (§5.5).
+3. Refinanciar (§5.6) y la mora por día (§5.7).
+4. Garantía y documentos (§5.8), reportes de cartera (§5.9) y lo de menor
+   prioridad (§5.10 a §5.12).
+
+**Para desplegar lo ya hecho** hacen falta las migraciones (`supabase db push`)
+y las dos Edge Functions (`supabase functions deploy receipt-link` y
+`supabase functions deploy send-loan-receipt`). Sin eso, la app queda pidiendo
+columnas y funciones que el proyecto todavía no tiene.
