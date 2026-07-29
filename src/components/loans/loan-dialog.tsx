@@ -42,7 +42,7 @@ const PER_MONTH: Record<LoanFrequency, number> = { weekly: 4, biweekly: 2, month
 // sale hacia el cliente, no al revés. El servidor recalcula todo al guardar.
 export function LoanDialog({ children }: LoanDialogProps) {
   const { toast } = useToast();
-  const { addLoan } = useLoans();
+  const { addLoan, fund } = useLoans();
   const { branches } = useBranches();
   const { appUser } = useAuth();
   const { profile } = useCompanyProfile();
@@ -109,8 +109,16 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const isPrincipalInvalid = !principal || Number(principal) <= 0;
   const isInstallmentsInvalid = nInstallments < 1 || nInstallments > 60;
   const isReferenceMissing = disbursement === 'transfer' && !disbursementReference.trim();
+
+  // Prestar más de lo que hay en el fondo. Que eso trabe o solo avise lo decide
+  // cada empresa (loan_fund_block_overdraft): bloquear de entrada frena al que
+  // metió dinero y todavía no lo registró, que es el olvido más común.
+  const excedeFondo = !!fund && Number(principal) > fund.disponible;
+  const fondoBloquea = excedeFondo && profile.loanFundBlockOverdraft;
+
   const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isInstallmentsInvalid
-    && preview.installmentAmount > 0 && !isReferenceMissing && !(disbursement === 'cash' && cashBlocked);
+    && preview.installmentAmount > 0 && !isReferenceMissing && !(disbursement === 'cash' && cashBlocked)
+    && !fondoBloquea;
 
   const handleSubmit = async () => {
     if (!canSubmit || !customer) return;
@@ -180,6 +188,16 @@ export function LoanDialog({ children }: LoanDialogProps) {
                 <Label htmlFor="principal">Monto a prestar</Label>
                 <Input id="principal" type="number" step="0.01" placeholder="0.00" value={principal} onChange={(e) => setPrincipal(e.target.value)} />
                 {isPrincipalInvalid && principal !== '' && <p className="text-xs text-destructive">Debe ser mayor que cero.</p>}
+                {fund && !excedeFondo && (
+                  <p className="text-xs text-muted-foreground">Disponible: {formatCurrency(fund.disponible)}</p>
+                )}
+                {fund && excedeFondo && (
+                  <p className={`text-xs ${fondoBloquea ? 'text-destructive' : 'text-amber-600 dark:text-amber-400'}`}>
+                    Te faltan {formatCurrency(Number(principal) - fund.disponible)}: solo tienes{' '}
+                    {formatCurrency(fund.disponible)} disponible.
+                    {fondoBloquea ? ' Registra un aporte para poder prestar.' : ''}
+                  </p>
+                )}
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="interestRate">Interés mensual (%)</Label>

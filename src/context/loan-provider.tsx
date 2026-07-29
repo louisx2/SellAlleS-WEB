@@ -1,10 +1,15 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Loan, LoanFrequency, LoanPaymentResult, PaymentMethod } from '@/lib/types';
+import type {
+  Loan, LoanFrequency, LoanFundMovement, LoanFundSummary, LoanPaymentResult, PaymentMethod,
+} from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
-import { rowToLoan, loanToRow, rowToLoanPaymentResult } from '@/lib/supabase/mappers';
+import {
+  rowToLoan, loanToRow, rowToLoanPaymentResult, rowToLoanFundMovement, rowToLoanFundSummary,
+} from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
+import { useCompanyProfile } from '@/context/company-profile-provider';
 
 interface NewLoanInput {
   branchId: string;
@@ -24,6 +29,10 @@ interface LoanContextType {
   payLoan: (loanId: string, amount: number, method: PaymentMethod, branchId?: string, notes?: string, reference?: string) => Promise<LoanPaymentResult>;
   reload: () => Promise<void>;
   loading: boolean;
+  /** Capital del negocio. null si la empresa no lleva el fondo. */
+  fund: LoanFundSummary | null;
+  fundMovements: LoanFundMovement[];
+  addFundMovement: (type: 'aporte' | 'retiro', amount: number, reason?: string) => Promise<void>;
 }
 
 const LoanContext = createContext<LoanContextType | undefined>(undefined);
@@ -37,8 +46,12 @@ export function LoanProvider({ children }: { children: ReactNode }) {
   // propia. Sin este filtro el super admin (que ignora RLS) vería préstamos de
   // TODAS las empresas — mismo criterio que branch-provider/user-provider.
   const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+  const { profile } = useCompanyProfile();
+  const fundEnabled = profile.loanFundEnabled;
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fund, setFund] = useState<LoanFundSummary | null>(null);
+  const [fundMovements, setFundMovements] = useState<LoanFundMovement[]>([]);
 
   const load = useCallback(async () => {
     if (!activeCompanyId) { setLoans([]); setLoading(false); return; }
@@ -53,6 +66,35 @@ export function LoanProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { load(); }, [load]);
 
+  // El disponible lo calcula la base (loan_fund_summary): aquí no están los
+  // abonos de todos los préstamos, y traerlos solo para sumarlos sería caro y
+  // se desincronizaría en cuanto alguien cobre en otra sucursal.
+  const loadFund = useCallback(async () => {
+    if (!activeCompanyId || !fundEnabled) { setFund(null); setFundMovements([]); return; }
+    const [resumen, movimientos] = await Promise.all([
+      supabase.rpc('loan_fund_summary'),
+      supabase
+        .from('loan_fund_movements')
+        .select('*')
+        .eq('company_id', activeCompanyId)
+        .order('created_at', { ascending: false })
+        .limit(50),
+    ]);
+    if (!resumen.error) setFund(rowToLoanFundSummary(resumen.data));
+    if (!movimientos.error && movimientos.data) setFundMovements(movimientos.data.map(rowToLoanFundMovement));
+  }, [activeCompanyId, fundEnabled]);
+
+  useEffect(() => { loadFund(); }, [loadFund]);
+
+  const addFundMovement = async (type: 'aporte' | 'retiro', amount: number, reason?: string) => {
+    const userName = (typeof window !== 'undefined' && localStorage.getItem('userName')) || null;
+    const { error } = await supabase.from('loan_fund_movements').insert({
+      type, amount, reason: reason?.trim() || null, user_name: userName,
+    });
+    if (error) throw error;
+    await loadFund();
+  };
+
   // Los montos (interés, cuotas) los calcula el trigger trg_before_loan_checks
   // en la base; el cliente solo envía los parámetros del plan.
   const addLoan = async (loanData: NewLoanInput): Promise<Loan> => {
@@ -64,6 +106,9 @@ export function LoanProvider({ children }: { children: ReactNode }) {
       .single();
     if (error) throw error;
     await load();
+    // Prestar baja el disponible: si no se recarga aquí, la tarjeta sigue
+    // enseñando el capital de antes hasta que se recargue la página.
+    await loadFund();
     return rowToLoan(data);
   };
 
@@ -79,6 +124,8 @@ export function LoanProvider({ children }: { children: ReactNode }) {
     });
     if (error) throw error;
     await load();
+    // Cobrar devuelve dinero al fondo.
+    await loadFund();
     const result = rowToLoanPaymentResult(data);
     // Recibo por correo, best-effort (no bloquea ni revierte el abono si falla).
     if (customerId) {
@@ -93,7 +140,10 @@ export function LoanProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <LoanContext.Provider value={{ loans, addLoan, payLoan, reload: load, loading }}>
+    <LoanContext.Provider value={{
+      loans, addLoan, payLoan, reload: load, loading,
+      fund, fundMovements, addFundMovement,
+    }}>
       {children}
     </LoanContext.Provider>
   );
