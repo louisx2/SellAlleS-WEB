@@ -36,6 +36,28 @@ export const supabase = createClient(
     : undefined,
 );
 
+// La cabecera se le quita al cliente de Edge Functions y se le deja al de datos.
+//
+// A las funciones no les sirve: usan service role y resuelven permisos leyendo
+// profiles por su cuenta. A quien le sirve es a RLS, que la lee vía
+// impersonated_company_id() en las consultas normales.
+//
+// Y mandársela las ROMPE, todas: el preflight CORS de cada función declara una
+// lista fija de cabeceras permitidas que no la incluye, así que el navegador
+// bloquea la petición real. En el log del servidor se ve el OPTIONS y ningún
+// POST, y al usuario le llega un "Failed to send a request to the Edge Function"
+// que no explica nada. Estando dentro de una empresa fallaban por igual el envío
+// de facturas por correo, el enlace de WhatsApp, los tickets de soporte y el
+// resumen de caja.
+//
+// Se arregla aquí y no en las 22 funciones porque es un solo sitio, cubre
+// también las que no están en este repo, y no hay que volver a acordarse al
+// escribir la próxima.
+if (impersonatedCompany) {
+  const clienteFunciones = supabase.functions as unknown as { headers?: Record<string, string> };
+  if (clienteFunciones.headers) delete clienteFunciones.headers['x-impersonate-company'];
+}
+
 // =============================================================================
 // MODO SOLO-LECTURA (prueba de 14 días vencida)
 // -----------------------------------------------------------------------------
