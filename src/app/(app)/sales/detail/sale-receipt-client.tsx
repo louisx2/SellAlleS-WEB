@@ -278,24 +278,6 @@ export default function SaleReceiptClient() {
                   estas descripciones largas se salían del botón. */}
               <Button
                 variant="outline"
-                className="justify-start h-auto py-3 px-4 whitespace-normal border-emerald-200 dark:border-emerald-900 bg-emerald-50/10 hover:bg-emerald-50/20"
-                onClick={() => {
-                  shareSaleViaWhatsApp(sale, profile.name);
-                  setActiveDialog('none');
-                }}
-              >
-                <div className="text-left">
-                  <p className="font-semibold text-emerald-600 dark:text-emerald-400 flex items-center">
-                    <MessageSquare className="mr-2 h-4 w-4 shrink-0" /> Texto detallado
-                  </p>
-                  <p className="text-xs text-muted-foreground font-normal mt-0.5">
-                    Abre el chat del cliente en WhatsApp con la lista de productos y totales ya escrita. Tú solo le das enviar.
-                  </p>
-                </div>
-              </Button>
-
-              <Button
-                variant="outline"
                 className="justify-start h-auto py-3 px-4 whitespace-normal border-emerald-200 dark:border-emerald-900"
                 disabled={sendingLink}
                 onClick={handleSharePdfLink}
