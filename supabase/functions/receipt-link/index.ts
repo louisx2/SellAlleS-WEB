@@ -1,5 +1,15 @@
 // Entrega al navegador lo necesario para compartir el comprobante de una venta
-// por WhatsApp: una URL firmada para SUBIR el PDF y otra para DESCARGARLO.
+// por WhatsApp. Son DOS llamadas, y el orden importa:
+//
+//   1) paso 'subida' -> URL firmada para SUBIR el PDF a Storage.
+//   2) el navegador sube el archivo directo a Storage.
+//   3) paso 'enlace' -> URL firmada de DESCARGA, la que va en el mensaje.
+//
+// No se puede firmar la descarga en el mismo viaje que la subida: Storage
+// exige que el objeto exista para firmarlo y responde 400 "Object not found"
+// si todavia no esta. Se comprobo contra el proyecto: firmar una ruta
+// inexistente falla, firmar la misma ruta despues de subir devuelve 200 y el
+// enlace abre sin sesion.
 //
 // El PDF no pasa por esta funcion. Antes llegaba en base64 dentro del JSON y la
 // peticion fallaba por tamano ("Failed to send a request to the Edge
@@ -54,6 +64,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => null);
     const saleId = body?.saleId;
     if (!saleId) return json(400, { error: 'Se requiere saleId.' });
+    const paso = body?.paso === 'enlace' ? 'enlace' : 'subida';
 
     const { data: sale } = await admin
       .from('sales')
@@ -69,16 +80,21 @@ Deno.serve(async (req) => {
     // cada uno si algun dia hay que limpiar.
     const ruta = `${sale.company_id}/${sale.id}.pdf`;
 
-    const { data: subida, error: upErr } = await admin.storage
-      .from('comprobantes')
-      .createSignedUploadUrl(ruta, { upsert: true });
-    if (upErr || !subida) {
-      console.error('Fallo creando la URL de subida:', upErr?.message);
-      return json(502, { error: `No se pudo preparar la subida: ${upErr?.message ?? 'desconocido'}` });
+    if (paso === 'subida') {
+      // upsert para que reimprimir o reenviar el comprobante de la misma venta
+      // sobrescriba el archivo en vez de fallar con "ya existe".
+      const { data: subida, error: upErr } = await admin.storage
+        .from('comprobantes')
+        .createSignedUploadUrl(ruta, { upsert: true });
+      if (upErr || !subida) {
+        console.error('Fallo creando la URL de subida:', upErr?.message);
+        return json(502, { error: `No se pudo preparar la subida: ${upErr?.message ?? 'desconocido'}` });
+      }
+      return json(200, { ok: true, ruta, uploadToken: subida.token });
     }
 
-    // Firmar la descarga antes de que el archivo exista es valido: la URL
-    // simplemente no resuelve hasta que se sube, y para entonces ya se subio.
+    // El nombre de descarga hace que al cliente le llegue "comprobante-B01...pdf"
+    // y no el uuid de la venta.
     const { data: firmada, error: signErr } = await admin.storage
       .from('comprobantes')
       .createSignedUrl(ruta, DIAS_VALIDEZ * 24 * 60 * 60, {
@@ -89,13 +105,7 @@ Deno.serve(async (req) => {
       return json(502, { error: `No se pudo generar el enlace: ${signErr?.message ?? 'desconocido'}` });
     }
 
-    return json(200, {
-      ok: true,
-      ruta,
-      uploadToken: subida.token,
-      url: firmada.signedUrl,
-      diasValidez: DIAS_VALIDEZ,
-    });
+    return json(200, { ok: true, ruta, url: firmada.signedUrl, diasValidez: DIAS_VALIDEZ });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error('receipt-link:', msg);
