@@ -235,6 +235,26 @@ export function CompaniesDataTable({
 
                     {expandedCompanies.includes(c.id) && (
                       <div className="pl-11 mt-3 flex flex-col gap-2 text-xs font-normal">
+                        {/* Cómo va el reparto del cupo de la empresa entre sus
+                            sucursales. Solo se muestra si hay algo repartido:
+                            si no, no hay nada que cuadrar. */}
+                        {c.max_users != null && (() => {
+                          const repartido = (c.branches ?? []).reduce(
+                            (acc, b) => acc + (b.max_users ?? 0), 0,
+                          );
+                          if (repartido === 0) return null;
+                          const sinRepartir = c.max_users - repartido;
+                          return (
+                            <div className="flex items-center gap-1.5 text-muted-foreground">
+                              <Users className="h-3 w-3" />
+                              <span>
+                                Reparto de usuarios: <strong className="text-foreground">{repartido}</strong> de {c.max_users}
+                                {sinRepartir > 0 && ` · ${sinRepartir} sin repartir`}
+                                {sinRepartir === 0 && ' · cupo completo'}
+                              </span>
+                            </div>
+                          );
+                        })()}
                         {c.branches && c.branches.length > 0 ? (
                           c.branches.map(b => (
                             <div key={b.id} className="flex items-center justify-between bg-muted/40 hover:bg-muted/60 transition-colors p-2 rounded-md pr-3 border border-border/50">
@@ -246,8 +266,9 @@ export function CompaniesDataTable({
                                 {!b.is_active && (
                                   <Badge variant="destructive" className="text-[10px] h-4 px-1">Inactiva</Badge>
                                 )}
-                                {/* Cupo de la sucursal. Sin tope no se muestra
-                                    nada: el dato solo importa cuando limita. */}
+                                {/* Usuarios que ocupa la sucursal frente a los que
+                                    tiene reservados del cupo de la empresa. Sin
+                                    reparto no se muestra nada. */}
                                 {b.max_users != null && (
                                   <Badge
                                     variant="outline"
@@ -258,7 +279,7 @@ export function CompaniesDataTable({
                                     }`}
                                   >
                                     <Users className="h-2.5 w-2.5" />
-                                    {branchUserCounts ? `${branchUserCounts[b.id] ?? 0} de ${b.max_users}` : `máx. ${b.max_users}`}
+                                    {branchUserCounts ? `${branchUserCounts[b.id] ?? 0} de ${b.max_users}` : `${b.max_users} reservados`}
                                   </Badge>
                                 )}
                               </div>
