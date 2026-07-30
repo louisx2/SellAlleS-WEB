@@ -5,7 +5,10 @@ import { useRouter, usePathname } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
 import type { User as AppUser, RolePermissions } from '@/lib/types';
 import { supabase, setReadOnlyMode, cabeceraImpersonacionHorneada } from '@/lib/supabase/client';
-import { DEFAULT_ADMIN_PERMISSIONS, DEFAULT_CASHIER_PERMISSIONS } from '@/lib/permissions';
+import {
+  DEFAULT_ADMIN_PERMISSIONS, DEFAULT_CASHIER_PERMISSIONS,
+  MANAGEMENT_PERMISSIONS, unionPermissions,
+} from '@/lib/permissions';
 import { resetCartStore } from '@/context/cart-provider';
 import { AppSkeleton } from '@/components/ui/app-skeleton';
 import { CreateCompanyScreen } from '@/components/auth/create-company-screen';
@@ -66,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         id, name, email, role, is_super_admin, company_id, pos_inventory_view,
         companies!profiles_company_id_fkey(status, demo_expires_at, trial_ends_at, paid_until, max_users),
         branches!profiles_branch_id_fkey(id, name, is_active),
-        profile_branches(branches(id, name, is_active)),
+        profile_branches(branch_id, branches(id, name, is_active), roles(id, name, permissions)),
         profile_roles(roles(id, name, description, permissions)),
         profile_companies(role, companies(id, name, status, is_demo))
       `)
@@ -151,26 +154,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .filter(Boolean)
         .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '', permissions: r.permissions ?? {} }));
 
-      // Permisos del rol base (Administrador/Cajero) de esta empresa: son los
-      // que realmente determinan el acceso ahora (antes admin/cajero se
-      // resolvían por código, ignorando este jsonb). Si por algún motivo no
-      // aparece la fila (dato corrupto/carrera), se usa un default seguro que
-      // reproduce el mismo comportamiento en vez de dejar al usuario sin acceso.
-      let baseRolePermissions: RolePermissions | undefined;
-      if (!data.is_super_admin && data.company_id && data.role) {
-        const { data: baseRoleRow } = await supabase
-          .from('roles')
-          .select('permissions')
-          .eq('company_id', data.company_id)
-          .eq('is_system', true)
-          .eq('key', data.role)
-          .maybeSingle();
-        baseRolePermissions = baseRoleRow?.permissions
-          ?? (data.role === 'admin' ? DEFAULT_ADMIN_PERMISSIONS : DEFAULT_CASHIER_PERMISSIONS);
+      // Permisos POR SUCURSAL: lo que alguien puede hacer lo decide el rol que
+      // tiene EN esa sucursal (profile_branches.role_id). Se arma el mapa entero
+      // aquí, con los datos que ya vienen en la misma consulta, para que cambiar
+      // de sucursal no cueste otra ida a la base.
+      const branchPermissions: Record<string, RolePermissions> = {};
+      const branchRoleNames: Record<string, string> = {};
+      for (const pb of (data.profile_branches ?? []) as any[]) {
+        const bId = pb.branch_id ?? pb.branches?.id;
+        if (!bId) continue;
+        // Sin rol en la fila (dato viejo) se cae a Cajero, que es lo que hace el
+        // trigger en la base: nadie se queda sin poder trabajar.
+        branchPermissions[bId] = pb.roles?.permissions ?? DEFAULT_CASHIER_PERMISSIONS;
+        branchRoleNames[bId] = pb.roles?.name ?? 'Cajero';
       }
 
-      const isManager = customRoles.some((r: any) => r.name.toLowerCase().includes('gerente'));
-      const isAdminOrManager = !data.is_super_admin && (data.role === 'admin' || isManager);
+      // Administrar la empresa NO es de la sucursal: viene de ser admin en
+      // profile_companies. Por eso se suma aparte a lo que dé el rol de sucursal.
+      const rolEnLaEmpresa = (data.profile_companies ?? [])
+        .find((pc: any) => pc.companies?.id === data.company_id)?.role ?? data.role;
+      const esAdminDeEmpresa = !data.is_super_admin && rolEnLaEmpresa === 'admin';
+
+      const permisosDeSucursal = (branchId?: string): RolePermissions | undefined => {
+        if (data.is_super_admin) return undefined;
+        // Ojo con `branchId && ...`: si el id llega vacío devuelve "" y el ?? no lo
+        // atrapa, dejando al usuario sin permisos. Por eso el ternario.
+        const propios: RolePermissions = (branchId ? branchPermissions[branchId] : undefined)
+          // Sin sucursal asignada solo quedan las secciones de gestión (si las tiene).
+          ?? (esAdminDeEmpresa ? {} : DEFAULT_CASHIER_PERMISSIONS);
+        return esAdminDeEmpresa
+          ? unionPermissions([{ permissions: propios }, { permissions: MANAGEMENT_PERMISSIONS }])
+          : propios;
+      };
+
+      const isAdminOrManager = !data.is_super_admin && esAdminDeEmpresa;
       const isSuperAdminImpersonating = !!data.is_super_admin && !!savedImpersonatedId;
 
       // Si ya había una sucursal activa seleccionada previamente en esta sesión, mantenerla
@@ -247,7 +264,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         impersonatedCompanyId: savedImpersonatedId || undefined,
         impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,
-        baseRolePermissions,
+        baseRolePermissions: permisosDeSucursal(activeBranch.id),
+        branchPermissions,
+        branchRoleName: activeBranch.id ? branchRoleNames[activeBranch.id] : undefined,
+        // Se conservan para mostrarlos, pero ya NO suman permisos: el acceso lo
+        // decide el rol de la sucursal activa.
         customRoles: customRoles,
         companies: companyList,
         companyMaxUsers: maxUsers,
@@ -450,7 +471,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const setActiveBranch = useCallback((branchId: string, branchName: string) => {
     setAppUser((prev) => {
       if (!prev) return null;
-      const updated = { ...prev, activeBranchId: branchId, branch: branchName };
+      // Los permisos dependen de la sucursal, así que cambiar de sucursal cambia
+      // lo que se puede hacer. Sale del mapa que ya se armó al cargar el perfil:
+      // ni consulta extra ni recarga. Al super admin no se le tocan.
+      const permisos = prev.isSuperAdmin
+        ? prev.baseRolePermissions
+        : unionPermissions([
+            { permissions: prev.branchPermissions?.[branchId] ?? DEFAULT_CASHIER_PERMISSIONS },
+            ...(prev.companies?.find((c) => c.id === prev.companyId)?.role === 'admin'
+              ? [{ permissions: MANAGEMENT_PERMISSIONS }]
+              : []),
+          ]);
+      const updated = {
+        ...prev,
+        activeBranchId: branchId,
+        branch: branchName,
+        baseRolePermissions: permisos,
+      };
       persistLocal(updated);
       return updated;
     });

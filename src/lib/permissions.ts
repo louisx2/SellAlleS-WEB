@@ -84,6 +84,20 @@ export const DEFAULT_CASHIER_PERMISSIONS: RolePermissions = {
   caja: ['view', 'create'],
 };
 
+// Secciones que gobierna el Administrador de la EMPRESA, no el rol de la
+// sucursal. Son las de administrar el negocio; el resto (POS, ventas, caja,
+// inventario...) son de operar y las decide el rol que se tenga en la sucursal
+// activa. Esta línea es la que separa "gestionar" de "operar".
+export const MANAGEMENT_RESOURCES: PermissionResource[] = [
+  'company-profile', 'users', 'branches', 'roles', 'suscripcion',
+];
+
+// Permisos de gestión completos, para dárselos al Administrador de la empresa
+// por encima de lo que pueda hacer en cada sucursal.
+export const MANAGEMENT_PERMISSIONS: RolePermissions = Object.fromEntries(
+  MANAGEMENT_RESOURCES.map((r) => [r, ['view', 'create', 'edit', 'delete']])
+) as RolePermissions;
+
 export function hasPermission(
   permissions: Partial<Record<PermissionResource, PermissionAction[]>> | undefined,
   resource: PermissionResource,

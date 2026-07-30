@@ -25,7 +25,6 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { PlusCircle, Trash2, ShieldCheck, Shield, Link2, Unlink, MoreHorizontal, Mail } from 'lucide-react';
-import { BranchChecklist } from '@/components/users/branch-checklist';
 import { PasswordInput } from '@/components/ui/password-input';
 
 interface CompanyUser {
@@ -39,6 +38,8 @@ interface CompanyUser {
   // el mismo en todas porque el rol vive en la empresa, no en la sucursal.
   branchId: string | null;
   branchIds: string[];
+  // Rol que tiene EN cada sucursal (branchId -> roleId). Uno por sucursal.
+  branchRoles: Record<string, string>;
   roleIds: string[];
   emailConfirmedAt: string | null;
 }
@@ -75,6 +76,9 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [roles, setRoles] = useState<RoleOption[]>([]);
+  // Todos los roles de la empresa (sistema + personalizados): las opciones que se
+  // pueden dar a alguien EN una sucursal.
+  const [allRoles, setAllRoles] = useState<{ id: string; name: string; isSystem: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
   const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({});
   const [deleteTarget, setDeleteTarget] = useState<CompanyUser | null>(null);
@@ -106,7 +110,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const [{ data: profs }, { data: bs }, { data: rls }, { data: links }, { data: comp }, { data: pbs }] = await Promise.all([
+    const [{ data: profs }, { data: bs }, { data: rls }, { data: links }, { data: comp }, { data: pbs }, { data: todosRoles }] = await Promise.all([
       supabase.from('profiles').select('id, name, email, role, is_super_admin, branch_id, email_confirmed_at, profile_roles(role_id)').eq('company_id', companyId).order('name'),
       supabase.from('branches').select('id, name, max_users').eq('company_id', companyId).order('name'),
       supabase.from('roles').select('id, name').eq('company_id', companyId).eq('is_system', false).order('name'),
@@ -114,7 +118,10 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       supabase.from('profile_companies').select('profiles(id, name, email, company_id, companies!profiles_company_id_fkey(name))').eq('company_id', companyId),
       supabase.from('companies').select('max_users').eq('id', companyId).single(),
       // Asignaciones reales a sucursales: un usuario puede tener varias.
-      supabase.from('profile_branches').select('profile_id, branch_id').eq('company_id', companyId),
+      supabase.from('profile_branches').select('profile_id, branch_id, role_id').eq('company_id', companyId),
+      // Todos los roles de la empresa (incluidos Administrador y Cajero): son las
+      // opciones que se le pueden dar a alguien en una sucursal.
+      supabase.from('roles').select('id, name, is_system').eq('company_id', companyId).order('is_system', { ascending: false }).order('name'),
     ]);
 
     // Se unen las dos vías por las que un perfil queda en una sucursal:
@@ -122,21 +129,30 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     // Hay perfiles antiguos que solo tienen la segunda, y si se ignorara
     // aparecerían como "sin sucursal" en el panel.
     const porPerfil = new Map<string, Set<string>>();
+    const rolPorPerfilSucursal = new Map<string, string>();
     for (const pb of (pbs ?? []) as any[]) {
       if (!porPerfil.has(pb.profile_id)) porPerfil.set(pb.profile_id, new Set());
       porPerfil.get(pb.profile_id)!.add(pb.branch_id);
+      if (pb.role_id) rolPorPerfilSucursal.set(`${pb.profile_id}:${pb.branch_id}`, pb.role_id);
     }
     setUsers((profs ?? []).map((p: any) => {
       const ids = porPerfil.get(p.id) ?? new Set<string>();
       if (p.branch_id) ids.add(p.branch_id);
+      const branchRoles: Record<string, string> = {};
+      for (const bId of ids) {
+        const rId = rolPorPerfilSucursal.get(`${p.id}:${bId}`);
+        if (rId) branchRoles[bId] = rId;
+      }
       return {
         id: p.id, name: p.name ?? 'Usuario', email: p.email ?? '',
         role: p.role, isSuperAdmin: p.is_super_admin === true, branchId: p.branch_id,
         branchIds: [...ids],
+        branchRoles,
         roleIds: (p.profile_roles ?? []).map((pr: any) => pr.role_id),
         emailConfirmedAt: p.email_confirmed_at,
       };
     }));
+    setAllRoles((todosRoles ?? []).map((r: any) => ({ id: r.id, name: r.name, isSystem: r.is_system })));
     setBranches((bs ?? []).map((b: any) => ({ id: b.id, name: b.name, maxUsers: b.max_users ?? null })));
     setCupoEmpresa((comp as any)?.max_users != null ? String((comp as any).max_users) : '');
     setCupoSucursal(
@@ -283,9 +299,36 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       setUsers((prev) => prev.map((x) => (
         x.id === user.id ? { ...x, branchIds: nuevos, branchId: defecto } : x
       )));
+      // Las sucursales nuevas nacen con el rol que puso el trigger (Cajero); se
+      // recarga solo si se añadió alguna, para traer ese rol y poder mostrarlo.
+      if (agregar.length > 0) await load();
     } catch (err: any) {
       toast({ title: 'No se pudo asignar', description: err?.message ?? 'Error desconocido.', variant: 'destructive' });
       // Aquí sí se recarga: hay que volver a lo que de verdad quedó guardado.
+      await load();
+    } finally {
+      setBusy(user.id, false);
+    }
+  };
+
+  // El rol que alguien tiene EN una sucursal. Es lo que decide qué puede hacer
+  // ahí: en Michelle puede ser Gerente y en Delmastech Técnico.
+  const handleBranchRoleChange = async (user: CompanyUser, branchId: string, roleId: string) => {
+    if (!companyId || user.branchRoles[branchId] === roleId) return;
+    setBusy(user.id, true);
+    try {
+      const { error } = await supabase
+        .from('profile_branches')
+        .update({ role_id: roleId })
+        .eq('profile_id', user.id)
+        .eq('branch_id', branchId)
+        .eq('company_id', companyId);
+      if (error) throw error;
+      setUsers((prev) => prev.map((x) => (
+        x.id === user.id ? { ...x, branchRoles: { ...x.branchRoles, [branchId]: roleId } } : x
+      )));
+    } catch (err: any) {
+      toast({ title: 'No se pudo cambiar el rol', description: err?.message ?? 'Error desconocido.', variant: 'destructive' });
       await load();
     } finally {
       setBusy(user.id, false);
@@ -746,6 +789,13 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                                       className="px-1.5 py-0 text-[10px] font-normal"
                                     >
                                       {nombreSucursal(id)}
+                                      {/* El rol va aquí para poder leer de un vistazo
+                                          qué hace cada quien en cada sucursal. */}
+                                      {u.branchRoles[id] && (
+                                        <span className="text-muted-foreground">
+                                          {' · '}{allRoles.find((r) => r.id === u.branchRoles[id])?.name ?? ''}
+                                        </span>
+                                      )}
                                       {/* La de por defecto es donde aterriza al entrar. */}
                                       {id === u.branchId && u.branchIds.length > 1 && ' ★'}
                                     </Badge>
@@ -754,20 +804,47 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                               )}
                             </Button>
                           </PopoverTrigger>
-                          <PopoverContent className="w-64" align="start">
+                          <PopoverContent className="w-80" align="start">
                             <p className="mb-2 text-xs font-medium">Sucursales de {u.name}</p>
-                            <BranchChecklist
-                              branches={branches.map((b) => ({ id: b.id, name: b.name }))}
-                              selectedIds={u.branchIds}
-                              onChange={(ids) => handleSaveBranches(u, ids)}
-                              idPrefix={`suc-${u.id}`}
-                            />
-                            {u.branchIds.length > 1 && (
-                              <p className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">
-                                ★ es la sucursal donde entra por defecto. Su rol
-                                ({u.role === 'admin' ? 'Administrador' : 'Cajero'}) es el mismo en todas.
-                              </p>
-                            )}
+                            <div className="flex flex-col gap-2">
+                              {branches.map((b) => {
+                                const asignada = u.branchIds.includes(b.id);
+                                return (
+                                  <div key={b.id} className="flex items-center gap-2">
+                                    <Checkbox
+                                      id={`suc-${u.id}-${b.id}`}
+                                      checked={asignada}
+                                      onCheckedChange={(c) => handleSaveBranches(
+                                        u,
+                                        c ? [...u.branchIds, b.id] : u.branchIds.filter((x) => x !== b.id),
+                                      )}
+                                    />
+                                    <Label htmlFor={`suc-${u.id}-${b.id}`} className="flex-1 cursor-pointer text-xs font-normal">
+                                      {b.name}
+                                    </Label>
+                                    {/* El rol solo tiene sentido si trabaja ahí. */}
+                                    {asignada && (
+                                      <Select
+                                        value={u.branchRoles[b.id] ?? ''}
+                                        onValueChange={(v) => handleBranchRoleChange(u, b.id, v)}
+                                      >
+                                        <SelectTrigger className="h-7 w-[130px] text-xs"><SelectValue placeholder="Rol" /></SelectTrigger>
+                                        <SelectContent>
+                                          {allRoles.map((r) => (
+                                            <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <p className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">
+                              El rol decide qué puede hacer en cada sucursal, y puede ser
+                              distinto en cada una.
+                              {u.branchIds.length > 1 && ' ★ es donde entra por defecto.'}
+                            </p>
                           </PopoverContent>
                         </Popover>
                       </TableCell>

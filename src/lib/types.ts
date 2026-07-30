@@ -12,17 +12,14 @@ export type Product = {
   itbis: boolean;
   image: string;
   stock: number;
-  // Unidad de medida: decide si el producto se vende en cantidades
-  // fraccionadas (libra, metro…) o solo enteras (unidad, caja…).
   unit: UnitCode;
-  // false = no maneja existencias (plato preparado, servicio, tarifa): se
-  // vende siempre, no descuenta stock y nunca aparece agotado.
   tracksStock: boolean;
   locationId?: string;
   entryDate?: string;
   modificationDate?: string;
   wholesalePrice?: number;
   wholesaleMinQuantity?: number;
+  branchId?: string;
 };
 
 export type ProductCategory = {
@@ -91,7 +88,14 @@ export type User = {
   impersonatedCompanyId?: string;
   impersonatedCompanyName?: string;
   isSuperAdmin?: boolean;
-  baseRolePermissions?: RolePermissions; // Permisos del rol de sistema (Administrador/Cajero) que corresponde a `role`
+  // Permisos EFECTIVOS en la sucursal activa: los del rol que el usuario tiene en
+  // esa sucursal, más los de gestión si es Administrador de la empresa.
+  baseRolePermissions?: RolePermissions;
+  // Permisos por sucursal (branchId -> permisos del rol que tiene allí). Se calcula
+  // una vez al cargar el perfil, así cambiar de sucursal no cuesta otra consulta.
+  branchPermissions?: Record<string, RolePermissions>;
+  // Rol del usuario EN la sucursal activa, para poder mostrarlo.
+  branchRoleName?: string;
   customRoles?: Role[]; // Roles adicionales asignados al usuario
   // role: rol del usuario EN esa empresa (profile_companies.role); `role` (arriba) es el de la empresa activa
   companies?: { id: string; name: string; status: 'trial' | 'active' | 'suspended'; isDemo: boolean; role: 'admin' | 'cashier' }[];
