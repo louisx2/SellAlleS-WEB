@@ -25,6 +25,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { PlusCircle, Trash2, ShieldCheck, Shield, Link2, Unlink, MoreHorizontal, Mail } from 'lucide-react';
+import { BranchChecklist } from '@/components/users/branch-checklist';
 import { PasswordInput } from '@/components/ui/password-input';
 
 interface CompanyUser {
@@ -33,7 +34,11 @@ interface CompanyUser {
   email: string;
   role: 'admin' | 'cashier';
   isSuperAdmin: boolean;
+  // branchId es la sucursal por defecto (donde aterriza al entrar); branchIds son
+  // TODAS las que tiene asignadas. Un usuario puede estar en varias, y su rol es
+  // el mismo en todas porque el rol vive en la empresa, no en la sucursal.
   branchId: string | null;
+  branchIds: string[];
   roleIds: string[];
   emailConfirmedAt: string | null;
 }
@@ -51,7 +56,6 @@ interface LinkedUser {
   primaryCompanyName: string;
 }
 
-const NONE = 'none';
 const emptyAddForm = { name: '', email: '', password: '', role: 'cashier' as 'admin' | 'cashier', branchId: '' };
 
 interface ManageCompanyUsersDialogProps {
@@ -79,6 +83,9 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [addSaving, setAddSaving] = useState(false);
 
+  // Ver "los usuarios de la sucursal X" sin salir de aquí.
+  const [filtroSucursal, setFiltroSucursal] = useState<string>('todas');
+
   // Cupos: cuántos usuarios admite la empresa y cuántos cada sucursal. Se editan
   // aquí porque es el único sitio donde se ven junto a los usuarios reales; antes
   // estaban repartidos entre el formulario de empresa y el de cada sucursal.
@@ -96,20 +103,37 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const [{ data: profs }, { data: bs }, { data: rls }, { data: links }, { data: comp }] = await Promise.all([
+    const [{ data: profs }, { data: bs }, { data: rls }, { data: links }, { data: comp }, { data: pbs }] = await Promise.all([
       supabase.from('profiles').select('id, name, email, role, is_super_admin, branch_id, email_confirmed_at, profile_roles(role_id)').eq('company_id', companyId).order('name'),
       supabase.from('branches').select('id, name, max_users').eq('company_id', companyId).order('name'),
       supabase.from('roles').select('id, name').eq('company_id', companyId).eq('is_system', false).order('name'),
       // Usuarios con acceso a esta empresa cuya empresa principal es OTRA.
       supabase.from('profile_companies').select('profiles(id, name, email, company_id, companies!profiles_company_id_fkey(name))').eq('company_id', companyId),
       supabase.from('companies').select('max_users').eq('id', companyId).single(),
+      // Asignaciones reales a sucursales: un usuario puede tener varias.
+      supabase.from('profile_branches').select('profile_id, branch_id').eq('company_id', companyId),
     ]);
-    setUsers((profs ?? []).map((p: any) => ({
-      id: p.id, name: p.name ?? 'Usuario', email: p.email ?? '',
-      role: p.role, isSuperAdmin: p.is_super_admin === true, branchId: p.branch_id,
-      roleIds: (p.profile_roles ?? []).map((pr: any) => pr.role_id),
-      emailConfirmedAt: p.email_confirmed_at,
-    })));
+
+    // Se unen las dos vías por las que un perfil queda en una sucursal:
+    // profile_branches (la asignación) y profiles.branch_id (la de por defecto).
+    // Hay perfiles antiguos que solo tienen la segunda, y si se ignorara
+    // aparecerían como "sin sucursal" en el panel.
+    const porPerfil = new Map<string, Set<string>>();
+    for (const pb of (pbs ?? []) as any[]) {
+      if (!porPerfil.has(pb.profile_id)) porPerfil.set(pb.profile_id, new Set());
+      porPerfil.get(pb.profile_id)!.add(pb.branch_id);
+    }
+    setUsers((profs ?? []).map((p: any) => {
+      const ids = porPerfil.get(p.id) ?? new Set<string>();
+      if (p.branch_id) ids.add(p.branch_id);
+      return {
+        id: p.id, name: p.name ?? 'Usuario', email: p.email ?? '',
+        role: p.role, isSuperAdmin: p.is_super_admin === true, branchId: p.branch_id,
+        branchIds: [...ids],
+        roleIds: (p.profile_roles ?? []).map((pr: any) => pr.role_id),
+        emailConfirmedAt: p.email_confirmed_at,
+      };
+    }));
     setBranches((bs ?? []).map((b: any) => ({ id: b.id, name: b.name, maxUsers: b.max_users ?? null })));
     setCupoEmpresa((comp as any)?.max_users != null ? String((comp as any).max_users) : '');
     setCupoSucursal(
@@ -147,8 +171,19 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   // Usuarios que ocupan la empresa: los suyos más los vinculados desde otra
   // empresa, que es como los cuenta check_company_membership_limit en la base.
   const usadosEmpresa = users.filter((u) => !u.isSuperAdmin).length + linkedUsers.length;
+  // Cuenta a todo el que tenga la sucursal asignada, no solo a quien la tenga como
+  // sucursal por defecto: es así como la cuenta branch_user_count en la base.
   const usadosEnSucursal = (branchId: string) =>
-    users.filter((u) => !u.isSuperAdmin && u.branchId === branchId).length;
+    users.filter((u) => !u.isSuperAdmin && u.branchIds.includes(branchId)).length;
+
+  const usuariosVisibles =
+    filtroSucursal === 'todas' ? users
+      : filtroSucursal === 'sin' ? users.filter((u) => u.branchIds.length === 0)
+      : users.filter((u) => u.branchIds.includes(filtroSucursal));
+
+  const enVarias = users.filter((u) => !u.isSuperAdmin && u.branchIds.length > 1).length;
+  const sinSucursal = users.filter((u) => !u.isSuperAdmin && u.branchIds.length === 0).length;
+  const nombreSucursal = (id: string) => branches.find((b) => b.id === id)?.name ?? 'Sucursal';
 
   const cupoEmpresaNum = aCupo(cupoEmpresa);
   const asignadoASucursales = branches.reduce((acc, b) => {
@@ -197,18 +232,55 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
     }
   };
 
-  const handleMoveBranch = async (user: CompanyUser, newBranchId: string) => {
-    if (!companyId || newBranchId === user.branchId) return;
+  // Guarda el conjunto de sucursales de un usuario. Se calcula el diff en vez de
+  // borrar todo y reinsertar: si una sucursal está llena, el insert rebota y con
+  // el borrado previo el usuario habría quedado sin ninguna.
+  //
+  // El borrado anterior tampoco filtraba por empresa, así que a un usuario
+  // multi-empresa le barría también las sucursales de sus OTRAS empresas.
+  const handleSaveBranches = async (user: CompanyUser, nuevos: string[]) => {
+    if (!companyId) return;
+    const antes = new Set(user.branchIds);
+    const despues = new Set(nuevos);
+    const quitar = [...antes].filter((id) => !despues.has(id));
+    const agregar = [...despues].filter((id) => !antes.has(id));
+    if (quitar.length === 0 && agregar.length === 0) return;
+
     setBusy(user.id, true);
     try {
-      const { error } = await supabase.from('profiles').update({ branch_id: newBranchId }).eq('id', user.id);
-      if (error) throw error;
-      await supabase.from('profile_branches').delete().eq('profile_id', user.id);
-      await supabase.from('profile_branches').insert({ profile_id: user.id, branch_id: newBranchId, company_id: companyId });
-      setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, branchId: newBranchId } : u)));
-      toast({ title: 'Sucursal actualizada', description: `${user.name} movido de sucursal.` });
+      if (quitar.length > 0) {
+        const { error } = await supabase
+          .from('profile_branches')
+          .delete()
+          .eq('profile_id', user.id)
+          .eq('company_id', companyId)
+          .in('branch_id', quitar);
+        if (error) throw error;
+      }
+
+      if (agregar.length > 0) {
+        const { error } = await supabase.from('profile_branches').insert(
+          agregar.map((branch_id) => ({ profile_id: user.id, branch_id, company_id: companyId })),
+        );
+        if (error) throw error;
+      }
+
+      // La sucursal por defecto tiene que ser una de las asignadas: si se le quitó
+      // la que tenía, pasa a la primera que quede (o a ninguna).
+      const defecto = user.branchId && despues.has(user.branchId)
+        ? user.branchId
+        : (nuevos[0] ?? null);
+      if (defecto !== user.branchId) {
+        const { error } = await supabase.from('profiles').update({ branch_id: defecto }).eq('id', user.id);
+        if (error) throw error;
+      }
+
+      toast({ title: 'Sucursales actualizadas', description: user.name });
+      await load();
     } catch (err: any) {
-      toast({ title: 'Error', description: err?.message ?? 'No se pudo mover al usuario.', variant: 'destructive' });
+      toast({ title: 'No se pudo asignar', description: err?.message ?? 'Error desconocido.', variant: 'destructive' });
+      // Recargar para que la pantalla no quede mostrando un estado que no se guardó.
+      await load();
     } finally {
       setBusy(user.id, false);
     }
@@ -571,13 +643,40 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
             </div>
           )}
 
+          {/* Ver el pool completo o solo los de una sucursal. */}
+          {!addOpen && !linkOpen && branches.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <Select value={filtroSucursal} onValueChange={setFiltroSucursal}>
+                <SelectTrigger className="h-8 w-[220px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todas">Todos los usuarios ({users.length})</SelectItem>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      {b.name} ({usadosEnSucursal(b.id)})
+                    </SelectItem>
+                  ))}
+                  {sinSucursal > 0 && (
+                    <SelectItem value="sin">Sin sucursal ({sinSucursal})</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+              {enVarias > 0 && (
+                <span className="text-muted-foreground">
+                  {enVarias} {enVarias === 1 ? 'usuario está' : 'usuarios están'} en más de una sucursal
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="rounded-lg border overflow-hidden">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Usuario</TableHead>
                   <TableHead>Rol</TableHead>
-                  <TableHead>Sucursal</TableHead>
+                  <TableHead>Sucursales</TableHead>
                   <TableHead>Roles adicionales</TableHead>
                   <TableHead className="text-right">Acciones</TableHead>
                 </TableRow>
@@ -585,10 +684,16 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
               <TableBody>
                 {loading ? (
                   <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Cargando…</TableCell></TableRow>
-                ) : users.length === 0 ? (
-                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">Sin usuarios todavía.</TableCell></TableRow>
+                ) : usuariosVisibles.length === 0 ? (
+                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    {users.length === 0
+                      ? 'Sin usuarios todavía.'
+                      : filtroSucursal === 'sin'
+                        ? 'Todos los usuarios tienen sucursal asignada.'
+                        : `Ningún usuario asignado a ${nombreSucursal(filtroSucursal)}.`}
+                  </TableCell></TableRow>
                 ) : (
-                  users.map((u) => (
+                  usuariosVisibles.map((u) => (
                     <TableRow key={u.id}>
                       <TableCell>
                         <div className="font-medium text-sm">{u.name}</div>
@@ -608,12 +713,49 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                         )}
                       </TableCell>
                       <TableCell>
-                        <Select value={u.branchId ?? NONE} onValueChange={(v) => handleMoveBranch(u, v)} disabled={rowBusy[u.id]}>
-                          <SelectTrigger className="h-8 w-[160px] text-xs"><SelectValue placeholder="Sin sucursal" /></SelectTrigger>
-                          <SelectContent>
-                            {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                        <Popover>
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-auto min-h-8 w-[200px] justify-start py-1 text-xs font-normal"
+                              disabled={rowBusy[u.id] || branches.length === 0}
+                            >
+                              {u.branchIds.length === 0 ? (
+                                <span className="text-muted-foreground">Sin sucursal</span>
+                              ) : (
+                                <span className="flex flex-wrap gap-1">
+                                  {u.branchIds.map((id) => (
+                                    <Badge
+                                      key={id}
+                                      variant="secondary"
+                                      className="px-1.5 py-0 text-[10px] font-normal"
+                                    >
+                                      {nombreSucursal(id)}
+                                      {/* La de por defecto es donde aterriza al entrar. */}
+                                      {id === u.branchId && u.branchIds.length > 1 && ' ★'}
+                                    </Badge>
+                                  ))}
+                                </span>
+                              )}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-64" align="start">
+                            <p className="mb-2 text-xs font-medium">Sucursales de {u.name}</p>
+                            <BranchChecklist
+                              branches={branches.map((b) => ({ id: b.id, name: b.name }))}
+                              selectedIds={u.branchIds}
+                              onChange={(ids) => handleSaveBranches(u, ids)}
+                              idPrefix={`suc-${u.id}`}
+                            />
+                            {u.branchIds.length > 1 && (
+                              <p className="mt-2 border-t pt-2 text-[11px] text-muted-foreground">
+                                ★ es la sucursal donde entra por defecto. Su rol
+                                ({u.role === 'admin' ? 'Administrador' : 'Cajero'}) es el mismo en todas.
+                              </p>
+                            )}
+                          </PopoverContent>
+                        </Popover>
                       </TableCell>
                       <TableCell>
                         {u.isSuperAdmin ? (
