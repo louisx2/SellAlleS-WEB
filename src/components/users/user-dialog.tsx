@@ -148,7 +148,10 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
         }
         setOpen(false);
     } catch(error: any) {
-        let description = 'Ocurrió un error inesperado.';
+        // El mensaje del error se descartaba y todo caía en "error inesperado",
+        // así que los motivos reales (p. ej. el tope de usuarios de la empresa o
+        // de la sucursal, que vienen de la base) no se veían nunca.
+        let description = error?.message || 'Ocurrió un error inesperado.';
         if (error.code === 'auth/email-already-in-use') {
             description = 'Este correo electrónico ya está en uso por otro usuario.';
         } else if (error.code === 'auth/weak-password') {

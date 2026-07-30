@@ -202,7 +202,11 @@ export function UserProvider({ children }: { children: ReactNode }) {
           branch_id: b.id,
           company_id: activeCompanyId
         }));
-        await supabase.from('profile_branches').insert(insertData);
+        // El error se ignoraba, así que las sucursales se quedaban sin asignar
+        // en silencio. Ahora importa de verdad: si una sucursal llegó a su tope
+        // (branches.max_users) el insert rebota y hay que decirlo.
+        const { error: pbError } = await supabase.from('profile_branches').insert(insertData);
+        if (pbError) throw new Error(pbError.message);
       }
     }
 

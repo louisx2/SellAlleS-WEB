@@ -33,7 +33,7 @@ interface CompaniesDataTableProps {
   onModulesCompany: (c: Company) => void;
   onEnterCompany: (c: Company) => void;
   onEnterBranch: (companyId: string, companyName: string, branchId: string, branchName: string) => void;
-  onEditBranch: (b: { id: string; name: string; location: string; companyId: string }) => void;
+  onEditBranch: (b: { id: string; name: string; location: string; companyId: string; maxUsers: string }) => void;
   onToggleStatus?: (c: Company) => void;
   onDeleteCompany?: (c: Company) => void;
   onDeleteBranch?: (b: { id: string; name: string; companyId: string }) => void;
@@ -43,6 +43,9 @@ interface CompaniesDataTableProps {
   onManageRoles?: (c: Company) => void;
   onToggleBranchStatus?: (b: { id: string; name: string; isActive: boolean }) => void;
   getPlanName: (companyId: string) => string;
+  // Usuarios que hoy ocupan cada sucursal, por branch_id. Viene del RPC
+  // company_branch_user_counts; si aún no cargó, no se muestra el conteo.
+  branchUserCounts?: Record<string, number>;
 }
 
 const STATUS_LABEL: Record<string, string> = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida' };
@@ -97,6 +100,7 @@ export function CompaniesDataTable({
   onManageRoles,
   onToggleBranchStatus,
   getPlanName,
+  branchUserCounts,
 }: CompaniesDataTableProps) {
   const { appUser } = useAuth();
   const [expandedCompanies, setExpandedCompanies] = useState<string[]>([]);
@@ -242,6 +246,21 @@ export function CompaniesDataTable({
                                 {!b.is_active && (
                                   <Badge variant="destructive" className="text-[10px] h-4 px-1">Inactiva</Badge>
                                 )}
+                                {/* Cupo de la sucursal. Sin tope no se muestra
+                                    nada: el dato solo importa cuando limita. */}
+                                {b.max_users != null && (
+                                  <Badge
+                                    variant="outline"
+                                    className={`text-[10px] h-4 px-1 gap-1 font-normal ${
+                                      (branchUserCounts?.[b.id] ?? 0) >= b.max_users
+                                        ? 'border-destructive/30 text-destructive'
+                                        : 'text-muted-foreground'
+                                    }`}
+                                  >
+                                    <Users className="h-2.5 w-2.5" />
+                                    {branchUserCounts ? `${branchUserCounts[b.id] ?? 0} de ${b.max_users}` : `máx. ${b.max_users}`}
+                                  </Badge>
+                                )}
                               </div>
                               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Button
@@ -260,7 +279,7 @@ export function CompaniesDataTable({
                                       </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                                      <DropdownMenuItem onClick={() => onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id })}>
+                                      <DropdownMenuItem onClick={() => onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id, maxUsers: b.max_users != null ? String(b.max_users) : '' })}>
                                         <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
                                       </DropdownMenuItem>
                                       {onManageUsers && (

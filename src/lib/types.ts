@@ -136,7 +136,8 @@ export type Company = {
   is_demo: boolean;
   business_type?: string | null;
   max_users?: number;
-  branches?: { id: string; name: string; location: string | null; is_active: boolean }[];
+  // max_users por sucursal: null = sin límite (el tope de la empresa sigue aplicando aparte).
+  branches?: { id: string; name: string; location: string | null; is_active: boolean; max_users?: number | null }[];
 };
 
 export type PermissionAction = 'view' | 'create' | 'edit' | 'delete';

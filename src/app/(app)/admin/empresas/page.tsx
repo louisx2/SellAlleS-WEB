@@ -87,13 +87,19 @@ export default function CompaniesManagementPage() {
   };
 
   const [modulesFor, setModulesFor] = useState<Company | null>(null);
-  const [editingBranch, setEditingBranch] = useState<{ id: string; name: string; location: string; companyId: string } | null>(null);
+  // maxUsers viaja como string para poder dejarlo vacío = "sin límite".
+  const [editingBranch, setEditingBranch] = useState<{ id: string; name: string; location: string; companyId: string; maxUsers: string } | null>(null);
   const [statusTarget, setStatusTarget] = useState<Company | null>(null);
   const [deleteCompanyTarget, setDeleteCompanyTarget] = useState<Company | null>(null);
   const [deleteBranchTarget, setDeleteBranchTarget] = useState<{ id: string; name: string; companyId: string } | null>(null);
   const [addBranchFor, setAddBranchFor] = useState<Company | null>(null);
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchLocation, setNewBranchLocation] = useState('');
+  const [newBranchMaxUsers, setNewBranchMaxUsers] = useState('');
+  // Usuarios que ocupan cada sucursal (branch_id -> cantidad), para mostrar
+  // "3 de 5" junto al tope. Se pide por RPC porque los perfiles de otras
+  // empresas no son visibles por RLS desde aquí.
+  const [branchUserCounts, setBranchUserCounts] = useState<Record<string, number>>({});
   const [manageUsersFor, setManageUsersFor] = useState<Company | null>(null);
   const [paymentsFor, setPaymentsFor] = useState<Company | null>(null);
   const [rolesFor, setRolesFor] = useState<Company | null>(null);
@@ -114,9 +120,10 @@ export default function CompaniesManagementPage() {
   // entrar como super admin no salían todas las empresas hasta recargar la
   // página a mano.
   const load = useCallback(async () => {
+    const camposSucursal = 'id, name, location, is_active, max_users';
     const compsQuery = esSuperAdmin
-      ? supabase.from('companies').select('*, branches(id, name, location, is_active)').order('created_at', { ascending: false })
-      : supabase.from('companies').select('*, branches(id, name, location, is_active)').in('id', idsEmpresas ? idsEmpresas.split(',') : []).order('created_at', { ascending: false });
+      ? supabase.from('companies').select(`*, branches(${camposSucursal})`).order('created_at', { ascending: false })
+      : supabase.from('companies').select(`*, branches(${camposSucursal})`).in('id', idsEmpresas ? idsEmpresas.split(',') : []).order('created_at', { ascending: false });
 
     const [
       { data: comps },
@@ -130,6 +137,24 @@ export default function CompaniesManagementPage() {
 
     if (comps) setCompanies(comps as Company[]);
     if (pls) setPlans(pls as Plan[]);
+    // Solo se piden los conteos de las empresas que tienen alguna sucursal con
+    // tope: es el único caso en que el "x de y" se muestra, y así no se dispara
+    // un RPC por empresa sin necesidad.
+    if (comps) {
+      const conTope = (comps as Company[]).filter(
+        (c) => (c.branches ?? []).some((b) => b.max_users != null),
+      );
+      const resultados = await Promise.all(
+        conTope.map((c) => supabase.rpc('company_branch_user_counts', { p_company_id: c.id })),
+      );
+      const conteos: Record<string, number> = {};
+      resultados.forEach(({ data }) => {
+        (data as { branch_id: string; user_count: number }[] | null)?.forEach((r) => {
+          conteos[r.branch_id] = r.user_count;
+        });
+      });
+      setBranchUserCounts(conteos);
+    }
     if (ss) {
       const map: Record<string, Sub> = {};
       (ss as Sub[]).forEach((s) => { map[s.company_id] = s; });
@@ -536,11 +561,19 @@ export default function CompaniesManagementPage() {
 
   const handleSaveBranch = async () => {
     if (!editingBranch || !editingBranch.name.trim()) return;
+    // Vacío = sin límite. Bajar el tope por debajo de los usuarios que ya hay
+    // no se bloquea a propósito: no se expulsa a nadie, simplemente no entran
+    // más hasta que la sucursal baje del número nuevo.
+    const tope = editingBranch.maxUsers.trim() === '' ? null : parseInt(editingBranch.maxUsers, 10);
+    if (tope !== null && (!Number.isFinite(tope) || tope < 1)) {
+      toast({ title: 'Límite inválido', description: 'El límite de usuarios debe ser 1 o más, o vacío para dejarlo sin límite.', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
       const { error } = await supabase
         .from('branches')
-        .update({ name: editingBranch.name.trim(), location: editingBranch.location.trim() || null })
+        .update({ name: editingBranch.name.trim(), location: editingBranch.location.trim() || null, max_users: tope })
         .eq('id', editingBranch.id);
       if (error) throw error;
       toast({ title: 'Sucursal actualizada' });
@@ -608,18 +641,25 @@ export default function CompaniesManagementPage() {
   // super admin no está necesariamente "dentro" de esa empresa).
   const handleAddBranch = async () => {
     if (!addBranchFor || !newBranchName.trim()) return;
+    const tope = newBranchMaxUsers.trim() === '' ? null : parseInt(newBranchMaxUsers, 10);
+    if (tope !== null && (!Number.isFinite(tope) || tope < 1)) {
+      toast({ title: 'Límite inválido', description: 'El límite de usuarios debe ser 1 o más, o vacío para dejarlo sin límite.', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     try {
       const { error } = await supabase.from('branches').insert({
         company_id: addBranchFor.id,
         name: newBranchName.trim(),
         location: newBranchLocation.trim() || null,
+        max_users: tope,
       });
       if (error) throw error;
       toast({ title: 'Sucursal creada', description: `${newBranchName} en ${addBranchFor.name}` });
       setAddBranchFor(null);
       setNewBranchName('');
       setNewBranchLocation('');
+      setNewBranchMaxUsers('');
       await load();
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo crear la sucursal.', variant: 'destructive' });
@@ -689,12 +729,13 @@ export default function CompaniesManagementPage() {
         onEditBranch={setEditingBranch}
         onDeleteCompany={setDeleteCompanyTarget}
         onDeleteBranch={setDeleteBranchTarget}
-        onAddBranch={(c) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); }}
+        onAddBranch={(c) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); setNewBranchMaxUsers(''); }}
         onManageUsers={setManageUsersFor}
         onManagePayments={setPaymentsFor}
         onManageRoles={setRolesFor}
         onToggleBranchStatus={setBranchStatusTarget}
         getPlanName={getPlanName}
+        branchUserCounts={branchUserCounts}
       />
 
       <SubscriptionPaymentsDialog
@@ -1155,6 +1196,25 @@ export default function CompaniesManagementPage() {
                   className="col-span-3"
                 />
               </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="branchMaxUsers" className="text-right">Máx. usuarios</Label>
+                <Input
+                  id="branchMaxUsers"
+                  type="number"
+                  min={1}
+                  placeholder="Sin límite"
+                  value={editingBranch.maxUsers}
+                  onChange={e => setEditingBranch({ ...editingBranch, maxUsers: e.target.value })}
+                  className="col-span-3"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground col-span-4">
+                Cuántos usuarios pueden estar asignados a esta sucursal. Déjalo vacío
+                para no poner tope. Es un límite aparte del de la empresa
+                {typeof branchUserCounts[editingBranch.id] === 'number'
+                  ? `, que hoy tiene ${branchUserCounts[editingBranch.id]} usuario(s) asignado(s).`
+                  : '.'}
+              </p>
             </div>
           )}
           <DialogFooter>
@@ -1221,6 +1281,20 @@ export default function CompaniesManagementPage() {
             <div className="grid gap-2">
               <Label htmlFor="newBranchLocation">Ubicación</Label>
               <Input id="newBranchLocation" value={newBranchLocation} onChange={(e) => setNewBranchLocation(e.target.value)} placeholder="Opcional" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="newBranchMaxUsers">Máx. usuarios</Label>
+              <Input
+                id="newBranchMaxUsers"
+                type="number"
+                min={1}
+                value={newBranchMaxUsers}
+                onChange={(e) => setNewBranchMaxUsers(e.target.value)}
+                placeholder="Sin límite"
+              />
+              <p className="text-xs text-muted-foreground">
+                Tope de usuarios asignados a esta sucursal. Vacío = sin límite.
+              </p>
             </div>
           </div>
           <DialogFooter>
