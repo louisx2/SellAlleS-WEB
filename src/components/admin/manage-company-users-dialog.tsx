@@ -490,7 +490,9 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        {/* 4xl y no 2xl: con la columna de sucursales la tabla tiene 5 columnas y
+            en 2xl se salían "Roles adicionales" y "Acciones". */}
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Usuarios de {companyName}</DialogTitle>
             <DialogDescription>Define cuántos usuarios admite la empresa y cada sucursal, y gestiona quién los ocupa.</DialogDescription>
@@ -670,7 +672,9 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
             </div>
           )}
 
-          <div className="rounded-lg border overflow-hidden">
+          {/* overflow-x-auto y no overflow-hidden: si la tabla no cabe (pantalla
+              estrecha) tiene que poder desplazarse, no recortarse. */}
+          <div className="rounded-lg border overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -718,7 +722,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-auto min-h-8 w-[200px] justify-start py-1 text-xs font-normal"
+                              className="h-auto min-h-8 w-full min-w-[150px] justify-start py-1 text-xs font-normal"
                               disabled={rowBusy[u.id] || branches.length === 0}
                             >
                               {u.branchIds.length === 0 ? (
