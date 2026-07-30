@@ -85,6 +85,9 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
 
   // Ver "los usuarios de la sucursal X" sin salir de aquí.
   const [filtroSucursal, setFiltroSucursal] = useState<string>('todas');
+  // Controlado: así marcar una casilla no cierra el popover ni lo desmonta al
+  // refrescar, que era lo que hacía saltar el clic a la fila de abajo.
+  const [sucursalesAbiertas, setSucursalesAbiertas] = useState<string | null>(null);
 
   // Cupos: cuántos usuarios admite la empresa y cuántos cada sucursal. Se editan
   // aquí porque es el único sitio donde se ven junto a los usuarios reales; antes
@@ -275,11 +278,14 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
         if (error) throw error;
       }
 
-      toast({ title: 'Sucursales actualizadas', description: user.name });
-      await load();
+      // Se actualiza el estado a mano en vez de recargar: un load() por casilla
+      // marcada desmonta la tabla y hace parpadear el popover abierto.
+      setUsers((prev) => prev.map((x) => (
+        x.id === user.id ? { ...x, branchIds: nuevos, branchId: defecto } : x
+      )));
     } catch (err: any) {
       toast({ title: 'No se pudo asignar', description: err?.message ?? 'Error desconocido.', variant: 'destructive' });
-      // Recargar para que la pantalla no quede mostrando un estado que no se guardó.
+      // Aquí sí se recarga: hay que volver a lo que de verdad quedó guardado.
       await load();
     } finally {
       setBusy(user.id, false);
@@ -717,7 +723,11 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                         )}
                       </TableCell>
                       <TableCell>
-                        <Popover>
+                        <Popover
+                          modal
+                          open={sucursalesAbiertas === u.id}
+                          onOpenChange={(o) => setSucursalesAbiertas(o ? u.id : null)}
+                        >
                           <PopoverTrigger asChild>
                             <Button
                               variant="outline"
@@ -765,7 +775,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                         {u.isSuperAdmin ? (
                           <span className="text-xs text-muted-foreground">—</span>
                         ) : (
-                          <Popover>
+                          <Popover modal>
                             <PopoverTrigger asChild>
                               <Button variant="outline" size="sm" className="h-8 text-xs" disabled={rowBusy[u.id]}>
                                 <Shield className="mr-1.5 h-3.5 w-3.5" />
@@ -798,7 +808,11 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                         )}
                       </TableCell>
                       <TableCell className="text-right">
-                        <DropdownMenu modal={false}>
+                        {/* modal (por defecto) y NO modal={false}: dentro de un
+                            Dialog, Radix pone pointer-events:none en el body, y el
+                            contenido de un menú no modal se portaliza ahí fuera, así
+                            que los clics lo atravesaban y el menú no respondía. */}
+                        <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon" className="h-8 w-8" disabled={rowBusy[u.id]}>
                               <span className="sr-only">Abrir menú</span>
