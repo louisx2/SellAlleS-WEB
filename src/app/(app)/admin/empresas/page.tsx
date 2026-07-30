@@ -87,15 +87,13 @@ export default function CompaniesManagementPage() {
   };
 
   const [modulesFor, setModulesFor] = useState<Company | null>(null);
-  // maxUsers viaja como string para poder dejarlo vacío = "sin límite".
-  const [editingBranch, setEditingBranch] = useState<{ id: string; name: string; location: string; companyId: string; maxUsers: string } | null>(null);
+  const [editingBranch, setEditingBranch] = useState<{ id: string; name: string; location: string; companyId: string } | null>(null);
   const [statusTarget, setStatusTarget] = useState<Company | null>(null);
   const [deleteCompanyTarget, setDeleteCompanyTarget] = useState<Company | null>(null);
   const [deleteBranchTarget, setDeleteBranchTarget] = useState<{ id: string; name: string; companyId: string } | null>(null);
   const [addBranchFor, setAddBranchFor] = useState<Company | null>(null);
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchLocation, setNewBranchLocation] = useState('');
-  const [newBranchMaxUsers, setNewBranchMaxUsers] = useState('');
   // Usuarios que ocupan cada sucursal (branch_id -> cantidad), para mostrar
   // "3 de 5" junto al tope. Se pide por RPC porque los perfiles de otras
   // empresas no son visibles por RLS desde aquí.
@@ -186,27 +184,6 @@ export default function CompaniesManagementPage() {
     const sub = subs[companyId];
     if (!sub?.plan_id) return '—';
     return plans.find((p) => p.id === sub.plan_id)?.name ?? '—';
-  };
-
-  // El cupo de usuarios de la empresa se REPARTE entre sus sucursales: lo que se
-  // le asigna a una sale del total de la empresa, no se suma aparte. La base
-  // sostiene la invariante (trg_check_branch_allocation), esto es para poder
-  // decirlo antes de que el guardado reviente.
-  const cupoEmpresa = (companyId: string) =>
-    companies.find((c) => c.id === companyId)?.max_users ?? null;
-
-  // excludeBranchId saca a una sucursal de la suma: al editarla, lo que le limita
-  // es lo que tienen LAS DEMÁS.
-  const repartidoEn = (companyId: string, excludeBranchId?: string) =>
-    (companies.find((c) => c.id === companyId)?.branches ?? []).reduce(
-      (acc, b) => acc + (b.id !== excludeBranchId && b.max_users != null ? b.max_users : 0),
-      0,
-    );
-
-  const disponibleEn = (companyId: string, excludeBranchId?: string) => {
-    const cupo = cupoEmpresa(companyId);
-    if (cupo == null) return null;
-    return Math.max(cupo - repartidoEn(companyId, excludeBranchId), 0);
   };
 
   const getPlanRates = (companyId: string) => {
@@ -378,21 +355,6 @@ export default function CompaniesManagementPage() {
       }
     }
 
-    // Al editar, el cupo de la empresa no puede quedar por debajo de lo que ya
-    // está repartido entre sus sucursales: dejaría sucursales con más asignado
-    // del que la empresa tiene. La base también lo rechaza; esto lo explica.
-    if (editingId) {
-      const repartido = repartidoEn(editingId);
-      if (repartido > form.maxUsers) {
-        toast({
-          title: 'Hay más repartido que eso',
-          description: `Ya hay ${repartido} usuarios repartidos entre las sucursales de esta empresa. Baja primero el reparto de las sucursales para poder dejar el cupo en ${form.maxUsers}.`,
-          variant: 'destructive',
-        });
-        return;
-      }
-    }
-
     setSaving(true);
     try {
       const payload = {
@@ -405,11 +367,14 @@ export default function CompaniesManagementPage() {
         ncf_enabled: form.ncfEnabled,
         is_demo: form.isDemo,
         business_type: form.businessType === 'otro' ? form.customBusinessType.trim() : form.businessType,
-        max_users: form.maxUsers,
         // Se guarda el final del día elegido: "vence el 27" debe significar que
         // el 27 todavía puede trabajar, no que amanece bloqueado.
         trial_ends_at: form.trialEndsAt ? new Date(`${form.trialEndsAt}T23:59:59`).toISOString() : null,
         paid_until: form.paidUntil || null,
+        // max_users va aparte: al EDITAR no se toca desde aquí, porque el dueño del
+        // dato es "Gestionar usuarios". Si se enviara, un cupo null (sin límite)
+        // volvería a 2 en cuanto se guardara cualquier otro campo de la empresa.
+        ...(editingId ? {} : { max_users: form.maxUsers }),
       };
 
       let companyId = editingId;
@@ -597,28 +562,11 @@ export default function CompaniesManagementPage() {
 
   const handleSaveBranch = async () => {
     if (!editingBranch || !editingBranch.name.trim()) return;
-    // Vacío = sin reparto propio. Bajar el reparto por debajo de los usuarios que
-    // ya hay no se bloquea a propósito: no se expulsa a nadie, simplemente no
-    // entran más hasta que la sucursal baje del número nuevo.
-    const tope = editingBranch.maxUsers.trim() === '' ? null : parseInt(editingBranch.maxUsers, 10);
-    if (tope !== null && (!Number.isFinite(tope) || tope < 1)) {
-      toast({ title: 'Reparto inválido', description: 'Asigna 1 usuario o más, o déjalo vacío para no repartirle ninguno.', variant: 'destructive' });
-      return;
-    }
-    const disponible = disponibleEn(editingBranch.companyId, editingBranch.id);
-    if (tope !== null && disponible !== null && tope > disponible) {
-      toast({
-        title: 'No queda tanto cupo',
-        description: `La empresa tiene ${cupoEmpresa(editingBranch.companyId)} usuarios y ya hay ${repartidoEn(editingBranch.companyId, editingBranch.id)} repartidos en sus otras sucursales. A esta le quedan ${disponible}.`,
-        variant: 'destructive',
-      });
-      return;
-    }
     setSaving(true);
     try {
       const { error } = await supabase
         .from('branches')
-        .update({ name: editingBranch.name.trim(), location: editingBranch.location.trim() || null, max_users: tope })
+        .update({ name: editingBranch.name.trim(), location: editingBranch.location.trim() || null })
         .eq('id', editingBranch.id);
       if (error) throw error;
       toast({ title: 'Sucursal actualizada' });
@@ -686,34 +634,20 @@ export default function CompaniesManagementPage() {
   // super admin no está necesariamente "dentro" de esa empresa).
   const handleAddBranch = async () => {
     if (!addBranchFor || !newBranchName.trim()) return;
-    const tope = newBranchMaxUsers.trim() === '' ? null : parseInt(newBranchMaxUsers, 10);
-    if (tope !== null && (!Number.isFinite(tope) || tope < 1)) {
-      toast({ title: 'Reparto inválido', description: 'Asigna 1 usuario o más, o déjalo vacío para no repartirle ninguno.', variant: 'destructive' });
-      return;
-    }
-    const disponible = disponibleEn(addBranchFor.id);
-    if (tope !== null && disponible !== null && tope > disponible) {
-      toast({
-        title: 'No queda tanto cupo',
-        description: `La empresa tiene ${cupoEmpresa(addBranchFor.id)} usuarios y ya hay ${repartidoEn(addBranchFor.id)} repartidos entre sus sucursales. Quedan ${disponible}.`,
-        variant: 'destructive',
-      });
-      return;
-    }
     setSaving(true);
     try {
+      // El cupo de la sucursal se pone después en "Gestionar usuarios"; nace sin
+      // límite para no tener el mismo número en dos formularios.
       const { error } = await supabase.from('branches').insert({
         company_id: addBranchFor.id,
         name: newBranchName.trim(),
         location: newBranchLocation.trim() || null,
-        max_users: tope,
       });
       if (error) throw error;
       toast({ title: 'Sucursal creada', description: `${newBranchName} en ${addBranchFor.name}` });
       setAddBranchFor(null);
       setNewBranchName('');
       setNewBranchLocation('');
-      setNewBranchMaxUsers('');
       await load();
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo crear la sucursal.', variant: 'destructive' });
@@ -783,7 +717,7 @@ export default function CompaniesManagementPage() {
         onEditBranch={setEditingBranch}
         onDeleteCompany={setDeleteCompanyTarget}
         onDeleteBranch={setDeleteBranchTarget}
-        onAddBranch={(c) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); setNewBranchMaxUsers(''); }}
+        onAddBranch={(c) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); }}
         onManageUsers={setManageUsersFor}
         onManagePayments={setPaymentsFor}
         onManageRoles={setRolesFor}
@@ -926,24 +860,25 @@ export default function CompaniesManagementPage() {
                 </div>
               )}
 
-              <div className="grid gap-2">
-                <Label htmlFor="maxUsers">Límite de usuarios *</Label>
-                <Input
-                  id="maxUsers"
-                  type="number"
-                  min={editingId ? Math.max(repartidoEn(editingId), 1) : 1}
-                  value={form.maxUsers}
-                  onChange={(e) => setForm({ ...form, maxUsers: parseInt(e.target.value) || 1 })}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Total de usuarios de la empresa. Después se reparte entre sus
-                  sucursales desde el menú de cada una.
-                  {editingId && repartidoEn(editingId) > 0 && (
-                    <> Ahora mismo hay <strong>{repartidoEn(editingId)}</strong> repartidos, así
-                    que no puedes bajar de ahí sin ajustar antes las sucursales.</>
-                  )}
-                </p>
-              </div>
+              {/* Solo al crear: es el valor inicial. Después se administra en
+                  "Gestionar usuarios", que es donde se ve junto al de cada
+                  sucursal y a los usuarios reales. */}
+              {!editingId && (
+                <div className="grid gap-2">
+                  <Label htmlFor="maxUsers">Límite de usuarios *</Label>
+                  <Input
+                    id="maxUsers"
+                    type="number"
+                    min={1}
+                    value={form.maxUsers}
+                    onChange={(e) => setForm({ ...form, maxUsers: parseInt(e.target.value) || 1 })}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Cuántos usuarios admite la empresa. Luego se ajusta, junto al cupo de
+                    cada sucursal, en el menú <strong>Gestionar usuarios</strong>.
+                  </p>
+                </div>
+              )}
 
               {/* Estas dos fechas son las que deciden si la empresa entra en
                   solo-lectura, y de las que salen los avisos automáticos. */}
@@ -1258,37 +1193,9 @@ export default function CompaniesManagementPage() {
                   className="col-span-3"
                 />
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="branchMaxUsers" className="text-right">Usuarios</Label>
-                <Input
-                  id="branchMaxUsers"
-                  type="number"
-                  min={1}
-                  max={disponibleEn(editingBranch.companyId, editingBranch.id) ?? undefined}
-                  placeholder="Sin repartir"
-                  value={editingBranch.maxUsers}
-                  onChange={e => setEditingBranch({ ...editingBranch, maxUsers: e.target.value })}
-                  className="col-span-3"
-                />
-              </div>
-              <div className="col-span-4 rounded-lg border bg-muted/40 p-3 text-xs space-y-1">
-                <p>
-                  Cuántos de los usuarios de la empresa usa esta sucursal. Vacío = no le
-                  reservas ninguno.
-                </p>
-                {cupoEmpresa(editingBranch.companyId) != null && (
-                  <p className="text-muted-foreground">
-                    La empresa tiene <strong>{cupoEmpresa(editingBranch.companyId)}</strong> usuarios ·
-                    repartidos en las otras sucursales: <strong>{repartidoEn(editingBranch.companyId, editingBranch.id)}</strong> ·
-                    disponibles para esta: <strong>{disponibleEn(editingBranch.companyId, editingBranch.id)}</strong>
-                  </p>
-                )}
-                {typeof branchUserCounts[editingBranch.id] === 'number' && (
-                  <p className="text-muted-foreground">
-                    Hoy tiene {branchUserCounts[editingBranch.id]} usuario(s) asignado(s).
-                  </p>
-                )}
-              </div>
+              {/* El cupo de usuarios NO se edita aquí a propósito: vive en
+                  "Gestionar usuarios", junto al de la empresa y a los usuarios
+                  reales, para que haya un solo sitio donde administrarlos. */}
             </div>
           )}
           <DialogFooter>
@@ -1356,26 +1263,10 @@ export default function CompaniesManagementPage() {
               <Label htmlFor="newBranchLocation">Ubicación</Label>
               <Input id="newBranchLocation" value={newBranchLocation} onChange={(e) => setNewBranchLocation(e.target.value)} placeholder="Opcional" />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="newBranchMaxUsers">Usuarios</Label>
-              <Input
-                id="newBranchMaxUsers"
-                type="number"
-                min={1}
-                max={(addBranchFor ? disponibleEn(addBranchFor.id) : null) ?? undefined}
-                value={newBranchMaxUsers}
-                onChange={(e) => setNewBranchMaxUsers(e.target.value)}
-                placeholder="Sin repartir"
-              />
-              <p className="text-xs text-muted-foreground">
-                Cuántos de los usuarios de la empresa usa esta sucursal. Vacío = no le
-                reservas ninguno.
-                {addBranchFor && cupoEmpresa(addBranchFor.id) != null && (
-                  <> La empresa tiene {cupoEmpresa(addBranchFor.id)} y quedan{' '}
-                  <strong>{disponibleEn(addBranchFor.id)}</strong> sin repartir.</>
-                )}
-              </p>
-            </div>
+            <p className="text-xs text-muted-foreground">
+              Nace sin límite de usuarios. El cupo se le pone después en{' '}
+              <strong>Gestionar usuarios</strong>.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddBranchFor(null)} disabled={saving}>Cancelar</Button>

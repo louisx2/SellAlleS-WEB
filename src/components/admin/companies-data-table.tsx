@@ -33,7 +33,7 @@ interface CompaniesDataTableProps {
   onModulesCompany: (c: Company) => void;
   onEnterCompany: (c: Company) => void;
   onEnterBranch: (companyId: string, companyName: string, branchId: string, branchName: string) => void;
-  onEditBranch: (b: { id: string; name: string; location: string; companyId: string; maxUsers: string }) => void;
+  onEditBranch: (b: { id: string; name: string; location: string; companyId: string }) => void;
   onToggleStatus?: (c: Company) => void;
   onDeleteCompany?: (c: Company) => void;
   onDeleteBranch?: (b: { id: string; name: string; companyId: string }) => void;
@@ -235,26 +235,6 @@ export function CompaniesDataTable({
 
                     {expandedCompanies.includes(c.id) && (
                       <div className="pl-11 mt-3 flex flex-col gap-2 text-xs font-normal">
-                        {/* Cómo va el reparto del cupo de la empresa entre sus
-                            sucursales. Solo se muestra si hay algo repartido:
-                            si no, no hay nada que cuadrar. */}
-                        {c.max_users != null && (() => {
-                          const repartido = (c.branches ?? []).reduce(
-                            (acc, b) => acc + (b.max_users ?? 0), 0,
-                          );
-                          if (repartido === 0) return null;
-                          const sinRepartir = c.max_users - repartido;
-                          return (
-                            <div className="flex items-center gap-1.5 text-muted-foreground">
-                              <Users className="h-3 w-3" />
-                              <span>
-                                Reparto de usuarios: <strong className="text-foreground">{repartido}</strong> de {c.max_users}
-                                {sinRepartir > 0 && ` · ${sinRepartir} sin repartir`}
-                                {sinRepartir === 0 && ' · cupo completo'}
-                              </span>
-                            </div>
-                          );
-                        })()}
                         {c.branches && c.branches.length > 0 ? (
                           c.branches.map(b => (
                             <div key={b.id} className="flex items-center justify-between bg-muted/40 hover:bg-muted/60 transition-colors p-2 rounded-md pr-3 border border-border/50">
@@ -300,7 +280,7 @@ export function CompaniesDataTable({
                                       </Button>
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                                      <DropdownMenuItem onClick={() => onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id, maxUsers: b.max_users != null ? String(b.max_users) : '' })}>
+                                      <DropdownMenuItem onClick={() => onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id })}>
                                         <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
                                       </DropdownMenuItem>
                                       {onManageUsers && (

@@ -40,7 +40,7 @@ interface CompanyUser {
 
 interface RoleOption { id: string; name: string; }
 
-interface BranchOption { id: string; name: string; }
+interface BranchOption { id: string; name: string; maxUsers: number | null; }
 
 // Usuario cuya empresa PRINCIPAL es otra, pero que tiene acceso a esta
 // empresa vía profile_companies (multi-empresa).
@@ -79,6 +79,14 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const [addForm, setAddForm] = useState(emptyAddForm);
   const [addSaving, setAddSaving] = useState(false);
 
+  // Cupos: cuántos usuarios admite la empresa y cuántos cada sucursal. Se editan
+  // aquí porque es el único sitio donde se ven junto a los usuarios reales; antes
+  // estaban repartidos entre el formulario de empresa y el de cada sucursal.
+  // Se guardan como texto para que vacío pueda significar "sin límite" (null).
+  const [cupoEmpresa, setCupoEmpresa] = useState('');
+  const [cupoSucursal, setCupoSucursal] = useState<Record<string, string>>({});
+  const [cuposSaving, setCuposSaving] = useState(false);
+
   // Vincular un usuario EXISTENTE (de otra empresa) a esta empresa.
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkEmail, setLinkEmail] = useState('');
@@ -88,12 +96,13 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const [{ data: profs }, { data: bs }, { data: rls }, { data: links }] = await Promise.all([
+    const [{ data: profs }, { data: bs }, { data: rls }, { data: links }, { data: comp }] = await Promise.all([
       supabase.from('profiles').select('id, name, email, role, is_super_admin, branch_id, email_confirmed_at, profile_roles(role_id)').eq('company_id', companyId).order('name'),
-      supabase.from('branches').select('id, name').eq('company_id', companyId).order('name'),
+      supabase.from('branches').select('id, name, max_users').eq('company_id', companyId).order('name'),
       supabase.from('roles').select('id, name').eq('company_id', companyId).eq('is_system', false).order('name'),
       // Usuarios con acceso a esta empresa cuya empresa principal es OTRA.
       supabase.from('profile_companies').select('profiles(id, name, email, company_id, companies!profiles_company_id_fkey(name))').eq('company_id', companyId),
+      supabase.from('companies').select('max_users').eq('id', companyId).single(),
     ]);
     setUsers((profs ?? []).map((p: any) => ({
       id: p.id, name: p.name ?? 'Usuario', email: p.email ?? '',
@@ -101,7 +110,11 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       roleIds: (p.profile_roles ?? []).map((pr: any) => pr.role_id),
       emailConfirmedAt: p.email_confirmed_at,
     })));
-    setBranches((bs ?? []).map((b: any) => ({ id: b.id, name: b.name })));
+    setBranches((bs ?? []).map((b: any) => ({ id: b.id, name: b.name, maxUsers: b.max_users ?? null })));
+    setCupoEmpresa((comp as any)?.max_users != null ? String((comp as any).max_users) : '');
+    setCupoSucursal(
+      Object.fromEntries((bs ?? []).map((b: any) => [b.id, b.max_users != null ? String(b.max_users) : ''])),
+    );
     setRoles((rls ?? []).map((r: any) => ({ id: r.id, name: r.name })));
     setLinkedUsers(
       (links ?? [])
@@ -122,6 +135,67 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   }, [open, companyId, load]);
 
   const setBusy = (id: string, v: boolean) => setRowBusy((prev) => ({ ...prev, [id]: v }));
+
+  // Vacío = sin límite. Se valida aquí para dar un mensaje claro; la base tiene la
+  // última palabra igualmente.
+  const aCupo = (v: string): number | null | 'malo' => {
+    if (v.trim() === '') return null;
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) && n >= 1 ? n : 'malo';
+  };
+
+  // Usuarios que ocupan la empresa: los suyos más los vinculados desde otra
+  // empresa, que es como los cuenta check_company_membership_limit en la base.
+  const usadosEmpresa = users.filter((u) => !u.isSuperAdmin).length + linkedUsers.length;
+  const usadosEnSucursal = (branchId: string) =>
+    users.filter((u) => !u.isSuperAdmin && u.branchId === branchId).length;
+
+  const cupoEmpresaNum = aCupo(cupoEmpresa);
+  const asignadoASucursales = branches.reduce((acc, b) => {
+    const n = aCupo(cupoSucursal[b.id] ?? '');
+    return acc + (typeof n === 'number' ? n : 0);
+  }, 0);
+  // Que la suma pase del cupo de la empresa no es un error: cada sucursal tiene su
+  // propio techo y el cupo de la empresa bloquea por su cuenta. Solo se avisa.
+  const seExcede = typeof cupoEmpresaNum === 'number' && asignadoASucursales > cupoEmpresaNum;
+
+  const handleGuardarCupos = async () => {
+    if (!companyId) return;
+    const empresa = aCupo(cupoEmpresa);
+    if (empresa === 'malo') {
+      toast({ title: 'Número inválido', description: 'El cupo de la empresa debe ser 1 o más, o vacío para no poner límite.', variant: 'destructive' });
+      return;
+    }
+    for (const b of branches) {
+      if (aCupo(cupoSucursal[b.id] ?? '') === 'malo') {
+        toast({ title: 'Número inválido', description: `El cupo de ${b.name} debe ser 1 o más, o vacío para no poner límite.`, variant: 'destructive' });
+        return;
+      }
+    }
+
+    setCuposSaving(true);
+    try {
+      const { error: eComp } = await supabase
+        .from('companies').update({ max_users: empresa }).eq('id', companyId);
+      if (eComp) throw eComp;
+
+      // Solo las sucursales que cambiaron, para no escribir de más.
+      for (const b of branches) {
+        const nuevo = aCupo(cupoSucursal[b.id] ?? '') as number | null;
+        if (nuevo === b.maxUsers) continue;
+        const { error } = await supabase
+          .from('branches').update({ max_users: nuevo }).eq('id', b.id);
+        if (error) throw error;
+      }
+
+      toast({ title: 'Cupos guardados' });
+      await load();
+    } catch (err: any) {
+      toast({ title: 'No se pudieron guardar los cupos', description: err?.message ?? 'Error desconocido.', variant: 'destructive' });
+    } finally {
+      setCuposSaving(false);
+    }
+  };
 
   const handleMoveBranch = async (user: CompanyUser, newBranchId: string) => {
     if (!companyId || newBranchId === user.branchId) return;
@@ -347,8 +421,74 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
         <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Usuarios de {companyName}</DialogTitle>
-            <DialogDescription>Agrega, mueve entre sucursales o elimina usuarios de esta empresa.</DialogDescription>
+            <DialogDescription>Define cuántos usuarios admite la empresa y cada sucursal, y gestiona quién los ocupa.</DialogDescription>
           </DialogHeader>
+
+          {/* CUPOS. Todo el control de límites en un solo sitio, con el conteo real
+              al lado de cada número para no tener que sumar de cabeza. */}
+          <div className="rounded-lg border">
+            <div className="flex items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cupos</span>
+              <Button size="sm" onClick={handleGuardarCupos} disabled={cuposSaving || loading}>
+                {cuposSaving ? 'Guardando…' : 'Guardar cupos'}
+              </Button>
+            </div>
+
+            <div className="divide-y">
+              <div className="flex items-center gap-3 px-3 py-2">
+                <span className="flex-1 text-sm font-medium">Empresa</span>
+                <Input
+                  type="number"
+                  min={1}
+                  className="h-8 w-20 text-center"
+                  placeholder="—"
+                  value={cupoEmpresa}
+                  onChange={(e) => setCupoEmpresa(e.target.value)}
+                />
+                <span className="w-24 text-right text-xs text-muted-foreground">
+                  {usadosEmpresa} en uso
+                </span>
+              </div>
+
+              {branches.map((b) => {
+                const usados = usadosEnSucursal(b.id);
+                const tope = aCupo(cupoSucursal[b.id] ?? '');
+                const completa = typeof tope === 'number' && usados >= tope;
+                return (
+                  <div key={b.id} className="flex items-center gap-3 px-3 py-2">
+                    <span className="flex-1 pl-3 text-sm text-muted-foreground">{b.name}</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      className="h-8 w-20 text-center"
+                      placeholder="—"
+                      value={cupoSucursal[b.id] ?? ''}
+                      onChange={(e) => setCupoSucursal((prev) => ({ ...prev, [b.id]: e.target.value }))}
+                    />
+                    <span className="w-24 text-right text-xs">
+                      <span className={completa ? 'font-medium text-destructive' : 'text-muted-foreground'}>
+                        {usados} en uso
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="border-t px-3 py-2 text-xs">
+              <span className="text-muted-foreground">
+                Un campo vacío (—) significa sin límite.
+              </span>
+              {typeof cupoEmpresaNum === 'number' && branches.length > 0 && (
+                <span className={seExcede ? 'ml-2 font-medium text-amber-600 dark:text-amber-500' : 'ml-2 text-muted-foreground'}>
+                  · {asignadoASucursales} asignados entre sucursales de {cupoEmpresaNum} de la empresa
+                  {seExcede
+                    ? ' — más de lo que tiene la empresa. Se permite, pero el cupo de la empresa manda al crear usuarios.'
+                    : ` · ${cupoEmpresaNum - asignadoASucursales} sin asignar`}
+                </span>
+              )}
+            </div>
+          </div>
 
           {!addOpen && !linkOpen && (
             <div className="flex flex-wrap gap-2">
