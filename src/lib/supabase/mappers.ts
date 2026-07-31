@@ -32,6 +32,7 @@ export const rowToProduct = (r: any): Product => ({
   modificationDate: r.modification_date ?? undefined,
   wholesalePrice: r.wholesale_price != null ? Number(r.wholesale_price) : undefined,
   wholesaleMinQuantity: r.wholesale_min_quantity != null ? Number(r.wholesale_min_quantity) : undefined,
+  branchId: r.branch_id ?? undefined,
 });
 export const productToRow = (p: Partial<Product>) => ({
   code: p.code ?? null, 
@@ -51,6 +52,7 @@ export const productToRow = (p: Partial<Product>) => ({
   modification_date: p.modificationDate ?? null,
   wholesale_price: p.wholesalePrice ?? null,
   wholesale_min_quantity: p.wholesaleMinQuantity ?? null,
+  branch_id: p.branchId ?? null,
 });
 
 // ---------- Product Category ----------
@@ -82,7 +84,10 @@ export const rowToCustomer = (r: any): Customer => ({
   createdAt: r.created_at,
   createdBy: r.created_by,
   createdByName: r.profiles?.name || undefined,
+  branchId: r.branch_id ?? undefined,
 });
+// branch_id tampoco se manda: lo pone addCustomer al crear y no debe cambiar al
+// editar — moverlo de sucursal es otra cosa, no un renombrado.
 // credit_balance NO se manda: solo lo escribe el servidor (triggers de venta y
 // RPCs de abono); en el insert aplica el default 0 de la base.
 export const customerToRow = (c: Partial<Customer>) => ({
@@ -243,6 +248,7 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   socialMedia: { instagram: r.instagram ?? '', facebook: r.facebook ?? '' },
   logoUrl: r.logo_url ?? '', ticketLogoUrl: r.ticket_logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
   ticketNameDisplay: (r.ticket_name_display ?? 'company') as CompanyProfile['ticketNameDisplay'],
+  headerNameDisplay: (r.header_name_display ?? 'company') as CompanyProfile['headerNameDisplay'],
   linkSlug: r.link_slug ?? '',
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
@@ -260,6 +266,7 @@ export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   instagram: p.socialMedia?.instagram ?? null, facebook: p.socialMedia?.facebook ?? null,
   logo_url: p.logoUrl ?? null, ticket_logo_url: p.ticketLogoUrl ?? null, receipt_footer: p.receiptFooter ?? null,
   ticket_name_display: p.ticketNameDisplay ?? 'company',
+  header_name_display: p.headerNameDisplay ?? 'company',
   // Vacío se guarda como null, que es lo que la función interpreta como
   // "derívalo del nombre". Guardar '' rompería el enlace: quedaría //c/.
   link_slug: p.linkSlug?.trim() ? p.linkSlug.trim() : null,

@@ -54,6 +54,8 @@ export type Customer = {
   createdAt?: string;
   createdBy?: string;
   createdByName?: string;
+  /** UUID de la sucursal dueña. Vacío = de la empresa, visible desde todas. */
+  branchId?: string;
 };
 
 export type CouponStatus = 'active' | 'redeemed' | 'expired';

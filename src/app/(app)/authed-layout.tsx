@@ -276,9 +276,16 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const logoLink = isSuperAdmin && !isImpersonating 
     ? '/admin/companies' 
     : (hasMultipleCompanies && !isImpersonating ? '/admin/empresas' : '/dashboard');
+  let defaultLogoName = profile?.name || 'SellAlleS';
+  if (profile?.headerNameDisplay === 'branch' && userBranch) {
+    defaultLogoName = userBranch;
+  } else if (profile?.headerNameDisplay === 'both' && userBranch) {
+    defaultLogoName = `${profile?.name || 'SellAlleS'} : ${userBranch}`;
+  }
+
   const logoName = isSuperAdmin && !isImpersonating 
     ? 'Plataforma SellAlleS' 
-    : (hasMultipleCompanies && !isImpersonating ? 'Mis Empresas' : (profile?.name || 'SellAlleS'));
+    : (hasMultipleCompanies && !isImpersonating ? 'Mis Empresas' : defaultLogoName);
   const logoImgUrl = (isSuperAdmin && !isImpersonating) || (hasMultipleCompanies && !isImpersonating) 
     ? null 
     : (branchLogo || profile?.logoUrl);

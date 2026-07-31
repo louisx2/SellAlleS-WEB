@@ -6,6 +6,8 @@ import { supabase } from '@/lib/supabase/client';
 import { rowToQuote, quoteToRow, quoteItemToRow } from '@/lib/supabase/mappers';
 import { resolveBranchId } from '@/context/sales-provider';
 
+import { useAuth } from '@/context/auth-provider';
+
 interface QuotesContextType {
   quotes: Quote[];
   addQuote: (quote: Omit<Quote, 'id' | 'items' | 'createdAt'>, items: CartItem[]) => Promise<void>;
@@ -17,17 +19,22 @@ interface QuotesContextType {
 const QuotesContext = createContext<QuotesContextType | undefined>(undefined);
 
 export function QuotesProvider({ children }: { children: ReactNode }) {
+  const { appUser } = useAuth();
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const activeBranchId = appUser?.activeBranchId;
+
   const reload = useCallback(async () => {
+    if (!activeBranchId) return;
     const { data, error } = await supabase
       .from('quotes')
       .select('*, quote_items(*), customers(*), branches(name)')
+      .eq('branch_id', activeBranchId)
       .order('created_at', { ascending: false });
     if (!error && data) setQuotes(data.map(rowToQuote));
     setLoading(false);
-  }, []);
+  }, [activeBranchId]);
 
   useEffect(() => { reload(); }, [reload]);
 

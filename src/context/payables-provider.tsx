@@ -65,15 +65,19 @@ export function PayablesProvider({ children }: { children: ReactNode }) {
   const [invoices, setInvoices] = useState<SupplierInvoice[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const activeBranchId = appUser?.activeBranchId;
+
   const load = useCallback(async () => {
+    if (!activeBranchId) return;
     const { data, error } = await supabase
       .from('supplier_invoices')
       .select('*, supplier_invoice_items(*), supplier_payments(*, branches(name)), suppliers(*), branches(name)')
+      .eq('branch_id', activeBranchId)
       .order('issue_date', { ascending: false })
       .order('created_at', { ascending: false });
     if (!error && data) setInvoices(data.map(rowToSupplierInvoice));
     setLoading(false);
-  }, []);
+  }, [activeBranchId]);
 
   useEffect(() => { load(); }, [load]);
 

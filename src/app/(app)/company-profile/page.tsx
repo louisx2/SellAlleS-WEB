@@ -509,6 +509,32 @@ export default function CompanyProfilePage() {
 
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="headerNameDisplay">Nombre en la barra superior (SaaS)</Label>
+                  </div>
+                  <Select
+                    value={companyData.headerNameDisplay}
+                    onValueChange={(v) =>
+                      setCompanyData((prev) => ({
+                        ...prev,
+                        headerNameDisplay: v as CompanyProfile['headerNameDisplay'],
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="headerNameDisplay">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="company">Solo el nombre de la empresa</SelectItem>
+                      <SelectItem value="branch">Solo el nombre de la sucursal</SelectItem>
+                      <SelectItem value="both">Ambos (empresa y sucursal)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
                   <Label htmlFor="instagram">Instagram</Label>
                   <Input
                     id="instagram"
