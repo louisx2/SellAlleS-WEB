@@ -103,7 +103,6 @@ export default function CompaniesManagementPage() {
   const [rolesFor, setRolesFor] = useState<Company | null>(null);
   const [branchStatusTarget, setBranchStatusTarget] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
   // Compartir entre sucursales (por módulo). Default OFF: cada sucursal aislada.
-  const [sharing, setSharing] = useState({ clientes: false, credito: false, financiamiento: false, prestamos: false });
 
   const esSuperAdmin = !!appUser?.isSuperAdmin;
   // Los ids viajan como string y no como array: `appUser.companies` es un array
@@ -199,7 +198,6 @@ export default function CompaniesManagementPage() {
   const openCreate = () => {
     setEditingId(null); setStep(1); setForm(emptyForm);
     setExtraUsers([]);
-    setSharing({ clientes: false, credito: false, financiamiento: false, prestamos: false });
     setOpen(true);
   };
   const openEdit = (c: Company) => {
@@ -220,22 +218,6 @@ export default function CompaniesManagementPage() {
       paidUntil: aInputFecha(c.paid_until),
     });
     setExtraUsers([]);
-    // Cargar la config de compartir entre sucursales de esta empresa.
-    setSharing({ clientes: false, credito: false, financiamiento: false, prestamos: false });
-    supabase
-      .from('company_branch_sharing')
-      .select('scope, enabled')
-      .eq('company_id', c.id)
-      .then(({ data }) => {
-        if (data) {
-          setSharing({
-            clientes: data.find((r) => r.scope === 'clientes')?.enabled ?? false,
-            credito: data.find((r) => r.scope === 'credito')?.enabled ?? false,
-            financiamiento: data.find((r) => r.scope === 'financiamiento')?.enabled ?? false,
-            prestamos: data.find((r) => r.scope === 'prestamos')?.enabled ?? false,
-          });
-        }
-      });
     setOpen(true);
   };
 
@@ -389,21 +371,6 @@ export default function CompaniesManagementPage() {
         if (error) throw error;
         companyId = data.id;
         trialEndsAt = data.trial_ends_at ?? null;
-      }
-
-      if (editingId) {
-        const { error: sharingError } = await supabase
-          .from('company_branch_sharing')
-          .upsert(
-            [
-              { company_id: editingId, scope: 'clientes', enabled: sharing.clientes },
-              { company_id: editingId, scope: 'credito', enabled: sharing.credito },
-              { company_id: editingId, scope: 'financiamiento', enabled: sharing.financiamiento },
-              { company_id: editingId, scope: 'prestamos', enabled: sharing.prestamos },
-            ],
-            { onConflict: 'company_id,scope' },
-          );
-        if (sharingError) throw sharingError;
       }
 
       if (companyId && form.planId !== NONE) {
@@ -938,39 +905,9 @@ export default function CompaniesManagementPage() {
                 <Switch checked={form.ncfEnabled} onCheckedChange={(v) => setForm({ ...form, ncfEnabled: v })} />
               </div>
 
-              {editingId && (
-                <>
-                  <p className="text-sm font-semibold mt-2">Compartir entre sucursales</p>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <p className="text-sm font-medium">Clientes compartidos</p>
-                      <p className="text-xs text-muted-foreground">Todas las sucursales ven la misma lista de clientes.</p>
-                    </div>
-                    <Switch checked={sharing.clientes} onCheckedChange={(v) => setSharing({ ...sharing, clientes: v })} />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <p className="text-sm font-medium">Crédito compartido</p>
-                      <p className="text-xs text-muted-foreground">Las ventas a crédito se pueden ver y cobrar desde cualquier sucursal.</p>
-                    </div>
-                    <Switch checked={sharing.credito} onCheckedChange={(v) => setSharing({ ...sharing, credito: v })} />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <p className="text-sm font-medium">Financiamiento compartido</p>
-                      <p className="text-xs text-muted-foreground">Los financiamientos se pueden ver y pagar desde cualquier sucursal.</p>
-                    </div>
-                    <Switch checked={sharing.financiamiento} onCheckedChange={(v) => setSharing({ ...sharing, financiamiento: v })} />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <p className="text-sm font-medium">Préstamos compartidos</p>
-                      <p className="text-xs text-muted-foreground">Los préstamos de dinero se pueden ver y cobrar desde cualquier sucursal.</p>
-                    </div>
-                    <Switch checked={sharing.prestamos} onCheckedChange={(v) => setSharing({ ...sharing, prestamos: v })} />
-                  </div>
-                </>
-              )}
+              {/* El compartir entre sucursales ya no es un sí/no por empresa:
+                  se elige sucursal por sucursal en Configuración → Compartir
+                  entre Sucursales, entrando a la empresa. */}
             </div>
           ) : step === 2 ? (
             <div className="grid gap-4 py-2">

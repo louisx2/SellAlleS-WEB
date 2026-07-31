@@ -18,12 +18,14 @@ import { QuotesProvider } from '@/context/quotes-provider';
 import { LoanProvider } from '@/context/loan-provider';
 import { CajaProvider } from '@/context/caja-provider';
 import { ModulesProvider } from '@/context/modules-provider';
+import { SharingProvider } from '@/context/sharing-provider';
 import { SidebarProvider } from '@/components/ui/sidebar';
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
     <ModulesProvider>
+    <SharingProvider>
     <CompanyProfileProvider>
       <BranchProvider>
         <UserProvider>
@@ -55,6 +57,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </UserProvider>
       </BranchProvider>
     </CompanyProfileProvider>
+    </SharingProvider>
     </ModulesProvider>
     </ThemeProvider>
   );

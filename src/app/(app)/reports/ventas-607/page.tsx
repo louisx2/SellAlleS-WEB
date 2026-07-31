@@ -42,18 +42,24 @@ export default function Ventas607Page() {
   const [period, setPeriod] = useState(defaultPeriod());
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
 
-  // Las notas de crédito (B04) del período también van al 607.
+  // Las notas de crédito (B04) del período también van al 607. Se filtran por
+  // la sucursal activa igual que las ventas del mismo reporte; las de branch_id
+  // nulo entran siempre, que en un reporte fiscal es peor perder un documento
+  // que ver uno de más.
+  const activeBranchId = appUser?.activeBranchId;
   useEffect(() => {
+    if (!activeBranchId) return;
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from('credit_notes')
         .select('*, customers(name, rnc)')
+        .or(`branch_id.eq.${activeBranchId},branch_id.is.null`)
         .order('created_at', { ascending: false });
       if (!cancelled) setCreditNotes((data ?? []).map(rowToCreditNote));
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [activeBranchId]);
 
   // Mes local del documento (createdAt es Date): evita que un documento de fin
   // de mes salte de período por el desfase UTC (RD es UTC-4).

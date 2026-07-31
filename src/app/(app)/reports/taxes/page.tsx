@@ -7,6 +7,7 @@ import { useSales } from '@/context/sales-provider';
 import { usePayables } from '@/context/payables-provider';
 import { useExpenses } from '@/context/expense-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToCreditNote } from '@/lib/supabase/mappers';
 import type { CreditNote } from '@/lib/types';
@@ -31,21 +32,27 @@ export default function TaxesReportPage() {
   const { invoices } = usePayables();
   const { expenses } = useExpenses();
   const { profile } = useCompanyProfile();
+  const { appUser } = useAuth();
   const [period, setPeriod] = useState(defaultPeriod());
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
 
-  // Las notas de crédito del período revierten ITBIS cobrado (igual que en el 607).
+  // Las notas de crédito del período revierten ITBIS cobrado (igual que en el
+  // 607) y se filtran por la sucursal activa, como las ventas y los gastos que
+  // ya llegan filtrados de sus providers.
+  const activeBranchId = appUser?.activeBranchId;
   useEffect(() => {
+    if (!activeBranchId) return;
     let cancelled = false;
     (async () => {
       const { data } = await supabase
         .from('credit_notes')
         .select('*, customers(name, rnc)')
+        .or(`branch_id.eq.${activeBranchId},branch_id.is.null`)
         .order('created_at', { ascending: false });
       if (!cancelled) setCreditNotes((data ?? []).map(rowToCreditNote));
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [activeBranchId]);
 
   // Ventas del mes local. Se incluyen las que luego se anularon: el ITBIS se
   // cobró en su mes y su nota de crédito lo revierte en el mes de la NC.

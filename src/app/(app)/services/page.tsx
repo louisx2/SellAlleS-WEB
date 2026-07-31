@@ -12,18 +12,28 @@ import { supabase } from '@/lib/supabase/client';
 import { rowToService } from '@/lib/supabase/mappers';
 import type { Service } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useSharing } from '@/context/sharing-provider';
 
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
   const { toast } = useToast();
+  const { branchesFor, loading: sharingLoading } = useSharing();
+
+  // services.branch_id es NOT NULL: una orden siempre es de una sucursal, así
+  // que el pool de 'servicios' decide cuáles se ven.
+  const branchesKey = branchesFor('servicios').join(',');
 
   const loadData = useCallback(async () => {
+    if (sharingLoading) return;
+    const branchIds = branchesKey.split(',').filter(Boolean);
+    if (branchIds.length === 0) { setServices([]); return; }
     const { data, error } = await supabase
       .from('services')
       .select('*, customers(id,name,phone), service_types(id,name,base_price), profiles(id,name,email,role), branches(name)')
+      .in('branch_id', branchIds)
       .order('created_at', { ascending: false });
-    
+
     if (error) {
         console.error(error);
         toast({ title: 'Error cargando servicios', variant: 'destructive' });
@@ -32,7 +42,7 @@ export default function ServicesPage() {
     if (data) {
         setServices(data.map(rowToService));
     }
-  }, [toast]);
+  }, [toast, sharingLoading, branchesKey]);
 
   useEffect(() => {
     loadData();

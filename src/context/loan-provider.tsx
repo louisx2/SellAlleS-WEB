@@ -5,6 +5,7 @@ import type { Loan, LoanFrequency, LoanPaymentResult, PaymentMethod } from '@/li
 import { supabase } from '@/lib/supabase/client';
 import { rowToLoan, loanToRow, rowToLoanPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
+import { useSharing } from '@/context/sharing-provider';
 
 interface NewLoanInput {
   branchId: string;
@@ -35,19 +36,28 @@ export function LoanProvider({ children }: { children: ReactNode }) {
   // propia. Sin este filtro el super admin (que ignora RLS) vería préstamos de
   // TODAS las empresas — mismo criterio que branch-provider/user-provider.
   const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+  const { branchesFor, loading: sharingLoading } = useSharing();
   const [loans, setLoans] = useState<Loan[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Dentro de la empresa, además, solo las sucursales del pool 'prestamos'.
+  // loans.branch_id es NOT NULL, así que basta el IN.
+  const branchesKey = branchesFor('prestamos').join(',');
+
   const load = useCallback(async () => {
     if (!activeCompanyId) { setLoans([]); setLoading(false); return; }
+    if (sharingLoading) return;
+    const branchIds = branchesKey.split(',').filter(Boolean);
+    if (branchIds.length === 0) { setLoans([]); setLoading(false); return; }
     const { data, error } = await supabase
       .from('loans')
       .select('*, customers(*), loan_installments(*)')
       .eq('company_id', activeCompanyId)
+      .in('branch_id', branchIds)
       .order('created_at', { ascending: false });
     if (!error && data) setLoans(data.map(rowToLoan));
     setLoading(false);
-  }, [activeCompanyId]);
+  }, [activeCompanyId, sharingLoading, branchesKey]);
 
   useEffect(() => { load(); }, [load]);
 

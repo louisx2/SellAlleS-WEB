@@ -9,8 +9,10 @@ import { creditColumns } from '@/components/credit/credit-columns';
 import { PlusCircle } from 'lucide-react';
 
 export default function CreditPage() {
-  const { customers } = useCustomers();
-  const customersWithCredit = customers.filter(c => c.creditBalance > 0);
+  // El ámbito 'credito' va aparte del de 'clientes': una empresa puede querer
+  // cobrar desde cualquier sucursal sin compartir la libreta de clientes.
+  const { creditCustomers } = useCustomers();
+  const customersWithCredit = creditCustomers.filter(c => c.creditBalance > 0);
 
   return (
     <div>

@@ -11,11 +11,10 @@ import { buildFinancingColumns } from '@/components/financing/financing-columns'
 import { PlusCircle } from 'lucide-react';
 
 export default function FinancingPage() {
-  const { sales } = useSales();
+  // El provider ya aplica el pool de 'financiamiento': lo propio siempre, más
+  // lo de las sucursales con las que se comparta.
+  const { financingSales } = useSales();
   const { profile } = useCompanyProfile();
-  const financingSales = sales.filter(
-    (sale) => sale.paymentStatus === 'credit' || sale.paymentStatus === 'in_financing'
-  );
   const columns = useMemo(() => buildFinancingColumns(profile.lateFeeRate), [profile.lateFeeRate]);
 
   return (

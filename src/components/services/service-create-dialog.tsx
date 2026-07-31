@@ -15,9 +15,10 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
-import type { Customer, ServiceType, User } from '@/lib/types';
+import type { ServiceType, User } from '@/lib/types';
 import { serviceToRow } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
+import { useCustomers } from '@/context/customer-provider';
 
 interface ServiceCreateDialogProps {
   onSuccess?: () => void;
@@ -28,7 +29,9 @@ export function ServiceCreateDialog({ onSuccess, children }: ServiceCreateDialog
   const { toast } = useToast();
   const { appUser } = useAuth();
   const [open, setOpen] = useState(false);
-  const [customers, setCustomers] = useState<Customer[]>([]);
+  // Del provider, no de la base: así el selector respeta el pool de 'clientes'
+  // en vez de ofrecer los de todas las sucursales.
+  const { customers } = useCustomers();
   const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
   const [users, setUsers] = useState<User[]>([]);
 
@@ -38,10 +41,6 @@ export function ServiceCreateDialog({ onSuccess, children }: ServiceCreateDialog
 
   useEffect(() => {
     if (open) {
-      // Fetch customers
-      supabase.from('customers').select('id, name').order('name').then(({ data }) => {
-        if (data) setCustomers(data as unknown as Customer[]);
-      });
       // Fetch service types
       supabase.from('service_types').select('id, name, base_price').order('name').then(({ data }) => {
         if (data) setServiceTypes(data.map(d => ({ id: d.id, name: d.name, basePrice: Number(d.base_price) })) as ServiceType[]);

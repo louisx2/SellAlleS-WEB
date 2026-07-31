@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useCustomers } from '@/context/customer-provider';
 import { useSales } from '@/context/sales-provider';
 import { useModules } from '@/context/modules-provider';
+import { useSharing } from '@/context/sharing-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToService, rowToCoupon } from '@/lib/supabase/mappers';
 import { formatCurrency } from '@/lib/utils';
@@ -47,6 +48,7 @@ export default function CustomerHistoryClient() {
   const { customers } = useCustomers();
   const { sales } = useSales();
   const { isModuleEnabled } = useModules();
+  const { branchesFor, loading: sharingLoading } = useSharing();
   const { toast } = useToast();
   const [services, setServices] = useState<Service[]>([]);
   const [coupons, setCoupons] = useState<Coupon[]>([]);
@@ -60,17 +62,24 @@ export default function CustomerHistoryClient() {
   const loyaltyEnabled = isModuleEnabled('loyalty');
   const portalEnabled = isModuleEnabled('customer-portal');
 
+  // Ver la ficha de un cliente no da acceso a las órdenes de servicio de una
+  // sucursal con la que no se comparte: manda el pool de 'servicios'.
+  const serviciosKey = branchesFor('servicios').join(',');
+
   useEffect(() => {
-    if (!customerId || !servicesEnabled) return;
+    if (!customerId || !servicesEnabled || sharingLoading) return;
+    const branchIds = serviciosKey.split(',').filter(Boolean);
+    if (branchIds.length === 0) { setServices([]); return; }
     (async () => {
       const { data } = await supabase
         .from('services')
         .select('*, customers(id,name,phone), service_types(id,name,base_price)')
         .eq('customer_id', customerId)
+        .in('branch_id', branchIds)
         .order('created_at', { ascending: false });
       if (data) setServices(data.map(rowToService));
     })();
-  }, [customerId, servicesEnabled]);
+  }, [customerId, servicesEnabled, sharingLoading, serviciosKey]);
 
   useEffect(() => {
     if (!customerId || !loyaltyEnabled) return;

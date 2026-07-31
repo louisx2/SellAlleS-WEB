@@ -6,9 +6,16 @@ import { supabase } from '@/lib/supabase/client';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { rowToSale, saleToRow, rowToPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
+import { useSharing } from '@/context/sharing-provider';
 
 interface SalesContextType {
   sales: Sale[];
+  /**
+   * Ventas a crédito y financiadas del ámbito 'financiamiento'. Son `sales`
+   * más las de las otras sucursales del pool, para que se puedan cobrar desde
+   * cualquiera de ellas sin que el resto de la app vea ventas ajenas.
+   */
+  financingSales: Sale[];
   addSale: (sale: Omit<Sale, 'id'>) => Promise<Sale>;
   /** Abono a una venta a crédito o financiada (RPC atómica en la base). */
   paySale: (saleId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string, reference?: string) => Promise<PaymentResult>;
@@ -38,25 +45,59 @@ export const resolveBranchId = async (branchName?: string): Promise<string | nul
   return data?.id ?? null;
 };
 
+const SALE_SELECT = '*, sale_items(*), customers(*), branches(name), financing_installments(*)';
+
 export function SalesProvider({ children }: { children: ReactNode }) {
   const { appUser } = useAuth();
+  const { branchesFor, loading: sharingLoading } = useSharing();
   const [sales, setSales] = useState<Sale[]>([]);
+  const [sharedFinancing, setSharedFinancing] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const activeBranchId = appUser?.activeBranchId;
+  // Solo las OTRAS sucursales del pool: las propias ya vienen en `sales`.
+  const otrasKey = branchesFor('financiamiento').filter((b) => b !== activeBranchId).join(',');
+
   const load = useCallback(async () => {
+    if (!activeBranchId) return;
     const { data, error } = await supabase
       .from('sales')
-      .select('*, sale_items(*), customers(*), branches(name), financing_installments(*)')
+      .select(SALE_SELECT)
+      .eq('branch_id', activeBranchId)
       .order('created_at', { ascending: false });
     if (!error && data) setSales(data.map(rowToSale));
     setLoading(false);
-  }, []);
+  }, [activeBranchId]);
 
-  useEffect(() => { load(); }, [load]);
+  // Segunda consulta solo si la empresa comparte financiamiento de verdad; una
+  // sucursal aislada no paga ningún viaje extra.
+  const loadSharedFinancing = useCallback(async () => {
+    if (sharingLoading) return;
+    const otras = otrasKey.split(',').filter(Boolean);
+    if (otras.length === 0) { setSharedFinancing([]); return; }
+    const { data, error } = await supabase
+      .from('sales')
+      .select(SALE_SELECT)
+      .in('branch_id', otras)
+      .in('payment_status', ['credit', 'in_financing'])
+      .order('created_at', { ascending: false });
+    if (!error && data) setSharedFinancing(data.map(rowToSale));
+  }, [sharingLoading, otrasKey]);
+
+  const reloadAll = useCallback(async () => {
+    await Promise.all([load(), loadSharedFinancing()]);
+  }, [load, loadSharedFinancing]);
+
+  useEffect(() => { reloadAll(); }, [reloadAll]);
 
   // Una venta hecha en otra caja aparece aquí sola: en Movimientos, en el
   // dashboard y en todo lo que lea de este provider.
-  useRealtimeReload('sales', load);
+  useRealtimeReload('sales', reloadAll);
+
+  const financingSales = [
+    ...sales.filter((s) => s.paymentStatus === 'credit' || s.paymentStatus === 'in_financing'),
+    ...sharedFinancing,
+  ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
   const addSale = async (saleData: Omit<Sale, 'id'>): Promise<Sale> => {
     let branchUuid: string | null = null;
@@ -174,7 +215,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SalesContext.Provider value={{ sales, addSale, paySale, payCustomerDebt, annulSale, reload: load, loading }}>
+    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, annulSale, reload: reloadAll, loading }}>
       {children}
     </SalesContext.Provider>
   );
