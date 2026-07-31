@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -36,10 +36,23 @@ import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useProducts } from '@/context/product-provider';
 
-const formSchema = z.object({
-  targetBranchId: z.string().min(1, 'Selecciona una sucursal destino'),
-  quantity: z.coerce.number().positive('La cantidad debe ser mayor a 0'),
-});
+// Valores centinela del desplegable de ubicación. No son ids.
+const SIN_UBICACION = '__sin__';
+const NUEVA_UBICACION = '__nueva__';
+
+const formSchema = z
+  .object({
+    targetBranchId: z.string().min(1, 'Selecciona una sucursal destino'),
+    quantity: z.coerce.number().positive('La cantidad debe ser mayor a 0'),
+    targetLocationId: z.string().min(1, 'Elige dónde va a quedar'),
+    nuevaUbicacion: z.string().optional(),
+  })
+  .refine(
+    (v) => v.targetLocationId !== NUEVA_UBICACION || !!v.nuevaUbicacion?.trim(),
+    { path: ['nuevaUbicacion'], message: 'Escribe el nombre de la ubicación' },
+  );
+
+type LocationOption = { id: string; name: string };
 
 interface TransferProductDialogProps {
   product: Product;
@@ -54,15 +67,46 @@ export function TransferProductDialog({ product, open, onOpenChange }: TransferP
   const { reload } = useProducts();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [loadingLocations, setLoadingLocations] = useState(false);
+
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: {
       targetBranchId: '',
       quantity: 1,
+      targetLocationId: SIN_UBICACION,
+      nuevaUbicacion: '',
     },
   });
 
   const availableBranches = branches.filter(b => b.id !== appUser?.activeBranchId);
+  const targetBranchId = form.watch('targetBranchId');
+  const targetLocationId = form.watch('targetLocationId');
+
+  // Las ubicaciones son de la sucursal destino, no de la mía: un estante de
+  // aquí no dice nada de dónde va a quedar la caja allá. Solo un admin abre
+  // este diálogo, y la RLS de product_locations deja al admin leer y crear en
+  // cualquier sucursal de su empresa.
+  useEffect(() => {
+    if (!targetBranchId) { setLocations([]); return; }
+    let cancelado = false;
+    setLoadingLocations(true);
+    (async () => {
+      const { data } = await supabase
+        .from('product_locations')
+        .select('id, name')
+        .eq('branch_id', targetBranchId)
+        .order('name');
+      if (!cancelado) {
+        setLocations((data ?? []) as LocationOption[]);
+        setLoadingLocations(false);
+        form.setValue('targetLocationId', SIN_UBICACION);
+        form.setValue('nuevaUbicacion', '');
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [targetBranchId, form]);
 
   const onSubmit = async (values: z.infer<typeof formSchema>) => {
     if (values.quantity > product.stock) {
@@ -72,11 +116,25 @@ export function TransferProductDialog({ product, open, onOpenChange }: TransferP
 
     setIsSubmitting(true);
     try {
+      let locationId: string | null = null;
+      if (values.targetLocationId === NUEVA_UBICACION) {
+        const { data: creada, error: errorUbicacion } = await supabase
+          .from('product_locations')
+          .insert({ name: values.nuevaUbicacion!.trim(), branch_id: values.targetBranchId })
+          .select('id')
+          .single();
+        if (errorUbicacion) throw errorUbicacion;
+        locationId = creada.id;
+      } else if (values.targetLocationId !== SIN_UBICACION) {
+        locationId = values.targetLocationId;
+      }
+
       const { error } = await supabase.rpc('transfer_product_stock', {
         p_product_id: product.id,
         p_quantity: values.quantity,
         p_target_branch_id: values.targetBranchId,
         p_current_branch_id: appUser?.activeBranchId,
+        p_target_location_id: locationId,
       });
 
       if (error) throw error;
@@ -153,6 +211,49 @@ export function TransferProductDialog({ product, open, onOpenChange }: TransferP
                 </FormItem>
               )}
             />
+
+            {targetBranchId && (
+              <FormField
+                control={form.control}
+                name="targetLocationId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>¿Dónde va a quedar en esa sucursal?</FormLabel>
+                    <Select onValueChange={field.onChange} value={field.value}>
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue placeholder={loadingLocations ? 'Cargando…' : 'Elige la ubicación'} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value={SIN_UBICACION}>Sin ubicación</SelectItem>
+                        {locations.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
+                        ))}
+                        <SelectItem value={NUEVA_UBICACION}>+ Crear una ubicación nueva</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
+
+            {targetLocationId === NUEVA_UBICACION && (
+              <FormField
+                control={form.control}
+                name="nuevaUbicacion"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Nombre de la ubicación nueva</FormLabel>
+                    <FormControl>
+                      <Input placeholder="Ej: Estante A / Segunda fila" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
                 Cancelar
