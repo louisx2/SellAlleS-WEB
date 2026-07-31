@@ -3,6 +3,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import type { Service, ServiceItem, Product } from '@/lib/types';
 import { rowToService, rowToServiceItem, rowToProduct } from '@/lib/supabase/mappers';
@@ -18,6 +19,8 @@ interface ServiceDetailSheetProps {
 
 export function ServiceDetailSheet({ serviceId, onClose, onUpdate }: ServiceDetailSheetProps) {
   const { toast } = useToast();
+  const { appUser } = useAuth();
+  const activeBranchId = appUser?.activeBranchId;
   const [service, setService] = useState<Service | null>(null);
   const [items, setItems] = useState<ServiceItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,9 +65,13 @@ export function ServiceDetailSheet({ serviceId, onClose, onUpdate }: ServiceDeta
     // obra, insumos a granel): esos siempre están disponibles.
     // select('*') + rowToProduct en vez de una lista corta con cast: así toda
     // columna nueva (unidad, tracks_stock…) llega mapeada y no como undefined.
+    // Solo los de ESTA sucursal: la RLS de products es por empresa, así que sin
+    // este filtro el selector mostraba los repuestos de todas las sucursales.
+    if (!activeBranchId) { setProducts([]); return; }
     const { data } = await supabase
       .from('products')
       .select('*')
+      .eq('branch_id', activeBranchId)
       .or('stock.gt.0,tracks_stock.eq.false');
     if (data) {
         setProducts(data.map(rowToProduct));
