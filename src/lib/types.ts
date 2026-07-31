@@ -100,7 +100,13 @@ export type User = {
   // role: rol del usuario EN esa empresa (profile_companies.role); `role` (arriba) es el de la empresa activa
   companies?: { id: string; name: string; status: 'trial' | 'active' | 'suspended'; isDemo: boolean; role: 'admin' | 'cashier' }[];
   emailConfirmedAt?: string | null;
+  // Cupo de la empresa ACTIVA (la impersonada si la hay), no la del propio perfil:
+  // un super admin dentro de otra empresa veía el cupo de la suya.
   companyMaxUsers?: number | null;
+  // Cupo de la sucursal activa, y el de todas las accesibles para poder cambiar de
+  // sucursal sin volver a consultar. null = sin límite.
+  branchMaxUsers?: number | null;
+  branchMaxUsersById?: Record<string, number | null>;
   // Vista preferida del panel de Inventario del POS: lista compacta o con imágenes.
   inventoryView?: 'list' | 'grid';
 };
@@ -323,6 +329,7 @@ export type CompanyProfile = {
   // Qué nombre encabeza el ticket: el de la empresa, el de la sucursal (o su
   // nombre comercial si lo tiene), o ambos.
   ticketNameDisplay: TicketNameDisplay;
+  headerNameDisplay: TicketNameDisplay;
   // Cómo se ve el negocio en el enlace del comprobante que va por WhatsApp:
   // sellalles.com/<linkSlug>/c/7Kq2Wp. Vacío = se deriva del nombre.
   linkSlug: string;

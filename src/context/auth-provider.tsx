@@ -237,7 +237,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const demoExpiresAt = (data as any).companies?.demo_expires_at ?? undefined;
       const trialEndsAt = (data as any).companies?.trial_ends_at ?? undefined;
       const paidUntil = (data as any).companies?.paid_until ?? undefined;
-      const maxUsers = (data as any).companies?.max_users ?? null;
+      // Los cupos tienen que ser los de la empresa y la sucursal donde se está
+      // trabajando AHORA. Antes salía del embed de profiles.company_id, o sea de
+      // la empresa propia: un super admin dentro de otra empresa veía el cupo de
+      // SU empresa demo (2) mientras administraba una de 15, y la pantalla de
+      // usuarios comparaba los usuarios de la sucursal contra ese 2.
+      const empresaActiva = savedImpersonatedId || data.company_id;
+      let maxUsers: number | null = null;
+      if (empresaActiva) {
+        const { data: comp } = await supabase
+          .from('companies').select('max_users').eq('id', empresaActiva).maybeSingle();
+        maxUsers = (comp as any)?.max_users ?? null;
+      }
+
+      // El cupo de TODAS las sucursales accesibles, en una sola consulta, para que
+      // cambiar de sucursal no tenga que volver a la base.
+      const branchMaxUsersById: Record<string, number | null> = {};
+      const idsSucursales = branchList.map((b) => b.id).filter(Boolean);
+      if (idsSucursales.length > 0) {
+        const { data: sucs } = await supabase
+          .from('branches').select('id, max_users').in('id', idsSucursales);
+        for (const s of (sucs ?? []) as any[]) branchMaxUsersById[s.id] = s.max_users ?? null;
+      }
       // Solo-lectura: puede entrar y ver, pero no modificar. Aplica si la prueba
       // venció, o si la suscripción pagada venció (paid_until en el pasado). El
       // super admin nunca queda en solo-lectura (gestiona/reactiva empresas).
@@ -272,6 +293,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         customRoles: customRoles,
         companies: companyList,
         companyMaxUsers: maxUsers,
+        branchMaxUsers: activeBranch.id ? (branchMaxUsersById[activeBranch.id] ?? null) : null,
+        branchMaxUsersById,
         inventoryView: (data as any).pos_inventory_view === 'list' ? 'list' : 'grid',
       };
       setAppUser(user);
@@ -487,6 +510,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         activeBranchId: branchId,
         branch: branchName,
         baseRolePermissions: permisos,
+        // El cupo mostrado también es el de la sucursal en la que se entra.
+        branchMaxUsers: prev.branchMaxUsersById?.[branchId] ?? null,
       };
       persistLocal(updated);
       return updated;
