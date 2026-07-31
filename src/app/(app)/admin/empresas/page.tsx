@@ -117,10 +117,15 @@ export default function CompaniesManagementPage() {
   // entrar como super admin no salían todas las empresas hasta recargar la
   // página a mano.
   const load = useCallback(async () => {
+    // El embed se pide por su clave foránea, no por el nombre de la tabla. Sin
+    // el `!branches_company_id_fkey`, cualquier tabla nueva con FK a companies
+    // Y a branches (branch_sharing lo fue) convierte esto en una relación
+    // ambigua y PostgREST responde 300: la pantalla se queda sin empresas.
     const camposSucursal = 'id, name, location, is_active, max_users';
+    const embedSucursales = `*, branches!branches_company_id_fkey(${camposSucursal})`;
     const compsQuery = esSuperAdmin
-      ? supabase.from('companies').select(`*, branches(${camposSucursal})`).order('created_at', { ascending: false })
-      : supabase.from('companies').select(`*, branches(${camposSucursal})`).in('id', idsEmpresas ? idsEmpresas.split(',') : []).order('created_at', { ascending: false });
+      ? supabase.from('companies').select(embedSucursales).order('created_at', { ascending: false })
+      : supabase.from('companies').select(embedSucursales).in('id', idsEmpresas ? idsEmpresas.split(',') : []).order('created_at', { ascending: false });
 
     const [
       { data: comps },
