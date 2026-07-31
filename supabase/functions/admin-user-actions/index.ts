@@ -88,7 +88,7 @@ serve(async (req) => {
     }
 
     // Parsear payload
-    const { action, userId, password, companyId, name, email, role, branchId, branchIds, roleIds } = await req.json();
+    const { action, userId, password, companyId, name, email, role, branchId, branchIds, branchRoles, roleIds } = await req.json();
 
     if (!action) {
       return new Response(
@@ -309,14 +309,33 @@ serve(async (req) => {
       }
 
       // 4. Insertar sucursales asociadas en profile_branches
+      //
+      // branchRoles (branchId -> roleId) dice qué rol tiene la persona EN cada
+      // sucursal: puede ser Gerente en una y Técnico en otra. Si no viene, el
+      // trigger de la base rellena con Cajero, así que nadie nace sin permisos.
       if (branchIds && branchIds.length > 0) {
         const branchInserts = branchIds.map((bId: string) => ({
           profile_id: newUserId,
           branch_id: bId,
           company_id: companyId,
+          role_id: branchRoles?.[bId] ?? null,
         }));
-        const { error: pbError } = await supabaseAdmin.from("profile_branches").insert(branchInserts);
-        if (pbError) console.error("Error al registrar sucursales del perfil:", pbError.message);
+        // upsert y no insert: el trigger que sincroniza profiles.branch_id ya pudo
+        // crear la fila de la sucursal principal, y un insert chocaría con ella.
+        const { error: pbError } = await supabaseAdmin
+          .from("profile_branches")
+          .upsert(branchInserts, { onConflict: "profile_id,branch_id" });
+        // Esto se limitaba a un console.error, así que el usuario quedaba creado
+        // pero sin las sucursales que se le pidieron y nadie se enteraba. Con el
+        // tope por sucursal (branches.max_users) ese silencio es peor: el límite
+        // parecería no existir. Se deshace la creación y se devuelve el motivo.
+        if (pbError) {
+          await supabaseAdmin.auth.admin.deleteUser(newUserId);
+          return new Response(
+            JSON.stringify({ error: `No se pudieron asignar las sucursales: ${pbError.message}` }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
       }
 
       // 5. Registrar roles personalizados en profile_roles

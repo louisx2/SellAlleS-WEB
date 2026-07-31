@@ -33,36 +33,52 @@ export function UserProvider({ children }: { children: ReactNode }) {
         id, name, email, role, is_super_admin, branch_id, email_confirmed_at,
         branches!profiles_branch_id_fkey(id, name),
         profile_roles(roles(id, name, description)),
-        profile_branches(branches(id, name, is_active))
+        profile_branches(branch_id, role_id, branches(id, name, is_active))
       `)
       .eq('company_id', activeCompanyId);
     if (!error && data) {
-      setUsers(
-        data.map((d: any) => {
-          const assignedBranches = (d.profile_branches ?? [])
-            .map((pb: any) => pb.branches)
-            .filter(Boolean)
-            .map((b: any) => ({ id: b.id, name: b.name }));
+      const currentBranchId = appUser?.activeBranchId;
+      let mappedUsers = data.map((d: any) => {
+        const assignedBranches = (d.profile_branches ?? [])
+          .map((pb: any) => pb.branches)
+          .filter(Boolean)
+          .map((b: any) => ({ id: b.id, name: b.name }));
 
-          return {
-            id: d.id,
-            name: d.name ?? 'Usuario',
-            email: d.email ?? '',
-            role: d.is_super_admin ? 'admin' : d.role,
-            branch: d.branches?.name ?? '',
-            activeBranchId: d.branch_id,
-            branches: assignedBranches,
-            customRoles: (d.profile_roles ?? [])
-              .map((pr: any) => pr.roles)
-              .filter(Boolean)
-              .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '' })),
-            emailConfirmedAt: d.email_confirmed_at
-          };
-        })
-      );
+        // Rol que tiene EN cada sucursal: puede ser distinto en cada una.
+        const branchRoles: Record<string, string> = {};
+        for (const pb of (d.profile_branches ?? [])) {
+          const bId = pb.branch_id ?? pb.branches?.id;
+          if (bId && pb.role_id) branchRoles[bId] = pb.role_id;
+        }
+
+        return {
+          branchRoles,
+          id: d.id,
+          name: d.name ?? 'Usuario',
+          email: d.email ?? '',
+          role: d.is_super_admin ? 'admin' : d.role,
+          branch: d.branches?.name ?? '',
+          activeBranchId: d.branch_id,
+          branches: assignedBranches,
+          customRoles: (d.profile_roles ?? [])
+            .map((pr: any) => pr.roles)
+            .filter(Boolean)
+            .map((r: any) => ({ id: r.id, name: r.name, description: r.description ?? '' })),
+          emailConfirmedAt: d.email_confirmed_at
+        };
+      });
+
+      if (currentBranchId) {
+        mappedUsers = mappedUsers.filter((u: AppUser) => 
+          u.activeBranchId === currentBranchId || 
+          u.branches?.some((b: { id: string }) => b.id === currentBranchId)
+        );
+      }
+
+      setUsers(mappedUsers);
     }
     setLoading(false);
-  }, [activeCompanyId]);
+  }, [activeCompanyId, appUser?.activeBranchId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -95,10 +111,24 @@ export function UserProvider({ children }: { children: ReactNode }) {
         role: newUser.role,
         branchId: branchId || null,
         branchIds: (newUser.branches ?? []).map((b) => b.id),
+        // Rol que tendrá EN cada sucursal. Si falta alguno, el trigger de la base
+        // lo rellena con Cajero para que nadie nazca sin permisos.
+        branchRoles: newUser.branchRoles ?? {},
         roleIds: (newUser.customRoles ?? []).map((r) => r.id),
       },
     });
-    if (error) throw new Error((data as any)?.error ?? error.message);
+    if (error) {
+      let realError = (data as any)?.error ?? error.message;
+      if (error instanceof Error && 'context' in error) {
+        try {
+          const errBody = await (error as any).context.json();
+          if (errBody.error) realError = errBody.error;
+        } catch (e) {
+          // Ignore JSON parse errors
+        }
+      }
+      throw new Error(realError);
+    }
     if ((data as any)?.error) throw new Error((data as any).error);
 
     await load();
@@ -200,7 +230,10 @@ export function UserProvider({ children }: { children: ReactNode }) {
         const insertData = updated.branches.map(b => ({
           profile_id: updated.id,
           branch_id: b.id,
-          company_id: activeCompanyId
+          company_id: activeCompanyId,
+          // Sin rol explícito el trigger pone Cajero, así que nadie se queda sin
+          // permisos por no haberlo elegido.
+          role_id: updated.branchRoles?.[b.id] ?? null,
         }));
         // El error se ignoraba, así que las sucursales se quedaban sin asignar
         // en silencio. Ahora importa de verdad: si una sucursal llegó a su tope

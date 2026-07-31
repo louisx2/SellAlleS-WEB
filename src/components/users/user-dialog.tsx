@@ -20,7 +20,6 @@ import { useToast } from '@/hooks/use-toast';
 import { useUsers } from '@/context/user-provider';
 import { useBranches } from '@/context/branch-provider';
 import { Checkbox } from '@/components/ui/checkbox';
-import { BranchChecklist } from '@/components/users/branch-checklist';
 import { supabase } from '@/lib/supabase/client';
 import { useEffect } from 'react';
 import { PasswordInput } from '@/components/ui/password-input';
@@ -52,6 +51,9 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>(
     user?.branches?.map(b => b.id) ?? []
   );
+  // Rol POR sucursal: lo que la persona puede hacer en cada una. Vacío en alguna
+  // = el trigger de la base le pone Cajero.
+  const [branchRoles, setBranchRoles] = useState<Record<string, string>>(user?.branchRoles ?? {});
   const [confirmPassword, setConfirmPassword] = useState('');
 
   useEffect(() => {
@@ -68,10 +70,12 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
         
         setSelectedRoles(user.customRoles?.map(r => r.id).filter(id => !managerRoleIds.includes(id)) ?? []);
         setSelectedBranchIds(user.branches?.map(b => b.id) ?? []);
+        setBranchRoles(user.branchRoles ?? {});
         setRole(user.role === 'admin' ? 'admin' : (isManager ? 'manager' : 'cashier'));
     } else if (open && !user) {
         setSelectedRoles([]);
         setSelectedBranchIds([]);
+        setBranchRoles({});
         setRole('cashier');
         setConfirmPassword('');
     }
@@ -130,6 +134,10 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
       role: role as 'admin' | 'cashier' | 'manager',
       customRoles: availableRoles.filter(r => selectedRoles.includes(r.id)),
       branches: finalBranches,
+      // Solo el de las sucursales que quedaron marcadas.
+      branchRoles: Object.fromEntries(
+        finalBranches.filter(b => branchRoles[b.id]).map(b => [b.id, branchRoles[b.id]]),
+      ),
     };
 
     try {
@@ -192,13 +200,17 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
                      <Label htmlFor="password" className="text-right">
                          Contraseña
                      </Label>
-                     <PasswordInput id="password" name="password" placeholder="Mínimo 8 caracteres" className="col-span-3" required />
+                     <div className="col-span-3">
+                         <PasswordInput id="password" name="password" placeholder="Mínimo 8 caracteres" required />
+                     </div>
                  </div>
                  <div className="grid grid-cols-4 items-center gap-4">
                      <Label htmlFor="confirmPassword" className="text-right">
                          Confirmar
                      </Label>
-                     <PasswordInput id="confirmPassword" name="confirmPassword" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" className="col-span-3" required />
+                     <div className="col-span-3">
+                         <PasswordInput id="confirmPassword" name="confirmPassword" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="Repite la contraseña" required />
+                     </div>
                  </div>
                </>
             )}
@@ -220,13 +232,41 @@ export function UserDialog({ user, children, open: controlledOpen, onOpenChange 
 
             <div className="grid grid-cols-4 items-start gap-4 pt-2">
                 <Label className="text-right mt-1">Sucursales</Label>
-                <div className="col-span-3">
-                  <BranchChecklist
-                    branches={branches}
-                    selectedIds={selectedBranchIds}
-                    onChange={setSelectedBranchIds}
-                    idPrefix="user-branch"
-                  />
+                <div className="col-span-3 flex flex-col gap-2">
+                  {branches.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Esta empresa no tiene sucursales todavía.</p>
+                  ) : branches.map((b) => {
+                    const marcada = selectedBranchIds.includes(b.id);
+                    return (
+                      <div key={b.id} className="flex items-center gap-2">
+                        <Checkbox
+                          id={`user-branch-${b.id}`}
+                          checked={marcada}
+                          onCheckedChange={(c) => setSelectedBranchIds(
+                            c ? [...selectedBranchIds, b.id] : selectedBranchIds.filter((x) => x !== b.id),
+                          )}
+                        />
+                        <Label htmlFor={`user-branch-${b.id}`} className="flex-1 cursor-pointer font-normal">
+                          {b.name}
+                        </Label>
+                        {/* El rol solo aplica si trabaja ahí, y puede ser distinto
+                            en cada sucursal. Sin elegir, la base pone Cajero. */}
+                        {marcada && (
+                          <Select
+                            value={branchRoles[b.id] ?? ''}
+                            onValueChange={(v) => setBranchRoles((prev) => ({ ...prev, [b.id]: v }))}
+                          >
+                            <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue placeholder="Cajero" /></SelectTrigger>
+                            <SelectContent>
+                              {availableRoles.map((r) => (
+                                <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
             </div>
 
