@@ -4,9 +4,9 @@ import React, { createContext, useContext, ReactNode, useState, useEffect, useCa
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/context/auth-provider';
 
-export type SharingScope = 'clientes' | 'credito' | 'financiamiento' | 'prestamos' | 'servicios';
+export type SharingScope = 'clientes' | 'credito' | 'financiamiento' | 'prestamos' | 'servicios' | 'categorias';
 
-export const SHARING_SCOPES: SharingScope[] = ['clientes', 'credito', 'financiamiento', 'prestamos', 'servicios'];
+export const SHARING_SCOPES: SharingScope[] = ['clientes', 'credito', 'financiamiento', 'prestamos', 'servicios', 'categorias'];
 
 interface SharingContextType {
   /**

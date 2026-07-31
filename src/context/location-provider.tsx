@@ -4,6 +4,7 @@ import React, { createContext, useContext, ReactNode, useState, useEffect, useCa
 import type { ProductLocation } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToProductLocation, productLocationToRow } from '@/lib/supabase/mappers';
+import { useAuth } from '@/context/auth-provider';
 
 interface LocationContextType {
   locations: ProductLocation[];
@@ -15,26 +16,37 @@ interface LocationContextType {
 
 const LocationContext = createContext<LocationContextType | undefined>(undefined);
 
+// Las ubicaciones son de la sucursal activa y no se comparten: un estante es un
+// mueble, está en un sitio. Por eso aquí no hay pool que consultar.
 export function LocationProvider({ children }: { children: ReactNode }) {
+  const { appUser } = useAuth();
   const [locations, setLocations] = useState<ProductLocation[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const activeBranchId = appUser?.activeBranchId;
+
   const load = useCallback(async () => {
-    const { data, error } = await supabase.from('product_locations').select('*').order('name');
+    if (!activeBranchId) { setLocations([]); setLoading(false); return; }
+    const { data, error } = await supabase
+      .from('product_locations')
+      .select('*')
+      .eq('branch_id', activeBranchId)
+      .order('name');
     if (!error && data) {
       setLocations(data.map(rowToProductLocation));
     }
     setLoading(false);
-  }, []);
+  }, [activeBranchId]);
 
   useEffect(() => {
     load();
   }, [load]);
 
   const addLocation = async (locationData: Omit<ProductLocation, 'id'>) => {
+    if (!activeBranchId) throw new Error('No hay sucursal activa');
     const { data, error } = await supabase
       .from('product_locations')
-      .insert(productLocationToRow(locationData))
+      .insert({ ...productLocationToRow(locationData), branch_id: activeBranchId })
       .select()
       .single();
     if (error) throw error;

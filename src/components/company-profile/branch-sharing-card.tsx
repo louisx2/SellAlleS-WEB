@@ -37,6 +37,11 @@ const SCOPES: { key: SharingScope; label: string; description: string }[] = [
     label: 'Servicios y reparaciones',
     description: 'Las órdenes de servicio se ven desde las sucursales marcadas.',
   },
+  {
+    key: 'categorias',
+    label: 'Categorías de producto',
+    description: 'Las sucursales marcadas usan las mismas categorías. Las ubicaciones no aparecen aquí: un estante es de una sola sucursal y no se comparte.',
+  },
 ];
 
 // Compartir entre sucursales: por cada ámbito se marca qué sucursales entran al
