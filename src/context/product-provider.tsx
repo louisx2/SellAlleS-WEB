@@ -26,6 +26,10 @@ interface ProductContextType {
   updateProduct: (product: Product) => Promise<void>;
   /** Borra el artículo; si ya tiene historial lo archiva y devuelve 'archivado'. */
   deleteProduct: (id: string) => Promise<'eliminado' | 'archivado'>;
+  /** Los archivados de esta sucursal, con la fecha en que se archivaron. */
+  archivedProducts: (Product & { archivedAt?: string | null })[];
+  loadArchived: () => Promise<void>;
+  restoreProduct: (id: string) => Promise<void>;
   bulkImportProducts: (items: BulkImportItem[], onProgress?: (done: number, total: number) => void) => Promise<BulkImportResult>;
   /** Relee productos de la base (p. ej. tras una compra que sumó stock en el servidor). */
   reload: () => Promise<void>;
@@ -36,6 +40,9 @@ const ProductContext = createContext<ProductContextType | undefined>(undefined);
 
 export function ProductProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>([]);
+  // Los archivados no se traen con el inventario: solo cuando se piden, que es al
+  // abrir la vista de archivados. No hace falta cargarlos en cada visita al POS.
+  const [archivedProducts, setArchivedProducts] = useState<(Product & { archivedAt?: string | null })[]>([]);
   const [loading, setLoading] = useState(true);
   const { appUser } = useAuth();
   const activeBranchId = appUser?.activeBranchId;
@@ -89,6 +96,25 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     if (eArchivar) throw eArchivar;
     setProducts((prev) => prev.filter((p) => p.id !== id));
     return 'archivado';
+  };
+
+  const loadArchived = useCallback(async () => {
+    if (!activeBranchId) { setArchivedProducts([]); return; }
+    const { data } = await supabase.from('products').select('*')
+      .eq('branch_id', activeBranchId).eq('is_active', false)
+      .order('archived_at', { ascending: false });
+    setArchivedProducts((data ?? []).map((row: any) => ({
+      ...rowToProduct(row), archivedAt: row.archived_at ?? null,
+    })));
+  }, [activeBranchId]);
+
+  const restoreProduct = async (id: string) => {
+    // archived_at y restored_at las escribe un trigger, así que aquí solo se
+    // cambia el estado.
+    const { error } = await supabase.from('products').update({ is_active: true }).eq('id', id);
+    if (error) throw error;
+    setArchivedProducts((prev) => prev.filter((p) => p.id !== id));
+    await load();
   };
 
   // Importación por lote: inserta los nuevos en tandas y actualiza los emparejados
@@ -147,7 +173,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, bulkImportProducts, reload: load, loading }}>
+    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, bulkImportProducts, archivedProducts, loadArchived, restoreProduct, reload: load, loading }}>
       {children}
     </ProductContext.Provider>
   );

@@ -6,6 +6,7 @@ import { ProductDataTable } from '@/components/products/product-data-table';
 import { productColumns } from '@/components/products/product-columns';
 import { ProductDialog } from '@/components/products/product-dialog';
 import { ImportProductsDialog } from '@/components/products/import-products-dialog';
+import { ArchivedProductsDialog } from '@/components/products/archived-products-dialog';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -62,6 +63,9 @@ export default function InventoryPage() {
               <Upload className="mr-2 h-4 w-4" />
               Importar
             </Button>
+            {/* Los artículos con ventas no se borran, se archivan: desde aquí se
+                ven y se recuperan. */}
+            <ArchivedProductsDialog />
           </div>
           <div className="sm:hidden">
             <DropdownMenu>
