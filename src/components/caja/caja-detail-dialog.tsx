@@ -71,6 +71,12 @@ export function CajaDetailDialog({ session, children }: { session: CajaSession; 
               <Row label="Ventas en efectivo" value={`+ ${formatCurrency(b.cashSales)}`} />
               <Row label="Abonos crédito (efectivo)" value={`+ ${formatCurrency(b.creditCashPayments)}`} />
               <Row label="Abonos préstamo (efectivo)" value={`+ ${formatCurrency(b.loanCashPayments)}`} />
+              {/* Los cierres anteriores a que el desembolso descontara de la
+                  caja no traen esta clave: se omite en vez de enseñar un 0 que
+                  haría creer que ese turno no prestó nada. */}
+              {b.loanDisbursements != null && (
+                <Row label="Préstamos entregados (efectivo)" value={`- ${formatCurrency(b.loanDisbursements)}`} />
+              )}
               <Row label="Entradas manuales" value={`+ ${formatCurrency(b.movementsIn)}`} />
               <Row label="Salidas manuales" value={`- ${formatCurrency(b.movementsOut)}`} />
               <Separator className="my-1" />

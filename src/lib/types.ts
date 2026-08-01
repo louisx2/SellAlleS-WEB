@@ -325,6 +325,8 @@ export type CompanyProfile = {
   defaultInterestRate: number; // % de interés mensual sugerido en el POS
   loanLateFeeRate: number;         // % de mora de préstamos (independiente de lateFeeRate)
   defaultLoanInterestRate: number; // % de interés mensual sugerido para préstamos
+  loanFundEnabled: boolean;        // lleva el capital disponible para prestar
+  loanFundBlockOverdraft: boolean; // prestar de más: bloquea (true) o solo avisa
   loyaltyEnabled: boolean;
   loyaltyPurchasesRequired: number | null; // null = sin configurar
   loyaltyRewardDescription: string;
@@ -401,11 +403,35 @@ export type Loan = {
   totalWithInterest: number;
   amountPaid: number;
   status: 'active' | 'paid' | 'cancelled';
+  // Cómo se le entregó el dinero al cliente. Solo el efectivo mueve la caja de
+  // la sucursal; la transferencia sale del banco y no toca la gaveta.
+  disbursementMethod: 'cash' | 'transfer';
+  disbursementReference?: string;
   notes?: string;
   userName?: string;
   createdAt: Date;
   installments?: LoanInstallment[];
   payments?: LoanPayment[];
+};
+
+// Capital del negocio de préstamos. Solo se guardan los aportes y retiros: lo
+// prestado y lo cobrado ya está en loans/loan_payments, así que el disponible
+// se deduce (ver la RPC loan_fund_summary).
+export type LoanFundMovement = {
+  id: string;
+  type: 'aporte' | 'retiro';
+  amount: number;
+  reason?: string;
+  userName?: string;
+  createdAt: Date;
+};
+
+export type LoanFundSummary = {
+  aportes: number;
+  retiros: number;
+  desembolsado: number;
+  cobrado: number;
+  disponible: number;
 };
 
 // Resultado de la RPC register_loan_payment.
@@ -436,6 +462,9 @@ export type CajaBreakdown = {
   cashSales: number;
   creditCashPayments: number;
   loanCashPayments: number;
+  // Capital entregado en efectivo por préstamos del turno. Opcional: los
+  // cierres anteriores a que esto existiera no lo traen en su desglose.
+  loanDisbursements?: number;
   movementsIn: number;
   movementsOut: number;
   expected: number;

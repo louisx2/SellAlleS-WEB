@@ -1,4 +1,4 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, LoanFundMovement, LoanFundSummary, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
 
@@ -248,6 +248,8 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
   loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
   defaultLoanInterestRate: Number(r.default_loan_interest_rate ?? 5),
+  loanFundEnabled: !!r.loan_fund_enabled,
+  loanFundBlockOverdraft: !!r.loan_fund_block_overdraft,
   loyaltyEnabled: !!r.loyalty_enabled,
   loyaltyPurchasesRequired: r.loyalty_purchases_required != null ? Number(r.loyalty_purchases_required) : null,
   loyaltyRewardDescription: r.loyalty_reward_description ?? '',
@@ -568,6 +570,8 @@ export const rowToLoan = (r: any): Loan => ({
   totalWithInterest: Number(r.total_with_interest),
   amountPaid: Number(r.amount_paid),
   status: r.status,
+  disbursementMethod: r.disbursement_method ?? 'cash',
+  disbursementReference: r.disbursement_reference ?? undefined,
   notes: r.notes ?? undefined,
   userName: r.user_name ?? undefined,
   createdAt: new Date(r.created_at),
@@ -579,6 +583,7 @@ export const rowToLoan = (r: any): Loan => ({
 export const loanToRow = (l: {
   branchId: string; customerId: string; principal: number; interestRate: number;
   installmentsCount: number; paymentFrequency: string; notes?: string; userName?: string;
+  disbursementMethod?: 'cash' | 'transfer'; disbursementReference?: string;
 }) => ({
   branch_id: l.branchId,
   customer_id: l.customerId,
@@ -586,8 +591,27 @@ export const loanToRow = (l: {
   interest_rate: l.interestRate,
   installments_count: l.installmentsCount,
   payment_frequency: l.paymentFrequency,
+  disbursement_method: l.disbursementMethod ?? 'cash',
+  disbursement_reference: l.disbursementReference ?? null,
   notes: l.notes ?? null,
   user_name: l.userName ?? null,
+});
+
+export const rowToLoanFundMovement = (r: any): LoanFundMovement => ({
+  id: r.id,
+  type: r.type,
+  amount: Number(r.amount),
+  reason: r.reason ?? undefined,
+  userName: r.user_name ?? undefined,
+  createdAt: new Date(r.created_at),
+});
+
+export const rowToLoanFundSummary = (r: any): LoanFundSummary => ({
+  aportes: Number(r?.aportes ?? 0),
+  retiros: Number(r?.retiros ?? 0),
+  desembolsado: Number(r?.desembolsado ?? 0),
+  cobrado: Number(r?.cobrado ?? 0),
+  disponible: Number(r?.disponible ?? 0),
 });
 
 export const rowToLoanPaymentResult = (r: any): LoanPaymentResult => ({

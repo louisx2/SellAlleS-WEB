@@ -1,34 +1,12 @@
 import type { Sale } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
+import { abrirWhatsApp, telefonoParaWhatsApp } from '@/lib/whatsapp';
 
 
-/** Normaliza el teléfono del cliente al formato que espera WhatsApp. */
-function telefonoParaWhatsApp(sale: Sale): string {
-  let phone = sale.customer?.phone ? sale.customer.phone.replace(/\D/g, '') : '';
-  if (phone.length === 10 && (phone.startsWith('809') || phone.startsWith('829') || phone.startsWith('849'))) {
-    phone = '1' + phone;
-  }
-  return phone;
-}
-
-function urlDeWhatsApp(text: string, phone: string) {
-  return phone
-    ? `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`
-    : `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-}
-
-/**
- * Abre WhatsApp. Si se le pasa una pestaña ya abierta, la reutiliza en vez de
- * abrir otra: ver `abrirPestanaParaWhatsApp`. Devuelve si logró abrirse.
- */
-function abrirWhatsApp(text: string, phone: string, ventana?: Window | null): boolean {
-  const url = urlDeWhatsApp(text, phone);
-  if (ventana && !ventana.closed) {
-    ventana.location.href = url;
-    return true;
-  }
-  return window.open(url, '_blank') !== null;
-}
+/** Qué se está compartiendo. Venta y préstamo siguen exactamente el mismo
+ *  camino (PDF a Storage → enlace corto → WhatsApp); lo único que cambia es a
+ *  qué apunta el enlace y qué dice el mensaje. */
+export type TipoComprobante = 'venta' | 'prestamo';
 
 /**
  * Deja un texto en la forma que admite el enlace del comprobante:
@@ -92,16 +70,19 @@ function base64APdf(base64: string): Blob {
  * alternativa anterior obligaba al cajero a descargar el PDF y adjuntarlo a
  * mano. Con el enlace el mensaje sale de una vez.
  *
- * El enlace es firmado y vence: una factura lleva datos del cliente y no debe
+ * El enlace es firmado y vence: una factura —y más aún el comprobante de un
+ * préstamo, que lleva el cronograma completo— tiene datos del cliente y no debe
  * quedar accesible para siempre a quien la reenvíe.
  */
-export async function shareSalePdfLinkViaWhatsApp(
-  saleId: string,
-  pdfBase64: string,
-  sale: Sale,
-  companyName?: string,
-  ventana?: Window | null,
-): Promise<{ url: string; diasValidez: number; abrioWhatsApp: boolean }> {
+export async function compartirPdfPorWhatsApp(opts: {
+  tipo: TipoComprobante;
+  id: string;
+  pdfBase64: string;
+  telefono?: string | null;
+  companyName?: string;
+  ventana?: Window | null;
+}): Promise<{ url: string; diasValidez: number; abrioWhatsApp: boolean }> {
+  const { tipo, id, pdfBase64, telefono, companyName, ventana } = opts;
   // El PDF NO viaja dentro del JSON de la función: por ahí no cabía y la
   // petición ni siquiera llegaba ("Failed to send a request to the Edge
   // Function"). La función entrega URLs firmadas y el archivo va directo a
@@ -117,7 +98,8 @@ export async function shareSalePdfLinkViaWhatsApp(
   // de un objeto que todavía no existe (responde "Object not found"), así que
   // primero se pide el permiso de subida, se sube, y recién ahí se pide el
   // enlace.
-  const subida = await llamarReceiptLink({ saleId });
+  const destino = tipo === 'venta' ? { saleId: id } : { loanId: id };
+  const subida = await llamarReceiptLink(destino);
   const { ruta, uploadToken } = subida as { ruta: string; uploadToken: string };
 
   const { error: upErr } = await supabase.storage
@@ -128,40 +110,45 @@ export async function shareSalePdfLinkViaWhatsApp(
     });
   if (upErr) throw new Error(`No se pudo guardar el PDF: ${upErr.message}`);
 
-  const enlace = await llamarReceiptLink({ saleId, paso: 'enlace' });
+  const enlace = await llamarReceiptLink({ ...destino, paso: 'enlace' });
   const { url, diasValidez } = enlace as { url: string; diasValidez: number };
 
   const abrioWhatsApp = abrirWhatsApp(
-    mensajeConEnlace(url, diasValidez, companyName),
-    telefonoParaWhatsApp(sale),
+    mensajeConEnlace(tipo, url, diasValidez, companyName),
+    telefonoParaWhatsApp(telefono),
     ventana,
   );
   return { url, diasValidez, abrioWhatsApp };
 }
 
-function mensajeConEnlace(url: string, diasValidez: number, companyName?: string) {
+function mensajeConEnlace(tipo: TipoComprobante, url: string, diasValidez: number, companyName?: string) {
   const negocio = companyName ?? 'nuestro negocio';
-  return (
-    `¡Gracias por su compra en ${negocio}!\n\n` +
-    `Aquí puede descargar su comprobante en PDF:\n${url}\n\n` +
-    `El enlace estará disponible por ${diasValidez} días.`
-  );
+  // A quien recibe un préstamo no se le da las gracias por una compra: el
+  // comprobante que se le manda es su contrato con el calendario de cuotas.
+  const saludo = tipo === 'venta'
+    ? `¡Gracias por su compra en ${negocio}!\n\nAquí puede descargar su comprobante en PDF:`
+    : `Comprobante de su préstamo con ${negocio}.\n\nAquí puede descargarlo en PDF, con el calendario de sus cuotas:`;
+  return `${saludo}\n${url}\n\nEl enlace estará disponible por ${diasValidez} días.`;
 }
 
 /** Reintento manual: el enlace ya está generado y solo falta abrir el chat.
  *  Sirve cuando el navegador bloqueó la pestaña la primera vez. */
-export function abrirWhatsAppConEnlace(
-  sale: Sale,
-  url: string,
-  diasValidez: number,
-  companyName?: string,
-) {
-  abrirWhatsApp(mensajeConEnlace(url, diasValidez, companyName), telefonoParaWhatsApp(sale));
+export function abrirWhatsAppConEnlace(opts: {
+  tipo: TipoComprobante;
+  telefono?: string | null;
+  url: string;
+  diasValidez: number;
+  companyName?: string;
+}) {
+  abrirWhatsApp(
+    mensajeConEnlace(opts.tipo, opts.url, opts.diasValidez, opts.companyName),
+    telefonoParaWhatsApp(opts.telefono),
+  );
 }
 
 /** Llama a la Edge Function y desenreda los dos sitios donde puede venir el
  *  error: el transporte (`error`) y el cuerpo de la respuesta (`data.error`). */
-async function llamarReceiptLink(body: { saleId: string; paso?: 'enlace' }) {
+async function llamarReceiptLink(body: { saleId?: string; loanId?: string; paso?: 'enlace' }) {
   const { data, error } = await supabase.functions.invoke('receipt-link', { body });
   const msg = (data as { error?: string } | null)?.error ?? error?.message;
   if (msg) throw new Error(msg);
@@ -261,4 +248,21 @@ export async function sendReceiptViaResendEmail(
   if (data?.error) {
     throw new Error(data.error);
   }
+}
+
+/** Correo del comprobante del préstamo. Función aparte de la de ventas porque
+ *  el cuerpo del mensaje no se parece: monto prestado, cuota y vencimiento en
+ *  lugar de total facturado y NCF. */
+export async function sendLoanReceiptViaResendEmail(
+  loanId: string,
+  email: string,
+  pdfBase64: string,
+  filename: string,
+): Promise<void> {
+  const { data, error } = await supabase.functions.invoke('send-loan-receipt', {
+    body: { loanId, email, pdfBase64, filename },
+  });
+
+  if (error) throw new Error(error?.message || 'Error al enviar el correo.');
+  if (data?.error) throw new Error(data.error);
 }

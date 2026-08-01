@@ -18,7 +18,7 @@ import { ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from './re
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  shareSalePdfLinkViaWhatsApp,
+  compartirPdfPorWhatsApp,
   abrirPestanaParaWhatsApp,
   abrirWhatsAppConEnlace,
   generateReceiptPdf,
@@ -83,9 +83,14 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
     setSendingLink(true);
     try {
       const pdfBase64 = await generateReceiptPdf(pdfContentRef.current, filename);
-      const { url, diasValidez, abrioWhatsApp } = await shareSalePdfLinkViaWhatsApp(
-        sale.id, pdfBase64, sale, profile.name, ventana,
-      );
+      const { url, diasValidez, abrioWhatsApp } = await compartirPdfPorWhatsApp({
+        tipo: 'venta',
+        id: sale.id,
+        pdfBase64,
+        telefono: sale.customer?.phone,
+        companyName: profile.name,
+        ventana,
+      });
       setEnlace({ url, diasValidez });
       toast({
         title: abrioWhatsApp ? 'WhatsApp abierto con el mensaje listo' : 'Enlace listo',
@@ -340,7 +345,13 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                         variant="outline"
                         size="sm"
                         className="flex-1"
-                        onClick={() => abrirWhatsAppConEnlace(sale, enlace.url, enlace.diasValidez, profile.name)}
+                        onClick={() => abrirWhatsAppConEnlace({
+                          tipo: 'venta',
+                          telefono: sale.customer?.phone,
+                          url: enlace.url,
+                          diasValidez: enlace.diasValidez,
+                          companyName: profile.name,
+                        })}
                       >
                         <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
                         Abrir WhatsApp

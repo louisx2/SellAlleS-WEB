@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import type { CompanyProfile } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToCompanyProfile, companyProfileToRow } from '@/lib/supabase/mappers';
@@ -8,6 +8,10 @@ import { rowToCompanyProfile, companyProfileToRow } from '@/lib/supabase/mappers
 interface CompanyProfileContextType {
   profile: CompanyProfile;
   updateProfile: (profile: CompanyProfile) => void;
+  /** Vuelve a leer la empresa. Lo necesitan las pantallas que escriben columnas
+   *  que no pasan por updateProfile (tasas y capital de préstamos, por ejemplo):
+   *  sin esto el cambio no se ve hasta recargar la página. */
+  reload: () => Promise<void>;
 }
 
 const EMPTY: CompanyProfile = {
@@ -17,6 +21,7 @@ const EMPTY: CompanyProfile = {
   ticketNameDisplay: 'company', linkSlug: '',
   lateFeeRate: 5, defaultInterestRate: 3.5,
   loanLateFeeRate: 5, defaultLoanInterestRate: 5,
+  loanFundEnabled: false, loanFundBlockOverdraft: false,
   loyaltyEnabled: false, loyaltyPurchasesRequired: null, loyaltyRewardDescription: '', loyaltyCouponValidDays: 30,
 };
 
@@ -29,26 +34,25 @@ export function CompanyProfileProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<CompanyProfile>(EMPTY);
   const [companyId, setCompanyId] = useState<string | null>(null);
 
-  useEffect(() => {
-    const targetCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
-    
+  const targetCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+
+  const load = useCallback(async () => {
     if (!targetCompanyId) {
       setProfile(EMPTY);
       setCompanyId(null);
       return;
     }
+    const { data } = await supabase.from('companies').select('*').eq('id', targetCompanyId).maybeSingle();
+    if (data) {
+      setCompanyId(data.id);
+      setProfile(rowToCompanyProfile(data));
+    } else {
+      setProfile(EMPTY);
+      setCompanyId(null);
+    }
+  }, [targetCompanyId]);
 
-    (async () => {
-      const { data } = await supabase.from('companies').select('*').eq('id', targetCompanyId).maybeSingle();
-      if (data) {
-        setCompanyId(data.id);
-        setProfile(rowToCompanyProfile(data));
-      } else {
-        setProfile(EMPTY);
-        setCompanyId(null);
-      }
-    })();
-  }, [appUser?.companyId, appUser?.impersonatedCompanyId]);
+  useEffect(() => { load(); }, [load]);
 
   const updateProfile = (newProfile: CompanyProfile) => {
     setProfile(newProfile);
@@ -58,7 +62,7 @@ export function CompanyProfileProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <CompanyProfileContext.Provider value={{ profile, updateProfile }}>
+    <CompanyProfileContext.Provider value={{ profile, updateProfile, reload: load }}>
       {children}
     </CompanyProfileContext.Provider>
   );
