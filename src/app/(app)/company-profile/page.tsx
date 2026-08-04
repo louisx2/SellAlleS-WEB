@@ -30,6 +30,9 @@ export default function CompanyProfilePage() {
   const [branchPhone, setBranchPhone] = useState('');
   const [branchRnc, setBranchRnc] = useState('');
   const [branchAddress, setBranchAddress] = useState('');
+  const [branchInstagram, setBranchInstagram] = useState('');
+  const [branchFacebook, setBranchFacebook] = useState('');
+  const [branchEmail, setBranchEmail] = useState('');
   const [branchLogoUrl, setBranchLogoUrl] = useState('');
   const [branchTicketLogoUrl, setBranchTicketLogoUrl] = useState('');
   const [branchReceiptFooter, setBranchReceiptFooter] = useState('');
@@ -52,6 +55,9 @@ export default function CompanyProfilePage() {
       setBranchPhone(activeBranch.phone || '');
       setBranchRnc(activeBranch.rnc || '');
       setBranchAddress(activeBranch.address || '');
+      setBranchInstagram(activeBranch.instagram || '');
+      setBranchFacebook(activeBranch.facebook || '');
+      setBranchEmail(activeBranch.email || '');
       setBranchLogoUrl(activeBranch.logoUrl || '');
       setBranchTicketLogoUrl(activeBranch.ticketLogoUrl || '');
       setBranchReceiptFooter(activeBranch.receiptFooter || '');
@@ -59,6 +65,15 @@ export default function CompanyProfilePage() {
   }, [activeBranch]);
 
   const processAndUpload = async (file: File, type: 'logo' | 'ticket') => {
+    const companyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+    if (!companyId) {
+      toast({
+        title: 'Sin empresa activa',
+        description: 'No se pudo determinar la empresa.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const isLogo = type === 'logo';
     if (isLogo) setUploadingLogo(true);
     else setUploadingTicketLogo(true);
@@ -112,7 +127,9 @@ export default function CompanyProfilePage() {
 
       // Si es una sucursal nueva y no tiene id, usamos un UUID aleatorio para la imagen.
       const fileId = activeBranch?.id || crypto.randomUUID();
-      const path = `logos/branch_${fileId}_${isLogo ? 'logo' : 'ticket'}_${Date.now()}.png`;
+      // La ruta TIENE que empezar por el id de la empresa: la policy del bucket
+      // exige que la primera carpeta sea current_company_id().
+      const path = `${companyId}/logos/branch_${fileId}_${isLogo ? 'logo' : 'ticket'}_${Date.now()}.png`;
       const { error: uploadError } = await supabase.storage
         .from('product-images')
         .upload(path, blob, {
@@ -183,6 +200,9 @@ export default function CompanyProfilePage() {
           phone: branchPhone || undefined,
           rnc: branchRnc || undefined,
           address: branchAddress || undefined,
+          instagram: branchInstagram || undefined,
+          facebook: branchFacebook || undefined,
+          email: branchEmail || undefined,
           logoUrl: branchLogoUrl || undefined,
           ticketLogoUrl: branchTicketLogoUrl || undefined,
           receiptFooter: branchReceiptFooter || undefined,
@@ -285,6 +305,41 @@ export default function CompanyProfilePage() {
                       placeholder="Dirección física del punto de venta"
                     />
                   </div>
+
+                  <div className="grid sm:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="branchInstagram">Instagram de la sucursal</Label>
+                      <Input
+                        id="branchInstagram"
+                        value={branchInstagram}
+                        onChange={(e) => setBranchInstagram(e.target.value)}
+                        placeholder="@tusucursal"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="branchFacebook">Facebook de la sucursal</Label>
+                      <Input
+                        id="branchFacebook"
+                        value={branchFacebook}
+                        onChange={(e) => setBranchFacebook(e.target.value)}
+                        placeholder="fb.com/tusucursal"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="branchEmail">Correo de la sucursal</Label>
+                      <Input
+                        id="branchEmail"
+                        type="email"
+                        value={branchEmail}
+                        onChange={(e) => setBranchEmail(e.target.value)}
+                        placeholder="contacto@tusucursal.com"
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Solo van al pie del recibo si en el perfil de la empresa elegiste mostrar los de la
+                    sucursal (o ambos).
+                  </p>
                 </>
               )}
             </CardContent>
@@ -535,6 +590,36 @@ export default function CompanyProfilePage() {
 
               <div className="grid sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="ticketSocialDisplay">Redes y correo en el pie de recibos</Label>
+                  </div>
+                  <Select
+                    value={companyData.ticketSocialDisplay}
+                    onValueChange={(v) =>
+                      setCompanyData((prev) => ({
+                        ...prev,
+                        ticketSocialDisplay: v as CompanyProfile['ticketSocialDisplay'],
+                      }))
+                    }
+                  >
+                    <SelectTrigger id="ticketSocialDisplay">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="company">Solo los de la empresa</SelectItem>
+                      <SelectItem value="branch">Solo los de la sucursal</SelectItem>
+                      <SelectItem value="both">Ambos (empresa y sucursal)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Cada sucursal carga los suyos en Sucursales. Con &quot;solo los de la sucursal&quot;, la
+                    que no cargue nada imprime el recibo sin redes ni correo: no hereda los de aquí.
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="space-y-2">
                   <Label htmlFor="instagram">Instagram</Label>
                   <Input
                     id="instagram"
@@ -552,6 +637,17 @@ export default function CompanyProfilePage() {
                     value={companyData.socialMedia.facebook}
                     onChange={handleSocialChange}
                     placeholder="fb.com/tuempresa"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Correo</Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    value={companyData.email}
+                    onChange={handleCompanyChange}
+                    placeholder="contacto@tuempresa.com"
                   />
                 </div>
               </div>

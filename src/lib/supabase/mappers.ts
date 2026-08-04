@@ -113,6 +113,9 @@ export const rowToBranch = (r: any): Branch => ({
   rnc: r.rnc ?? undefined,
   address: r.address ?? undefined,
   receiptFooter: r.receipt_footer ?? undefined,
+  instagram: r.instagram ?? undefined,
+  facebook: r.facebook ?? undefined,
+  email: r.email ?? undefined,
 });
 export const branchToRow = (b: Partial<Branch>) => ({
   name: b.name,
@@ -125,6 +128,9 @@ export const branchToRow = (b: Partial<Branch>) => ({
   rnc: b.rnc?.trim() || null,
   address: b.address?.trim() || null,
   receipt_footer: b.receiptFooter?.trim() || null,
+  instagram: b.instagram?.trim() || null,
+  facebook: b.facebook?.trim() || null,
+  email: b.email?.trim() || null,
 });
 
 // ---------- Supplier ----------
@@ -246,9 +252,11 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   name: r.name ?? '', phone: r.phone ?? '', rnc: r.rnc ?? '', address: r.address ?? '',
   isFormalized: !!r.is_formalized, ncfEnabled: !!r.ncf_enabled,
   socialMedia: { instagram: r.instagram ?? '', facebook: r.facebook ?? '' },
+  email: r.email ?? '',
   logoUrl: r.logo_url ?? '', ticketLogoUrl: r.ticket_logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
   ticketNameDisplay: (r.ticket_name_display ?? 'company') as CompanyProfile['ticketNameDisplay'],
   headerNameDisplay: (r.header_name_display ?? 'company') as CompanyProfile['headerNameDisplay'],
+  ticketSocialDisplay: (r.ticket_social_display ?? 'company') as CompanyProfile['ticketSocialDisplay'],
   linkSlug: r.link_slug ?? '',
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
@@ -264,9 +272,11 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
 export const companyProfileToRow = (p: Partial<CompanyProfile>) => ({
   name: p.name, phone: p.phone ?? null, rnc: p.rnc ?? null, address: p.address ?? null,
   instagram: p.socialMedia?.instagram ?? null, facebook: p.socialMedia?.facebook ?? null,
+  email: p.email?.trim() || null,
   logo_url: p.logoUrl ?? null, ticket_logo_url: p.ticketLogoUrl ?? null, receipt_footer: p.receiptFooter ?? null,
   ticket_name_display: p.ticketNameDisplay ?? 'company',
   header_name_display: p.headerNameDisplay ?? 'company',
+  ticket_social_display: p.ticketSocialDisplay ?? 'company',
   // Vacío se guarda como null, que es lo que la función interpreta como
   // "derívalo del nombre". Guardar '' rompería el enlace: quedaría //c/.
   link_slug: p.linkSlug?.trim() ? p.linkSlug.trim() : null,

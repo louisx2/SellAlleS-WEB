@@ -44,8 +44,18 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   };
 
   const updateBranch = async (updated: Branch) => {
-    const { error } = await supabase.from('branches').update(branchToRow(updated)).eq('id', updated.id);
+    // Pedimos la fila de vuelta para no dar por bueno un guardado vacío: si RLS
+    // no deja tocar la sucursal, PostgREST responde 204 sin error y la pantalla
+    // decía "guardado" mientras nada cambiaba.
+    const { data, error } = await supabase
+      .from('branches')
+      .update(branchToRow(updated))
+      .eq('id', updated.id)
+      .select('id');
     if (error) throw error;
+    if (!data || data.length === 0) {
+      throw new Error('No se pudo guardar la sucursal: tu usuario no tiene permiso para modificarla.');
+    }
     setBranches((prev) => prev.map((b) => (b.id === updated.id ? updated : b)));
   };
 

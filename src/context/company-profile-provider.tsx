@@ -13,8 +13,8 @@ interface CompanyProfileContextType {
 const EMPTY: CompanyProfile = {
   name: 'SellAlleS', phone: '', rnc: '', address: '',
   isFormalized: false, ncfEnabled: false,
-  socialMedia: { instagram: '', facebook: '' }, logoUrl: '', ticketLogoUrl: '', receiptFooter: '',
-  ticketNameDisplay: 'company', headerNameDisplay: 'company', linkSlug: '',
+  socialMedia: { instagram: '', facebook: '' }, email: '', logoUrl: '', ticketLogoUrl: '', receiptFooter: '',
+  ticketNameDisplay: 'company', headerNameDisplay: 'company', ticketSocialDisplay: 'company', linkSlug: '',
   lateFeeRate: 5, defaultInterestRate: 3.5,
   loanLateFeeRate: 5, defaultLoanInterestRate: 5,
   loyaltyEnabled: false, loyaltyPurchasesRequired: null, loyaltyRewardDescription: '', loyaltyCouponValidDays: 30,

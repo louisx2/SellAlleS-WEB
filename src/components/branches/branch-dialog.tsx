@@ -19,6 +19,7 @@ import { formatPhone } from '@/lib/format';
 import type { Branch } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useBranches } from '@/context/branch-provider';
+import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { Loader2, Upload } from 'lucide-react';
 
@@ -32,6 +33,7 @@ interface BranchDialogProps {
 export function BranchDialog({ branch, children, open: controlledOpen, onOpenChange }: BranchDialogProps) {
   const { toast } = useToast();
   const { addBranch, updateBranch } = useBranches();
+  const { appUser } = useAuth();
   const isEditMode = !!branch;
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -52,6 +54,15 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
   }, [open, branch]);
 
   const processAndUpload = async (file: File, type: 'logo' | 'ticket') => {
+    const companyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+    if (!companyId) {
+      toast({
+        title: 'Sin empresa activa',
+        description: 'No se pudo determinar la empresa.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const isLogo = type === 'logo';
     if (isLogo) setUploadingLogo(true);
     else setUploadingTicketLogo(true);
@@ -105,7 +116,9 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
 
       // Si es una sucursal nueva, usamos un UUID aleatorio para la imagen.
       const fileId = branch?.id || crypto.randomUUID();
-      const filename = `logos/branch_${fileId}_${type}.png`;
+      // La ruta TIENE que empezar por el id de la empresa: la policy del bucket
+      // exige que la primera carpeta sea current_company_id().
+      const filename = `${companyId}/logos/branch_${fileId}_${type}.png`;
 
       const { error } = await supabase.storage
         .from('product-images')
@@ -151,6 +164,9 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
       phone: phone || undefined,
       address: (formData.get('address') as string) || undefined,
       receiptFooter: (formData.get('receiptFooter') as string) || undefined,
+      instagram: (formData.get('instagram') as string) || undefined,
+      facebook: (formData.get('facebook') as string) || undefined,
+      email: (formData.get('email') as string) || undefined,
     };
 
     if (isEditMode && branch) {
@@ -232,6 +248,24 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
                 Pie de recibo
               </Label>
               <Textarea id="receiptFooter" name="receiptFooter" defaultValue={branch?.receiptFooter} className="col-span-3" rows={2} placeholder="El de la empresa" />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="branch-instagram" className="text-right">
+                Instagram
+              </Label>
+              <Input id="branch-instagram" name="instagram" defaultValue={branch?.instagram} className="col-span-3" placeholder="Propio de esta sucursal" />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="branch-facebook" className="text-right">
+                Facebook
+              </Label>
+              <Input id="branch-facebook" name="facebook" defaultValue={branch?.facebook} className="col-span-3" placeholder="Propio de esta sucursal" />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="branch-email" className="text-right">
+                Correo
+              </Label>
+              <Input id="branch-email" name="email" type="email" defaultValue={branch?.email} className="col-span-3" placeholder="Propio de esta sucursal" />
             </div>
 
             <div className="grid grid-cols-4 items-center gap-4">

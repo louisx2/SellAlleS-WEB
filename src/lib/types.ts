@@ -134,6 +134,9 @@ export type Branch = {
   rnc?: string;
   address?: string;
   receiptFooter?: string;
+  instagram?: string;
+  facebook?: string;
+  email?: string;
 };
 
 export type Company = {
@@ -328,6 +331,7 @@ export type CompanyProfile = {
     instagram: string;
     facebook: string;
   };
+  email: string;
   logoUrl: string;
   ticketLogoUrl: string;
   receiptFooter: string;
@@ -335,6 +339,8 @@ export type CompanyProfile = {
   // nombre comercial si lo tiene), o ambos.
   ticketNameDisplay: TicketNameDisplay;
   headerNameDisplay: TicketNameDisplay;
+  // Lo mismo para las redes sociales y el correo que van al pie del ticket.
+  ticketSocialDisplay: TicketNameDisplay;
   // Cómo se ve el negocio en el enlace del comprobante que va por WhatsApp:
   // sellalles.com/<linkSlug>/c/7Kq2Wp. Vacío = se deriva del nombre.
   linkSlug: string;

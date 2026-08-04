@@ -236,11 +236,15 @@ export function ReceiptContent({ sale }: ReceiptProps) {
             </>
         )}
         <p className="text-center mt-3 text-xs font-semibold">{profile.receiptFooter}</p>
-        <div className="text-center text-xs mt-1">
-          {profile.socialMedia.instagram && <span>{profile.socialMedia.instagram}</span>}
-          {profile.socialMedia.instagram && profile.socialMedia.facebook && <span> • </span>}
-          {profile.socialMedia.facebook && <span>{profile.socialMedia.facebook}</span>}
-        </div>
+        {[
+          [profile.socialMedia.instagram, profile.socialMedia.facebook, profile.email],
+          [profile.secondarySocialMedia?.instagram, profile.secondarySocialMedia?.facebook, profile.secondaryEmail],
+        ]
+          .map((datos) => datos.filter(Boolean).join(' • '))
+          .filter(Boolean)
+          .map((linea) => (
+            <div key={linea} className="text-center text-xs mt-1">{linea}</div>
+          ))}
         {showBarcode && (
           <div className="flex flex-col items-center justify-center mt-6 pt-4 border-t border-dashed gap-1">
             {barcodeType === 'code128' ? (
