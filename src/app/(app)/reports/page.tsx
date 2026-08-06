@@ -363,7 +363,21 @@ export default function ReportsDashboardPage() {
               </CardHeader>
             </Card>
           </Link>
-          
+
+          {hasSales && (
+            <Link href="/reports/anulados">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold">Ventas Anuladas</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Motivo, quién anuló y devoluciones</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
         </div>
       </div>
     </div>
