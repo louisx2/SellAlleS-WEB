@@ -79,9 +79,17 @@ export function ReceiptItems({ sale }: ReceiptProps) {
               const price = item.customPrice ?? item.product.price;
               const originalPrice = item.product.price;
               const hasDiscount = item.customPrice !== undefined && item.customPrice < originalPrice;
-              const itemSubtotal = price * item.quantity;
+              // El renglón se imprime en bruto (precio de lista) y la rebaja se
+              // resta aparte: impreso ya rebajado, la línea "Desc." se lee como
+              // una segunda rebaja y el papel no cuadra contra el total.
+              // Un precio manual por encima del de lista no es descuento: ahí el
+              // bruto es lo que se cobró, si no el ticket mostraría de menos.
+              const unitPrice = hasDiscount ? originalPrice : price;
+              const itemGross = unitPrice * item.quantity;
+              // El ITBIS es el que se cobró de verdad: sobre el precio rebajado.
+              const itemCharged = price * item.quantity;
               const itemItbis = item.product.itbis
-                ? (included ? itemSubtotal * ITBIS_RATE / (1 + ITBIS_RATE) : itemSubtotal * ITBIS_RATE)
+                ? (included ? itemCharged * ITBIS_RATE / (1 + ITBIS_RATE) : itemCharged * ITBIS_RATE)
                 : 0;
               const itemDiscountAmount = hasDiscount ? (originalPrice - (item.customPrice ?? 0)) * item.quantity : 0;
 
@@ -89,8 +97,8 @@ export function ReceiptItems({ sale }: ReceiptProps) {
                 <div key={item.cartItemId}>
                   <p>{item.product.name}</p>
                   <div className="flex justify-between pl-2">
-                    <span>{formatQtyCompact(item.quantity, item.product.unit)} x {formatCurrency(price)}</span>
-                    <span>{formatCurrency(itemSubtotal)}</span>
+                    <span>{formatQtyCompact(item.quantity, item.product.unit)} x {formatCurrency(unitPrice)}</span>
+                    <span>{formatCurrency(itemGross)}</span>
                   </div>
                    {hasDiscount && (
                       <div className="flex justify-between text-green-600 pl-2">
@@ -123,6 +131,11 @@ export function ReceiptTotals({ sale }: ReceiptProps) {
     return acc;
   }, 0);
 
+  // sale.subtotal se guarda ya neto de descuentos, así que imprimirlo tal cual
+  // junto a la línea "Descuentos" no cuadra a la vista (7,800 - 75 ≠ 7,800).
+  // El ticket lo muestra en bruto y deja que la resta lleve al total.
+  const grossSubtotal = sale.subtotal + totalDiscount;
+
   const paymentMethodStyles = {
     cash: 'bg-green-100 border-green-600 text-green-800',
     card: 'bg-blue-100 border-blue-600 text-blue-800',
@@ -140,7 +153,7 @@ export function ReceiptTotals({ sale }: ReceiptProps) {
           </div>
           <div className="flex justify-between">
               <span className="uppercase">Subtotal:</span>
-              <span>{formatCurrency(sale.subtotal)}</span>
+              <span>{formatCurrency(grossSubtotal)}</span>
           </div>
           {totalDiscount > 0 && (
               <div className="flex justify-between text-green-600">
