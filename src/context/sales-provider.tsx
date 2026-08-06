@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Sale, PaymentMethod, PaymentResult } from '@/lib/types';
+import type { Sale, PaymentMethod, PaymentResult, RefundMethod } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { rowToSale, saleToRow, rowToPaymentResult } from '@/lib/supabase/mappers';
@@ -23,7 +23,7 @@ interface SalesContextType {
   payCustomerDebt: (customerId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string, reference?: string) => Promise<PaymentResult>;
   /** Anula una venta pagada: emite nota de crédito B04 (si llevó NCF), repone
    *  inventario y registra la salida de caja si se devuelve efectivo. */
-  annulSale: (saleId: string, reason?: string, refundMethod?: PaymentMethod) => Promise<AnnulSaleResult>;
+  annulSale: (saleId: string, reason?: string, refundMethod?: RefundMethod) => Promise<AnnulSaleResult>;
   reload: () => Promise<void>;
   loading: boolean;
 }
@@ -33,7 +33,7 @@ export type AnnulSaleResult = {
   ncf?: string;
   ncfModified?: string;
   total: number;
-  refundMethod: PaymentMethod;
+  refundMethod: RefundMethod;
 };
 
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
@@ -197,7 +197,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
 
   // La anulación completa (NCF B04, inventario, caja, cancelled_at) ocurre en
   // una sola transacción dentro de la base; aquí solo se refresca el estado.
-  const annulSale = async (saleId: string, reason?: string, refundMethod?: PaymentMethod): Promise<AnnulSaleResult> => {
+  const annulSale = async (saleId: string, reason?: string, refundMethod?: RefundMethod): Promise<AnnulSaleResult> => {
     const { data, error } = await supabase.rpc('annul_sale', {
       p_sale_id: saleId,
       p_reason: reason ?? null,

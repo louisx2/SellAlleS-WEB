@@ -16,7 +16,7 @@ import { useSales } from '@/context/sales-provider';
 import { useProducts } from '@/context/product-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency } from '@/lib/utils';
-import type { PaymentMethod, Sale } from '@/lib/types';
+import type { RefundMethod, Sale } from '@/lib/types';
 
 interface AnnulSaleDialogProps {
   sale: Sale;
@@ -24,10 +24,11 @@ interface AnnulSaleDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const METHOD_LABEL: Record<PaymentMethod, string> = {
+const METHOD_LABEL: Record<RefundMethod, string> = {
   cash: 'Efectivo',
   card: 'Tarjeta',
   transfer: 'Transferencia',
+  none: 'Sin devolución de dinero',
 };
 
 // Anulación de una venta pagada: la base emite la nota de crédito B04 (si la
@@ -39,7 +40,9 @@ export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogPro
   const { profile } = useCompanyProfile();
   const { toast } = useToast();
   const [reason, setReason] = useState('');
-  const [refundMethod, setRefundMethod] = useState<PaymentMethod>(
+  // Por defecto el dinero vuelve por donde entró. "Sin devolución" se elige a
+  // propósito: es para la venta facturada por error, que nunca se cobró.
+  const [refundMethod, setRefundMethod] = useState<RefundMethod>(
     sale.paymentMethod === 'card' || sale.paymentMethod === 'transfer' ? sale.paymentMethod : 'cash'
   );
   const [saving, setSaving] = useState(false);
@@ -50,11 +53,14 @@ export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogPro
       const result = await annulSale(sale.id, reason, refundMethod);
       // El stock de los productos vendidos volvió a subir en la base.
       await reloadProducts();
+      const sinDevolucion = result.refundMethod === 'none';
       toast({
         title: 'Venta anulada',
         description: result.ncf
           ? `Nota de crédito ${result.ncf} emitida por ${formatCurrency(result.total)}.`
-          : `Venta anulada por ${formatCurrency(result.total)}. El inventario fue repuesto.`,
+            + (sinDevolucion ? ' No se devolvió dinero.' : '')
+          : `Venta anulada por ${formatCurrency(result.total)}. El inventario fue repuesto`
+            + (sinDevolucion ? ', sin devolución de dinero.' : '.'),
       });
       onOpenChange(false);
     } catch (error: any) {
@@ -91,10 +97,10 @@ export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogPro
 
           <div className="space-y-2">
             <Label>¿Cómo se devuelve el dinero?</Label>
-            <Select value={refundMethod} onValueChange={(v: PaymentMethod) => setRefundMethod(v)}>
+            <Select value={refundMethod} onValueChange={(v: RefundMethod) => setRefundMethod(v)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                {(Object.keys(METHOD_LABEL) as PaymentMethod[]).map((m) => (
+                {(Object.keys(METHOD_LABEL) as RefundMethod[]).map((m) => (
                   <SelectItem key={m} value={m}>{METHOD_LABEL[m]}</SelectItem>
                 ))}
               </SelectContent>
@@ -102,6 +108,12 @@ export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogPro
             {refundMethod === 'cash' && (
               <p className="text-xs text-muted-foreground">
                 Con el módulo de Caja activo, la devolución sale de la caja abierta de la sucursal.
+              </p>
+            )}
+            {refundMethod === 'none' && (
+              <p className="text-xs text-muted-foreground">
+                Para la venta que se facturó por error y nunca se cobró (por ejemplo, cobrada dos
+                veces por un doble clic). Se repone el inventario, pero no sale dinero de la caja.
               </p>
             )}
           </div>
