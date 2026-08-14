@@ -54,8 +54,29 @@ const emptyForm = {
   paidUntil: '',
 };
 
+const aYyyyMmDd = (d: Date) => {
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+/** Hoy en la zona del navegador, para comparar contra un <input type="date">. */
+const hoyLocal = () => aYyyyMmDd(new Date());
+
 /** timestamptz/date de la base -> yyyy-mm-dd para un <input type="date">. */
-const aInputFecha = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
+const aInputFecha = (v?: string | null) => {
+  if (!v) return '';
+  const s = String(v);
+  // Las columnas `date` (paid_until) ya vienen en yyyy-mm-dd. Pasarlas por Date
+  // las correría un día: JS las lee como medianoche UTC, que en RD es la tarde
+  // anterior.
+  if (!/[T ]/.test(s)) return s.slice(0, 10);
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s.slice(0, 10);
+  // Y las timestamptz hay que verlas en hora LOCAL. Cortar el ISO daba la fecha
+  // UTC, y como la prueba se guarda a las 23:59:59 de RD (03:59:59 UTC del día
+  // siguiente), el campo mostraba un día de más y al guardar se corría solo.
+  return aYyyyMmDd(d);
+};
 
 export default function CompaniesManagementPage() {
   const { appUser, setImpersonatedCompany, setActiveBranch } = useAuth();
@@ -229,6 +250,19 @@ export default function CompaniesManagementPage() {
   const handleSave = async () => {
     if (!form.name.trim()) {
       toast({ title: 'Falta el nombre', description: 'Escribe el nombre de la empresa.', variant: 'destructive' });
+      return;
+    }
+
+    // Una prueba que vence hoy o antes deja la empresa en solo-lectura casi de
+    // inmediato, y el barrido de la mañana siguiente le manda el correo de
+    // "tu prueba terminó". Pasó con dos clientes que se dieron de alta de noche
+    // con la fecha del mismo día. Vacío = la base pone la duración por defecto.
+    if (!editingId && form.status === 'trial' && form.trialEndsAt && form.trialEndsAt <= hoyLocal()) {
+      toast({
+        title: 'Revisa la fecha de prueba',
+        description: 'Esa prueba vencería hoy mismo: la empresa entraría en solo-lectura enseguida y recibiría el correo de prueba terminada. Déjala vacía para usar la duración por defecto.',
+        variant: 'destructive',
+      });
       return;
     }
 
