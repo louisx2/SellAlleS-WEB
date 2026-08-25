@@ -52,7 +52,10 @@ export const productToRow = (p: Partial<Product>) => ({
   modification_date: p.modificationDate ?? null,
   wholesale_price: p.wholesalePrice ?? null,
   wholesale_min_quantity: p.wholesaleMinQuantity ?? null,
-  branch_id: p.branchId ?? null,
+  // branch_id es la identidad del artículo, no un campo del formulario. Solo se
+  // envía cuando quien llama lo aporta (alta e importación). Mandarlo como null
+  // en una edición rompía TODA edición: la columna es NOT NULL.
+  ...(p.branchId !== undefined ? { branch_id: p.branchId } : {}),
 });
 
 // ---------- Product Category ----------
@@ -108,6 +111,7 @@ export const rowToBranch = (r: any): Branch => ({
   itbisIncluded: !!r.itbis_included,
   logoUrl: r.logo_url ?? undefined,
   ticketLogoUrl: r.ticket_logo_url ?? undefined,
+  inheritsCompanyProfile: r.inherits_company_profile ?? true,
   displayName: r.display_name ?? undefined,
   phone: r.phone ?? undefined,
   rnc: r.rnc ?? undefined,
@@ -116,6 +120,7 @@ export const rowToBranch = (r: any): Branch => ({
   instagram: r.instagram ?? undefined,
   facebook: r.facebook ?? undefined,
   email: r.email ?? undefined,
+  cajaEnabled: r.caja_enabled ?? false,
 });
 export const branchToRow = (b: Partial<Branch>) => ({
   name: b.name,
@@ -123,6 +128,7 @@ export const branchToRow = (b: Partial<Branch>) => ({
   itbis_included: b.itbisIncluded ?? false,
   logo_url: b.logoUrl ?? null,
   ticket_logo_url: b.ticketLogoUrl ?? null,
+  inherits_company_profile: b.inheritsCompanyProfile ?? true,
   display_name: b.displayName?.trim() || null,
   phone: b.phone?.trim() || null,
   rnc: b.rnc?.trim() || null,
@@ -131,6 +137,7 @@ export const branchToRow = (b: Partial<Branch>) => ({
   instagram: b.instagram?.trim() || null,
   facebook: b.facebook?.trim() || null,
   email: b.email?.trim() || null,
+  caja_enabled: b.cajaEnabled ?? false,
 });
 
 // ---------- Supplier ----------
@@ -289,6 +296,9 @@ const rowToCartItem = (i: any): CartItem => ({
   cartItemId: i.id,
   quantity: Number(i.quantity),
   customPrice: i.custom_price != null ? Number(i.custom_price) : undefined,
+  // Costo real de esta venta. null (ventas viejas, anteriores a la columna) se
+  // deja en undefined para distinguirlo de un costo que de verdad era 0.
+  cost: i.cost != null ? Number(i.cost) : undefined,
   product: {
     id: i.product_id ?? '', name: i.product_name, price: Number(i.price), cost: 0,
     itbis: !!i.itbis, image: '', stock: 0, code: '', unit: normalizeUnitCode(i.unit),

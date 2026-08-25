@@ -15,10 +15,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Switch } from '@/components/ui/switch';
 import { formatPhone } from '@/lib/format';
 import type { Branch } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useBranches } from '@/context/branch-provider';
+import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useModules } from '@/context/modules-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { Loader2, Upload } from 'lucide-react';
@@ -33,7 +37,9 @@ interface BranchDialogProps {
 export function BranchDialog({ branch, children, open: controlledOpen, onOpenChange }: BranchDialogProps) {
   const { toast } = useToast();
   const { addBranch, updateBranch } = useBranches();
+  const { profile } = useCompanyProfile();
   const { appUser } = useAuth();
+  const { isModuleEnabled } = useModules();
   const isEditMode = !!branch;
   const [internalOpen, setInternalOpen] = useState(false);
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen;
@@ -44,14 +50,40 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
   const [phone, setPhone] = useState(branch?.phone || '');
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingTicketLogo, setUploadingTicketLogo] = useState(false);
+  // Sucursal nueva: se pregunta, y arranca en "datos propios" para que nadie
+  // se lleve por accidente la marca de otra sucursal. Al editar, lo que ya
+  // tenga guardado.
+  const [hereda, setHereda] = useState(branch ? branch.inheritsCompanyProfile !== false : false);
+  // Caja: el módulo dice si la empresa la ve, esto si ESTA sucursal la exige.
+  // Arranca apagado en las nuevas, igual que las que ya existían.
+  const [usaCaja, setUsaCaja] = useState(branch?.cajaEnabled ?? false);
 
   useEffect(() => {
     if (open) {
       setLogoUrl(branch?.logoUrl || '');
       setTicketLogoUrl(branch?.ticketLogoUrl || '');
       setPhone(branch?.phone || '');
+      setHereda(branch ? branch.inheritsCompanyProfile !== false : false);
+      setUsaCaja(branch?.cajaEnabled ?? false);
     }
   }, [open, branch]);
+
+  // El interruptor de caja solo tiene sentido si la empresa tiene el módulo
+  // encendido; si no, se esconde para no ofrecer algo que no haría nada.
+  const cajaDisponible = isModuleEnabled('caja');
+
+  // Lo que se imprimiría si hereda, para que la decisión no sea a ciegas: el
+  // perfil de la empresa suele traer los datos de la primera sucursal.
+  const datosDeLaEmpresa = [
+    profile.phone,
+    profile.address,
+    profile.socialMedia?.instagram,
+    profile.socialMedia?.facebook,
+    profile.email,
+  ]
+    .map((d) => d?.trim())
+    .filter(Boolean)
+    .join(' • ');
 
   const processAndUpload = async (file: File, type: 'logo' | 'ticket') => {
     const companyId = appUser?.impersonatedCompanyId || appUser?.companyId;
@@ -159,7 +191,10 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
       isActive: branch?.isActive ?? true,
       logoUrl: logoUrl || undefined,
       ticketLogoUrl: ticketLogoUrl || undefined,
-      // Perfil del ticket: vacío = hereda del perfil de la empresa.
+      // Perfil del ticket: vacío = hereda del perfil de la empresa, salvo que
+      // la sucursal se haya marcado como "datos propios".
+      inheritsCompanyProfile: hereda,
+      cajaEnabled: usaCaja,
       displayName: (formData.get('displayName') as string) || undefined,
       phone: phone || undefined,
       address: (formData.get('address') as string) || undefined,
@@ -212,11 +247,53 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
 
 
 
-            <div className="border-t pt-3">
+            {cajaDisponible && (
+              <div className="border-t pt-3">
+                <div className="flex items-start justify-between gap-4">
+                  <Label htmlFor="branch-caja" className="font-normal leading-snug">
+                    Usa caja
+                    <span className="block text-xs text-muted-foreground">
+                      Esta sucursal tendrá que abrir caja antes de cobrar en efectivo. Las demás
+                      sucursales no se ven afectadas: cada una lo decide por su cuenta.
+                    </span>
+                  </Label>
+                  <Switch id="branch-caja" checked={usaCaja} onCheckedChange={setUsaCaja} />
+                </div>
+              </div>
+            )}
+
+            <div className="border-t pt-3 space-y-2">
               <p className="text-sm font-medium">Perfil del ticket</p>
               <p className="text-xs text-muted-foreground">
-                Datos que salen impresos en los tickets de esta sucursal. Si dejas un campo vacío, se usa el del perfil de la empresa.
+                Datos que salen impresos en los tickets de esta sucursal. Puedes dejarlos vacíos y llenarlos
+                después; solo el nombre y la ubicación son obligatorios.
               </p>
+              <RadioGroup
+                value={hereda ? 'empresa' : 'propios'}
+                onValueChange={(v) => setHereda(v === 'empresa')}
+                className="gap-2 pt-1"
+              >
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem value="propios" id="perfil-propios" className="mt-0.5" />
+                  <Label htmlFor="perfil-propios" className="font-normal leading-snug">
+                    Datos propios de esta sucursal
+                    <span className="block text-xs text-muted-foreground">
+                      Lo que dejes vacío se imprime vacío hasta que lo llenes. Nunca sale la marca de otra sucursal.
+                    </span>
+                  </Label>
+                </div>
+                <div className="flex items-start gap-2">
+                  <RadioGroupItem value="empresa" id="perfil-empresa" className="mt-0.5" />
+                  <Label htmlFor="perfil-empresa" className="font-normal leading-snug">
+                    Heredar los de la empresa
+                    <span className="block text-xs text-muted-foreground">
+                      {datosDeLaEmpresa
+                        ? `Lo vacío se llena con: ${datosDeLaEmpresa}`
+                        : 'El perfil de la empresa no tiene datos de contacto cargados.'}
+                    </span>
+                  </Label>
+                </div>
+              </RadioGroup>
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="displayName" className="text-right">
@@ -241,31 +318,31 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
               <Label htmlFor="branch-address" className="text-right">
                 Dirección
               </Label>
-              <Input id="branch-address" name="address" defaultValue={branch?.address} className="col-span-3" placeholder="La de la empresa" />
+              <Input id="branch-address" name="address" defaultValue={branch?.address} className="col-span-3" placeholder={hereda ? 'La de la empresa' : 'Vacío: no se imprime'} />
             </div>
             <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="receiptFooter" className="text-right pt-2">
                 Pie de recibo
               </Label>
-              <Textarea id="receiptFooter" name="receiptFooter" defaultValue={branch?.receiptFooter} className="col-span-3" rows={2} placeholder="El de la empresa" />
+              <Textarea id="receiptFooter" name="receiptFooter" defaultValue={branch?.receiptFooter} className="col-span-3" rows={2} placeholder={hereda ? 'El de la empresa' : 'Vacío: no se imprime'} />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="branch-instagram" className="text-right">
                 Instagram
               </Label>
-              <Input id="branch-instagram" name="instagram" defaultValue={branch?.instagram} className="col-span-3" placeholder="Propio de esta sucursal" />
+              <Input id="branch-instagram" name="instagram" defaultValue={branch?.instagram} className="col-span-3" placeholder={hereda ? 'El de la empresa' : 'Vacío: no se imprime'} />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="branch-facebook" className="text-right">
                 Facebook
               </Label>
-              <Input id="branch-facebook" name="facebook" defaultValue={branch?.facebook} className="col-span-3" placeholder="Propio de esta sucursal" />
+              <Input id="branch-facebook" name="facebook" defaultValue={branch?.facebook} className="col-span-3" placeholder={hereda ? 'El de la empresa' : 'Vacío: no se imprime'} />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="branch-email" className="text-right">
                 Correo
               </Label>
-              <Input id="branch-email" name="email" type="email" defaultValue={branch?.email} className="col-span-3" placeholder="Propio de esta sucursal" />
+              <Input id="branch-email" name="email" type="email" defaultValue={branch?.email} className="col-span-3" placeholder={hereda ? 'El de la empresa' : 'Vacío: no se imprime'} />
             </div>
 
             <div className="grid grid-cols-4 items-center gap-4">
