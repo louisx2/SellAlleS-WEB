@@ -32,7 +32,7 @@ export interface AppModule {
 
 export const APP_MODULES: AppModule[] = [
   { key: 'pos',        label: 'Punto de Venta',     description: 'Carritos, cobro y recibos.',                          defaultEnabled: true },
-  { key: 'sales',      label: 'Historial de Ventas', description: 'Listado y detalle de ventas realizadas.',            defaultEnabled: true },
+  { key: 'sales',      label: 'Movimientos',        description: 'Listado y detalle de las ventas, incluidas las anuladas, a crédito y financiadas.', defaultEnabled: true },
   { key: 'quotes',     label: 'Cotizaciones',       description: 'Crear cotizaciones y convertirlas en ventas.',        defaultEnabled: true },
   { key: 'credit',     label: 'Cuentas por Cobrar', description: 'Ventas a crédito y abonos de clientes.',              defaultEnabled: true },
   { key: 'financing',  label: 'Financiamiento',     description: 'Planes de cuotas con interés y mora.',                defaultEnabled: true },
