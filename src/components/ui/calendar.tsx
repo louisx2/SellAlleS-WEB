@@ -9,21 +9,41 @@ import { buttonVariants } from "@/components/ui/button"
 
 export type CalendarProps = React.ComponentProps<typeof DayPicker>
 
+const AÑO_ACTUAL = new Date().getFullYear()
+
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
+  // Mes y año como listas desplegables, además de las flechas. Con solo las
+  // flechas hay que dar un clic por mes: buscar un rango de hace dos años eran
+  // decenas de clics. Se pueden sobrescribir desde quien use el componente.
+  captionLayout = "dropdown-buttons",
+  fromYear = AÑO_ACTUAL - 15,
+  toYear = AÑO_ACTUAL + 1,
   ...props
 }: CalendarProps) {
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
+      captionLayout={captionLayout}
+      fromYear={fromYear}
+      toYear={toYear}
       className={cn("p-3", className)}
       classNames={{
         months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
         month: "space-y-4",
         caption: "flex justify-center pt-1 relative items-center",
         caption_label: "text-sm font-medium",
+        // El <select> va transparente encima de la etiqueta visible: se ve el
+        // texto del mes/año pero el clic abre la lista nativa del sistema.
+        caption_dropdowns: "flex justify-center gap-1",
+        dropdown: "absolute inset-0 h-full w-full cursor-pointer opacity-0",
+        dropdown_month:
+          "relative inline-flex items-center rounded-md border border-input bg-background px-2 py-1 text-sm font-medium hover:bg-accent",
+        dropdown_year:
+          "relative inline-flex items-center rounded-md border border-input bg-background px-2 py-1 text-sm font-medium hover:bg-accent",
+        vhidden: "sr-only",
         nav: "space-x-1 flex items-center",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),

@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/utils';
 import { formatQty } from '@/lib/units';
+import type { CartItem } from '@/lib/types';
 import { useSales } from '@/context/sales-provider';
 import { useExpenses } from '@/context/expense-provider';
 import { useProducts } from '@/context/product-provider';
@@ -53,6 +54,15 @@ export default function GananciasReportPage() {
     });
     return map;
   }, [allProducts]);
+
+  // Costo de una línea vendida: manda el que quedó congelado en la venta. Solo
+  // si la línea no lo trae (ventas anteriores a esa columna) se recurre al costo
+  // actual del catálogo — que además solo tiene productos activos, así que un
+  // producto archivado o borrado caería en 0 y regalaría margen.
+  const costoDeLinea = React.useCallback(
+    (item: CartItem) => item.cost ?? productCostMap.get(item.product.id) ?? 0,
+    [productCostMap]
+  );
 
   // Filtrado de Ventas por Sucursal y Fecha
   const filteredSales = React.useMemo(() => {
@@ -118,8 +128,7 @@ export default function GananciasReportPage() {
     filteredSales.forEach((sale) => {
       subtotalRevenue += sale.subtotal;
       (sale.items ?? []).forEach((item) => {
-        const productCost = productCostMap.get(item.product.id) || 0;
-        totalCogs += item.quantity * productCost;
+        totalCogs += item.quantity * costoDeLinea(item);
       });
     });
 
@@ -136,7 +145,7 @@ export default function GananciasReportPage() {
       netProfit,
       margin: netMarginPercent,
     };
-  }, [filteredSales, filteredExpenses, productCostMap]);
+  }, [filteredSales, filteredExpenses, costoDeLinea]);
 
   // --- Agrupación para el Gráfico ---
   const chartData = React.useMemo(() => {
@@ -151,8 +160,7 @@ export default function GananciasReportPage() {
       
       let saleCogs = 0;
       (sale.items ?? []).forEach((item) => {
-        const cost = productCostMap.get(item.product.id) || 0;
-        saleCogs += item.quantity * cost;
+        saleCogs += item.quantity * costoDeLinea(item);
       });
       // Ganancia bruta diaria estimada
       dailyData[day].Ganancia += (sale.subtotal - saleCogs);
@@ -170,7 +178,7 @@ export default function GananciasReportPage() {
 
     // Retornamos ordenado por fecha aproximada
     return Object.values(dailyData);
-  }, [filteredSales, filteredExpenses, productCostMap]);
+  }, [filteredSales, filteredExpenses, costoDeLinea]);
 
   // --- Rentabilidad por Producto ---
   const productProfitability = React.useMemo(() => {
@@ -185,9 +193,11 @@ export default function GananciasReportPage() {
 
     filteredSales.forEach((sale) => {
       (sale.items ?? []).forEach((item) => {
-        const pId = item.product.id;
+        // Las líneas de productos ya borrados no tienen product_id: se agrupan
+        // por nombre para que no caigan todas juntas bajo una sola fila.
+        const pId = item.product.id || `sin-id:${item.product.name}`;
         const pName = item.product.name;
-        const pCost = productCostMap.get(pId) || 0;
+        const pCost = costoDeLinea(item);
         const itemPrice = item.customPrice ?? item.product.price;
         const itemRevenue = item.quantity * itemPrice;
         const itemCostTotal = item.quantity * pCost;
@@ -213,7 +223,7 @@ export default function GananciasReportPage() {
     });
 
     return Object.values(productStats).sort((a, b) => b.profit - a.profit);
-  }, [filteredSales, productCostMap]);
+  }, [filteredSales, costoDeLinea]);
 
   return (
     <div className="space-y-6">

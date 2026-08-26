@@ -14,10 +14,13 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn, formatCurrency } from '@/lib/utils';
 import {
   Calendar as CalendarIcon, DollarSign, Hash, Receipt, Loader2,
-  Package, Users2, TicketPercent, Ban, Store, Wallet,
+  Package, Users2, TicketPercent, Ban, Store, Wallet, SlidersHorizontal,
 } from 'lucide-react';
-import { SalesChart } from '@/components/reports/sales-chart';
+import { SalesChart, TIPOS_GRAFICO, type TipoGrafico } from '@/components/reports/sales-chart';
 import { RecentSales } from '@/components/reports/recent-sales';
+import { ReceiptDialog } from '@/components/pos/receipt-dialog';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
@@ -55,6 +58,29 @@ export default function SalesSummaryReportPage() {
   const [selectedBranch, setSelectedBranch] = React.useState('all');
   const [todas, setTodas] = React.useState<Sale[]>([]);
   const [loading, setLoading] = React.useState(true);
+  // Venta cuyo ticket se está mirando, elegida en "Ventas recientes".
+  const [ventaVista, setVentaVista] = React.useState<Sale | null>(null);
+
+  // Preferencias del gráfico. Se leen en un efecto y no en el useState inicial
+  // porque el export estático renderiza sin localStorage.
+  const [tipoGrafico, setTipoGrafico] = React.useState<TipoGrafico>('barras');
+  const [rejilla, setRejilla] = React.useState(false);
+  React.useEffect(() => {
+    const guardado = window.localStorage.getItem('resumen-ventas-grafico');
+    if (!guardado) return;
+    try {
+      const { tipo, rejilla: r } = JSON.parse(guardado) as { tipo?: TipoGrafico; rejilla?: boolean };
+      if (tipo && TIPOS_GRAFICO.some((t) => t.valor === tipo)) setTipoGrafico(tipo);
+      if (typeof r === 'boolean') setRejilla(r);
+    } catch {
+      // Preferencia corrupta: se ignora y se queda el gráfico por defecto.
+    }
+  }, []);
+  const guardarPreferencia = (tipo: TipoGrafico, r: boolean) => {
+    setTipoGrafico(tipo);
+    setRejilla(r);
+    window.localStorage.setItem('resumen-ventas-grafico', JSON.stringify({ tipo, rejilla: r }));
+  };
 
   const esAdmin = appUser?.role === 'admin';
 
@@ -282,12 +308,46 @@ export default function SalesSummaryReportPage() {
 
           <div className="mt-8 grid gap-8 md:grid-cols-2 lg:grid-cols-7">
             <Card className="lg:col-span-4">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0">
                 <CardTitle>Ventas por día</CardTitle>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="outline" size="sm" title="Personalizar el gráfico">
+                      <SlidersHorizontal className="mr-2 h-4 w-4" />
+                      Personalizar
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-56 space-y-3">
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium">Tipo de gráfico</p>
+                      <div className="grid gap-1">
+                        {TIPOS_GRAFICO.map((t) => (
+                          <Button
+                            key={t.valor}
+                            variant={tipoGrafico === t.valor ? 'default' : 'ghost'}
+                            size="sm"
+                            className="justify-start"
+                            onClick={() => guardarPreferencia(t.valor, rejilla)}
+                          >
+                            {t.etiqueta}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between border-t pt-3">
+                      <Label htmlFor="rejilla" className="text-sm font-normal">Rejilla de fondo</Label>
+                      <Switch
+                        id="rejilla"
+                        checked={rejilla}
+                        onCheckedChange={(v) => guardarPreferencia(tipoGrafico, v)}
+                      />
+                    </div>
+                  </PopoverContent>
+                </Popover>
               </CardHeader>
               <CardContent>
                 {porDia.length > 0 ? (
-                  <SalesChart data={porDia} />
+                  <SalesChart data={porDia} tipo={tipoGrafico} rejilla={rejilla} />
                 ) : (
                   <p className="pt-8 text-center text-sm text-muted-foreground">No hay ventas en este rango.</p>
                 )}
@@ -296,10 +356,11 @@ export default function SalesSummaryReportPage() {
             <Card className="lg:col-span-3">
               <CardHeader>
                 <CardTitle>Ventas recientes</CardTitle>
+                <CardDescription>Haz clic en una para ver su ticket.</CardDescription>
               </CardHeader>
               <CardContent>
                 {ventas.length > 0 ? (
-                  <RecentSales sales={ventas.slice(0, 5)} />
+                  <RecentSales sales={ventas.slice(0, 5)} onSelect={setVentaVista} />
                 ) : (
                   <p className="pt-8 text-center text-sm text-muted-foreground">No hay ventas en este rango.</p>
                 )}
@@ -379,6 +440,14 @@ export default function SalesSummaryReportPage() {
           )}
         </>
       )}
+
+      {/* El ticket se arma con la venta que ya tenemos en memoria, no con el
+          provider: desde aquí el admin puede estar viendo otra sucursal. */}
+      <ReceiptDialog
+        sale={ventaVista}
+        isOpen={!!ventaVista}
+        onOpenChange={(abierto) => { if (!abierto) setVentaVista(null); }}
+      />
     </div>
   );
 }

@@ -189,6 +189,36 @@ function medidasDelRecibo(element: HTMLElement, canvas: HTMLCanvasElement) {
   };
 }
 
+/** Deja el clon que usa html2canvas en un sitio donde medirlo y pintarlo dé lo
+ *  mismo.
+ *
+ *  html2canvas no fotografía la pantalla: copia el documento a un iframe, ahí
+ *  mide el recibo y ahí lo pinta. Si entre medir y pintar el recibo cambia de
+ *  tamaño o de sitio, el recorte no cae donde debe y el PDF sale cortado.
+ *
+ *  Eso es justo lo que pasaba: el recibo del que se saca el PDF vive dentro del
+ *  diálogo, que entra con una animación de escala (`zoom-in-95`), y en el clon
+ *  esa animación vuelve a empezar. Encima el recibo está aparcado a -9999px del
+ *  origen, así que la diferencia de escala se multiplica por esa distancia:
+ *  milésimas se convierten en decenas de píxeles. Al cliente le llegaba la
+ *  factura sin el principio de cada línea ("ECIBO DE VENTA", "TAL:").
+ *
+ *  Aquí se le quitan al clon las transformaciones y animaciones de los
+ *  ancestros, y se trae el recibo al origen para que ya no haya distancia que
+ *  multiplicar. El clon se tira a la basura al terminar: nada de esto toca lo
+ *  que se ve en pantalla. */
+function prepararClonParaMedir(_documento: Document, clon: HTMLElement) {
+  for (let padre = clon.parentElement; padre; padre = padre.parentElement) {
+    padre.style.transform = 'none';
+    padre.style.animation = 'none';
+    padre.style.transition = 'none';
+    // Solo el escondite fuera de pantalla, que se posiciona por estilo en
+    // línea. Los ancestros colocados por clases se dejan como están.
+    if (padre.style.left) padre.style.left = '0px';
+    if (padre.style.top) padre.style.top = '0px';
+  }
+}
+
 /** Rasteriza el recibo y arma el PDF a su medida.
  *
  *  Lo comparten el envío y la descarga: antes cada uno hacía su propia versión
@@ -205,6 +235,7 @@ async function renderizarRecibo(element: HTMLElement) {
     scale: 3,
     useCORS: true,
     backgroundColor: '#ffffff',
+    onclone: prepararClonParaMedir,
   });
 
   const imgData = canvas.toDataURL('image/jpeg', 0.9);
