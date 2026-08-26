@@ -35,7 +35,7 @@ export function getRoleColumns({ onEdit, onDelete, isSuperAdmin }: RoleColumnsAc
       id: 'actions',
       cell: ({ row }) => (
         <div className="flex justify-end gap-1">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(row.original)} title={row.original.isSystem && !isSuperAdmin ? 'Ver permisos' : 'Editar'}>
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(row.original)} title="Editar">
             <Pencil className="h-4 w-4" />
           </Button>
           {!row.original.isSystem && (

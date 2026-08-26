@@ -25,6 +25,7 @@ import { FinancingDialog } from './financing-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '../ui/separator';
 import { Textarea } from '../ui/textarea';
+import Link from 'next/link';
 import { useAuth } from '@/context/auth-provider';
 import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
@@ -43,16 +44,19 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const { customers, reload: reloadCustomers } = useCustomers();
   const { appUser } = useAuth();
   const { isModuleEnabled } = useModules();
-  const { isOpen: isCajaOpen } = useCaja();
+  const { isOpen: isCajaOpen, cajaRequired } = useCaja();
   // Los métodos de venta a plazo solo se ofrecen si la empresa tiene el módulo
   // activo (se configura en Plataforma → Módulos). Mantiene el checkout
   // consistente con lo que aparece en el menú.
   const creditEnabled = isModuleEnabled('credit');
   const financingEnabled = isModuleEnabled('financing');
-  // Si el módulo de caja está activo, no se puede cobrar en efectivo sin una
-  // caja abierta en la sucursal (el bloqueo real lo hace la base; esto es el
-  // aviso inmediato en pantalla).
-  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
+  // Si ESTA sucursal usa caja, no se puede cobrar en efectivo sin una caja
+  // abierta (el bloqueo real lo hace la base; esto es el aviso inmediato en
+  // pantalla). Ojo: `cajaRequired` mira el módulo de la empresa Y la bandera
+  // de la sucursal, igual que el trigger. Con solo el módulo, una sucursal
+  // que no usa caja se quedaba sin poder cobrar en efectivo y sin menú de
+  // Caja donde abrir una.
+  const cashBlocked = cajaRequired && !isCajaOpen;
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer' | 'credit' | 'financing'>('cash');
   const [amountPaid, setAmountPaid] = useState<number | string>('');
   const [paymentReference, setPaymentReference] = useState('');
@@ -310,7 +314,11 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                       <p className="text-xs text-destructive mt-2">Debe seleccionar un cliente para vender a crédito o financiar.</p>
                   )}
                   {cashBlocked && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">No hay una caja abierta en esta sucursal. Abre caja para poder cobrar en efectivo.</p>
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                        No hay una caja abierta en esta sucursal.{' '}
+                        <Link href="/caja" className="underline font-medium">Abre caja</Link>{' '}
+                        para poder cobrar en efectivo.
+                      </p>
                   )}
                 </div>
 

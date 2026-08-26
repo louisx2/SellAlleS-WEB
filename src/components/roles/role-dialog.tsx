@@ -12,10 +12,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { roleToRow } from '@/lib/supabase/mappers';
-import { PERMISSION_ACTIONS, PERMISSION_RESOURCES, RESOURCE_MODULE, REPORT_ITEMS } from '@/lib/permissions';
+import {
+  PERMISSION_ACTIONS, PERMISSION_RESOURCES, RESOURCE_MODULE, REPORT_ITEMS,
+  isMinimumPermission, withSystemRoleMinimums,
+} from '@/lib/permissions';
 import type { ModuleKey } from '@/lib/modules';
 import type { PermissionAction, PermissionResource, Role, RolePermissions } from '@/lib/types';
 
@@ -35,14 +37,14 @@ const emptyPermissions: RolePermissions = {};
 
 export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isModuleEnabled }: RoleDialogProps) {
   const { toast } = useToast();
-  const { appUser } = useAuth();
   const isEditMode = !!role;
   const isSystem = !!role?.isSystem;
   // El nombre/clave de Administrador/Cajero son su identidad, siempre fijos.
-  // Sus permisos ahora SÍ controlan acceso real, así que un super admin (y
-  // solo un super admin) puede editarlos para cualquier empresa.
-  const isSuperAdmin = !!appUser?.isSuperAdmin;
-  const permissionsLocked = isSystem && !isSuperAdmin;
+  // Sus permisos SÍ controlan acceso real, y quien decide qué hace su gente es
+  // el dueño del negocio: el admin de la empresa los edita igual que el super
+  // admin. Lo que no puede es dejarlos sin lo mínimo para trabajar — de eso se
+  // encarga SYSTEM_ROLE_MIN_PERMISSIONS, que va marcado y desactivado.
+
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -56,16 +58,22 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
     setPermissions(role?.permissions ?? {});
   }, [open, role]);
 
+  // Un recurso se ofrece si su módulo está encendido para la empresa. La
+  // excepción son los que el rol YA tiene concedidos: esconder un permiso
+  // vigente lo deja imposible de quitar y hace creer que el rol no lo tiene
+  // (es lo que pasaba con Caja al apagar el módulo).
   const visibleResources = useMemo(
     () => PERMISSION_RESOURCES.filter((r) => {
       const mod = RESOURCE_MODULE[r.key];
-      return !mod || isModuleEnabled(mod);
+      if (!mod || isModuleEnabled(mod)) return true;
+      return (permissions[r.key]?.length ?? 0) > 0;
     }),
-    [isModuleEnabled]
+    [isModuleEnabled, permissions]
   );
   const showReportsTab = visibleResources.some((r) => r.key === 'reports');
 
   const toggle = (resource: PermissionResource, action: PermissionAction, checked: boolean) => {
+    if (isMinimumPermission(isSystem, resource, action)) return;
     setPermissions((prev) => {
       const current = new Set(prev[resource] ?? []);
       if (checked) current.add(action); else current.delete(action);
@@ -88,6 +96,7 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
     setPermissions((prev) => {
       const newPerms = { ...prev };
       visibleResources.forEach((r) => {
+        if (isMinimumPermission(isSystem, r.key, action)) return;
         const current = new Set(newPerms[r.key] ?? []);
         if (checked) current.add(action); else current.delete(action);
         newPerms[r.key] = Array.from(current);
@@ -100,7 +109,9 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
     setPermissions((prev) => {
       const newPerms = { ...prev };
       visibleResources.forEach((r) => {
-        newPerms[r.key] = checked ? ['view', 'create', 'edit', 'delete'] : [];
+        newPerms[r.key] = checked
+          ? ['view', 'create', 'edit', 'delete']
+          : PERMISSION_ACTIONS.filter((a) => isMinimumPermission(isSystem, r.key, a.key)).map((a) => a.key);
       });
       return newPerms;
     });
@@ -112,14 +123,15 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
       return;
     }
     setSaving(true);
+    const permissionsToSave = isSystem ? withSystemRoleMinimums(permissions) : permissions;
     try {
       if (isEditMode && role) {
-        const { error } = await supabase.from('roles').update(roleToRow({ name: name.trim(), description, permissions })).eq('id', role.id);
+        const { error } = await supabase.from('roles').update(roleToRow({ name: name.trim(), description, permissions: permissionsToSave })).eq('id', role.id);
         if (error) throw error;
         toast({ title: 'Rol actualizado' });
       } else {
         if (!companyId) throw new Error('No hay una empresa activa.');
-        const { error } = await supabase.from('roles').insert({ ...roleToRow({ name: name.trim(), description, permissions }), company_id: companyId });
+        const { error } = await supabase.from('roles').insert({ ...roleToRow({ name: name.trim(), description, permissions: permissionsToSave }), company_id: companyId });
         if (error) throw error;
         toast({ title: 'Rol creado' });
       }
@@ -142,9 +154,7 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
           </DialogTitle>
           <DialogDescription>
             {isSystem
-              ? (isSuperAdmin
-                  ? 'Como super admin puedes editar los permisos de este rol de sistema. El nombre y la clave quedan fijos.'
-                  : 'Los permisos de Administrador y Cajero son fijos y no se pueden modificar.')
+              ? 'Puedes ajustar a qué secciones llega este rol de sistema. El nombre y la clave quedan fijos, y el Carrito y el Dashboard no se pueden quitar para que nadie se quede sin poder trabajar.'
               : 'Define a qué secciones tiene acceso este rol y qué puede hacer en cada una.'}
           </DialogDescription>
         </DialogHeader>
@@ -168,10 +178,10 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
                 <TabsTrigger value="reportes">Reportes</TabsTrigger>
               </TabsList>
               <TabsContent value="permisos">
-                <PermissionsGrid 
-                  resources={visibleResources} 
-                  permissions={permissions} 
-                  isSystem={permissionsLocked} 
+                <PermissionsGrid
+                  resources={visibleResources}
+                  permissions={permissions}
+                  isSystemRole={isSystem}
                   toggle={toggle}
                   onToggleColumn={handleToggleColumn}
                   onToggleAll={handleToggleAll}
@@ -183,7 +193,6 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
                     <label className="flex items-center gap-2 text-sm font-semibold cursor-pointer select-none">
                       <Checkbox
                         checked={REPORT_ITEMS.every((r) => isReportChecked(r.slug))}
-                        disabled={permissionsLocked}
                         onCheckedChange={(checked) => {
                           setPermissions((prev) => ({
                             ...prev,
@@ -202,8 +211,7 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
                       <label key={item.slug} className="flex items-center gap-2 text-sm p-1.5 rounded hover:bg-muted/50 cursor-pointer select-none">
                         <Checkbox
                           checked={isReportChecked(item.slug)}
-                          disabled={permissionsLocked}
-                          onCheckedChange={(c) => toggleReport(item.slug, !!c)}
+                            onCheckedChange={(c) => toggleReport(item.slug, !!c)}
                         />
                         {item.label}
                       </label>
@@ -213,10 +221,10 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
               </TabsContent>
             </Tabs>
           ) : (
-            <PermissionsGrid 
-              resources={visibleResources} 
-              permissions={permissions} 
-              isSystem={permissionsLocked} 
+            <PermissionsGrid
+              resources={visibleResources}
+              permissions={permissions}
+              isSystemRole={isSystem}
               toggle={toggle}
               onToggleColumn={handleToggleColumn}
               onToggleAll={handleToggleAll}
@@ -226,9 +234,7 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cerrar</Button>
-          {!permissionsLocked && (
-            <Button onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
-          )}
+          <Button onClick={handleSave} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -236,21 +242,25 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
 }
 
 function PermissionsGrid({
-  resources, permissions, isSystem, toggle, onToggleColumn, onToggleAll,
+  resources, permissions, isSystemRole, toggle, onToggleColumn, onToggleAll,
 }: {
   resources: { key: PermissionResource; label: string }[];
   permissions: RolePermissions;
-  isSystem: boolean;
+  /** Administrador/Cajero: sus mínimos van marcados y no se pueden desmarcar. */
+  isSystemRole: boolean;
   toggle: (resource: PermissionResource, action: PermissionAction, checked: boolean) => void;
   onToggleColumn?: (action: PermissionAction, checked: boolean) => void;
   onToggleAll?: (checked: boolean) => void;
 }) {
+  const isChecked = (resource: PermissionResource, action: PermissionAction) =>
+    !!permissions[resource]?.includes(action) || isMinimumPermission(isSystemRole, resource, action);
+
   const isAllChecked = resources.length > 0 && resources.every(
-    (r) => PERMISSION_ACTIONS.every((a) => permissions[r.key]?.includes(a.key))
+    (r) => PERMISSION_ACTIONS.every((a) => isChecked(r.key, a.key))
   );
 
   const isColumnChecked = (action: PermissionAction) =>
-    resources.length > 0 && resources.every((r) => permissions[r.key]?.includes(action));
+    resources.length > 0 && resources.every((r) => isChecked(r.key, action));
 
   return (
     <div className="rounded-lg border overflow-x-auto">
@@ -259,7 +269,7 @@ function PermissionsGrid({
           <tr className="border-b bg-muted/30">
             <th className="text-left p-2 font-medium">
               <div className="flex items-center gap-2 whitespace-nowrap">
-                {!isSystem && onToggleAll && (
+                {onToggleAll && (
                   <Checkbox
                     checked={isAllChecked}
                     onCheckedChange={(c) => onToggleAll(!!c)}
@@ -272,7 +282,7 @@ function PermissionsGrid({
               <th key={a.key} className="text-center p-2 font-medium whitespace-nowrap">
                 <div className="flex flex-col items-center gap-1.5 min-w-[60px]">
                   <span>{a.label}</span>
-                  {!isSystem && onToggleColumn && (
+                  {onToggleColumn && (
                     <Checkbox
                       checked={isColumnChecked(a.key)}
                       onCheckedChange={(c) => onToggleColumn(a.key, !!c)}
@@ -290,8 +300,8 @@ function PermissionsGrid({
               {PERMISSION_ACTIONS.map((a) => (
                 <td key={a.key} className="text-center p-2">
                   <Checkbox
-                    checked={!!permissions[r.key]?.includes(a.key)}
-                    disabled={isSystem}
+                    checked={isChecked(r.key, a.key)}
+                    disabled={isMinimumPermission(isSystemRole, r.key, a.key)}
                     onCheckedChange={(c) => toggle(r.key, a.key, !!c)}
                   />
                 </td>

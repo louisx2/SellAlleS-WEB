@@ -15,6 +15,7 @@ import { useAuth } from '@/context/auth-provider';
 import { useTheme } from 'next-themes';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useModules } from '@/context/modules-provider';
+import { useCaja } from '@/context/caja-provider';
 import { moduleForRoute, type ModuleKey } from '@/lib/modules';
 import { hasPermission, isReportVisible, unionPermissions } from '@/lib/permissions';
 import type { PermissionResource } from '@/lib/types';
@@ -118,29 +119,28 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const [branchLogo, setBranchLogo] = useState<string | null>(null);
   // La caja se decide por sucursal: el módulo dice si la empresa la ve, esta
   // bandera si la sucursal activa la usa. Sin ella, el menú enseñaría /caja en
-  // sucursales que cobran sin abrir caja.
-  const [branchUsesCaja, setBranchUsesCaja] = useState(false);
+  // sucursales que cobran sin abrir caja. Sale del CajaProvider, que es el
+  // único sitio que la lee: si el menú se la calculara por su cuenta podría
+  // decir una cosa y el POS otra.
+  const { branchUsesCaja } = useCaja();
 
   useEffect(() => {
     if (!appUser?.activeBranchId) {
       setBranchLogo(null);
-      setBranchUsesCaja(false);
       return;
     }
     (async () => {
       try {
         const { data } = await supabase
           .from('branches')
-          .select('logo_url, caja_enabled')
+          .select('logo_url')
           .eq('id', appUser.activeBranchId)
           .limit(1)
           .maybeSingle();
         setBranchLogo(data?.logo_url ?? null);
-        setBranchUsesCaja(!!data?.caja_enabled);
       } catch (err) {
         console.warn("Error loading branch logo in layout:", err);
         setBranchLogo(null);
-        setBranchUsesCaja(false);
       }
     })();
   }, [appUser?.activeBranchId]);

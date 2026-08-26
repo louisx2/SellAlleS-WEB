@@ -84,6 +84,29 @@ export const DEFAULT_CASHIER_PERMISSIONS: RolePermissions = {
   caja: ['view', 'create'],
 };
 
+// Mínimo intocable de los roles de SISTEMA (Administrador/Cajero). El admin de
+// la empresa puede recortarlos a su gusto, pero no dejar a su gente sin poder
+// trabajar: sin Carrito ni Dashboard, un cajero entra y no puede hacer nada, y
+// para arreglarlo haría falta un super admin. Se pintan marcados y desactivados
+// en la grilla, y se vuelven a sumar al guardar por si llegan recortados.
+export const SYSTEM_ROLE_MIN_PERMISSIONS: RolePermissions = {
+  dashboard: ['view'],
+  pos: ['view', 'create'],
+};
+
+export function isMinimumPermission(
+  isSystemRole: boolean,
+  resource: PermissionResource,
+  action: PermissionAction
+): boolean {
+  return isSystemRole && !!SYSTEM_ROLE_MIN_PERMISSIONS[resource]?.includes(action);
+}
+
+/** Devuelve los permisos con el mínimo de los roles de sistema garantizado. */
+export function withSystemRoleMinimums(permissions: RolePermissions): RolePermissions {
+  return unionPermissions([{ permissions }, { permissions: SYSTEM_ROLE_MIN_PERMISSIONS }]);
+}
+
 // Secciones que gobierna el Administrador de la EMPRESA, no el rol de la
 // sucursal. Son las de administrar el negocio; el resto (POS, ventas, caja,
 // inventario...) son de operar y las decide el rol que se tenga en la sucursal
