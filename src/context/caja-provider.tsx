@@ -39,7 +39,6 @@ export function CajaProvider({ children }: { children: ReactNode }) {
   const branchId = appUser?.activeBranchId;
   const [session, setSession] = useState<CajaSession | null>(null);
   const [history, setHistory] = useState<CajaSession[]>([]);
-  const [branchUsesCaja, setBranchUsesCaja] = useState(false);
   const [loading, setLoading] = useState(true);
   // El módulo dice si la EMPRESA ve la caja; esta bandera si la sucursal
   // activa la USA. Sin ella, encenderla para una sucursal dejaba a las demás
@@ -47,14 +46,7 @@ export function CajaProvider({ children }: { children: ReactNode }) {
   const [branchUsesCaja, setBranchUsesCaja] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
-    if (!branchId) { setSession(null); setHistory([]); setBranchUsesCaja(false); setLoading(false); return; }
-    const { data: branch } = await supabase
-      .from('branches')
-      .select('caja_enabled')
-      .eq('id', branchId)
-      .limit(1)
-      .maybeSingle();
-    setBranchUsesCaja(!!branch?.caja_enabled);
+    if (!branchId) { setSession(null); setHistory([]); setLoading(false); return; }
     const { data, error } = await supabase
       .from('caja_sessions')
       .select('*, caja_movements(*)')
