@@ -16,7 +16,6 @@ import { calculateLoanStatus } from '@/lib/loan-utils';
 import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useAuth } from '@/context/auth-provider';
-import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { PaymentReceiptDialog, type PaymentReceiptData } from '@/components/credit/payment-receipt-dialog';
 import { Info, Loader2 } from 'lucide-react';
@@ -31,9 +30,7 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
   const { payLoan } = useLoans();
   const { profile } = useCompanyProfile();
   const { appUser } = useAuth();
-  const { isModuleEnabled } = useModules();
-  const { isOpen: isCajaOpen } = useCaja();
-  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
+  const { cashBlocked } = useCaja();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<number | ''>('');
   const [method, setMethod] = useState<PaymentMethod>('cash');

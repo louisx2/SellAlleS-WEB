@@ -19,7 +19,6 @@ import type { Customer, PaymentMethod } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useCustomers } from '@/context/customer-provider';
 import { useSales } from '@/context/sales-provider';
-import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { formatCurrency } from '@/lib/utils';
 import { PaymentReceiptDialog, type PaymentReceiptData } from './payment-receipt-dialog';
@@ -34,9 +33,7 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
   const { toast } = useToast();
   const { reload: reloadCustomers } = useCustomers();
   const { payCustomerDebt } = useSales();
-  const { isModuleEnabled } = useModules();
-  const { isOpen: isCajaOpen } = useCaja();
-  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
+  const { cashBlocked } = useCaja();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<number | ''>('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
