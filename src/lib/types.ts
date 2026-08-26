@@ -308,7 +308,7 @@ export type CreditNote = {
   subtotal: number;
   itbisAmount: number;
   total: number;
-  refundMethod?: PaymentMethod;
+  refundMethod?: RefundMethod;
   reason?: string;
   userName?: string;
   createdAt: Date;
@@ -372,6 +372,11 @@ export type CompanyProfile = {
 };
 
 export type PaymentMethod = 'cash' | 'card' | 'transfer';
+
+// Cómo vuelve el dinero al anular una venta. 'none' es para la venta que se
+// facturó por error y nunca se cobró: se anula y se repone el inventario, pero
+// no hubo dinero que devolver.
+export type RefundMethod = PaymentMethod | 'none';
 
 export type CreditPayment = {
   id: string;
