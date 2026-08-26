@@ -187,9 +187,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : propios;
       };
 
-      const isAdminOrManager = !data.is_super_admin && esAdminDeEmpresa;
-      const isSuperAdminImpersonating = !!data.is_super_admin && !!savedImpersonatedId;
-
       // Si ya había una sucursal activa seleccionada previamente en esta sesión, mantenerla
       const savedBranchId = localStorage.getItem('userBranchId');
       const savedImpersonatedName = localStorage.getItem('userImpersonatedCompanyName');
@@ -213,7 +210,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (isMultiCompanyLobby) {
         // Sin selector de sucursal en el lobby: la sucursal se elige al ENTRAR
         // a una empresa, no antes de decidir a cuál entrar.
-      } else if ((isAdminOrManager || isSuperAdminImpersonating) && branchList.length > 1) {
+      } else if (branchList.length > 1) {
+        // Quien alcanza más de una sucursal elige al entrar, sea cual sea su
+        // rol. Antes esto solo se le pedía a administradores y gerentes: un
+        // cajero de dos sucursales caía en la última que hubiera usado y podía
+        // ponerse a vender desde la sucursal equivocada sin enterarse.
         const sessionSelected = sessionStorage.getItem('branchSelectedThisSession');
         if (sessionSelected !== 'true') {
           requireSelection = true;
@@ -221,14 +222,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const found = branchList.find(b => b.id === savedBranchId);
           if (found) activeBranch = found;
         }
-      } else {
-        if (savedBranchId && branchList.find(b => b.id === savedBranchId)) {
-          const found = branchList.find(b => b.id === savedBranchId);
-          if (found) activeBranch = found;
-        } else if (branchList.length > 1) {
-          // Si no hay branch guardado y tiene más de 1, obligar a seleccionar
-          requireSelection = true;
-        }
+      } else if (savedBranchId && branchList.find(b => b.id === savedBranchId)) {
+        const found = branchList.find(b => b.id === savedBranchId);
+        if (found) activeBranch = found;
       }
 
       setNeedsBranchSelection(requireSelection);
@@ -535,15 +531,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
     if (error) throw error;
 
-    // Red de seguridad para la cabecera de impersonación, que el cliente de
-    // Supabase hornea al cargar su módulo. Cerrar sesión con el botón ya
-    // recarga duro, pero hay caminos que no pasan por ahí — una sesión que
-    // caduca sola redirige a /login sin recargar — y por ellos la cabecera de
-    // la sesión anterior llegaría hasta esta. Quien acaba de entrar no puede
-    // estar impersonando nada, así que si quedó algo horneado, sobra.
+    // Quien acaba de entrar no puede estar impersonando nada, así que lo
+    // elegido en una sesión anterior se descarta SIEMPRE: la empresa, que vivía
+    // en localStorage y sobrevivía al login metiendo a la persona directa en la
+    // última que usó, y la marca de sucursal ya elegida, que vive en
+    // sessionStorage y sobrevive a un cierre de sesión en la misma pestaña.
+    // Con las dos fuera, a quien alcanza varias empresas o varias sucursales se
+    // le vuelve a preguntar en cada entrada.
+    localStorage.removeItem('userImpersonatedCompany');
+    localStorage.removeItem('userImpersonatedCompanyName');
+    sessionStorage.removeItem('branchSelectedThisSession');
+
+    // La cabecera de impersonación, además, la hornea el cliente de Supabase al
+    // cargar su módulo. Cerrar sesión con el botón ya recarga duro, pero hay
+    // caminos que no pasan por ahí — una sesión que caduca sola redirige a
+    // /login sin recargar — y por ellos la cabecera de la sesión anterior
+    // llegaría hasta esta.
     if (cabeceraImpersonacionHorneada) {
-      localStorage.removeItem('userImpersonatedCompany');
-      localStorage.removeItem('userImpersonatedCompanyName');
       // Sin la clave en localStorage, el módulo nace ya sin cabecera: no puede
       // volver a entrar aquí ni quedarse recargando en bucle.
       window.location.reload();
