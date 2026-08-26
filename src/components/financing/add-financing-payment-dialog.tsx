@@ -20,7 +20,6 @@ import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { useSales } from '@/context/sales-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
-import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { PaymentReceiptDialog, type PaymentReceiptData } from '@/components/credit/payment-receipt-dialog';
 import { Info, Loader2 } from 'lucide-react';
@@ -34,9 +33,7 @@ export function AddFinancingPaymentDialog({ sale, children }: AddFinancingPaymen
   const { toast } = useToast();
   const { paySale } = useSales();
   const { profile } = useCompanyProfile();
-  const { isModuleEnabled } = useModules();
-  const { isOpen: isCajaOpen } = useCaja();
-  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
+  const { cashBlocked } = useCaja();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<number | ''>('');
   const [method, setMethod] = useState<PaymentMethod>('cash');

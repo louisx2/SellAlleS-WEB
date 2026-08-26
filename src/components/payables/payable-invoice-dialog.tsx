@@ -54,14 +54,13 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
   const { suppliers } = useSuppliers();
   const { products, reload: reloadProducts } = useProducts();
   const { isModuleEnabled } = useModules();
-  const { isOpen: isCajaOpen } = useCaja();
+  const { cashBlocked } = useCaja();
   const { profile } = useCompanyProfile();
 
   // Empresas informales no llevan datos fiscales; el módulo 'purchases'
   // habilita las líneas de productos que entran al inventario.
   const showFiscal = profile.isFormalized;
   const purchasesOn = isModuleEnabled('purchases');
-  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);

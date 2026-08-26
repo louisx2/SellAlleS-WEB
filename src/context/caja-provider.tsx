@@ -13,17 +13,15 @@ interface CajaContextType {
   isOpen: boolean;
   /** Sesiones cerradas recientes de la sucursal activa. */
   history: CajaSession[];
-  /** branches.caja_enabled de la sucursal activa: si ESTA sucursal usa caja. */
-  branchUsesCaja: boolean;
+  /** Si la sucursal activa exige caja abierta. null = todavía no se sabe. */
+  branchUsesCaja: boolean | null;
   /**
-   * Si en esta sucursal hace falta caja abierta para cobrar en efectivo.
-   * Son los dos niveles juntos — modulo de empresa Y bandera de sucursal —
-   * exactamente lo que mira el trigger fn_require_open_caja_for_cash_sale en
-   * la base. Cualquier bloqueo de efectivo en pantalla tiene que usar ESTO y
-   * no isModuleEnabled('caja') a secas, o el POS bloquea cobros que la base
-   * si acepta y el cajero se queda sin poder vender.
+   * No se puede cobrar (ni pagar, ni devolver) en efectivo: la empresa usa
+   * caja, ESTA sucursal la exige y no hay ninguna abierta. Mismo criterio que
+   * el gate de la base (`caja_blocks_cash`), en un solo lugar para que ninguna
+   * pantalla se quede pidiendo caja donde la sucursal no la usa.
    */
-  cajaRequired: boolean;
+  cashBlocked: boolean;
   openSession: (openingAmount: number, notes?: string) => Promise<CajaSession>;
   closeSession: (sessionId: string, declaredAmount: number, notes?: string) => Promise<CajaCloseResult>;
   addMovement: (type: 'in' | 'out', amount: number, reason?: string) => Promise<CajaMovement>;
@@ -43,6 +41,10 @@ export function CajaProvider({ children }: { children: ReactNode }) {
   const [history, setHistory] = useState<CajaSession[]>([]);
   const [branchUsesCaja, setBranchUsesCaja] = useState(false);
   const [loading, setLoading] = useState(true);
+  // El módulo dice si la EMPRESA ve la caja; esta bandera si la sucursal
+  // activa la USA. Sin ella, encenderla para una sucursal dejaba a las demás
+  // sin poder cobrar en efectivo y sin caja que abrir.
+  const [branchUsesCaja, setBranchUsesCaja] = useState<boolean | null>(null);
 
   const load = useCallback(async () => {
     if (!branchId) { setSession(null); setHistory([]); setBranchUsesCaja(false); setLoading(false); return; }
@@ -68,6 +70,25 @@ export function CajaProvider({ children }: { children: ReactNode }) {
   }, [branchId]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!branchId) { setBranchUsesCaja(null); return; }
+    let cancelado = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from('branches')
+        .select('caja_enabled')
+        .eq('id', branchId)
+        .limit(1)
+        .maybeSingle();
+      if (cancelado) return;
+      // Si la consulta falla se deja en null (no se sabe), que abajo cuenta
+      // como "exige caja": mejor pedirla de más que dejar salir efectivo sin
+      // registrar.
+      setBranchUsesCaja(error ? null : !!data?.caja_enabled);
+    })();
+    return () => { cancelado = true; };
+  }, [branchId]);
 
   const openSession = async (openingAmount: number, notes?: string): Promise<CajaSession> => {
     const { data, error } = await supabase.rpc('open_caja_session', {
@@ -104,8 +125,8 @@ export function CajaProvider({ children }: { children: ReactNode }) {
 
   return (
     <CajaContext.Provider value={{
-      session, isOpen: session !== null, history,
-      branchUsesCaja, cajaRequired: isModuleEnabled('caja') && branchUsesCaja,
+      session, isOpen: session !== null, history, branchUsesCaja,
+      cashBlocked: isModuleEnabled('caja') && branchUsesCaja !== false && session === null,
       openSession, closeSession, addMovement, reload: load, loading,
     }}>
       {children}

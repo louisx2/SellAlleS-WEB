@@ -17,7 +17,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { formatCurrency } from '@/lib/utils';
 import { useCompanyProfile } from '@/context/company-profile-provider';
-import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import type { FinancingDetails } from '@/lib/types';
 import { Separator } from '../ui/separator';
@@ -41,9 +40,7 @@ const installmentOptions = [3, 6, 9, 12, 18, 24];
 
 export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCredit, onFinancingComplete }: FinancingDialogProps) {
   const { profile } = useCompanyProfile();
-  const { isModuleEnabled } = useModules();
-  const { isOpen: isCajaOpen } = useCaja();
-  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
+  const { cashBlocked } = useCaja();
   const [downPayment, setDownPayment] = useState<number | string>('');
   const [interestRate, setInterestRate] = useState<number | string>(profile.defaultInterestRate);
   const [installments, setInstallments] = useState<number>(12);

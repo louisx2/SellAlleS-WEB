@@ -92,6 +92,9 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const { appUser, signOut, setImpersonatedCompany, setActiveBranch } = useAuth();
   const hayActualizacion = useActualizacionDisponible();
   const { isModuleEnabled, loading: modulesLoading } = useModules();
+  // Caja se decide en dos niveles: el módulo dice si la empresa la ve, y
+  // branchUsesCaja si la sucursal activa la usa (null = todavía cargando).
+  const { branchUsesCaja } = useCaja();
   const { profile } = useCompanyProfile();
   // Canales de contacto configurables desde Configuración de la Plataforma.
   const { support } = usePlatformSettings();
@@ -117,12 +120,6 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
 
   const [mounted, setMounted] = useState(false);
   const [branchLogo, setBranchLogo] = useState<string | null>(null);
-  // La caja se decide por sucursal: el módulo dice si la empresa la ve, esta
-  // bandera si la sucursal activa la usa. Sin ella, el menú enseñaría /caja en
-  // sucursales que cobran sin abrir caja. Sale del CajaProvider, que es el
-  // único sitio que la lee: si el menú se la calculara por su cuenta podría
-  // decir una cosa y el POS otra.
-  const { branchUsesCaja } = useCaja();
 
   useEffect(() => {
     if (!appUser?.activeBranchId) {
@@ -239,8 +236,8 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
 
   // 'caja' es el único módulo que además se decide por sucursal: la empresa lo
   // enciende y cada sucursal dice si lo usa. El resto se resuelve solo con el
-  // módulo de empresa.
-  const moduleActive = (m: ModuleKey) => isModuleEnabled(m) && (m !== 'caja' || branchUsesCaja);
+  // módulo de empresa. El enlace sale cuando ya consta que la sucursal la usa.
+  const moduleActive = (m: ModuleKey) => isModuleEnabled(m) && (m !== 'caja' || branchUsesCaja === true);
   const moduleOk = (item: NavItem) => !item.module || moduleActive(item.module);
   const visibleDashboard = showOperationalMenus && userRole && hasExtra(dashboardNavItem.permission);
   const visibleCoreNavItems = coreNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && hasExtra(item.permission));
@@ -262,8 +259,11 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
 
   // Guard de rutas: si la URL pertenece a un módulo apagado para esta
   // empresa, no se renderiza el contenido (aunque escriban la URL a mano).
+  // Con /caja se espera a saber si la sucursal la usa: se tumba solo cuando
+  // consta que NO, para no parpadear un "módulo no disponible" en las que sí.
   const routeModule = moduleForRoute(pathname);
-  const routeBlocked = routeModule !== null && !modulesLoading && !moduleActive(routeModule);
+  const routeBlocked = routeModule !== null && !modulesLoading
+    && (!isModuleEnabled(routeModule) || (routeModule === 'caja' && branchUsesCaja === false));
 
   // Guard de permisos: mismo criterio que gatea el ítem en el menú, aplicado
   // también al contenido de la página (si alguien escribe la URL a mano sin

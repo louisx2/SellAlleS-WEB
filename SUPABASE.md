@@ -127,6 +127,33 @@ el resto de las sucursales. La tarjeta solo aparece con el módulo POS o
 Cotizaciones activo (son los únicos que cobran con ITBIS) y solo los
 administradores pueden cambiar el modo.
 
+## Caja por sucursal (migraciones `caja_por_sucursal` y `caja_por_sucursal_en_los_cobros`)
+
+El control de efectivo se decide en dos niveles, y hacen falta los dos:
+
+- `company_modules.caja` — si la EMPRESA ve el módulo (menú, `/caja`, ajustes).
+- `branches.caja_enabled` — si ESA sucursal exige caja abierta para mover
+  efectivo. Default `false`, que es lo que protege a las sucursales que ya
+  existían: encender el módulo no les cambia la rutina de un día para otro.
+
+Una empresa puede tener una sucursal con caja y otras sin ella (el caso de
+Pujols Group). Por eso ningún cobro debe preguntar solo por el módulo: hacerlo
+dejaba a las sucursales sin caja pidiendo abrir una que no usan y que ni
+siquiera les aparece en el menú.
+
+El criterio vive en `caja_blocks_cash(p_company_id, p_branch_id)`: bloquea si la
+empresa usa caja **y** la sucursal la exige **y** no hay ninguna abierta. Sin
+sucursal bloquea igual, porque no hay caja que comprobar. Lo consultan las RPC
+`register_sale_payment`, `register_customer_payment`, `register_loan_payment`,
+`register_supplier_payment` y `annul_sale` (devolución en efectivo). El trigger
+`fn_require_open_caja_for_cash_sale` — ventas en efectivo y abonos iniciales en
+efectivo — aplica el mismo criterio con sus propias comprobaciones, apoyado en
+`branch_uses_caja()` y `has_open_caja()`.
+
+En el navegador el mismo criterio sale de un solo sitio, `CajaProvider`
+(`cashBlocked` y `branchUsesCaja`), para que ninguna pantalla pida caja donde la
+sucursal no la usa.
+
 ## Cuentas por Pagar / Compras (migración `payables_module`)
 
 Facturas de suplidores a nivel documento con los campos del Formato 606 de
@@ -148,7 +175,7 @@ empresa: `payables` (el módulo) y `purchases` (flag: las líneas con
 - RPC `register_supplier_payment(p_invoice_id, p_amount, p_method,
   p_branch_id, p_notes, p_reference)` — lock de la factura, valida contra
   `balance`, actualiza `amount_paid`/`payment_date`/`status`. Con método
-  `cash` y módulo caja activo: exige caja abierta e inserta un
+  `cash` donde la sucursal usa caja: exige caja abierta e inserta un
   `caja_movements` tipo 'out' ("Pago a suplidor: …") para que el cierre cuadre.
 - Roles: el rol de sistema `admin` incluye el recurso `payables`
   (backfill + `seed_system_roles()` actualizado). `seed_system_roles` ya no es
