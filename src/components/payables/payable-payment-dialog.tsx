@@ -18,7 +18,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { PaymentMethod, SupplierInvoice } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { usePayables } from '@/context/payables-provider';
-import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { formatCurrency } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
@@ -32,11 +31,9 @@ interface PayablePaymentDialogProps {
 export function PayablePaymentDialog({ invoice, open, onOpenChange }: PayablePaymentDialogProps) {
   const { toast } = useToast();
   const { payInvoice } = usePayables();
-  const { isModuleEnabled } = useModules();
-  const { isOpen: isCajaOpen } = useCaja();
-  // Con el módulo de caja activo, el efectivo sale de la caja de la sucursal:
-  // sin caja abierta no se puede pagar en efectivo (la RPC también lo valida).
-  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
+  // Donde la sucursal usa caja, el efectivo sale de ella: sin caja abierta no
+  // se puede pagar en efectivo (la RPC también lo valida).
+  const { cashBlocked } = useCaja();
   const [amount, setAmount] = useState<number | ''>('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [reference, setReference] = useState('');

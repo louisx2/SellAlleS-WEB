@@ -43,16 +43,12 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const { customers, reload: reloadCustomers } = useCustomers();
   const { appUser } = useAuth();
   const { isModuleEnabled } = useModules();
-  const { isOpen: isCajaOpen } = useCaja();
+  const { cashBlocked } = useCaja();
   // Los métodos de venta a plazo solo se ofrecen si la empresa tiene el módulo
   // activo (se configura en Plataforma → Módulos). Mantiene el checkout
   // consistente con lo que aparece en el menú.
   const creditEnabled = isModuleEnabled('credit');
   const financingEnabled = isModuleEnabled('financing');
-  // Si el módulo de caja está activo, no se puede cobrar en efectivo sin una
-  // caja abierta en la sucursal (el bloqueo real lo hace la base; esto es el
-  // aviso inmediato en pantalla).
-  const cashBlocked = isModuleEnabled('caja') && !isCajaOpen;
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer' | 'credit' | 'financing'>('cash');
   const [amountPaid, setAmountPaid] = useState<number | string>('');
   const [paymentReference, setPaymentReference] = useState('');
