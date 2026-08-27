@@ -207,32 +207,28 @@ export function ProductSearch() {
             </PopoverContent>
         </Popover>
         <TooltipProvider>
-            <div className="flex items-center rounded-md border p-0.5 shrink-0">
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            size="icon" variant={inventoryView === 'list' ? 'secondary' : 'ghost'}
-                            className="h-11 w-11" onClick={() => setInventoryView('list')}
-                        >
-                            <List className="h-5 w-5" />
-                            <span className="sr-only">Vista de lista</span>
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Vista de lista (sin imágenes)</TooltipContent>
-                </Tooltip>
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            size="icon" variant={inventoryView === 'grid' ? 'secondary' : 'ghost'}
-                            className="h-11 w-11" onClick={() => setInventoryView('grid')}
-                        >
-                            <LayoutGrid className="h-5 w-5" />
-                            <span className="sr-only">Vista con imágenes</span>
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Vista con imágenes</TooltipContent>
-                </Tooltip>
-            </div>
+            {/* Un solo botón que alterna. El icono es el DESTINO, no el estado:
+                enseña lo que consigues al pulsarlo, y cambia con cada toque. */}
+            <Tooltip>
+                <TooltipTrigger asChild>
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-12 w-12 shrink-0"
+                        onClick={() => setInventoryView(inventoryView === 'grid' ? 'list' : 'grid')}
+                    >
+                        {inventoryView === 'grid'
+                            ? <List className="h-5 w-5" />
+                            : <LayoutGrid className="h-5 w-5" />}
+                        <span className="sr-only">
+                            {inventoryView === 'grid' ? 'Ver en lista, sin imágenes' : 'Ver con imágenes'}
+                        </span>
+                    </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                    {inventoryView === 'grid' ? 'Ver en lista (sin imágenes)' : 'Ver con imágenes'}
+                </TooltipContent>
+            </Tooltip>
         </TooltipProvider>
       </div>
 
