@@ -12,11 +12,19 @@ import { Search, SlidersHorizontal, List, LayoutGrid } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-provider';
+
+// Preferencia por dispositivo: la caja que tiene el lector fisico deja el modo
+// activo, las que se teclean a mano lo apagan.
+const SCANNER_MODE_KEY = 'posScannerMode';
 
 export function ProductSearch() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchMode, setSearchMode] = useState<'name' | 'code'>('name');
+  // Por defecto activado, para no cambiarle el comportamiento a quien ya usa lector.
+  const [scannerMode, setScannerMode] = useState(true);
   const { products: allProducts } = useProducts();
   const { addItem, saleCompletionCount } = useCart();
   const { toast } = useToast();
@@ -27,16 +35,23 @@ export function ProductSearch() {
   const filteredProducts = useMemo(() => {
     // Los productos sin inventario (platos, servicios) siempre están a la venta.
     const productsInStock = allProducts.filter(p => !p.tracksStock || p.stock > 0);
-    if (searchMode === 'code' || !searchTerm) {
-      // When searching by code, we don't filter the grid. We just add the product.
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) {
       // When search is empty, show all products.
       return productsInStock;
     }
-    const term = searchTerm.toLowerCase();
+    if (searchMode === 'code') {
+      // Con el modo lector activo no filtramos la grilla: el codigo escaneado
+      // se agrega solo al carrito. Con el modo apagado solo filtramos.
+      if (scannerMode) return productsInStock;
+      return productsInStock.filter(product =>
+        (product.code ?? '').toLowerCase().includes(term)
+      );
+    }
     return productsInStock.filter(product =>
       product.name.toLowerCase().includes(term)
     );
-  }, [searchTerm, allProducts, searchMode]);
+  }, [searchTerm, allProducts, searchMode, scannerMode]);
 
   useEffect(() => {
     if (saleCompletionCount > prevSaleCompletionCount.current) {
@@ -46,23 +61,42 @@ export function ProductSearch() {
   }, [saleCompletionCount]);
   
   useEffect(() => {
-    if (searchMode === 'code' && searchTerm.trim() !== '') {
+    try {
+      setScannerMode(localStorage.getItem(SCANNER_MODE_KEY) !== 'false');
+    } catch {
+      // Si el navegador bloquea el almacenamiento, dejamos el valor por defecto.
+    }
+  }, []);
+
+  const handleScannerModeChange = (enabled: boolean) => {
+    setScannerMode(enabled);
+    try {
+      localStorage.setItem(SCANNER_MODE_KEY, String(enabled));
+    } catch {
+      // Sin persistencia el cambio igual aplica en esta sesion.
+    }
+  };
+
+  useEffect(() => {
+    if (scannerMode && searchMode === 'code' && searchTerm.trim() !== '') {
       const product = allProducts.find(p => p.code === searchTerm.trim());
       if (product) {
         addItem(product);
         setSearchTerm(''); // Clear input after adding
       }
     }
-  }, [searchTerm, searchMode, allProducts, addItem, toast]);
+  }, [searchTerm, searchMode, scannerMode, allProducts, addItem, toast]);
 
   const handleModeChange = (mode: 'name' | 'code') => {
     setSearchMode(mode);
     setSearchTerm(''); // Clear search on mode change
   }
 
-  const placeholderText = searchMode === 'name' 
-    ? "Buscar producto por nombre..." 
-    : "Escanear o introducir código de barras...";
+  const placeholderText = searchMode === 'name'
+    ? "Buscar producto por nombre..."
+    : scannerMode
+      ? "Escanear o introducir código de barras..."
+      : "Buscar producto por código...";
 
   return (
     <div className="space-y-6 flex flex-col h-full">
@@ -101,6 +135,28 @@ export function ProductSearch() {
                             <Label htmlFor="code">Código</Label>
                         </div>
                     </RadioGroup>
+                    {searchMode === 'code' && (
+                      <>
+                        <Separator />
+                        <div className="flex items-start justify-between gap-4 pt-1">
+                            <div className="space-y-1">
+                                <Label htmlFor="scanner-mode-switch" className="text-sm font-medium">
+                                    Modo lector de código de barras
+                                </Label>
+                                <p className="text-xs text-muted-foreground max-w-[15rem]">
+                                    {scannerMode
+                                      ? 'El código escaneado se agrega solo al carrito.'
+                                      : 'Solo filtra los productos; tocá el producto para agregarlo.'}
+                                </p>
+                            </div>
+                            <Switch
+                                id="scanner-mode-switch"
+                                checked={scannerMode}
+                                onCheckedChange={handleScannerModeChange}
+                            />
+                        </div>
+                      </>
+                    )}
                 </div>
             </PopoverContent>
         </Popover>
