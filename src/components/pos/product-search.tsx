@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Input } from '@/components/ui/input';
 import { ProductGrid } from './product-grid';
 import { useProducts } from '@/context/product-provider';
@@ -8,13 +8,18 @@ import { useCart } from '@/context/cart-provider';
 import { useToast } from '@/hooks/use-toast';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
-import { Search, SlidersHorizontal, List, LayoutGrid } from 'lucide-react';
+import { Search, SlidersHorizontal, List, LayoutGrid, Camera } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-provider';
+import {
+  BarcodeScannerDialog,
+  puedeEscanearConCamara,
+  type ResultadoEscaneo,
+} from './barcode-scanner-dialog';
 
 // Preferencia por dispositivo: la caja que tiene el lector fisico deja el modo
 // activo, las que se teclean a mano lo apagan.
@@ -31,6 +36,34 @@ export function ProductSearch() {
   const { appUser, setInventoryView } = useAuth();
   const inventoryView = appUser?.inventoryView ?? 'grid';
   const prevSaleCompletionCount = useRef(saleCompletionCount);
+  const [escanerAbierto, setEscanerAbierto] = useState(false);
+  // Se resuelve en el cliente: el HTML es estático y en el servidor no hay
+  // cámara ni `matchMedia` que valgan.
+  const [puedeEscanear, setPuedeEscanear] = useState(false);
+
+  useEffect(() => {
+    setPuedeEscanear(puedeEscanearConCamara());
+  }, []);
+
+  // Misma búsqueda para el código escrito y para el escaneado, para que el
+  // lector de mano y la cámara no encuentren cosas distintas.
+  const buscarPorCodigo = useCallback((codigo: string) => {
+    const objetivo = codigo.trim().toLowerCase();
+    if (!objetivo) return undefined;
+    return allProducts.find(p => (p.code ?? '').trim().toLowerCase() === objetivo);
+  }, [allProducts]);
+
+  const manejarCodigoEscaneado = useCallback((codigo: string): ResultadoEscaneo => {
+    const producto = buscarPorCodigo(codigo);
+    if (!producto) return { ok: false, mensaje: `Ningún producto tiene el código ${codigo}` };
+    // `addItem` también frena por existencias, pero en silencio: con la cámara
+    // en la cara hace falta decir por qué no entró al carrito.
+    if (producto.tracksStock && producto.stock <= 0) {
+      return { ok: false, mensaje: `${producto.name} no tiene existencias` };
+    }
+    addItem(producto);
+    return { ok: true, mensaje: `${producto.name} agregado` };
+  }, [buscarPorCodigo, addItem]);
 
   const filteredProducts = useMemo(() => {
     // Los productos sin inventario (platos, servicios) siempre están a la venta.
@@ -77,15 +110,17 @@ export function ProductSearch() {
     }
   };
 
+  // El modo lector solo gobierna lo que se teclea: el botón de la cámara es una
+  // intención explícita del cajero y agrega al carrito esté como esté.
   useEffect(() => {
     if (scannerMode && searchMode === 'code' && searchTerm.trim() !== '') {
-      const product = allProducts.find(p => p.code === searchTerm.trim());
+      const product = buscarPorCodigo(searchTerm);
       if (product) {
         addItem(product);
         setSearchTerm(''); // Clear input after adding
       }
     }
-  }, [searchTerm, searchMode, scannerMode, allProducts, addItem, toast]);
+  }, [searchTerm, searchMode, scannerMode, buscarPorCodigo, addItem, toast]);
 
   const handleModeChange = (mode: 'name' | 'code') => {
     setSearchMode(mode);
@@ -112,6 +147,17 @@ export function ProductSearch() {
               autoFocus
             />
         </div>
+        {puedeEscanear && (
+            <Button
+                variant="outline"
+                size="icon"
+                className="h-12 w-12 shrink-0"
+                onClick={() => setEscanerAbierto(true)}
+            >
+                <Camera className="h-5 w-5" />
+                <span className="sr-only">Escanear con la cámara</span>
+            </Button>
+        )}
         <Popover>
             <PopoverTrigger asChild>
                 <Button variant="outline" size="icon" className="h-12 w-12 shrink-0">
@@ -193,6 +239,14 @@ export function ProductSearch() {
       <div className="flex-grow overflow-y-auto">
         <ProductGrid products={filteredProducts} view={inventoryView} />
       </div>
+
+      {puedeEscanear && (
+        <BarcodeScannerDialog
+          open={escanerAbierto}
+          onOpenChange={setEscanerAbierto}
+          onCodigo={manejarCodigoEscaneado}
+        />
+      )}
     </div>
   );
 }
