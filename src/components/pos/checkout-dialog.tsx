@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCart, getEffectiveUnitPrice } from '@/context/cart-provider';
 import { Button } from '@/components/ui/button';
 import {
@@ -29,6 +29,7 @@ import { useAuth } from '@/context/auth-provider';
 import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
   isOpen: boolean;
@@ -57,6 +58,13 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const [downPaymentReference, setDownPaymentReference] = useState('');
   const [saleNotes, setSaleNotes] = useState('');
   const [change, setChange] = useState(0);
+  // Guardar la venta tarda: inserta en la base, relee inventario y a veces
+  // clientes. En ese hueco el cajero cree que no respondió y vuelve a tocar.
+  // El ref frena el segundo toque en el acto —el estado de React no llega a
+  // tiempo si los dos clics caen en el mismo tick, que es justo lo que hace un
+  // doble toque en una tableta—, y `guardandoVenta` es solo para la pantalla.
+  const ventaEnCurso = useRef(false);
+  const [guardandoVenta, setGuardandoVenta] = useState(false);
   const { toast } = useToast();
   const [isFinancingOpen, setFinancingOpen] = useState(false);
   const [selectedBank, setSelectedBank] = useState('Banreservas');
@@ -121,6 +129,11 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     downPaymentReferenceOverride?: string,
   ) => {
     if (!activeCart || !appUser) return;
+    // Sin esto, dos toques = dos ventas insertadas y el cliente facturado dos
+    // veces. La venta ya salió de aquí; deshacerla es un trabajo manual.
+    if (ventaEnCurso.current) return;
+    ventaEnCurso.current = true;
+    setGuardandoVenta(true);
 
     const finalPaymentMethod = financingDetails ? 'financing' : paymentMethod;
     const effectiveDownPaymentMethod = downPaymentMethodOverride ?? downPaymentMethod;
@@ -178,6 +191,11 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
         description: e?.message ?? 'Error de conexión con el servidor. El carrito no se perdió.',
         variant: 'destructive',
       });
+    } finally {
+      // También al salir bien: el diálogo se cierra pero el componente sigue
+      // montado, así que sin soltar el candado la siguiente venta no entraría.
+      ventaEnCurso.current = false;
+      setGuardandoVenta(false);
     }
   };
 
@@ -233,7 +251,9 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
 
   return (
     <>
-    <Dialog open={isOpen && !isFinancingOpen} onOpenChange={onOpenChange}>
+    {/* Mientras se guarda no se cierra ni con Escape ni tocando fuera: la venta
+        ya va camino de la base y cerrar aquí deja al cajero sin la factura. */}
+    <Dialog open={isOpen && !isFinancingOpen} onOpenChange={(abierto) => { if (!guardandoVenta) onOpenChange(abierto); }}>
       <DialogContent className="sm:max-w-4xl grid grid-rows-[auto_1fr_auto] h-full max-h-[95vh]">
         <DialogHeader>
           <DialogTitle>Confirmar Venta</DialogTitle>
@@ -525,11 +545,16 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
         </div>
         
         <DialogFooter>
-          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={guardandoVenta}>
             Cancelar
           </Button>
-          <Button type="button" onClick={confirmButtonAction} disabled={isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid}>
-            {paymentMethod === 'financing' ? 'Configurar Plan' : 'Confirmar'}
+          <Button type="button" onClick={confirmButtonAction} disabled={guardandoVenta || isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid}>
+            {guardandoVenta ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Registrando venta...
+              </>
+            ) : paymentMethod === 'financing' ? 'Configurar Plan' : 'Confirmar'}
           </Button>
         </DialogFooter>
       </DialogContent>
