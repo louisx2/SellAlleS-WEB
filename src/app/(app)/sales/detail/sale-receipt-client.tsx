@@ -59,7 +59,7 @@ export default function SaleReceiptClient() {
             <Button asChild>
                 <Link href="/sales">
                     <ArrowLeft className="mr-2 h-4 w-4" />
-                    Volver al Historial de Ventas
+                    Volver a Movimientos
                 </Link>
             </Button>
         </div>

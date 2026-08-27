@@ -128,7 +128,14 @@ export type Branch = {
   logoUrl?: string;
   ticketLogoUrl?: string;
   // Perfil del ticket propio de la sucursal. Cualquier campo vacío/ausente
-  // hereda el dato del perfil de la empresa (companies) al imprimir.
+  // hereda el dato del perfil de la empresa (companies) al imprimir, salvo que
+  // `inheritsCompanyProfile` sea false: ahí lo vacío se imprime vacío.
+  //
+  // false = "los datos de esta sucursal son suyos". Se pregunta al crearla,
+  // porque heredar en silencio hacía que una sucursal nueva imprimiera las
+  // redes y la dirección de otra. Ausente = true (las que ya existían heredan,
+  // como siempre).
+  inheritsCompanyProfile?: boolean;
   displayName?: string; // nombre comercial mostrado en el ticket
   phone?: string;
   rnc?: string;
@@ -137,6 +144,11 @@ export type Branch = {
   instagram?: string;
   facebook?: string;
   email?: string;
+  // Si esta sucursal exige caja abierta para cobrar en efectivo. Requiere además
+  // que el módulo 'caja' esté encendido en la empresa: el módulo dice si la
+  // empresa VE la caja, esto dice cuáles de sus sucursales la USAN. Ausente =
+  // false, que es como cobraban todas antes de que existiera el interruptor.
+  cajaEnabled?: boolean;
 };
 
 export type Company = {
@@ -195,6 +207,11 @@ export type CartItem = {
   product: Product;
   quantity: number;
   customPrice?: number;
+  // Costo unitario congelado al momento de vender. Solo viene en líneas ya
+  // vendidas; undefined = la línea no lo guardó y hay que caer al costo actual
+  // del producto. Es lo que permite que el margen histórico no cambie cuando
+  // se le edita el costo al producto.
+  cost?: number;
 };
 
 export type Cart = {

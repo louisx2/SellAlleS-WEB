@@ -116,28 +116,31 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
 
   const [mounted, setMounted] = useState(false);
   const [branchLogo, setBranchLogo] = useState<string | null>(null);
+  // La caja se decide por sucursal: el módulo dice si la empresa la ve, esta
+  // bandera si la sucursal activa la usa. Sin ella, el menú enseñaría /caja en
+  // sucursales que cobran sin abrir caja.
+  const [branchUsesCaja, setBranchUsesCaja] = useState(false);
 
   useEffect(() => {
     if (!appUser?.activeBranchId) {
       setBranchLogo(null);
+      setBranchUsesCaja(false);
       return;
     }
     (async () => {
       try {
         const { data } = await supabase
           .from('branches')
-          .select('logo_url')
+          .select('logo_url, caja_enabled')
           .eq('id', appUser.activeBranchId)
           .limit(1)
           .maybeSingle();
-        if (data?.logo_url) {
-          setBranchLogo(data.logo_url);
-        } else {
-          setBranchLogo(null);
-        }
+        setBranchLogo(data?.logo_url ?? null);
+        setBranchUsesCaja(!!data?.caja_enabled);
       } catch (err) {
         console.warn("Error loading branch logo in layout:", err);
         setBranchLogo(null);
+        setBranchUsesCaja(false);
       }
     })();
   }, [appUser?.activeBranchId]);
@@ -234,7 +237,11 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   // al pasar a permisos reales; sin este bypass se quedaba sin nav alguno.
   const hasExtra = (resource?: PermissionResource) => !!resource && (isSuperAdmin || hasPermission(effectivePermissions, resource, 'view'));
 
-  const moduleOk = (item: NavItem) => !item.module || isModuleEnabled(item.module);
+  // 'caja' es el único módulo que además se decide por sucursal: la empresa lo
+  // enciende y cada sucursal dice si lo usa. El resto se resuelve solo con el
+  // módulo de empresa.
+  const moduleActive = (m: ModuleKey) => isModuleEnabled(m) && (m !== 'caja' || branchUsesCaja);
+  const moduleOk = (item: NavItem) => !item.module || moduleActive(item.module);
   const visibleDashboard = showOperationalMenus && userRole && hasExtra(dashboardNavItem.permission);
   const visibleCoreNavItems = coreNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && hasExtra(item.permission));
   const visibleFeaturesNavItems = featuresNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && hasExtra(item.permission));
@@ -256,7 +263,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   // Guard de rutas: si la URL pertenece a un módulo apagado para esta
   // empresa, no se renderiza el contenido (aunque escriban la URL a mano).
   const routeModule = moduleForRoute(pathname);
-  const routeBlocked = routeModule !== null && !modulesLoading && !isModuleEnabled(routeModule);
+  const routeBlocked = routeModule !== null && !modulesLoading && !moduleActive(routeModule);
 
   // Guard de permisos: mismo criterio que gatea el ítem en el menú, aplicado
   // también al contenido de la página (si alguien escribe la URL a mano sin
@@ -420,7 +427,14 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                   <DropdownMenuItem disabled>
                     <span>{isSuperAdmin ? 'Super Administrador' : formatRole(userRole)}</span>
                   </DropdownMenuItem>
-                  {!isSuperAdmin && appUser.branches && appUser.branches.length > 1 && isAdminOrManager ? (
+                  {/* El super admin impersonando también necesita el selector: la
+                      pantalla de elección de sucursal solo aparece una vez por
+                      sesión del navegador (`branchSelectedThisSession`), así que
+                      sin esto quedaba clavado en la sucursal que eligió la primera
+                      vez — y una sucursal creada después ni siquiera podía llegar a
+                      elegirla. `setActiveBranch` ya contempla al super admin: le
+                      respeta los permisos base en vez de recalcularlos. */}
+                  {(isAdminOrManager || (isSuperAdmin && isImpersonating)) && appUser.branches && appUser.branches.length > 1 ? (
                     <DropdownMenuSub>
                       <DropdownMenuSubTrigger className="cursor-pointer">
                         <Store className="mr-2 h-4 w-4 text-muted-foreground" />

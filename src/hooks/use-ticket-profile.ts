@@ -6,8 +6,10 @@ import { useAuth } from '@/context/auth-provider';
 
 // Perfil efectivo que se imprime en un ticket: los datos propios de la
 // sucursal ganan, y cualquier campo que la sucursal no tenga llenado hereda
-// del perfil de la empresa. El RNC es SIEMPRE de la empresa (identidad fiscal
-// única); las redes y el correo dependen de `ticketSocialDisplay`.
+// del perfil de la empresa — salvo que la sucursal se haya creado como "datos
+// propios" (`inheritsCompanyProfile === false`), y entonces lo vacío se imprime
+// vacío. El RNC es SIEMPRE de la empresa (identidad fiscal única); las redes y
+// el correo dependen además de `ticketSocialDisplay`.
 export interface TicketProfile {
   name: string;
   // Segunda línea bajo `name` cuando la empresa configuró "mostrar ambos".
@@ -39,6 +41,14 @@ export function useTicketProfile(branchRef?: string | null): TicketProfile {
   const companyName = profile.name;
   const branchName = branch?.displayName?.trim() || branch?.name?.trim() || '';
 
+  // La sucursal decidió al crearse si hereda el perfil de la empresa. Si no
+  // hereda, lo que no tenga cargado se imprime vacío: es preferible un ticket
+  // sin Instagram a un ticket con el Instagram de la sucursal de al lado.
+  // Si no encontramos la sucursal, heredar es el único dato que tenemos.
+  const hereda = branch?.inheritsCompanyProfile !== false;
+  const propio = (deLaSucursal: string | undefined, deLaEmpresa: string) =>
+    deLaSucursal?.trim() || (hereda ? deLaEmpresa : '');
+
   // Qué nombre encabeza el ticket, según lo configurado en el perfil de la
   // empresa: el de la empresa (por defecto), el de la sucursal, o ambos.
   let name = companyName;
@@ -64,11 +74,13 @@ export function useTicketProfile(branchRef?: string | null): TicketProfile {
   let secondarySocialMedia: TicketProfile['secondarySocialMedia'];
   let secondaryEmail: string | undefined;
 
-  if (profile.ticketSocialDisplay === 'branch') {
+  if (!hereda || profile.ticketSocialDisplay === 'branch') {
     // Por sucursal es por sucursal: lo que la sucursal no tenga cargado NO se
     // hereda de la empresa, se deja en blanco. Las redes de una sucursal son
     // suyas, y heredarlas hacía que un negocio imprimiera el Instagram de otro
-    // (dos sucursales de la misma empresa con marcas distintas).
+    // (dos sucursales de la misma empresa con marcas distintas). Una sucursal
+    // que no hereda manda sobre el ajuste de la empresa: dijo que sus datos
+    // son suyos, y eso vale también para 'company' y 'both'.
     socialMedia = branchSocial;
     email = branchEmail;
   } else if (profile.ticketSocialDisplay === 'both' && branchTieneContacto) {
@@ -85,11 +97,12 @@ export function useTicketProfile(branchRef?: string | null): TicketProfile {
   return {
     name,
     secondaryName,
-    phone: branch?.phone?.trim() || profile.phone,
-    address: branch?.address?.trim() || profile.address,
+    phone: propio(branch?.phone, profile.phone),
+    address: propio(branch?.address, profile.address),
+    // El RNC se hereda siempre: identidad fiscal de la empresa, no marca.
     rnc: branch?.rnc?.trim() || profile.rnc,
-    ticketLogoUrl: branch?.ticketLogoUrl || profile.ticketLogoUrl,
-    receiptFooter: branch?.receiptFooter?.trim() || profile.receiptFooter,
+    ticketLogoUrl: propio(branch?.ticketLogoUrl, profile.ticketLogoUrl),
+    receiptFooter: propio(branch?.receiptFooter, profile.receiptFooter),
     socialMedia,
     email,
     secondarySocialMedia,

@@ -79,9 +79,11 @@ export default function ReportsDashboardPage() {
     let totalCogs = 0;
     filteredSales.forEach((sale) => {
       (sale.items ?? []).forEach((item) => {
-        // Buscamos el costo actual
-        const prod = allProducts.find((p) => p.id === item.product.id);
-        totalCogs += item.quantity * (prod?.cost ?? 0);
+        // Manda el costo congelado en la venta; solo si la línea no lo trae se
+        // usa el del catálogo, que además solo tiene los productos activos (un
+        // producto archivado o borrado caería en 0 y regalaría margen).
+        const costo = item.cost ?? allProducts.find((p) => p.id === item.product.id)?.cost ?? 0;
+        totalCogs += item.quantity * costo;
       });
     });
     const subtotalRevenue = filteredSales.reduce((sum, s) => sum + s.subtotal, 0);
@@ -335,6 +337,20 @@ export default function ReportsDashboardPage() {
                     <CardDescription className="text-3xs mt-1">Vencimientos y saldos pendientes</CardDescription>
                   </div>
                   <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {hasFinancing && (
+            <Link href="/reports/financiamientos">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group bg-gradient-to-br from-emerald-500/5 to-transparent">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold text-emerald-500">Ganancias de Financiamiento</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Interés y mora cobrados</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-emerald-500 group-hover:translate-x-1 transition-transform" />
                 </CardHeader>
               </Card>
             </Link>

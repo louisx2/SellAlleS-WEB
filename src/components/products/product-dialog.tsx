@@ -190,7 +190,10 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
 
     try {
       if (isEditMode && product) {
-        await updateProduct({ ...productData, id: product.id });
+        // Se parte del producto original: productData solo trae lo que hay en el
+        // formulario, y productToRow manda como null todo lo ausente. Sin esto,
+        // editar el precio borraba la fecha de ingreso del artículo.
+        await updateProduct({ ...product, ...productData, id: product.id });
         toast({
           title: `Producto actualizado`,
           description: `El producto '${productData.name}' ha sido actualizado.`,

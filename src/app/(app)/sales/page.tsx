@@ -80,7 +80,10 @@ export default function SalesPage() {
 
   return (
     <div>
-      <PageHeader title="Historial de Ventas" />
+      {/* "Movimientos" y no "Historial de Ventas": la tabla lista tambien las
+          anuladas, las de credito y las financiadas, no solo ventas cobradas.
+          Es ademas el texto que ya llevaba el boton del menu lateral. */}
+      <PageHeader title="Movimientos" />
       
       <div className="flex flex-col sm:flex-row gap-4 mb-6 items-center">
         <div className="relative w-full sm:w-auto sm:min-w-[240px]">
