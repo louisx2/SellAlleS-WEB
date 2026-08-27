@@ -91,6 +91,9 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const pathname = usePathname();
   const { appUser, signOut, setImpersonatedCompany, setActiveBranch } = useAuth();
   const hayActualizacion = useActualizacionDisponible();
+  // Entre el clic y la recarga pasan hasta 3 s. Sin esto el botón se ve muerto
+  // y el cajero vuelve a pulsarlo, que es de donde salió el reporte.
+  const [actualizando, setActualizando] = useState(false);
   const { isModuleEnabled, loading: modulesLoading } = useModules();
   // Caja se decide en dos niveles: el módulo dice si la empresa la ve, y
   // branchUsesCaja si la sucursal activa la usa (null = todavía cargando).
@@ -691,11 +694,17 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
             {hayActualizacion && (
               <button
                 type="button"
-                onClick={aplicarActualizacion}
-                className="mt-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20"
+                disabled={actualizando}
+                onClick={() => {
+                  setActualizando(true);
+                  // Siempre termina recargando, así que no hace falta volver a
+                  // poner el botón como estaba.
+                  void aplicarActualizacion();
+                }}
+                className="mt-1 inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary hover:bg-primary/20 disabled:opacity-70"
               >
-                <RefreshCw className="h-3 w-3" />
-                Versión nueva · Actualizar
+                <RefreshCw className={cn('h-3 w-3', actualizando && 'animate-spin')} />
+                {actualizando ? 'Actualizando...' : 'Versión nueva · Actualizar'}
               </button>
             )}
           </div>
