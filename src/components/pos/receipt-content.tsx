@@ -7,7 +7,7 @@ import { formatQtyCompact } from '@/lib/units';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
-import { useState, useEffect } from 'react';
+import { BusinessHeader, BusinessFooter, DocumentBarcode } from '@/components/print/business-header';
 
 interface ReceiptProps {
   sale: Sale;
@@ -35,18 +35,9 @@ export function ReceiptHeader({ sale }: ReceiptProps) {
 
   return (
     <div className="text-left space-y-1">
-      {profile.ticketLogoUrl && (
-        <div className="flex justify-center pb-1">
-          <img src={profile.ticketLogoUrl} alt="" style={{ maxHeight: 85, maxWidth: '80%', objectFit: 'contain' }} />
-        </div>
-      )}
-      <h3 className="text-lg font-semibold text-center">{profile.name}</h3>
-      {profile.secondaryName && <p className="text-sm font-medium text-center">{profile.secondaryName}</p>}
-       <div className="text-xs text-muted-foreground text-center">
-        {profile.address && <p>{profile.address}</p>}
-        {profile.rnc && <p>RNC: {profile.rnc}</p>}
-        {profile.phone && <p>Tel: {profile.phone}</p>}
-      </div>
+      {/* Compartido con el estado de cuenta: los dos documentos tienen que
+          verse del mismo negocio. */}
+      <BusinessHeader profile={profile} />
       <Separator className="my-2" />
       <div className="text-sm pt-1">
         <p className="text-left text-xs font-semibold uppercase">Recibo de Venta</p>
@@ -213,15 +204,6 @@ export function ReceiptTotals({ sale }: ReceiptProps) {
 
 export function ReceiptContent({ sale }: ReceiptProps) {
   const profile = useTicketProfile(sale.branchId);
-  const [showBarcode, setShowBarcode] = useState(true);
-  const [barcodeType, setBarcodeType] = useState<'code128' | 'qr'>('code128');
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      setShowBarcode(localStorage.getItem('showBarcode') !== 'false');
-      setBarcodeType((localStorage.getItem('barcodeType') as any) || 'code128');
-    }
-  }, []);
 
   return (
      <div className="space-y-4">
@@ -248,38 +230,7 @@ export function ReceiptContent({ sale }: ReceiptProps) {
                 </div>
             </>
         )}
-        <p className="text-center mt-3 text-xs font-semibold">{profile.receiptFooter}</p>
-        {[
-          [profile.socialMedia.instagram, profile.socialMedia.facebook, profile.email],
-          [profile.secondarySocialMedia?.instagram, profile.secondarySocialMedia?.facebook, profile.secondaryEmail],
-        ]
-          .map((datos) => datos.filter(Boolean).join(' • '))
-          .filter(Boolean)
-          .map((linea) => (
-            <div key={linea} className="text-center text-xs mt-1">{linea}</div>
-          ))}
-        {showBarcode && (
-          <div className="flex flex-col items-center justify-center mt-6 pt-4 border-t border-dashed gap-1">
-            {barcodeType === 'code128' ? (
-              <img 
-                src={`https://bwipjs-api.metafloor.com/?bcid=code128&text=${sale.id.slice(0, 8).toUpperCase()}&scale=2&height=10`} 
-                alt="Código de barras"
-                className="h-10 w-auto mix-blend-multiply"
-              />
-            ) : (
-              <img 
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${sale.id}`} 
-                alt="Código QR"
-                className="w-20 h-20"
-              />
-            )}
-          </div>
-        )}
-        <div className="text-center mt-4 pt-2 border-t border-dashed">
-          <p className="text-[10px] text-muted-foreground font-mono">
-            SellAlleS Web <span className="opacity-70">by SmartCore</span>
-          </p>
-        </div>
+        <BusinessFooter profile={profile} codigo={<DocumentBarcode valor={sale.id} />} />
     </div>
   );
 }

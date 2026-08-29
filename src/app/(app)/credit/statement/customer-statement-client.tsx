@@ -17,9 +17,27 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
-import { DialogTrigger } from '@/components/ui/dialog';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
+} from '@/components/ui/dialog';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { AddPaymentDialog } from '@/components/credit/add-payment-dialog';
+import {
+  StatementDocument, type FormatoEstadoCuenta, type OpcionesEstadoCuenta,
+} from '@/components/credit/statement-document';
 import { ArrowLeft, DollarSign, Printer } from 'lucide-react';
+
+// Preferencias por dispositivo: la caja del mostrador imprime en la térmica y
+// la oficina en hoja, y cada una lo deja como lo usa.
+const PREF_KEY = 'estadoCuentaImpresion';
+
+const OPCIONES_POR_DEFECTO: OpcionesEstadoCuenta = {
+  formato: 'ticket',
+  mostrarLimite: true,
+  mostrarAbonos: true,
+};
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -35,6 +53,29 @@ export default function CustomerStatementClient() {
   const { profile } = useCompanyProfile();
   const [payments, setPayments] = useState<CreditPayment[]>([]);
   const printRef = useRef(null);
+  const [opcionesAbiertas, setOpcionesAbiertas] = useState(false);
+  const [opciones, setOpciones] = useState<OpcionesEstadoCuenta>(OPCIONES_POR_DEFECTO);
+
+  useEffect(() => {
+    try {
+      const guardado = localStorage.getItem(PREF_KEY);
+      if (guardado) setOpciones({ ...OPCIONES_POR_DEFECTO, ...JSON.parse(guardado) });
+    } catch {
+      // Preferencia corrupta o almacenamiento bloqueado: se usan las de fábrica.
+    }
+  }, []);
+
+  const cambiarOpciones = (cambio: Partial<OpcionesEstadoCuenta>) => {
+    setOpciones((previas) => {
+      const siguientes = { ...previas, ...cambio };
+      try {
+        localStorage.setItem(PREF_KEY, JSON.stringify(siguientes));
+      } catch {
+        // Sin persistencia el cambio igual aplica en esta sesión.
+      }
+      return siguientes;
+    });
+  };
 
   const handlePrint = useReactToPrint({
     content: () => printRef.current,
@@ -89,7 +130,7 @@ export default function CustomerStatementClient() {
           </Link>
         </Button>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handlePrint}>
+          <Button variant="outline" onClick={() => setOpcionesAbiertas(true)}>
             <Printer className="mr-2 h-4 w-4" />
             Imprimir Estado de Cuenta
           </Button>
@@ -106,7 +147,10 @@ export default function CustomerStatementClient() {
         </div>
       </div>
 
-      <div ref={printRef} className="space-y-6">
+      {/* La pantalla se queda como estaba: es donde se trabaja y se registran
+          abonos. Lo que cambia es el papel, que sale del documento oculto de
+          más abajo con la identidad del negocio. */}
+      <div className="space-y-6">
         <Card>
           <CardHeader>
             <CardTitle>{customer.name}</CardTitle>
@@ -235,6 +279,106 @@ export default function CustomerStatementClient() {
             )}
           </CardContent>
         </Card>
+      </div>
+
+      <Dialog open={opcionesAbiertas} onOpenChange={setOpcionesAbiertas}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Imprimir estado de cuenta</DialogTitle>
+            <DialogDescription>
+              Se recuerda lo que elijas en este dispositivo.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Formato</Label>
+              <RadioGroup
+                value={opciones.formato}
+                onValueChange={(v) => cambiarOpciones({ formato: v as FormatoEstadoCuenta })}
+                className="space-y-2"
+              >
+                <div className="flex items-start gap-3">
+                  <RadioGroupItem value="ticket" id="formato-ticket" className="mt-1" />
+                  <Label htmlFor="formato-ticket" className="font-normal">
+                    Ticket 80mm
+                    <span className="block text-xs text-muted-foreground">
+                      La impresora del mostrador, la misma de la factura.
+                    </span>
+                  </Label>
+                </div>
+                <div className="flex items-start gap-3">
+                  <RadioGroupItem value="hoja" id="formato-hoja" className="mt-1" />
+                  <Label htmlFor="formato-hoja" className="font-normal">
+                    Hoja carta
+                    <span className="block text-xs text-muted-foreground">
+                      Con tablas, para archivar o mandar por correo.
+                    </span>
+                  </Label>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <div className="flex items-start justify-between gap-4">
+              <Label htmlFor="mostrar-limite" className="font-normal">
+                Incluir límite y disponible
+                <span className="block text-xs text-muted-foreground">
+                  Apágalo si el papel se lo lleva el cliente.
+                </span>
+              </Label>
+              <Switch
+                id="mostrar-limite"
+                checked={opciones.mostrarLimite}
+                onCheckedChange={(v) => cambiarOpciones({ mostrarLimite: v })}
+              />
+            </div>
+
+            <div className="flex items-start justify-between gap-4">
+              <Label htmlFor="mostrar-abonos" className="font-normal">
+                Incluir historial de abonos
+                <span className="block text-xs text-muted-foreground">
+                  {opciones.formato === 'ticket'
+                    ? 'En ticket salen los 10 últimos, para no alargar el papel.'
+                    : 'Salen todos los abonos del cliente.'}
+                </span>
+              </Label>
+              <Switch
+                id="mostrar-abonos"
+                checked={opciones.mostrarAbonos}
+                onCheckedChange={(v) => cambiarOpciones({ mostrarAbonos: v })}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setOpcionesAbiertas(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                setOpcionesAbiertas(false);
+                handlePrint();
+              }}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Imprimir
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Lo que sale por la impresora. Igual que en la factura: fuera de la
+          vista, y con la clase que le da el ancho del papel. */}
+      <div className="hidden">
+        <div ref={printRef} className={opciones.formato === 'ticket' ? 'receipt-container' : 'sheet-container'}>
+          <StatementDocument
+            customer={customer}
+            ventasAbiertas={openSales}
+            abonos={payments}
+            lateFeeRate={profile.lateFeeRate}
+            opciones={opciones}
+          />
+        </div>
       </div>
     </div>
   );

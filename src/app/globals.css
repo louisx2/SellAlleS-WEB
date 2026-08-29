@@ -103,6 +103,17 @@
   .receipt-container * {
     color: #000000 !important;
   }
+  /* El otro formato del estado de cuenta: hoja completa. `@page` va sin
+     margen para el ticket, así que el margen de la hoja lo pone el padding. */
+  .sheet-container {
+    width: 100%;
+    font-size: 11px;
+    color: black;
+    padding: 12mm 10mm;
+  }
+  .sheet-container * {
+    color: #000000 !important;
+  }
   .print-only {
     display: block;
   }
