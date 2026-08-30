@@ -201,22 +201,60 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
   total − inicial para crédito) y genera las cuotas en `financing_installments`
   (vencimiento mensual desde la fecha de venta; la última cuota absorbe el
   redondeo para que la suma sea exacta).
-- **RPC `register_sale_payment(sale_id, amount, method, branch_id, notes)`**
-  (SECURITY INVOKER — RLS aplica): abono a una venta. En una transacción cobra
-  primero la **mora** (`companies.late_fee_rate`% por cuota vencida, cargo
-  único por cuota, persistida en `late_fee_paid` de cuota y abono), luego
-  aplica capital FIFO a las cuotas, sube `sales.amount_paid` (solo capital),
-  marca `paid` al saldar y baja `customers.credit_balance`. El usuario se
-  captura en servidor (`auth.uid()`). Devuelve jsonb para el recibo de abono.
-- **RPC `register_customer_payment(customer_id, amount, method, branch_id, notes)`**:
-  abono a la deuda general; se aplica FIFO a las ventas `credit` abiertas del
-  cliente y baja su balance.
-- `companies.late_fee_rate` (default 5) y `companies.default_interest_rate`
-  (default 3.5) se editan en Perfil de Empresa → "Crédito y Financiamiento".
+- **`apply_payment_to_sale(sale_id, monto, tasa_mora, hoy, gracia)`** (interno,
+  sin EXECUTE para `authenticated`): el único motor que aplica dinero a una
+  venta. Cobra primero la **mora** (`companies.late_fee_rate`% por cuota
+  vencida, cargo único por cuota, exigible pasados
+  `companies.late_fee_grace_days`), luego capital FIFO a las cuotas, y sube
+  `sales.amount_paid` solo con el capital. Devuelve el detalle de la aplicación
+  para poder revertirla cuota por cuota.
+- **RPC `register_sale_payment(sale_id, amount, method, branch_id, notes, reference)`**
+  (SECURITY DEFINER): abono a una venta. Valida acceso con `can_collect_sale()`,
+  que replica la policy de `sales`, y comprueba que la sucursal del cobro sea de
+  la empresa. El usuario se captura en servidor (`auth.uid()`). Devuelve jsonb
+  para el recibo de abono.
+- **RPC `register_customer_payment(customer_id, amount, method, branch_id, notes, reference)`**
+  (SECURITY DEFINER): abono a la deuda general. Se reparte entre **todas** las
+  ventas abiertas del cliente — `credit` **y** `in_financing` — de la de
+  vencimiento más viejo a la más nueva, mora antes que capital.
+- **RPC `void_credit_payment(payment_id, reason)`** (SECURITY DEFINER, solo
+  admin de empresa): anula un abono por reverso. No lo borra: marca `voided_at`
+  y devuelve capital y mora a las cuotas exactas que los recibieron, según
+  `credit_payments.allocation`. El abono inicial (`kind = 'down_payment'`) no
+  se puede anular suelto. Si el cobro fue en efectivo y venía de una sesión de
+  caja ya cerrada, registra la salida en la caja abierta.
+- `customers.credit_balance` **se recalcula** desde las ventas abiertas
+  (`recompute_customer_balance`), no se suma y resta. Sumar a ciegas lo dejaba
+  a la deriva; ahora es derivado y se autocorrige.
+- **El libro de abonos no es escribible desde el navegador.** `credit_payments`,
+  `financing_installments`, `loan_payments` y `loan_installments` no tienen
+  INSERT/UPDATE/DELETE para `anon` ni `authenticated`, y `sales`/`loans` solo
+  conservan INSERT. RLS decide qué filas ve cada quien; los grants deciden qué
+  verbos puede usar, y con FOR ALL + grants abiertos un PATCH a PostgREST
+  marcaba una cuota como pagada.
+- **Zona horaria del negocio**: `companies.timezone` (default
+  `America/Santo_Domingo`) y `company_today(company_id)`. La base corre en UTC:
+  con `current_date`, a partir de las 8:00 PM en RD ya era "mañana", así que a
+  quien pagaba el día del vencimiento se le cobraba mora y el plan de cuotas de
+  una venta de noche arrancaba un día tarde.
+- `companies.late_fee_rate` (default 5), `companies.default_interest_rate`
+  (default 3.5) y `companies.late_fee_grace_days` (default 0 = la mora aplica
+  al día siguiente del vencimiento).
 - La mora exigible NO se materializa: se deriva al leer (cuota vencida ×
   tasa − ya cobrada), igual en SQL y en `calculateFinancingStatus` del cliente.
-- `customers.credit_balance` solo lo escriben los triggers/RPCs; el mapper
-  `customerToRow` ya no lo envía desde el navegador.
+- El interés es **add-on**: se calcula una vez sobre todo el plazo y se reparte
+  en cuotas iguales, así que pagar antes no ahorra intereses. Falta un "saldar
+  anticipado" con descuento de intereses no devengados.
+
+## Reportes de crédito y financiamiento
+
+- `/reports/cobros` — **lo que entró**, por método de pago y por origen
+  (financiamiento, crédito, abono inicial, abono general, préstamo). Los
+  reportes de ventas cuentan la venta completa el día que se hace; este cuenta
+  lo que el cliente pagó, el día que lo pagó. Los abonos anulados salen en el
+  detalle, tachados, y no suman.
+- `/reports/receivables` — **lo que falta**, con días de atraso y teléfono.
+- `/reports/financiamientos` — **la ganancia**: interés y mora cobrados.
 
 ## Próximos pasos
 

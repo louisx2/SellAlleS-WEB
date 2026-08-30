@@ -14,18 +14,31 @@ import { CreditCard, AlertTriangle, Wallet } from 'lucide-react';
 // Reporte de Cuentas por Cobrar: consolida ventas a crédito y financiadas con
 // su saldo pendiente y mora. Reutiliza calculateFinancingStatus (mismo cálculo
 // que la pantalla de financiamiento).
+const DIA_MS = 24 * 60 * 60 * 1000;
+
 export default function ReceivablesReportPage() {
-  const { sales } = useSales();
+  // `financingSales` ya trae solo las abiertas (crédito y financiamiento) e
+  // incluye el pool compartido: con `sales` a secas el reporte se quedaba
+  // corto en las empresas que cobran desde cualquier sucursal.
+  const { financingSales } = useSales();
   const { profile } = useCompanyProfile();
 
   const rows = useMemo(() => {
-    return sales
-      .filter((s) => s.paymentStatus === 'credit' || s.paymentStatus === 'in_financing')
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    return financingSales
+      .filter((s) => !s.cancelledAt)
       .map((s) => {
         const st = calculateFinancingStatus(s, profile.lateFeeRate);
+        // Días desde el vencimiento más viejo sin pagar: es el número por el
+        // que se ordena una cartera, más que por el monto.
+        const diasAtraso = st.isOverdue && st.nextDueDate
+          ? Math.max(Math.floor((hoy.getTime() - st.nextDueDate.getTime()) / DIA_MS), 0)
+          : 0;
         return {
           id: s.id,
           customer: s.customer?.name ?? 'Cliente',
+          phone: s.customer?.phone ?? '',
           date: new Date(s.createdAt),
           type: s.paymentMethod === 'financing' ? 'Financiamiento' : 'Crédito',
           total: s.total,
@@ -33,11 +46,12 @@ export default function ReceivablesReportPage() {
           pending: st.pendingBalance,
           lateFee: st.lateFee,
           overdue: st.isOverdue,
+          diasAtraso,
         };
       })
       .filter((r) => r.pending > 0)
-      .sort((a, b) => b.pending - a.pending);
-  }, [sales, profile.lateFeeRate]);
+      .sort((a, b) => b.diasAtraso - a.diasAtraso || b.pending - a.pending);
+  }, [financingSales, profile.lateFeeRate]);
 
   const totals = useMemo(() => ({
     pending: rows.reduce((a, r) => a + r.pending, 0),
@@ -53,12 +67,14 @@ export default function ReceivablesReportPage() {
           rows={rows}
           columns={[
             { header: 'Cliente', value: (r) => r.customer },
+            { header: 'Telefono', value: (r) => r.phone },
             { header: 'Fecha', value: (r) => r.date.toLocaleDateString('es-DO') },
             { header: 'Tipo', value: (r) => r.type },
             { header: 'Total', value: (r) => r.total },
             { header: 'Pagado', value: (r) => r.paid },
             { header: 'Pendiente', value: (r) => r.pending },
             { header: 'Mora', value: (r) => r.lateFee },
+            { header: 'Dias de atraso', value: (r) => r.diasAtraso },
             { header: 'Estado', value: (r) => (r.overdue ? 'Atrasado' : 'Al día') },
           ]}
         />
@@ -105,6 +121,7 @@ export default function ReceivablesReportPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Cliente</TableHead>
+                  <TableHead>Teléfono</TableHead>
                   <TableHead>Fecha</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead className="text-right">Total</TableHead>
@@ -117,15 +134,23 @@ export default function ReceivablesReportPage() {
                 {rows.length > 0 ? rows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="font-medium">{r.customer}</TableCell>
+                    <TableCell className="whitespace-nowrap">{r.phone || '—'}</TableCell>
                     <TableCell>{r.date.toLocaleDateString('es-DO')}</TableCell>
                     <TableCell>{r.type}</TableCell>
                     <TableCell className="text-right">{formatCurrency(r.total)}</TableCell>
                     <TableCell className="text-right font-semibold text-destructive">{formatCurrency(r.pending)}</TableCell>
                     <TableCell className="text-right">{r.lateFee > 0 ? formatCurrency(r.lateFee) : '—'}</TableCell>
-                    <TableCell>{r.overdue ? <Badge variant="destructive">Atrasado</Badge> : <Badge variant="outline">Al día</Badge>}</TableCell>
+                    <TableCell>
+                      {r.overdue ? (
+                        <div className="flex flex-col">
+                          <Badge variant="destructive" className="w-fit">Atrasado</Badge>
+                          <span className="text-xs text-destructive mt-1">{r.diasAtraso} día{r.diasAtraso === 1 ? '' : 's'}</span>
+                        </div>
+                      ) : <Badge variant="outline">Al día</Badge>}
+                    </TableCell>
                   </TableRow>
                 )) : (
-                  <TableRow><TableCell colSpan={7} className="h-24 text-center">No hay cuentas por cobrar.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={8} className="h-24 text-center">No hay cuentas por cobrar.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>

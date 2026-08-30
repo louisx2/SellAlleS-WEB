@@ -159,6 +159,7 @@ export default function FinancingProfitReportPage() {
     let cobrado = 0;
 
     payments.forEach((p) => {
+      if (p.voidedAt) return;           // abono anulado: nunca fue ganancia
       if (!p.saleId) return;            // abono general a la deuda del cliente, no a un financiamiento
       const e = byId.get(p.saleId);
       if (!e) return;                   // venta a crédito simple, otra sucursal u otra empresa

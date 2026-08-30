@@ -1,15 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useReactToPrint } from 'react-to-print';
 import { useCustomers } from '@/context/customer-provider';
 import { useSales } from '@/context/sales-provider';
+import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToCreditPayment } from '@/lib/supabase/mappers';
-import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
+import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import type { CreditPayment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,7 +20,8 @@ import {
 } from '@/components/ui/table';
 import { DialogTrigger } from '@/components/ui/dialog';
 import { AddPaymentDialog } from '@/components/credit/add-payment-dialog';
-import { ArrowLeft, DollarSign, Printer } from 'lucide-react';
+import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
+import { ArrowLeft, DollarSign, Printer, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -31,9 +33,11 @@ export default function CustomerStatementClient() {
   const searchParams = useSearchParams();
   const customerId = searchParams.get('id') ?? '';
   const { customers } = useCustomers();
-  const { sales } = useSales();
+  const { sales, financingSales } = useSales();
+  const { appUser } = useAuth();
   const { profile } = useCompanyProfile();
   const [payments, setPayments] = useState<CreditPayment[]>([]);
+  const [voiding, setVoiding] = useState<CreditPayment | null>(null);
   const printRef = useRef(null);
 
   const handlePrint = useReactToPrint({
@@ -41,20 +45,21 @@ export default function CustomerStatementClient() {
   });
 
   const customer = customers.find(c => c.id === customerId);
+  const canVoid = appUser?.role === 'admin';
 
   // Historial completo de abonos del cliente (generales y por venta);
   // se refresca cuando el provider recarga las ventas tras un abono.
-  useEffect(() => {
+  const loadPayments = useCallback(async () => {
     if (!customerId) return;
-    (async () => {
-      const { data } = await supabase
-        .from('credit_payments')
-        .select('*, branches(name)')
-        .eq('customer_id', customerId)
-        .order('date', { ascending: false });
-      if (data) setPayments(data.map(rowToCreditPayment));
-    })();
-  }, [customerId, sales]);
+    const { data } = await supabase
+      .from('credit_payments')
+      .select('*, branches(name)')
+      .eq('customer_id', customerId)
+      .order('date', { ascending: false });
+    if (data) setPayments(data.map(rowToCreditPayment));
+  }, [customerId]);
+
+  useEffect(() => { loadPayments(); }, [loadPayments, sales]);
 
   if (!customer) {
     return (
@@ -71,10 +76,11 @@ export default function CustomerStatementClient() {
     );
   }
 
-  const openSales = sales.filter(
-    s => s.customerId === customer.id
-      && (s.paymentStatus === 'credit' || s.paymentStatus === 'in_financing')
-  );
+  // `financingSales` incluye el pool compartido: si la empresa cobra desde
+  // cualquier sucursal, el estado de cuenta tiene que mostrar TODA la deuda,
+  // no solo la originada en la sucursal activa (si no, no cuadra con el
+  // balance del cliente, que sí es de la empresa entera).
+  const openSales = financingSales.filter(s => s.customerId === customer.id);
   const available = customer.creditLimit != null
     ? Math.max(customer.creditLimit - customer.creditBalance, 0)
     : null;
@@ -208,17 +214,28 @@ export default function CustomerStatementClient() {
                     <TableHead>Aplicado a</TableHead>
                     <TableHead>Sucursal</TableHead>
                     <TableHead>Usuario</TableHead>
+                    {canVoid && <TableHead className="text-right print:hidden">Acción</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {payments.map((p) => (
-                    <TableRow key={p.id}>
+                    <TableRow key={p.id} className={p.voidedAt ? 'opacity-60' : undefined}>
                       <TableCell>{p.date.toLocaleString('es-DO')}</TableCell>
-                      <TableCell className="text-right font-medium">{formatCurrency(p.amount)}</TableCell>
-                      <TableCell className="text-right">{p.lateFeePaid > 0 ? formatCurrency(p.lateFeePaid) : '—'}</TableCell>
+                      <TableCell className={cn('text-right font-medium', p.voidedAt && 'line-through')}>
+                        {formatCurrency(p.amount)}
+                      </TableCell>
+                      <TableCell className={cn('text-right', p.voidedAt && 'line-through')}>
+                        {p.lateFeePaid > 0 ? formatCurrency(p.lateFeePaid) : '—'}
+                      </TableCell>
                       <TableCell>{METHOD_LABEL[p.method]}</TableCell>
                       <TableCell>
-                        {p.saleId ? (
+                        {p.voidedAt ? (
+                          <span className="text-destructive" title={p.voidReason}>Anulado</span>
+                        ) : p.kind === 'down_payment' ? (
+                          <Link href={`/financing/detail?id=${p.saleId}`} className="underline underline-offset-2 print:no-underline">
+                            Abono inicial
+                          </Link>
+                        ) : p.saleId ? (
                           <Link href={`/financing/detail?id=${p.saleId}`} className="underline underline-offset-2 print:no-underline">
                             Venta específica
                           </Link>
@@ -228,6 +245,16 @@ export default function CustomerStatementClient() {
                       </TableCell>
                       <TableCell>{p.branchId || '—'}</TableCell>
                       <TableCell>{p.userName ?? '—'}</TableCell>
+                      {canVoid && (
+                        <TableCell className="text-right print:hidden">
+                          {p.voidedAt || p.kind === 'down_payment' ? null : (
+                            <Button variant="ghost" size="sm" onClick={() => setVoiding(p)}>
+                              <Undo2 className="mr-1 h-3.5 w-3.5" />
+                              Anular
+                            </Button>
+                          )}
+                        </TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -236,6 +263,15 @@ export default function CustomerStatementClient() {
           </CardContent>
         </Card>
       </div>
+
+      {voiding && (
+        <VoidPaymentDialog
+          payment={voiding}
+          open={!!voiding}
+          onOpenChange={(o) => !o && setVoiding(null)}
+          onVoided={loadPayments}
+        />
+      )}
     </div>
   );
 }

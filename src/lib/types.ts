@@ -378,10 +378,20 @@ export type PaymentMethod = 'cash' | 'card' | 'transfer';
 // no hubo dinero que devolver.
 export type RefundMethod = PaymentMethod | 'none';
 
+/**
+ * De dónde salió el abono:
+ * - `down_payment`: el inicial de la venta. Es parte de la venta, no se anula suelto.
+ * - `sale`: abono a una venta concreta desde Financiamientos.
+ * - `customer`: abono a la deuda general, repartido entre las ventas abiertas.
+ */
+export type CreditPaymentKind = 'down_payment' | 'sale' | 'customer';
+
 export type CreditPayment = {
   id: string;
   saleId?: string;      // abonos generales a deuda no van ligados a una venta
   customerId: string;
+  customerName?: string;
+  kind: CreditPaymentKind;
   amount: number;
   lateFeePaid: number;  // parte del abono que fue mora
   method: PaymentMethod;
@@ -390,6 +400,11 @@ export type CreditPayment = {
   userName?: string;
   date: Date;
   branchId: string;     // nombre de sucursal a nivel de app; se resuelve a UUID al guardar
+  // Un abono no se borra: se anula por reverso (RPC void_credit_payment) y
+  // queda con su motivo. Todo lo que sume dinero descarta los anulados.
+  voidedAt?: Date;
+  voidedByName?: string;
+  voidReason?: string;
 };
 
 // Resultado de las RPCs register_sale_payment / register_customer_payment.
@@ -402,6 +417,8 @@ export type PaymentResult = {
   installmentsPaid: number | null;
   installmentsTotal: number | null;
   customerBalance: number | null;
+  /** Solo en el abono general: entre cuántas ventas se repartió. */
+  salesTouched?: number;
 };
 
 // ---------- Préstamos (dominio independiente de ventas/financiamiento) ----------

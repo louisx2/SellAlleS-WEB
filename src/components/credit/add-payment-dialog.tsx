@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useCustomers } from '@/context/customer-provider';
 import { useSales } from '@/context/sales-provider';
 import { useCaja } from '@/context/caja-provider';
-import { formatCurrency } from '@/lib/utils';
+import { useCompanyProfile } from '@/context/company-profile-provider';
+import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { PaymentReceiptDialog, type PaymentReceiptData } from './payment-receipt-dialog';
 import { Loader2 } from 'lucide-react';
 
@@ -32,8 +33,9 @@ interface AddPaymentDialogProps {
 export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) {
   const { toast } = useToast();
   const { reload: reloadCustomers } = useCustomers();
-  const { payCustomerDebt } = useSales();
+  const { payCustomerDebt, financingSales } = useSales();
   const { cashBlocked } = useCaja();
+  const { profile } = useCompanyProfile();
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState<number | ''>('');
   const [method, setMethod] = useState<PaymentMethod>('cash');
@@ -57,14 +59,25 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
     }
   }, [open, cashBlocked])
 
+  // Mora exigible de todas las ventas abiertas del cliente. El balance no la
+  // incluye (la mora no es deuda de capital), pero el abono sí la cobra: sin
+  // esto el tope del formulario rechazaba cobros legítimos.
+  const lateFeeDue = useMemo(
+    () => financingSales
+      .filter((s) => s.customerId === customer.id && !s.cancelledAt)
+      .reduce((acc, s) => acc + calculateFinancingStatus(s, profile.lateFeeRate).lateFee, 0),
+    [financingSales, customer.id, profile.lateFeeRate]
+  );
+  const maxPayable = Math.round((customer.creditBalance + lateFeeDue) * 100) / 100;
+
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const paymentAmount = Number(amount);
 
-    if (paymentAmount <= 0 || paymentAmount > customer.creditBalance) {
+    if (paymentAmount <= 0 || paymentAmount > maxPayable + 0.01) {
         toast({
             title: 'Monto inválido',
-            description: 'El monto del abono no puede ser cero, negativo o mayor que la deuda.',
+            description: `El abono debe ser mayor que cero y no exceder ${formatCurrency(maxPayable)} (deuda + mora).`,
             variant: 'destructive'
         });
         return;
@@ -84,14 +97,19 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
       const finalReference = method === 'transfer' && reference.trim()
         ? `${selectedBank} - Ref: ${reference.trim()}`
         : reference.trim();
-      // RPC atómica: registra el abono, lo aplica FIFO a las ventas a crédito
-      // abiertas del cliente y actualiza su balance en una sola transacción.
+      // RPC atómica: registra el abono y lo reparte entre TODAS las ventas
+      // abiertas del cliente (crédito y financiamiento), de la más vencida a la
+      // más nueva, cobrando mora antes que capital.
       const result = await payCustomerDebt(customer.id, paymentAmount, method, userBranch, notes.trim() || undefined, finalReference || undefined);
       await reloadCustomers();
 
       toast({
           title: 'Abono registrado',
-          description: `Se registró un abono de ${formatCurrency(paymentAmount)} para ${customer.name}.`,
+          description: `Se registró un abono de ${formatCurrency(paymentAmount)} para ${customer.name}.`
+            + (result.salesTouched && result.salesTouched > 1
+                ? ` Se repartió entre ${result.salesTouched} ventas.` : '')
+            + (result.lateFeePaid > 0
+                ? ` Incluye ${formatCurrency(result.lateFeePaid)} de mora.` : ''),
       });
 
       setReceipt({
@@ -126,6 +144,13 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
           <DialogDescription>
             Cliente: <span className="font-semibold">{customer.name}</span><br />
             Deuda Actual: <span className="font-semibold text-destructive">{formatCurrency(customer.creditBalance)}</span>
+            {lateFeeDue > 0 && (
+              <> · Mora: <span className="font-semibold text-destructive">{formatCurrency(lateFeeDue)}</span></>
+            )}
+            <br />
+            <span className="text-xs">
+              Se aplica a sus ventas abiertas empezando por la más vencida; la mora se cobra primero.
+            </span>
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>

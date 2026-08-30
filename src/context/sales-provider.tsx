@@ -19,8 +19,14 @@ interface SalesContextType {
   addSale: (sale: Omit<Sale, 'id'>) => Promise<Sale>;
   /** Abono a una venta a crédito o financiada (RPC atómica en la base). */
   paySale: (saleId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string, reference?: string) => Promise<PaymentResult>;
-  /** Abono a la deuda general del cliente; la base lo aplica FIFO a sus ventas a crédito. */
+  /**
+   * Abono a la deuda general del cliente. La base lo reparte entre TODAS sus
+   * ventas abiertas — crédito y financiamiento — de la más vencida a la más
+   * nueva, cobrando mora antes que capital.
+   */
   payCustomerDebt: (customerId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string, reference?: string) => Promise<PaymentResult>;
+  /** Anula un abono mal registrado: lo revierte cuota por cuota (no lo borra). Solo admin. */
+  voidPayment: (paymentId: string, reason: string) => Promise<VoidPaymentResult>;
   /** Anula una venta pagada: emite nota de crédito B04 (si llevó NCF), repone
    *  inventario y registra la salida de caja si se devuelve efectivo. */
   annulSale: (saleId: string, reason?: string, refundMethod?: RefundMethod) => Promise<AnnulSaleResult>;
@@ -34,6 +40,14 @@ export type AnnulSaleResult = {
   ncfModified?: string;
   total: number;
   refundMethod: RefundMethod;
+};
+
+export type VoidPaymentResult = {
+  paymentId: string;
+  amount: number;
+  /** true = el abono venía de una sesión de caja ya cerrada y el efectivo salió de la caja de hoy. */
+  cashReturned: boolean;
+  customerBalance: number | null;
 };
 
 const SalesContext = createContext<SalesContextType | undefined>(undefined);
@@ -195,6 +209,23 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     return result;
   };
 
+  // El abono no se borra: la RPC lo marca anulado y devuelve capital y mora a
+  // las cuotas exactas que los recibieron (guardadas en credit_payments.allocation).
+  const voidPayment = async (paymentId: string, reason: string): Promise<VoidPaymentResult> => {
+    const { data, error } = await supabase.rpc('void_credit_payment', {
+      p_payment_id: paymentId,
+      p_reason: reason,
+    });
+    if (error) throw error;
+    await load();
+    return {
+      paymentId: data.payment_id,
+      amount: Number(data.amount),
+      cashReturned: !!data.cash_returned,
+      customerBalance: data.customer_balance != null ? Number(data.customer_balance) : null,
+    };
+  };
+
   // La anulación completa (NCF B04, inventario, caja, cancelled_at) ocurre en
   // una sola transacción dentro de la base; aquí solo se refresca el estado.
   const annulSale = async (saleId: string, reason?: string, refundMethod?: RefundMethod): Promise<AnnulSaleResult> => {
@@ -215,7 +246,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, annulSale, reload: reloadAll, loading }}>
+    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, reload: reloadAll, loading }}>
       {children}
     </SalesContext.Provider>
   );

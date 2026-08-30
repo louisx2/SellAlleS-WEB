@@ -323,6 +323,8 @@ export const rowToCreditPayment = (r: any): CreditPayment => ({
   id: r.id,
   saleId: r.sale_id ?? undefined,
   customerId: r.customer_id ?? '',
+  customerName: r.customers?.name ?? undefined,
+  kind: r.kind ?? (r.sale_id ? 'sale' : 'customer'),
   amount: Number(r.amount),
   lateFeePaid: Number(r.late_fee_paid ?? 0),
   method: r.method ?? 'cash',
@@ -331,6 +333,9 @@ export const rowToCreditPayment = (r: any): CreditPayment => ({
   userName: r.user_name ?? undefined,
   date: new Date(r.date),
   branchId: r.branches?.name ?? '',
+  voidedAt: r.voided_at ? new Date(r.voided_at) : undefined,
+  voidedByName: r.voided_by_name ?? undefined,
+  voidReason: r.void_reason ?? undefined,
 });
 
 // jsonb devuelto por register_sale_payment / register_customer_payment.
@@ -343,6 +348,7 @@ export const rowToPaymentResult = (r: any): PaymentResult => ({
   installmentsPaid: r.installments_paid != null ? Number(r.installments_paid) : null,
   installmentsTotal: r.installments_total != null ? Number(r.installments_total) : null,
   customerBalance: r.customer_balance != null ? Number(r.customer_balance) : null,
+  salesTouched: r.sales_touched != null ? Number(r.sales_touched) : undefined,
 });
 
 export const rowToSale = (r: any): Sale => ({
