@@ -57,8 +57,14 @@ const TIPOS: NcfTipo[] = [
 ];
 
 // Aviso cuando a una secuencia en uso le quedan pocos números: sin esto el
-// aviso llega el día que el POS deja de facturar.
-const UMBRAL_POR_AGOTARSE = 50;
+// aviso llega el día que el POS deja de facturar. El umbral se mide contra el
+// tamaño del rango, no en absoluto: 50 sobre un talonario de 500 avisa a
+// tiempo, pero sobre uno de 15 estaría encendido desde el primer día.
+const UMBRAL_MAXIMO = 50;
+const umbralPorAgotarse = (seq: NcfSequenceRow): number => {
+  const total = Math.max(seq.range_to - seq.range_from + 1, 1);
+  return Math.min(UMBRAL_MAXIMO, Math.max(3, Math.ceil(total * 0.2)));
+};
 
 type EstadoSeq = {
   label: string;
@@ -108,7 +114,7 @@ export function NcfSettingsCard() {
   const avisos = sequences.flatMap((seq) => {
     const estado = estadoDeSecuencia(seq, hoy);
     const label = TIPO_LABEL[seq.tipo] ?? seq.tipo;
-    if (estado.usable && estado.disponibles <= UMBRAL_POR_AGOTARSE) {
+    if (estado.usable && estado.disponibles <= umbralPorAgotarse(seq)) {
       return [`A ${label} le quedan ${estado.disponibles} comprobante${estado.disponibles === 1 ? '' : 's'}: pide el próximo rango a DGII.`];
     }
     if (seq.active && !estado.usable) {
@@ -278,7 +284,7 @@ export function NcfSettingsCard() {
                     {sequences.map((seq) => {
                       const estado = estadoDeSecuencia(seq, hoy);
                       const agotada = estado.label === 'Agotada';
-                      const porAgotarse = estado.usable && estado.disponibles <= UMBRAL_POR_AGOTARSE;
+                      const porAgotarse = estado.usable && estado.disponibles <= umbralPorAgotarse(seq);
                       return (
                         <TableRow key={seq.id}>
                           <TableCell className="font-medium">{TIPO_LABEL[seq.tipo] ?? seq.tipo}</TableCell>
