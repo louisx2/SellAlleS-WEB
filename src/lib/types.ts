@@ -274,6 +274,9 @@ export type Sale = {
   userEmail?: string;
   ncf?: string;
   ncfType: NcfType;
+  // El cliente pidió comprobante fiscal: solo entonces la base quema un número
+  // de ncf_sequences. Sin esto toda venta gastaría un NCF autorizado por DGII.
+  ncfRequested?: boolean;
   quoteId?: string; // cotización de origen (se marca convertida al cobrar)
   couponId?: string; // cupón de fidelidad canjeado en esta venta
   coupon?: Coupon; // objeto completo, solo para mostrarlo en el recibo (no se persiste aparte de couponId)

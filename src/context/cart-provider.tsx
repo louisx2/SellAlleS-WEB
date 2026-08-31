@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useEffect, ReactNode, useContext } from 'react';
-import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart, Coupon } from '@/lib/types';
+import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart, Coupon, NcfType } from '@/lib/types';
 import { ITBIS_RATE, GENERIC_CUSTOMER, round2 } from '@/lib/utils';
 import { roundQty, normalizeQty, formatQuantity, unitAllowsDecimals } from '@/lib/units';
 import { useAuth } from '@/context/auth-provider';
@@ -431,6 +431,11 @@ export const useCart = () => {
     notes?: string;
     userName?: string;
     userEmail?: string;
+    // Comprobante fiscal pedido en el cobro. El tipo por defecto sale de la
+    // ficha del cliente, pero el cajero puede cambiarlo para esta venta sin
+    // tener que editar el cliente (cliente de paso que pide crédito fiscal).
+    ncfRequested?: boolean;
+    ncfType?: NcfType;
   }): Omit<Sale, 'id'> & { id: string } => {
     if (!activeCart) throw new Error("No active cart to create sale from");
 
@@ -480,8 +485,9 @@ export const useCart = () => {
       notes,
       userName,
       userEmail,
-      ncf: undefined, // lo asigna la base desde ncf_sequences (si la empresa emite NCF)
-      ncfType: activeCart.selectedCustomer?.ncfType || 'consumer',
+      ncf: undefined, // lo asigna la base desde ncf_sequences, solo si se pidió
+      ncfRequested: options.ncfRequested ?? false,
+      ncfType: options.ncfType ?? activeCart.selectedCustomer?.ncfType ?? 'consumer',
       quoteId: activeCart.quoteId, // si vino de una cotización, se marcará convertida
       couponId: activeCart.coupon?.id, // se canjea en el servidor tras crear la venta
       coupon: activeCart.coupon, // solo para mostrarlo en el recibo

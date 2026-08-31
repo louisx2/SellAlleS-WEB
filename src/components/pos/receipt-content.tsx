@@ -60,11 +60,17 @@ export function ReceiptHeader({ sale }: ReceiptProps) {
           <p className="font-semibold uppercase">CLIENTE: {sale.customer?.name ?? 'Consumidor Final'}</p>
           {sale.customer?.rnc && <p><span className="font-semibold uppercase">RNC:</span> {sale.customer.rnc}</p>}
        </div>
-       <Separator className="my-2" />
-       <div className="text-left pt-1 text-xs">
-          <p className="font-semibold uppercase">COMPROBANTE: {ncfTypeText[sale.ncfType]}</p>
-          <p className="font-semibold uppercase">NCF: {sale.ncf ?? 'N/A'}</p>
-       </div>
+       {/* Solo las ventas que pidieron comprobante llevan NCF. Imprimir
+           "NCF: N/A" en las demás hacía parecer que el fiscal falló. */}
+       {sale.ncf && (
+         <>
+           <Separator className="my-2" />
+           <div className="text-left pt-1 text-xs">
+              <p className="font-semibold uppercase">COMPROBANTE: {ncfTypeText[sale.ncfType]}</p>
+              <p className="font-semibold uppercase">NCF: {sale.ncf}</p>
+           </div>
+         </>
+       )}
     </div>
   );
 }
