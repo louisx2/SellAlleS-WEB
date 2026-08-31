@@ -31,6 +31,7 @@ import { useCaja } from '@/context/caja-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
@@ -76,9 +77,19 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const { profile: companyProfile } = useCompanyProfile();
   const [ncfRequested, setNcfRequested] = useState(false);
   const [ncfType, setNcfType] = useState<NcfType>('consumer');
+  const NCF_TIPO_LABEL: Record<NcfType, string> = {
+    consumer: 'Consumidor Final (B02)',
+    fiscal: 'Crédito Fiscal (B01)',
+    gubernamental: 'Gubernamental (B15)',
+    regimen_especial: 'Régimen Especial (B14)',
+  };
   // Sin formalización ni emisión activa la base devuelve NULL igual: no tiene
   // sentido ofrecer el comprobante en el cobro.
   const ncfEmitible = !!companyProfile?.ncfEnabled;
+  // Solo se ofrecen los tipos que tienen secuencia utilizable: ofrecer uno sin
+  // rango autorizado sería mandar al cajero a un error al confirmar.
+  const { tiposDisponibles } = useNcfAvailability(ncfEmitible && isOpen);
+  const hayComprobantes = (tiposDisponibles?.length ?? 0) > 0;
   // B01/B15/B14 identifican al comprador ante DGII: sin RNC o cédula válida la
   // venta queda fuera del 607 (misma regla que classify607 en dgii-607.ts).
   const ncfNeedsCustomerId = ncfType === 'fiscal' || ncfType === 'gubernamental' || ncfType === 'regimen_especial';
@@ -99,6 +110,18 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       setNcfType(activeCart?.selectedCustomer?.ncfType ?? 'consumer');
     }
   }, [isOpen, total, cashBlocked, activeCart?.selectedCustomer?.ncfType]);
+
+  // El tipo por defecto es el del cliente, pero solo si hay secuencia para él;
+  // si no, el primero que sí se pueda emitir.
+  useEffect(() => {
+    if (!tiposDisponibles || tiposDisponibles.length === 0) return;
+    setNcfType((actual) => {
+      if (tiposDisponibles.includes(actual)) return actual;
+      const delCliente = activeCart?.selectedCustomer?.ncfType;
+      if (delCliente && tiposDisponibles.includes(delCliente)) return delCliente;
+      return tiposDisponibles[0];
+    });
+  }, [tiposDisponibles, activeCart?.selectedCustomer?.ncfType]);
 
   useEffect(() => {
     if (paymentMethod === 'cash') {
@@ -177,8 +200,8 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       notes: saleNotes,
       userName: appUser.name,
       userEmail: appUser.email,
-      ncfRequested: ncfEmitible && ncfRequested,
-      ncfType: ncfEmitible && ncfRequested ? ncfType : undefined,
+      ncfRequested: ncfEmitible && hayComprobantes && ncfRequested,
+      ncfType: ncfEmitible && hayComprobantes && ncfRequested ? ncfType : undefined,
     });
 
     try {
@@ -508,20 +531,28 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                             <Switch
                                 checked={ncfRequested}
                                 onCheckedChange={setNcfRequested}
+                                disabled={!hayComprobantes}
                                 aria-label="Emitir comprobante fiscal"
                             />
                         </div>
 
-                        {ncfRequested && (
+                        {tiposDisponibles !== null && !hayComprobantes && (
+                            <p className="text-xs text-destructive">
+                                No hay secuencias con números disponibles. Un administrador debe
+                                registrar el rango autorizado por DGII en Perfil de Empresa →
+                                Facturación Fiscal.
+                            </p>
+                        )}
+
+                        {ncfRequested && hayComprobantes && (
                             <div className="space-y-2">
                                 <Label htmlFor="ncf-type" className="text-xs">Tipo de comprobante</Label>
                                 <Select value={ncfType} onValueChange={(v: NcfType) => setNcfType(v)}>
                                     <SelectTrigger id="ncf-type"><SelectValue /></SelectTrigger>
                                     <SelectContent>
-                                        <SelectItem value="consumer">Consumidor Final (B02)</SelectItem>
-                                        <SelectItem value="fiscal">Crédito Fiscal (B01)</SelectItem>
-                                        <SelectItem value="gubernamental">Gubernamental (B15)</SelectItem>
-                                        <SelectItem value="regimen_especial">Régimen Especial (B14)</SelectItem>
+                                        {(tiposDisponibles ?? []).map((t) => (
+                                            <SelectItem key={t} value={t}>{NCF_TIPO_LABEL[t]}</SelectItem>
+                                        ))}
                                     </SelectContent>
                                 </Select>
                                 {ncfNeedsCustomerId && !customerIdIsValid && (
