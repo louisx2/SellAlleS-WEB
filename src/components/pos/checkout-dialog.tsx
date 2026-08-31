@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatQtyCompact } from '@/lib/units';
 import { useToast } from '@/hooks/use-toast';
-import type { Sale, FinancingDetails } from '@/lib/types';
+import type { Sale, FinancingDetails, NcfType } from '@/lib/types';
 import { useProducts } from '@/context/product-provider';
 import { useSales } from '@/context/sales-provider';
 import { useCustomers } from '@/context/customer-provider';
@@ -29,6 +29,9 @@ import { useAuth } from '@/context/auth-provider';
 import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
@@ -69,6 +72,29 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const [isFinancingOpen, setFinancingOpen] = useState(false);
   const [selectedBank, setSelectedBank] = useState('Banreservas');
   const [selectedDownPaymentBank, setSelectedDownPaymentBank] = useState('Banreservas');
+  // Comprobante fiscal: se emite solo si el cliente lo pide, para no quemar un
+  // número autorizado por DGII en cada venta de mostrador.
+  const { profile: companyProfile } = useCompanyProfile();
+  const [ncfRequested, setNcfRequested] = useState(false);
+  const [ncfType, setNcfType] = useState<NcfType>('consumer');
+  const NCF_TIPO_LABEL: Record<NcfType, string> = {
+    consumer: 'Consumidor Final (B02)',
+    fiscal: 'Crédito Fiscal (B01)',
+    gubernamental: 'Gubernamental (B15)',
+    regimen_especial: 'Régimen Especial (B14)',
+  };
+  // Sin formalización ni emisión activa la base devuelve NULL igual: no tiene
+  // sentido ofrecer el comprobante en el cobro.
+  const ncfEmitible = !!companyProfile?.ncfEnabled;
+  // Solo se ofrecen los tipos que tienen secuencia utilizable: ofrecer uno sin
+  // rango autorizado sería mandar al cajero a un error al confirmar.
+  const { tiposDisponibles } = useNcfAvailability(ncfEmitible && isOpen);
+  const hayComprobantes = (tiposDisponibles?.length ?? 0) > 0;
+  // B01/B15/B14 identifican al comprador ante DGII: sin RNC o cédula válida la
+  // venta queda fuera del 607 (misma regla que classify607 en dgii-607.ts).
+  const ncfNeedsCustomerId = ncfType === 'fiscal' || ncfType === 'gubernamental' || ncfType === 'regimen_especial';
+  const customerIdDigits = (activeCart?.selectedCustomer?.rnc ?? '').replace(/\D/g, '');
+  const customerIdIsValid = customerIdDigits.length === 9 || customerIdDigits.length === 11;
 
 
   useEffect(() => {
@@ -79,8 +105,23 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       setDownPaymentMethod(cashBlocked ? 'card' : 'cash');
       setDownPaymentReference('');
       setSaleNotes('');
+      // Cada venta arranca sin comprobante: se pide a propósito, no por inercia.
+      setNcfRequested(false);
+      setNcfType(activeCart?.selectedCustomer?.ncfType ?? 'consumer');
     }
-  }, [isOpen, total, cashBlocked]);
+  }, [isOpen, total, cashBlocked, activeCart?.selectedCustomer?.ncfType]);
+
+  // El tipo por defecto es el del cliente, pero solo si hay secuencia para él;
+  // si no, el primero que sí se pueda emitir.
+  useEffect(() => {
+    if (!tiposDisponibles || tiposDisponibles.length === 0) return;
+    setNcfType((actual) => {
+      if (tiposDisponibles.includes(actual)) return actual;
+      const delCliente = activeCart?.selectedCustomer?.ncfType;
+      if (delCliente && tiposDisponibles.includes(delCliente)) return delCliente;
+      return tiposDisponibles[0];
+    });
+  }, [tiposDisponibles, activeCart?.selectedCustomer?.ncfType]);
 
   useEffect(() => {
     if (paymentMethod === 'cash') {
@@ -159,6 +200,8 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       notes: saleNotes,
       userName: appUser.name,
       userEmail: appUser.email,
+      ncfRequested: ncfEmitible && hayComprobantes && ncfRequested,
+      ncfType: ncfEmitible && hayComprobantes && ncfRequested ? ncfType : undefined,
     });
 
     try {
@@ -471,6 +514,54 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                 La deuda nueva ({formatCurrency(total - Number(amountPaid || 0))}) excede el crédito
                                 disponible del cliente ({formatCurrency(availableCredit ?? 0)}).
                             </p>
+                        )}
+                    </div>
+                )}
+
+                {ncfEmitible && (
+                    <div className="rounded-lg border p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-sm font-medium">Comprobante fiscal (NCF)</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Actívalo solo si el cliente pide comprobante: cada uno consume un
+                                    número autorizado por DGII.
+                                </p>
+                            </div>
+                            <Switch
+                                checked={ncfRequested}
+                                onCheckedChange={setNcfRequested}
+                                disabled={!hayComprobantes}
+                                aria-label="Emitir comprobante fiscal"
+                            />
+                        </div>
+
+                        {tiposDisponibles !== null && !hayComprobantes && (
+                            <p className="text-xs text-destructive">
+                                No hay secuencias con números disponibles. Un administrador debe
+                                registrar el rango autorizado por DGII en Perfil de Empresa →
+                                Facturación Fiscal.
+                            </p>
+                        )}
+
+                        {ncfRequested && hayComprobantes && (
+                            <div className="space-y-2">
+                                <Label htmlFor="ncf-type" className="text-xs">Tipo de comprobante</Label>
+                                <Select value={ncfType} onValueChange={(v: NcfType) => setNcfType(v)}>
+                                    <SelectTrigger id="ncf-type"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {(tiposDisponibles ?? []).map((t) => (
+                                            <SelectItem key={t} value={t}>{NCF_TIPO_LABEL[t]}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {ncfNeedsCustomerId && !customerIdIsValid && (
+                                    <p className="text-xs text-destructive">
+                                        Este tipo exige RNC (9 dígitos) o cédula (11) del cliente. Sin eso el
+                                        comprobante se emite, pero la venta no se podrá reportar en el 607.
+                                    </p>
+                                )}
+                            </div>
                         )}
                     </div>
                 )}
