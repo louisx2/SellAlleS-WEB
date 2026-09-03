@@ -261,10 +261,13 @@ catálogo entero en cada despliegue. Verificado en Chromium: la misma imagen se
 descarga una sola vez y sobrevive a un despliegue nuevo.
 
 **5. Red de seguridad en el servidor.** La migración
-`20260903120000_limites_bucket_imagenes.sql` pone `file_size_limit` de 2 MB y
+`20260903054459_limites_bucket_imagenes.sql` pone `file_size_limit` de 2 MB y
 `allowed_mime_types` al bucket, que estaba sin ninguno de los dos (a diferencia
 de `comprobantes`). La compresión vive en el navegador, y un cliente con la PWA
 vieja en caché podría saltársela; esto lo corta del lado del servidor.
+**Ya aplicada en producción** (el nombre del archivo lleva la misma versión con
+la que quedó registrada, para que `db push` no la repita). Los objetos que ya
+estaban subidos no se ven afectados: el límite solo rige para subidas nuevas.
 
 ### Poner al día lo ya subido
 
@@ -279,9 +282,14 @@ con simulacro por defecto (sin `--aplicar` no escribe nada):
 
 `recomprimir` reescribe cada foto a WebP + miniatura, repunta `products.image`
 y borra el original. `huerfanas` borra lo que no referencia ningún producto ni
-logo (había 27 objetos, 21 MB). Ojo: si algún día se añade otra columna que
-apunte al bucket, hay que registrarla en la lista `fuentes` del script o
-borrará archivos en uso.
+logo: a día de hoy son 23 fotos (21 MB) y 4 logos reemplazados (273 kB) — los
+logos se acumulan porque `company-profile` mete un `Date.now()` en el nombre,
+así que cada cambio deja atrás el anterior.
+
+Ojo: si algún día se añade otra columna que apunte al bucket, hay que
+registrarla en la lista `fuentes` del script o borrará archivos en uso. Hoy son
+exactamente cinco: `products.image`, y `logo_url`/`ticket_logo_url` en
+`companies` y `branches`.
 
 ## Próximos pasos
 
