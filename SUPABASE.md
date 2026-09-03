@@ -218,6 +218,71 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
 - `customers.credit_balance` solo lo escriben los triggers/RPCs; el mapper
   `customerToRow` ya no lo envía desde el navegador.
 
+## Imágenes y transferencia (bucket `product-images`)
+
+Un solo tenant con 240 fotos sin optimizar consumió **5.13 GB de transferencia
+en 24 horas** — el cupo mensual entero del plan gratuito. El almacenamiento
+nunca fue el problema (360 MB de 1 GB); lo fue el egress: la misma foto se
+llegó a descargar 39 veces en un día. Con más tenants ese coste crece en
+proporción, así que el gasto se ataca en cuatro capas más una red de seguridad.
+
+**1. Nunca se sube el original.** `src/lib/image-optim.ts` redimensiona y
+recomprime en el navegador antes de subir, y devuelve dos variantes:
+`full` (1280 px, WebP q82) y `thumb` (400 px, WebP q72). Medido sobre una foto
+de 12 MP: 1141 kB → 49 kB + 5 kB. Aplica la orientación EXIF al decodificar,
+porque al recomprimir se pierde el metadato y si no las fotos de teléfono
+quedan giradas para siempre.
+
+**2. Cada pantalla pide la variante que le toca.** La grilla del POS y el
+carrito usan `<ProductImage variant="thumb">`; el detalle y la edición usan la
+grande. Aquí está el grueso del ahorro: la grilla dibuja recuadros de 200 px,
+y pedir 400 px en vez de 3024 px son ~57× menos píxeles.
+
+Las dos variantes se distinguen por el nombre — `{uuid}.webp` y
+`{uuid}.thumb.webp` — así que no hizo falta ninguna columna nueva. Para las
+fotos subidas antes de esto el thumb no existe: `ProductImage` baja una
+escalera de miniatura → imagen grande → placeholder, de modo que el 404 no se
+ve en pantalla.
+
+**3. Caché de un año** (`cacheControl: '31536000'`). Es seguro porque cada URL
+lleva un UUID irrepetible y se sube con `upsert: false`: si la foto cambia,
+cambia la URL. Antes era una hora, y de ahí salían las descargas repetidas.
+Los logos de sucursal son la excepción — se suben con `upsert` sobre un nombre
+fijo — así que la URL guardada lleva `?v=<timestamp>` para poder cachearlos
+fuerte sin que se quede pegado el logo viejo.
+
+**4. El Service Worker cachea las fotos** (`public/sw.js`, regla 0).
+La regla que salta `supabase.co` existe para no cachear auth ni consultas,
+pero arrastraba también a las fotos, que son lo contrario: contenido inmutable
+pedido decenas de veces al día. Van en una caché **aparte** y sin la versión
+del build en el nombre (`sellalles-images-v1`), porque el `activate` borra toda
+caché que no sea la del build actual: meterlas ahí habría vuelto a descargar el
+catálogo entero en cada despliegue. Verificado en Chromium: la misma imagen se
+descarga una sola vez y sobrevive a un despliegue nuevo.
+
+**5. Red de seguridad en el servidor.** La migración
+`20260903120000_limites_bucket_imagenes.sql` pone `file_size_limit` de 2 MB y
+`allowed_mime_types` al bucket, que estaba sin ninguno de los dos (a diferencia
+de `comprobantes`). La compresión vive en el navegador, y un cliente con la PWA
+vieja en caché podría saltársela; esto lo corta del lado del servidor.
+
+### Poner al día lo ya subido
+
+`scripts/optimizar-storage.mjs` arregla lo que se subió antes, en dos fases y
+con simulacro por defecto (sin `--aplicar` no escribe nada):
+
+    npm i --no-save sharp
+    export SUPABASE_URL=https://qwpjclqinruhtxgkrxwr.supabase.co
+    export SUPABASE_SERVICE_ROLE_KEY=...
+    node scripts/optimizar-storage.mjs recomprimir   # + --aplicar
+    node scripts/optimizar-storage.mjs huerfanas     # + --aplicar
+
+`recomprimir` reescribe cada foto a WebP + miniatura, repunta `products.image`
+y borra el original. `huerfanas` borra lo que no referencia ningún producto ni
+logo (había 27 objetos, 21 MB). Ojo: si algún día se añade otra columna que
+apunte al bucket, hay que registrarla en la lista `fuentes` del script o
+borrará archivos en uso.
+
 ## Próximos pasos
 
 1. Retirar `src/lib/database.ts` (resto del modo demo, ya sin usos activos).
