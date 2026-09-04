@@ -133,7 +133,10 @@ export default function CompanyProfilePage() {
       const { error: uploadError } = await supabase.storage
         .from('product-images')
         .upload(path, blob, {
-          cacheControl: '3600',
+          // La ruta ya lleva un Date.now(), así que esta URL es única e
+          // inmutable: cachearla un año es seguro y evita que cada caja
+          // revuelva a pedir el logo cada hora.
+          cacheControl: '31536000',
           contentType: 'image/png',
         });
 
