@@ -235,6 +235,7 @@ export const rowToExpense = (r: any): Expense => ({
   itbisAmount: Number(r.itbis_amount ?? 0),
   isGoods: !!r.is_goods,
   paymentForm: r.payment_form ?? undefined,
+  paidFromCaja: !!r.paid_from_caja,
   userName: r.user_name ?? undefined,
 });
 
@@ -251,6 +252,7 @@ export const expenseToRow = (e: Omit<Expense, 'id'>, branchUuid: string | null) 
   itbis_amount: e.itbisAmount ?? 0,
   is_goods: e.isGoods ?? false,
   payment_form: e.paymentForm || null,
+  paid_from_caja: e.paidFromCaja ?? false,
   user_name: e.userName ?? null,
 });
 

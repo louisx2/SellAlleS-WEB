@@ -71,6 +71,9 @@ export function CajaDetailDialog({ session, children }: { session: CajaSession; 
               <Row label="Ventas en efectivo" value={`+ ${formatCurrency(b.cashSales)}`} />
               <Row label="Abonos crédito (efectivo)" value={`+ ${formatCurrency(b.creditCashPayments)}`} />
               <Row label="Abonos préstamo (efectivo)" value={`+ ${formatCurrency(b.loanCashPayments)}`} />
+              {b.expensesFromCaja ? (
+                <Row label="Gastos pagados de la caja" value={`- ${formatCurrency(b.expensesFromCaja)}`} />
+              ) : null}
               <Row label="Entradas manuales" value={`+ ${formatCurrency(b.movementsIn)}`} />
               <Row label="Salidas manuales" value={`- ${formatCurrency(b.movementsOut)}`} />
               <Separator className="my-1" />

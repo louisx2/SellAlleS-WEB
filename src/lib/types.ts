@@ -484,6 +484,8 @@ export type CajaBreakdown = {
   cashSales: number;
   creditCashPayments: number;
   loanCashPayments: number;
+  /** Gastos pagados desde la gaveta. Ausente en cierres anteriores a esta versión. */
+  expensesFromCaja?: number;
   movementsIn: number;
   movementsOut: number;
   expected: number;
@@ -559,6 +561,8 @@ export type Expense = {
     itbisAmount: number;    // parte de amount que es ITBIS
     isGoods: boolean;       // true = bienes, false = servicios (casillas 8/9 del 606)
     paymentForm?: string;   // forma de pago 606 ('01'..'07')
+    /** Salió de la gaveta: el cierre de caja lo resta del efectivo esperado. */
+    paidFromCaja: boolean;
     userName?: string;
 };
 

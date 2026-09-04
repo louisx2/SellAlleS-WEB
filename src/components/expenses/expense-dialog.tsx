@@ -16,6 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useExpenses } from '@/context/expense-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useCaja } from '@/context/caja-provider';
 import { EXPENSE_TYPES_606, PAYMENT_FORMS_606 } from '@/lib/dgii-606';
 import type { Expense } from '@/lib/types';
 
@@ -37,6 +38,7 @@ const emptyForm = {
   itbisAmount: '',
   isGoods: false,
   paymentForm: '01',
+  paidFromCaja: false,
 };
 
 // Alta/edición de gastos. La sección fiscal (NCF, RNC, tipo 606) solo aparece
@@ -45,6 +47,10 @@ export function ExpenseDialog({ open, onOpenChange, expense }: ExpenseDialogProp
   const { addExpense, updateExpense } = useExpenses();
   const { appUser } = useAuth();
   const { profile } = useCompanyProfile();
+  // Solo tiene sentido preguntarlo donde hay una gaveta de la que sacar el
+  // dinero: sucursal que usa caja y con una abierta ahora mismo.
+  const { branchUsesCaja, isOpen: cajaIsOpen } = useCaja();
+  const canPayFromCaja = branchUsesCaja === true && cajaIsOpen;
   const { toast } = useToast();
   const [form, setForm] = useState(emptyForm);
   const [withNcf, setWithNcf] = useState(false);
@@ -64,6 +70,7 @@ export function ExpenseDialog({ open, onOpenChange, expense }: ExpenseDialogProp
         itbisAmount: expense.itbisAmount ? String(expense.itbisAmount) : '',
         isGoods: expense.isGoods,
         paymentForm: expense.paymentForm ?? '01',
+        paidFromCaja: expense.paidFromCaja,
       });
       setWithNcf(!!expense.ncf);
     } else {
@@ -113,6 +120,7 @@ export function ExpenseDialog({ open, onOpenChange, expense }: ExpenseDialogProp
       itbisAmount: withNcf ? itbis : 0,
       isGoods: withNcf ? form.isGoods : false,
       paymentForm: withNcf ? form.paymentForm : undefined,
+      paidFromCaja: canPayFromCaja ? form.paidFromCaja : false,
       userName: appUser?.name,
     };
 
@@ -186,6 +194,22 @@ export function ExpenseDialog({ open, onOpenChange, expense }: ExpenseDialogProp
               />
             </div>
           </div>
+
+          {canPayFromCaja && (
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div className="space-y-0.5 pr-3">
+                <Label htmlFor="exp-caja">Pagado desde la caja</Label>
+                <p className="text-xs text-muted-foreground">
+                  El dinero salió de la gaveta, así que el cierre lo resta del efectivo esperado.
+                </p>
+              </div>
+              <Switch
+                id="exp-caja"
+                checked={form.paidFromCaja}
+                onCheckedChange={(v) => set({ paidFromCaja: v })}
+              />
+            </div>
+          )}
 
           {profile.isFormalized && (
             <div className="rounded-lg border p-3 space-y-4">
