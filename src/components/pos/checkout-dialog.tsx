@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCart, getEffectiveUnitPrice } from '@/context/cart-provider';
 import { Button } from '@/components/ui/button';
 import {
@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatQtyCompact } from '@/lib/units';
 import { useToast } from '@/hooks/use-toast';
-import type { Sale, FinancingDetails } from '@/lib/types';
+import type { Sale, FinancingDetails, NcfType } from '@/lib/types';
 import { useProducts } from '@/context/product-provider';
 import { useSales } from '@/context/sales-provider';
 import { useCustomers } from '@/context/customer-provider';
@@ -31,6 +31,10 @@ import { useModules } from '@/context/modules-provider';
 import { useFinancingSettings } from '@/hooks/use-financing-settings';
 import { useCaja } from '@/context/caja-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
+import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useNcfAvailability } from '@/hooks/use-ncf-availability';
+import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
   isOpen: boolean;
@@ -63,10 +67,40 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const [downPaymentReference, setDownPaymentReference] = useState('');
   const [saleNotes, setSaleNotes] = useState('');
   const [change, setChange] = useState(0);
+  // Guardar la venta tarda: inserta en la base, relee inventario y a veces
+  // clientes. En ese hueco el cajero cree que no respondió y vuelve a tocar.
+  // El ref frena el segundo toque en el acto —el estado de React no llega a
+  // tiempo si los dos clics caen en el mismo tick, que es justo lo que hace un
+  // doble toque en una tableta—, y `guardandoVenta` es solo para la pantalla.
+  const ventaEnCurso = useRef(false);
+  const [guardandoVenta, setGuardandoVenta] = useState(false);
   const { toast } = useToast();
   const [isFinancingOpen, setFinancingOpen] = useState(false);
   const [selectedBank, setSelectedBank] = useState('Banreservas');
   const [selectedDownPaymentBank, setSelectedDownPaymentBank] = useState('Banreservas');
+  // Comprobante fiscal: se emite solo si el cliente lo pide, para no quemar un
+  // número autorizado por DGII en cada venta de mostrador.
+  const { profile: companyProfile } = useCompanyProfile();
+  const [ncfRequested, setNcfRequested] = useState(false);
+  const [ncfType, setNcfType] = useState<NcfType>('consumer');
+  const NCF_TIPO_LABEL: Record<NcfType, string> = {
+    consumer: 'Consumidor Final (B02)',
+    fiscal: 'Crédito Fiscal (B01)',
+    gubernamental: 'Gubernamental (B15)',
+    regimen_especial: 'Régimen Especial (B14)',
+  };
+  // Sin formalización ni emisión activa la base devuelve NULL igual: no tiene
+  // sentido ofrecer el comprobante en el cobro.
+  const ncfEmitible = !!companyProfile?.ncfEnabled;
+  // Solo se ofrecen los tipos que tienen secuencia utilizable: ofrecer uno sin
+  // rango autorizado sería mandar al cajero a un error al confirmar.
+  const { tiposDisponibles } = useNcfAvailability(ncfEmitible && isOpen);
+  const hayComprobantes = (tiposDisponibles?.length ?? 0) > 0;
+  // B01/B15/B14 identifican al comprador ante DGII: sin RNC o cédula válida la
+  // venta queda fuera del 607 (misma regla que classify607 en dgii-607.ts).
+  const ncfNeedsCustomerId = ncfType === 'fiscal' || ncfType === 'gubernamental' || ncfType === 'regimen_especial';
+  const customerIdDigits = (activeCart?.selectedCustomer?.rnc ?? '').replace(/\D/g, '');
+  const customerIdIsValid = customerIdDigits.length === 9 || customerIdDigits.length === 11;
 
 
   useEffect(() => {
@@ -77,8 +111,23 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       setDownPaymentMethod(cashBlocked ? 'card' : 'cash');
       setDownPaymentReference('');
       setSaleNotes('');
+      // Cada venta arranca sin comprobante: se pide a propósito, no por inercia.
+      setNcfRequested(false);
+      setNcfType(activeCart?.selectedCustomer?.ncfType ?? 'consumer');
     }
-  }, [isOpen, total, cashBlocked]);
+  }, [isOpen, total, cashBlocked, activeCart?.selectedCustomer?.ncfType]);
+
+  // El tipo por defecto es el del cliente, pero solo si hay secuencia para él;
+  // si no, el primero que sí se pueda emitir.
+  useEffect(() => {
+    if (!tiposDisponibles || tiposDisponibles.length === 0) return;
+    setNcfType((actual) => {
+      if (tiposDisponibles.includes(actual)) return actual;
+      const delCliente = activeCart?.selectedCustomer?.ncfType;
+      if (delCliente && tiposDisponibles.includes(delCliente)) return delCliente;
+      return tiposDisponibles[0];
+    });
+  }, [tiposDisponibles, activeCart?.selectedCustomer?.ncfType]);
 
   useEffect(() => {
     if (paymentMethod === 'cash') {
@@ -127,6 +176,11 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     downPaymentReferenceOverride?: string,
   ) => {
     if (!activeCart || !appUser) return;
+    // Sin esto, dos toques = dos ventas insertadas y el cliente facturado dos
+    // veces. La venta ya salió de aquí; deshacerla es un trabajo manual.
+    if (ventaEnCurso.current) return;
+    ventaEnCurso.current = true;
+    setGuardandoVenta(true);
 
     const finalPaymentMethod = financingDetails ? 'financing' : paymentMethod;
     const effectiveDownPaymentMethod = downPaymentMethodOverride ?? downPaymentMethod;
@@ -152,6 +206,8 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       notes: saleNotes,
       userName: appUser.name,
       userEmail: appUser.email,
+      ncfRequested: ncfEmitible && hayComprobantes && ncfRequested,
+      ncfType: ncfEmitible && hayComprobantes && ncfRequested ? ncfType : undefined,
     });
 
     try {
@@ -184,6 +240,11 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
         description: e?.message ?? 'Error de conexión con el servidor. El carrito no se perdió.',
         variant: 'destructive',
       });
+    } finally {
+      // También al salir bien: el diálogo se cierra pero el componente sigue
+      // montado, así que sin soltar el candado la siguiente venta no entraría.
+      ventaEnCurso.current = false;
+      setGuardandoVenta(false);
     }
   };
 
@@ -239,7 +300,9 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
 
   return (
     <>
-    <Dialog open={isOpen && !isFinancingOpen} onOpenChange={onOpenChange}>
+    {/* Mientras se guarda no se cierra ni con Escape ni tocando fuera: la venta
+        ya va camino de la base y cerrar aquí deja al cajero sin la factura. */}
+    <Dialog open={isOpen && !isFinancingOpen} onOpenChange={(abierto) => { if (!guardandoVenta) onOpenChange(abierto); }}>
       <DialogContent className="sm:max-w-4xl grid grid-rows-[auto_1fr_auto] h-full max-h-[95vh]">
         <DialogHeader>
           <DialogTitle>Confirmar Venta</DialogTitle>
@@ -465,6 +528,54 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                     </div>
                 )}
 
+                {ncfEmitible && (
+                    <div className="rounded-lg border p-3 space-y-3">
+                        <div className="flex items-center justify-between gap-3">
+                            <div>
+                                <p className="text-sm font-medium">Comprobante fiscal (NCF)</p>
+                                <p className="text-xs text-muted-foreground">
+                                    Actívalo solo si el cliente pide comprobante: cada uno consume un
+                                    número autorizado por DGII.
+                                </p>
+                            </div>
+                            <Switch
+                                checked={ncfRequested}
+                                onCheckedChange={setNcfRequested}
+                                disabled={!hayComprobantes}
+                                aria-label="Emitir comprobante fiscal"
+                            />
+                        </div>
+
+                        {tiposDisponibles !== null && !hayComprobantes && (
+                            <p className="text-xs text-destructive">
+                                No hay secuencias con números disponibles. Un administrador debe
+                                registrar el rango autorizado por DGII en Perfil de Empresa →
+                                Facturación Fiscal.
+                            </p>
+                        )}
+
+                        {ncfRequested && hayComprobantes && (
+                            <div className="space-y-2">
+                                <Label htmlFor="ncf-type" className="text-xs">Tipo de comprobante</Label>
+                                <Select value={ncfType} onValueChange={(v: NcfType) => setNcfType(v)}>
+                                    <SelectTrigger id="ncf-type"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {(tiposDisponibles ?? []).map((t) => (
+                                            <SelectItem key={t} value={t}>{NCF_TIPO_LABEL[t]}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {ncfNeedsCustomerId && !customerIdIsValid && (
+                                    <p className="text-xs text-destructive">
+                                        Este tipo exige RNC (9 dígitos) o cédula (11) del cliente. Sin eso el
+                                        comprobante se emite, pero la venta no se podrá reportar en el 607.
+                                    </p>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <div>
                     <Label htmlFor="sale-notes">Notas de la Venta (Opcional)</Label>
                     <Textarea 
@@ -535,11 +646,16 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
         </div>
         
         <DialogFooter>
-          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)}>
+          <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={guardandoVenta}>
             Cancelar
           </Button>
-          <Button type="button" onClick={confirmButtonAction} disabled={isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid}>
-            {paymentMethod === 'financing' ? 'Configurar Plan' : 'Confirmar'}
+          <Button type="button" onClick={confirmButtonAction} disabled={guardandoVenta || isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid}>
+            {guardandoVenta ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Registrando venta...
+              </>
+            ) : paymentMethod === 'financing' ? 'Configurar Plan' : 'Confirmar'}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -16,6 +16,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { Loader2, Plus } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 type NcfTipo = 'consumer' | 'fiscal' | 'nota_credito' | 'gubernamental' | 'regimen_especial' | 'nota_debito';
 
@@ -48,6 +49,46 @@ const TIPO_PREFIX: Record<NcfTipo, string> = {
   consumer: 'B02', fiscal: 'B01', nota_credito: 'B04',
   gubernamental: 'B15', regimen_especial: 'B14', nota_debito: 'B03',
 };
+// Los seis tipos que acepta ncf_sequences_tipo_check. Antes el formulario solo
+// ofrecía tres, así que un cliente marcado B15/B14 no tenía secuencia posible y
+// su venta moría en assign_ncf.
+const TIPOS: NcfTipo[] = [
+  'consumer', 'fiscal', 'nota_credito', 'gubernamental', 'regimen_especial', 'nota_debito',
+];
+
+// Aviso cuando a una secuencia en uso le quedan pocos números: sin esto el
+// aviso llega el día que el POS deja de facturar. El umbral se mide contra el
+// tamaño del rango, no en absoluto: 50 sobre un talonario de 500 avisa a
+// tiempo, pero sobre uno de 15 estaría encendido desde el primer día.
+const UMBRAL_MAXIMO = 50;
+const umbralPorAgotarse = (seq: NcfSequenceRow): number => {
+  const total = Math.max(seq.range_to - seq.range_from + 1, 1);
+  return Math.min(UMBRAL_MAXIMO, Math.max(3, Math.ceil(total * 0.2)));
+};
+
+type EstadoSeq = {
+  label: string;
+  variant: 'default' | 'secondary' | 'destructive' | 'outline';
+  disponibles: number;
+  /** La base la tomaría ahora mismo (mismo filtro que assign_ncf). */
+  usable: boolean;
+};
+
+// Espeja exactamente el filtro de assign_ncf: active, con números y sin vencer.
+// Si esto y la función se separan, la tarjeta miente sobre lo que hará el POS.
+const estadoDeSecuencia = (seq: NcfSequenceRow, hoy: string): EstadoSeq => {
+  const disponibles = Math.max(seq.range_to - seq.current_val + 1, 0);
+  if (seq.current_val > seq.range_to) {
+    return { label: 'Agotada', variant: 'destructive', disponibles: 0, usable: false };
+  }
+  if (seq.expires_at && seq.expires_at < hoy) {
+    return { label: 'Vencida', variant: 'destructive', disponibles, usable: false };
+  }
+  if (!seq.active) {
+    return { label: 'Inactiva', variant: 'secondary', disponibles, usable: false };
+  }
+  return { label: 'Activa', variant: 'default', disponibles, usable: true };
+};
 
 // Gestión fiscal de la empresa: formalización DGII, emisión de NCF y
 // secuencias autorizadas. El número lo asigna la base (trigger set_sale_ncf).
@@ -63,6 +104,24 @@ export function NcfSettingsCard() {
   const [rangeFrom, setRangeFrom] = useState('1');
   const [rangeTo, setRangeTo] = useState('');
   const [expiresAt, setExpiresAt] = useState('');
+
+  // current_date de la base es hora local del servidor; comparamos en el mismo
+  // formato AAAA-MM-DD que devuelve la columna date.
+  const hoy = new Date().toLocaleDateString('en-CA');
+
+  // Avisos que hay que ver ANTES de que el POS deje de facturar: secuencias por
+  // agotarse, y secuencias encendidas que la base ya no tomaría.
+  const avisos = sequences.flatMap((seq) => {
+    const estado = estadoDeSecuencia(seq, hoy);
+    const label = TIPO_LABEL[seq.tipo] ?? seq.tipo;
+    if (estado.usable && estado.disponibles <= umbralPorAgotarse(seq)) {
+      return [`A ${label} le quedan ${estado.disponibles} comprobante${estado.disponibles === 1 ? '' : 's'}: pide el próximo rango a DGII.`];
+    }
+    if (seq.active && !estado.usable) {
+      return [`${label}: secuencia ${estado.label.toLowerCase()}. Las ventas que pidan este comprobante serán rechazadas.`];
+    }
+    return [];
+  });
 
   const load = useCallback(async () => {
     const { data: company } = await supabase
@@ -193,6 +252,15 @@ export function NcfSettingsCard() {
 
         {fiscal.isFormalized && (
           <>
+            {fiscal.ncfEnabled && avisos.length > 0 && (
+              <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 space-y-1">
+                <p className="text-sm font-semibold text-destructive">Atención a las secuencias</p>
+                <ul className="text-xs text-destructive space-y-0.5 list-disc pl-4">
+                  {avisos.map((aviso) => <li key={aviso}>{aviso}</li>)}
+                </ul>
+              </div>
+            )}
+
             <div>
               <h4 className="text-sm font-semibold mb-2">Secuencias autorizadas</h4>
               {sequences.length === 0 ? (
@@ -206,6 +274,7 @@ export function NcfSettingsCard() {
                       <TableHead>Tipo</TableHead>
                       <TableHead>Rango</TableHead>
                       <TableHead>Próximo</TableHead>
+                      <TableHead>Disponibles</TableHead>
                       <TableHead>Vence</TableHead>
                       <TableHead>Estado</TableHead>
                       <TableHead></TableHead>
@@ -213,7 +282,9 @@ export function NcfSettingsCard() {
                   </TableHeader>
                   <TableBody>
                     {sequences.map((seq) => {
-                      const agotada = seq.current_val > seq.range_to;
+                      const estado = estadoDeSecuencia(seq, hoy);
+                      const agotada = estado.label === 'Agotada';
+                      const porAgotarse = estado.usable && estado.disponibles <= umbralPorAgotarse(seq);
                       return (
                         <TableRow key={seq.id}>
                           <TableCell className="font-medium">{TIPO_LABEL[seq.tipo] ?? seq.tipo}</TableCell>
@@ -223,15 +294,14 @@ export function NcfSettingsCard() {
                           <TableCell className="font-mono text-xs">
                             {agotada ? '—' : `${seq.prefix}${String(seq.current_val).padStart(8, '0')}`}
                           </TableCell>
-                          <TableCell className="text-xs">{seq.expires_at ?? 'Sin vencimiento'}</TableCell>
+                          <TableCell className={cn('text-xs tabular-nums', porAgotarse && 'font-semibold text-destructive')}>
+                            {estado.disponibles}
+                          </TableCell>
+                          <TableCell className={cn('text-xs', estado.label === 'Vencida' && 'font-semibold text-destructive')}>
+                            {seq.expires_at ?? 'Sin vencimiento'}
+                          </TableCell>
                           <TableCell>
-                            {agotada ? (
-                              <Badge variant="destructive">Agotada</Badge>
-                            ) : seq.active ? (
-                              <Badge>Activa</Badge>
-                            ) : (
-                              <Badge variant="secondary">Inactiva</Badge>
-                            )}
+                            <Badge variant={estado.variant}>{estado.label}</Badge>
                           </TableCell>
                           <TableCell className="text-right">
                             {!agotada && (
@@ -256,9 +326,9 @@ export function NcfSettingsCard() {
                   <Select value={tipo} onValueChange={(v: NcfTipo) => { setTipo(v); setPrefix(TIPO_PREFIX[v]); }}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="consumer">{TIPO_LABEL.consumer}</SelectItem>
-                      <SelectItem value="fiscal">{TIPO_LABEL.fiscal}</SelectItem>
-                      <SelectItem value="nota_credito">{TIPO_LABEL.nota_credito}</SelectItem>
+                      {TIPOS.map((t) => (
+                        <SelectItem key={t} value={t}>{TIPO_LABEL[t]}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
