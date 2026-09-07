@@ -17,6 +17,9 @@ import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency } from '@/lib/utils';
 import { CustomerSearchDialog } from '@/components/pos/customer-search-dialog';
+// FREQUENCY_LABEL y PER_MONTH viven en lib/frequency.ts, compartidos con
+// Financiamiento: el prorrateo de la tasa mensual es el mismo cálculo.
+import { FREQUENCY_LABEL, PER_MONTH } from '@/lib/frequency';
 import type { Customer, LoanFrequency } from '@/lib/types';
 import { HandCoins, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -24,16 +27,6 @@ import { useRouter } from 'next/navigation';
 interface LoanDialogProps {
   children?: React.ReactNode;
 }
-
-const FREQUENCY_LABEL: Record<LoanFrequency, string> = {
-  weekly: 'Semanal',
-  biweekly: 'Quincenal',
-  monthly: 'Mensual',
-};
-
-// Cuotas por mes según la frecuencia; para prorratear la tasa mensual a la
-// duración real del préstamo (mismo cálculo que trg_before_loan_checks).
-const PER_MONTH: Record<LoanFrequency, number> = { weekly: 4, biweekly: 2, monthly: 1 };
 
 // Diálogo de prestamista: presto RD$X a una tasa mensual y el cliente lo paga
 // en cuotas semanales/quincenales/mensuales. Sin "abono inicial" — el dinero

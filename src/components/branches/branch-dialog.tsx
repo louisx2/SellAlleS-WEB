@@ -17,7 +17,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Switch } from '@/components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { formatPhone } from '@/lib/format';
+import {
+  FREQUENCY_LABEL,
+  INTEREST_MODE_LABEL,
+  type InterestMode,
+  type PaymentFrequency,
+} from '@/lib/frequency';
 import type { Branch } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useBranches } from '@/context/branch-provider';
@@ -33,6 +40,14 @@ interface BranchDialogProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
+
+// Los desplegables no admiten valor vacío, así que "hereda de la empresa" es
+// una opción explícita que al guardar se convierte en NULL.
+const HEREDA = 'inherit' as const;
+
+// Campo numérico opcional de la sucursal: sin valor propio, se muestra vacío y
+// el placeholder dice qué se hereda.
+const numOrEmpty = (n?: number) => (n != null ? String(n) : '');
 
 export function BranchDialog({ branch, children, open: controlledOpen, onOpenChange }: BranchDialogProps) {
   const { toast } = useToast();
@@ -58,6 +73,15 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
   // Arranca apagado en las nuevas, igual que las que ya existían.
   const [usaCaja, setUsaCaja] = useState(branch?.cajaEnabled ?? false);
 
+  // Financiamiento por sucursal. El interruptor arranca ENCENDIDO (hasta ahora
+  // financiaban todas), y los cuatro ajustes vacíos = hereda el de la empresa.
+  const [financia, setFinancia] = useState(branch?.financingEnabled ?? true);
+  const [finRate, setFinRate] = useState(numOrEmpty(branch?.defaultInterestRate));
+  const [finMora, setFinMora] = useState(numOrEmpty(branch?.lateFeeRate));
+  const [finCuotas, setFinCuotas] = useState(numOrEmpty(branch?.financingDefaultInstallments));
+  const [finMode, setFinMode] = useState<InterestMode | typeof HEREDA>(branch?.financingInterestMode ?? HEREDA);
+  const [finFreq, setFinFreq] = useState<PaymentFrequency | typeof HEREDA>(branch?.financingDefaultFrequency ?? HEREDA);
+
   useEffect(() => {
     if (open) {
       setLogoUrl(branch?.logoUrl || '');
@@ -65,12 +89,19 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
       setPhone(branch?.phone || '');
       setHereda(branch ? branch.inheritsCompanyProfile !== false : false);
       setUsaCaja(branch?.cajaEnabled ?? false);
+      setFinancia(branch?.financingEnabled ?? true);
+      setFinRate(numOrEmpty(branch?.defaultInterestRate));
+      setFinMora(numOrEmpty(branch?.lateFeeRate));
+      setFinCuotas(numOrEmpty(branch?.financingDefaultInstallments));
+      setFinMode(branch?.financingInterestMode ?? HEREDA);
+      setFinFreq(branch?.financingDefaultFrequency ?? HEREDA);
     }
   }, [open, branch]);
 
   // El interruptor de caja solo tiene sentido si la empresa tiene el módulo
   // encendido; si no, se esconde para no ofrecer algo que no haría nada.
   const cajaDisponible = isModuleEnabled('caja');
+  const financiamientoDisponible = isModuleEnabled('financing');
 
   // Lo que se imprimiría si hereda, para que la decisión no sea a ciegas: el
   // perfil de la empresa suele traer los datos de la primera sucursal.
@@ -184,6 +215,33 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+
+    // Vacío = hereda de la empresa; con valor, tiene que ser válido. La base
+    // tiene los mismos límites, pero un toast se lee mejor que un error de SQL.
+    const pct = (raw: string) => (raw.trim() === '' ? undefined : Number(raw));
+    const rateOverride = pct(finRate);
+    const moraOverride = pct(finMora);
+    const cuotasOverride = pct(finCuotas);
+    const fueraDeRango = [rateOverride, moraOverride].some(
+      (v) => v !== undefined && (isNaN(v) || v < 0 || v > 100),
+    );
+    if (fueraDeRango) {
+      toast({
+        title: 'Valores inválidos',
+        description: 'El interés y la mora de la sucursal deben ser porcentajes entre 0 y 100.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (cuotasOverride !== undefined && (!Number.isInteger(cuotasOverride) || cuotasOverride < 1 || cuotasOverride > 60)) {
+      toast({
+        title: 'Cuotas inválidas',
+        description: 'La cantidad de cuotas por defecto debe ir de 1 a 60.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const newBranchData = {
       id: branch?.id ?? '',
       name: formData.get('name') as string,
@@ -195,6 +253,14 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
       // la sucursal se haya marcado como "datos propios".
       inheritsCompanyProfile: hereda,
       cajaEnabled: usaCaja,
+      // Financiamiento: undefined = se guarda NULL y la sucursal sigue lo que
+      // diga la empresa, en vez de quedarse con una copia congelada.
+      financingEnabled: financia,
+      defaultInterestRate: rateOverride,
+      lateFeeRate: moraOverride,
+      financingDefaultInstallments: cuotasOverride,
+      financingInterestMode: finMode === HEREDA ? undefined : finMode,
+      financingDefaultFrequency: finFreq === HEREDA ? undefined : finFreq,
       displayName: (formData.get('displayName') as string) || undefined,
       phone: phone || undefined,
       address: (formData.get('address') as string) || undefined,
@@ -259,6 +325,102 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
                   </Label>
                   <Switch id="branch-caja" checked={usaCaja} onCheckedChange={setUsaCaja} />
                 </div>
+              </div>
+            )}
+
+            {financiamientoDisponible && (
+              <div className="border-t pt-3 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <Label htmlFor="branch-financing" className="font-normal leading-snug">
+                    Ofrece financiamiento
+                    <span className="block text-xs text-muted-foreground">
+                      Si lo apagas, el POS de esta sucursal deja de mostrar el botón «Financiar».
+                      Las demás sucursales no se ven afectadas.
+                    </span>
+                  </Label>
+                  <Switch id="branch-financing" checked={financia} onCheckedChange={setFinancia} />
+                </div>
+
+                {financia && (
+                  <>
+                    <p className="text-xs text-muted-foreground">
+                      Valores con los que abre el POS al financiar en esta sucursal. Déjalos vacíos
+                      para seguir los de la empresa; el cajero puede cambiarlos en cada venta.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="branch-fin-rate" className="text-xs">Interés sugerido (%)</Label>
+                        <Input
+                          id="branch-fin-rate"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={finRate}
+                          onChange={(e) => setFinRate(e.target.value)}
+                          placeholder={`Empresa: ${profile.defaultInterestRate}%`}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="branch-fin-mora" className="text-xs">Mora por cuota vencida (%)</Label>
+                        <Input
+                          id="branch-fin-mora"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={finMora}
+                          onChange={(e) => setFinMora(e.target.value)}
+                          placeholder={`Empresa: ${profile.lateFeeRate}%`}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label htmlFor="branch-fin-mode" className="text-xs">Cómo se cobra el interés</Label>
+                      <Select value={finMode} onValueChange={(v: InterestMode | typeof HEREDA) => setFinMode(v)}>
+                        <SelectTrigger id="branch-fin-mode"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={HEREDA}>
+                            Como la empresa ({INTEREST_MODE_LABEL[profile.financingInterestMode]})
+                          </SelectItem>
+                          <SelectItem value="monthly_prorated">{INTEREST_MODE_LABEL.monthly_prorated}</SelectItem>
+                          <SelectItem value="per_installment">{INTEREST_MODE_LABEL.per_installment}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="branch-fin-freq" className="text-xs">Frecuencia por defecto</Label>
+                        <Select value={finFreq} onValueChange={(v: PaymentFrequency | typeof HEREDA) => setFinFreq(v)}>
+                          <SelectTrigger id="branch-fin-freq"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={HEREDA}>
+                              Como la empresa ({FREQUENCY_LABEL[profile.financingDefaultFrequency]})
+                            </SelectItem>
+                            <SelectItem value="weekly">{FREQUENCY_LABEL.weekly}</SelectItem>
+                            <SelectItem value="biweekly">{FREQUENCY_LABEL.biweekly}</SelectItem>
+                            <SelectItem value="monthly">{FREQUENCY_LABEL.monthly}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="branch-fin-cuotas" className="text-xs">Cuotas por defecto</Label>
+                        <Input
+                          id="branch-fin-cuotas"
+                          type="number"
+                          min="1"
+                          max="60"
+                          step="1"
+                          value={finCuotas}
+                          onChange={(e) => setFinCuotas(e.target.value)}
+                          placeholder={`Empresa: ${profile.financingDefaultInstallments}`}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

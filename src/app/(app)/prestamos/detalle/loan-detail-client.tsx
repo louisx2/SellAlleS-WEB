@@ -8,6 +8,7 @@ import { supabase } from '@/lib/supabase/client';
 import { rowToLoanPayment } from '@/lib/supabase/mappers';
 import { formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
+import { FREQUENCY_LABEL } from '@/lib/frequency';
 import type { LoanPayment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,11 +31,6 @@ const INSTALLMENT_STATUS: Record<string, { label: string; variant: 'default' | '
   pending: { label: 'Pendiente', variant: 'outline' },
 };
 
-const FREQUENCY_LABEL: Record<string, string> = {
-  weekly: 'Semanal',
-  biweekly: 'Quincenal',
-  monthly: 'Mensual',
-};
 
 export default function LoanDetailClient() {
   // Ruta estática con query param (?id=): más robusta que una ruta dinámica en
@@ -155,7 +151,7 @@ export default function LoanDetailClient() {
             </div>
             <div>
               <p className="text-muted-foreground">Tasa mensual / Cuotas</p>
-              <p className="font-semibold">{loan.interestRate}% · {loan.installmentsCount} cuotas ({FREQUENCY_LABEL[loan.paymentFrequency] ?? 'Mensual'})</p>
+              <p className="font-semibold">{loan.interestRate}% · {loan.installmentsCount} cuotas ({FREQUENCY_LABEL[loan.paymentFrequency]})</p>
             </div>
             <div>
               <p className="text-muted-foreground">Ganancia (interés)</p>

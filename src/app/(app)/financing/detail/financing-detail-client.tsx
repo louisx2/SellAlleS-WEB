@@ -9,6 +9,7 @@ import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToCreditPayment } from '@/lib/supabase/mappers';
 import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
+import { FREQUENCY_LABEL } from '@/lib/frequency';
 import type { CreditPayment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -86,6 +87,10 @@ export default function FinancingDetailClient() {
   const fin = sale.financingDetails;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  // La mora del plan es la que va a cobrar la RPC de abonos: se congeló al
+  // crearlo. Los planes viejos no la traen y siguen la de la empresa.
+  const lateFeeRate = fin?.lateFeeRate ?? profile.lateFeeRate;
+  const frequency = fin?.frequency ?? 'monthly';
 
   return (
     <div className="space-y-6">
@@ -144,8 +149,14 @@ export default function FinancingDetailClient() {
               <p className="font-semibold">{formatCurrency(fin?.downPayment ?? 0)}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Tasa mensual / Cuotas</p>
-              <p className="font-semibold">{fin ? `${fin.interestRate}% · ${fin.installments} cuotas` : 'Crédito simple'}</p>
+              <p className="text-muted-foreground">
+                {fin?.interestMode === 'per_installment' ? 'Tasa por cuota / Cuotas' : 'Tasa mensual / Cuotas'}
+              </p>
+              <p className="font-semibold">
+                {fin
+                  ? `${fin.interestRate}% · ${fin.installments} cuotas (${FREQUENCY_LABEL[frequency]})`
+                  : 'Crédito simple'}
+              </p>
             </div>
             <div>
               <p className="text-muted-foreground">Total con intereses</p>
@@ -176,7 +187,7 @@ export default function FinancingDetailClient() {
           <CardHeader>
             <CardTitle>Plan de Cuotas</CardTitle>
             <CardDescription>
-              La mora ({profile.lateFeeRate}% por cuota vencida) se cobra primero al registrar un abono.
+              La mora ({lateFeeRate}% por cuota vencida) se cobra primero al registrar un abono.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -196,7 +207,7 @@ export default function FinancingDetailClient() {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
                   const isOverdue = cuota.status !== 'paid' && new Date(cuota.dueDate + 'T23:59:59') < today;
                   const feeDue = isOverdue
-                    ? Math.round(cuota.amount * profile.lateFeeRate / 100 * 100) / 100
+                    ? Math.round(cuota.amount * lateFeeRate / 100 * 100) / 100
                     : 0;
                   const st = INSTALLMENT_STATUS[cuota.status] ?? INSTALLMENT_STATUS.pending;
                   return (

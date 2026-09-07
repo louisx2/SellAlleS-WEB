@@ -16,6 +16,11 @@ const EMPTY: CompanyProfile = {
   socialMedia: { instagram: '', facebook: '' }, email: '', logoUrl: '', ticketLogoUrl: '', receiptFooter: '',
   ticketNameDisplay: 'company', headerNameDisplay: 'company', ticketSocialDisplay: 'company', linkSlug: '',
   lateFeeRate: 5, defaultInterestRate: 3.5,
+  // Mismos defaults que las columnas en la base, para que el POS abra igual
+  // mientras el perfil todavía no ha cargado.
+  financingInterestMode: 'monthly_prorated',
+  financingDefaultFrequency: 'monthly',
+  financingDefaultInstallments: 12,
   loanLateFeeRate: 5, defaultLoanInterestRate: 5,
   loyaltyEnabled: false, loyaltyPurchasesRequired: null, loyaltyRewardDescription: '', loyaltyCouponValidDays: 30,
 };

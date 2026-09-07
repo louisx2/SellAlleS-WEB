@@ -1,4 +1,7 @@
 import type { UnitCode } from './units';
+import type { InterestMode, PaymentFrequency } from './frequency';
+
+export type { InterestMode, PaymentFrequency } from './frequency';
 
 export type Product = {
   id: string;
@@ -149,6 +152,17 @@ export type Branch = {
   // empresa VE la caja, esto dice cuáles de sus sucursales la USAN. Ausente =
   // false, que es como cobraban todas antes de que existiera el interruptor.
   cajaEnabled?: boolean;
+  // Mismo "dos interruptores" que la caja, al revés: ausente = true, porque
+  // hasta ahora financiaban todas las sucursales.
+  financingEnabled?: boolean;
+  // Ajustes de financiamiento propios de la sucursal. Ausente/vacío = hereda
+  // el de la empresa, igual que el perfil del ticket. Son los valores con los
+  // que abre el diálogo del POS; el cajero puede cambiarlos en cada venta.
+  defaultInterestRate?: number;
+  lateFeeRate?: number;
+  financingInterestMode?: InterestMode;
+  financingDefaultFrequency?: PaymentFrequency;
+  financingDefaultInstallments?: number;
 };
 
 export type Company = {
@@ -222,12 +236,23 @@ export type Cart = {
   coupon?: Coupon; // cupón de fidelidad seleccionado para esta venta
 };
 
+// Plan de financiamiento tal como queda grabado en la venta. Lo arma el
+// servidor (`before_sale_credit_checks`); lo que manda el POS es solo una vista
+// previa. Los campos opcionales no existen en los planes creados antes de que
+// hubiera frecuencia: ausente significa el comportamiento de entonces —
+// mensual, tasa prorrateada, y la mora vigente de la empresa.
 export type FinancingDetails = {
   interestRate: number;
+  interestMode?: InterestMode;
+  frequency?: PaymentFrequency;
   installments: number;
   installmentAmount: number;
   totalWithInterest: number;
   downPayment?: number;
+  // Congeladas al crear el plan: cambiar la mora de la sucursal no debe
+  // repreciar una deuda que ya está corriendo.
+  lateFeeRate?: number;
+  lateFeeGraceDays?: number;
 };
 
 // Cuota de un plan de financiamiento. La genera y actualiza la base
@@ -363,6 +388,11 @@ export type CompanyProfile = {
   linkSlug: string;
   lateFeeRate: number;         // % de mora sobre la cuota vencida
   defaultInterestRate: number; // % de interés mensual sugerido en el POS
+  // Valores por defecto del financiamiento para toda la empresa. Cada sucursal
+  // puede sobrescribirlos; ver Branch.
+  financingInterestMode: InterestMode;
+  financingDefaultFrequency: PaymentFrequency;
+  financingDefaultInstallments: number;
   loanLateFeeRate: number;         // % de mora de préstamos (independiente de lateFeeRate)
   defaultLoanInterestRate: number; // % de interés mensual sugerido para préstamos
   loyaltyEnabled: boolean;
@@ -448,7 +478,9 @@ export type LoanPayment = {
   branchId?: string;
 };
 
-export type LoanFrequency = 'weekly' | 'biweekly' | 'monthly';
+// Alias histórico: los préstamos ya usaban este nombre. El calendario y las
+// etiquetas viven en lib/frequency.ts, compartidos con Financiamiento.
+export type LoanFrequency = PaymentFrequency;
 
 export type Loan = {
   id: string;

@@ -1,7 +1,8 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { Customer, Sale } from "./types";
-import { addMonths, isPast } from 'date-fns';
+import { addDays, isPast } from 'date-fns';
+import { addPeriods } from './frequency';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -47,16 +48,25 @@ export type FinancingStatus = {
 };
 
 // Estado del plan derivado de las cuotas reales (financing_installments),
-// que genera y actualiza la base. lateFeeRate es % (companies.late_fee_rate).
-export function calculateFinancingStatus(sale: Sale, lateFeeRate: number = DEFAULT_LATE_FEE_RATE): FinancingStatus {
+// que genera y actualiza la base.
+//
+// `fallbackLateFeeRate` (% de la empresa) solo se usa para los planes creados
+// antes de que la mora se congelara en la venta. Cuando el plan trae la suya
+// manda esa: es la que va a cobrar la RPC de abonos, y mostrar otra en pantalla
+// haría que el cajero anunciara un número y el sistema cobrara otro.
+export function calculateFinancingStatus(sale: Sale, fallbackLateFeeRate: number = DEFAULT_LATE_FEE_RATE): FinancingStatus {
     const installments = sale.installments ?? [];
+    const lateFeeRate = sale.financingDetails?.lateFeeRate ?? fallbackLateFeeRate;
+    const graceDays = sale.financingDetails?.lateFeeGraceDays ?? 0;
+    const frequency = sale.financingDetails?.frequency ?? 'monthly';
 
     if (installments.length > 0) {
         const open = installments.filter(i => i.status !== 'paid');
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const overdue = open.filter(i => new Date(i.dueDate + 'T23:59:59') < today);
+        // Los días de gracia corren igual que en la base (`due_date + grace < today`).
+        const overdue = open.filter(i => addDays(new Date(i.dueDate + 'T23:59:59'), graceDays) < today);
         const lateFee = round2(overdue.reduce(
             (acc, i) => acc + Math.max(round2(i.amount * lateFeeRate / 100) - i.lateFeePaid, 0), 0));
 
@@ -94,7 +104,7 @@ export function calculateFinancingStatus(sale: Sale, lateFeeRate: number = DEFAU
 
     const { installmentAmount, installments: totalInstallments } = sale.financingDetails;
     const installmentsPaid = installmentAmount > 0 ? Math.floor(sale.amountPaid / installmentAmount) : 0;
-    const nextDueDate = addMonths(new Date(sale.createdAt), installmentsPaid + 1);
+    const nextDueDate = addPeriods(new Date(sale.createdAt), frequency, installmentsPaid + 1);
     const isOverdue = isPast(nextDueDate) && pendingBalance > 0;
     const lateFee = isOverdue ? round2(installmentAmount * lateFeeRate / 100) : 0;
 
