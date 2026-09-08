@@ -154,19 +154,24 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
 
       const { error } = await supabase.storage
         .from('product-images')
-        .upload(filename, blob, { contentType: 'image/png', upsert: true });
+        // Un año de caché con upsert sobre un nombre fijo sería un logo viejo
+        // pegado un año. El `?v=` de abajo lo resuelve: al reemplazarlo cambia
+        // la URL guardada, y esa es la clave de caché tanto del navegador como
+        // del CDN. Así se cachea fuerte sin perder el cambio de logo.
+        .upload(filename, blob, { contentType: 'image/png', upsert: true, cacheControl: '31536000' });
 
       if (error) throw error;
 
       const { data: { publicUrl } } = supabase.storage
         .from('product-images')
         .getPublicUrl(filename);
+      const urlVersionada = `${publicUrl}?v=${Date.now()}`;
 
       if (isLogo) {
-        setLogoUrl(publicUrl);
+        setLogoUrl(urlVersionada);
         toast({ title: 'Logo de sucursal subido', description: 'El logo principal se cargó correctamente.' });
       } else {
-        setTicketLogoUrl(publicUrl);
+        setTicketLogoUrl(urlVersionada);
         toast({ title: 'Logo de ticket subido', description: 'El logo del ticket se optimizó correctamente.' });
       }
     } catch (err: any) {

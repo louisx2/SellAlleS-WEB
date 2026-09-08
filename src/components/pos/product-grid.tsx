@@ -51,7 +51,7 @@ export function ProductGrid({ products, view }: ProductGridProps) {
         <Card key={product.id} className="flex flex-col overflow-hidden">
           <CardHeader className="p-0 relative">
             <div className="aspect-square relative w-full">
-              <ProductImage image={product.image} alt={product.name} fill />
+              <ProductImage image={product.image} alt={product.name} fill variant="thumb" />
             </div>
             <ProductDetailButton product={product} className="absolute top-2 right-2" />
           </CardHeader>

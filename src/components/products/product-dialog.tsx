@@ -29,7 +29,8 @@ import { useCategories } from '@/context/category-provider';
 import { useLocations } from '@/context/location-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
-import { ProductImage } from '@/components/products/product-image';
+import { ProductImage, SUFIJO_THUMB } from '@/components/products/product-image';
+import { optimizarImagen } from '@/lib/image-optim';
 import { ImagePlus, Loader2, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 
@@ -113,23 +114,47 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       toast({ title: 'Archivo inválido', description: 'Selecciona una imagen.', variant: 'destructive' });
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: 'Imagen muy grande', description: 'El máximo es 5 MB.', variant: 'destructive' });
+    // El límite se mide sobre el archivo elegido, no sobre lo que subimos: lo
+    // que sale de `optimizarImagen` pesa ~120 kB venga de donde venga. Es solo
+    // un tope para no intentar decodificar un archivo absurdo en una tablet.
+    if (file.size > 20 * 1024 * 1024) {
+      toast({ title: 'Imagen muy grande', description: 'El máximo es 20 MB.', variant: 'destructive' });
       return;
     }
     setUploading(true);
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
-      const path = `${companyId}/${crypto.randomUUID()}.${ext}`;
-      const { error } = await supabase.storage.from('product-images').upload(path, file, {
-        cacheControl: '3600',
-        upsert: false,
-        contentType: file.type,
-      });
-      if (error) throw error;
+      // Nunca subimos el original. Ver src/lib/image-optim.ts: una foto de
+      // teléfono son 1.5 MB que después se sirven dentro de un recuadro de
+      // 200 px, y eso fue lo que se comió el cupo de transferencia del plan.
+      const { full, thumb, ext, mime } = await optimizarImagen(file);
+
+      const id = crypto.randomUUID();
+      // La ruta TIENE que empezar por el id de empresa: la policy del bucket
+      // exige que la primera carpeta sea current_company_id().
+      const path = `${companyId}/${id}.${ext}`;
+      const pathThumb = `${companyId}/${id}${SUFIJO_THUMB}.${ext}`;
+
+      // Un año de caché, y es seguro: el nombre lleva un UUID nuevo y subimos
+      // con upsert:false, así que esta URL nunca cambiará de contenido. Con el
+      // valor anterior (una hora) cada caja revalidaba el catálogo entero cada
+      // hora, que es de donde salían las descargas repetidas de la misma foto.
+      const opciones = { cacheControl: '31536000', upsert: false, contentType: mime };
+
+      const [subidaFull, subidaThumb] = await Promise.all([
+        supabase.storage.from('product-images').upload(path, full, opciones),
+        supabase.storage.from('product-images').upload(pathThumb, thumb, opciones),
+      ]);
+      if (subidaFull.error) throw subidaFull.error;
+      // Si falla solo la miniatura seguimos: `ProductImage` cae a la imagen
+      // grande al recibir el 404. Peor sería dejar al producto sin foto.
+      if (subidaThumb.error) {
+        console.warn('No se pudo subir la miniatura:', subidaThumb.error.message);
+      }
+
       const { data } = supabase.storage.from('product-images').getPublicUrl(path);
       setImageUrl(data.publicUrl);
-      toast({ title: 'Imagen subida' });
+      const kb = Math.round(full.size / 1024);
+      toast({ title: 'Imagen subida', description: `Optimizada a ${kb} kB.` });
     } catch (err: any) {
       toast({ title: 'No se pudo subir', description: err?.message ?? 'Error al subir.', variant: 'destructive' });
     } finally {

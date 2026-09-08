@@ -8,6 +8,19 @@
 // El `activate` de abajo borra cualquier caché con nombre distinto a este, así
 // que cambiar de versión purga de paso lo que quedó del build anterior.
 const CACHE_NAME = 'sellalles-cache-__VERSION__';
+
+// Las imágenes de Storage viven en una caché aparte y SIN la versión en el
+// nombre, a propósito: el `activate` de abajo borra toda caché que no sea la
+// del build actual, así que meterlas ahí significaría volver a descargar el
+// catálogo entero en cada despliegue — justo el gasto de transferencia que
+// esto viene a eliminar. El contenido es inmutable (cada URL lleva un UUID
+// nuevo), de modo que conservarla entre versiones es seguro.
+const IMAGE_CACHE_NAME = 'sellalles-images-v1';
+
+// Tope de fotos guardadas por dispositivo. A ~18 kB la miniatura y ~120 kB la
+// imagen grande, 400 entradas son unos pocos MB: suficiente para el catálogo
+// de una caja sin llenarle el disco a una tablet barata.
+const IMAGE_CACHE_MAX = 400;
 const PRECACHE_ASSETS = [
   '/',
   '/login',
@@ -45,7 +58,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
+          if (cacheName !== CACHE_NAME && cacheName !== IMAGE_CACHE_NAME) {
             console.log('[Service Worker] Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
@@ -58,6 +71,45 @@ self.addEventListener('activate', (event) => {
 // Fetch handler with custom caching strategies
 self.addEventListener('fetch', (event) => {
   const requestUrl = new URL(event.request.url);
+
+  // 0. Imágenes públicas de Storage - CACHE FIRST, PERMANENTE
+  //
+  // Tiene que ir ANTES del bypass de supabase.co de abajo: esa regla existe
+  // para no cachear auth ni consultas, pero arrastraba también a las fotos de
+  // producto, que son lo contrario — contenido inmutable que se repite decenas
+  // de veces al día. En producción se midió la misma foto descargada 39 veces
+  // en 24 horas por este motivo.
+  //
+  // Cache-first sin revalidar es correcto aquí porque la URL lleva un UUID
+  // irrepetible: si la foto cambia, cambia la URL. Nunca se sirve una imagen
+  // vieja bajo una URL nueva.
+  if (requestUrl.pathname.startsWith('/storage/v1/object/public/')) {
+    event.respondWith(
+      caches.open(IMAGE_CACHE_NAME).then((cache) =>
+        cache.match(event.request).then((cachedResponse) => {
+          if (cachedResponse) return cachedResponse;
+
+          return fetch(event.request).then((networkResponse) => {
+            // Las <img> se piden sin crossorigin, así que la respuesta es
+            // opaca (type 'opaque', status 0): no se puede inspeccionar, pero
+            // sí guardar y servir. Por eso no vale el `status !== 200` que usan
+            // las otras reglas — descartaría todas las fotos.
+            const utilizable =
+              networkResponse &&
+              (networkResponse.ok || networkResponse.type === 'opaque');
+            if (utilizable) {
+              cache
+                .put(event.request, networkResponse.clone())
+                .then(() => podarCacheImagenes())
+                .catch(() => {/* sin espacio: se sirve igual, solo no se cachea */});
+            }
+            return networkResponse;
+          });
+        })
+      )
+    );
+    return;
+  }
 
   // 1. API and Database requests (Supabase) - NETWORK ONLY
   // Do not intercept or cache authentication or transactional database queries.
@@ -127,3 +179,21 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+/**
+ * Mantiene la caché de imágenes por debajo de IMAGE_CACHE_MAX.
+ *
+ * `cache.keys()` devuelve las entradas en orden de inserción, así que borrar
+ * desde el principio descarta lo más antiguo. Es una aproximación pobre a LRU
+ * — no distingue lo más usado de lo más viejo — pero no requiere llevar
+ * metadatos aparte y para un catálogo que cambia poco basta de sobra.
+ */
+function podarCacheImagenes() {
+  return caches.open(IMAGE_CACHE_NAME).then((cache) =>
+    cache.keys().then((claves) => {
+      const sobran = claves.length - IMAGE_CACHE_MAX;
+      if (sobran <= 0) return;
+      return Promise.all(claves.slice(0, sobran).map((clave) => cache.delete(clave)));
+    })
+  );
+}

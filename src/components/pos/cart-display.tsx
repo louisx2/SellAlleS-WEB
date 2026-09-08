@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { formatCurrency } from '@/lib/utils';
-import { resolveProductImageUrl } from '@/components/products/product-image';
+import { ProductImage } from '@/components/products/product-image';
 import { MinusCircle, PlusCircle, ShoppingCart, Trash2, UserSearch, X, Plus, FileText } from 'lucide-react';
 import { CheckoutDialog } from './checkout-dialog';
 import { CreateQuoteDialog } from './create-quote-dialog';
@@ -45,20 +45,17 @@ const perUnitLabel = (unit?: string | null) => {
   return u.code === 'und' ? 'c/u' : `/ ${u.short}`;
 };
 
-function CartItemImage({ src, alt }: { src: string, alt: string }) {
+function CartItemImage({ image, alt }: { image?: string | null, alt: string }) {
     const [imageLoaded, setImageLoaded] = useState(false);
     return (
         <div className="relative h-16 w-16 flex items-center justify-center">
             {!imageLoaded && <Skeleton className="absolute inset-0 h-16 w-16 rounded-md" />}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-                src={src}
+            <ProductImage
+                image={image}
                 alt={alt}
-                width={64}
-                height={64}
-                loading="lazy"
-                className={cn("rounded-md object-cover h-16 w-16 transition-opacity duration-300", imageLoaded ? "opacity-100" : "opacity-0")}
+                variant="thumb"
                 onLoad={() => setImageLoaded(true)}
+                className={cn("rounded-md h-16 w-16 transition-opacity duration-300", imageLoaded ? "opacity-100" : "opacity-0")}
             />
         </div>
     );
@@ -263,7 +260,7 @@ export function CartDisplay() {
                                 )}>
                                   <div className="hidden sm:block">
                                     <CartItemImage
-                                      src={resolveProductImageUrl(item.product.image)}
+                                      image={item.product.image}
                                       alt={item.product.name}
                                     />
                                   </div>
