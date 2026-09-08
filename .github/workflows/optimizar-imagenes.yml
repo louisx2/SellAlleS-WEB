@@ -1,10 +1,11 @@
 # Corre scripts/optimizar-storage.mjs en los servidores de GitHub, para no
 # depender de que alguien tenga Node, sharp y la service-role key a mano en su
-# maquina. Solo se lanza a mano desde la pestana Actions: no hay schedule ni
-# trigger por push, porque toca Storage y products.image de produccion.
+# maquina. Nunca se ejecuta solo: hay que pedirlo, de una de las dos formas de
+# abajo, porque el script escribe en Storage y en products.image de produccion.
 name: Optimizar imagenes de Storage
 
 on:
+  # Via 1: el formulario de la pestana Actions.
   workflow_dispatch:
     inputs:
       fase:
@@ -20,6 +21,13 @@ on:
         required: false
         type: boolean
         default: false
+
+  # Via 2: empujar a esta rama ejecuta lo que diga .github/optimizador.json.
+  # Existe para poder lanzarlo con un commit, sin entrar a la pestana Actions.
+  # Solo dispara en esta rama concreta, nunca en main.
+  push:
+    branches:
+      - ejecutar-optimizacion
 
 # Dos corridas a la vez se pisarian: la una borraria el original que la otra
 # acaba de repuntar. Con esto la segunda espera.
@@ -52,6 +60,32 @@ jobs:
           fi
           echo "Clave presente."
 
+      # De donde salen la fase y el modo depende de como se lanzo. El JSON es
+      # texto del repositorio, asi que la fase se valida contra la lista blanca
+      # antes de que llegue a la linea de comandos.
+      - name: Decidir que ejecutar
+        id: plan
+        env:
+          EVENTO: ${{ github.event_name }}
+          FASE_INPUT: ${{ inputs.fase }}
+          APLICAR_INPUT: ${{ inputs.aplicar }}
+        run: |
+          if [ "$EVENTO" = "workflow_dispatch" ]; then
+            fase="$FASE_INPUT"
+            aplicar="$APLICAR_INPUT"
+          else
+            fase=$(jq -r '.fase' .github/optimizador.json)
+            aplicar=$(jq -r '.aplicar' .github/optimizador.json)
+          fi
+          case "$fase" in
+            huerfanas|recomprimir) ;;
+            *) echo "Fase no valida: '$fase'. Solo vale huerfanas o recomprimir."; exit 1 ;;
+          esac
+          [ "$aplicar" = "true" ] || aplicar=false
+          echo "fase=$fase" >> "$GITHUB_OUTPUT"
+          echo "aplicar=$aplicar" >> "$GITHUB_OUTPUT"
+          echo "Lanzado por $EVENTO -> fase=$fase aplicar=$aplicar"
+
       - run: npm ci
 
       # sharp no esta en package.json a proposito: solo lo necesita este script.
@@ -61,8 +95,8 @@ jobs:
         env:
           SUPABASE_URL: https://qwpjclqinruhtxgkrxwr.supabase.co
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          FASE: ${{ inputs.fase }}
-          APLICAR: ${{ inputs.aplicar }}
+          FASE: ${{ steps.plan.outputs.fase }}
+          APLICAR: ${{ steps.plan.outputs.aplicar }}
         run: |
           if [ "$APLICAR" = "true" ]; then
             echo "== $FASE (APLICANDO DE VERDAD) =="

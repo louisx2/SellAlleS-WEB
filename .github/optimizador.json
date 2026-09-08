@@ -1,0 +1,5 @@
+{
+  "_comentario": "Lo que ejecuta el workflow cuando se empuja a la rama 'ejecutar-optimizacion'. Cambiar estos valores y empujar es la forma de lanzarlo con un commit, sin entrar a la pestana Actions. En main queda siempre en simulacro.",
+  "fase": "huerfanas",
+  "aplicar": false
+}
