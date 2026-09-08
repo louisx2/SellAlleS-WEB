@@ -42,9 +42,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Node 22 como minimo: supabase-js exige un WebSocket nativo, que no
+      # existe hasta esa version. Con Node 20 el script muere al construir el
+      # cliente, antes de tocar nada.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
 
       # Sin la clave el script falla igual, pero con un mensaje mucho menos
