@@ -1,0 +1,73 @@
+# Corre scripts/optimizar-storage.mjs en los servidores de GitHub, para no
+# depender de que alguien tenga Node, sharp y la service-role key a mano en su
+# maquina. Solo se lanza a mano desde la pestana Actions: no hay schedule ni
+# trigger por push, porque toca Storage y products.image de produccion.
+name: Optimizar imagenes de Storage
+
+on:
+  workflow_dispatch:
+    inputs:
+      fase:
+        description: 'Que hacer'
+        required: true
+        type: choice
+        default: huerfanas
+        options:
+          - huerfanas
+          - recomprimir
+      aplicar:
+        description: 'Escribir de verdad (sin marcar = solo simulacro, no cambia nada)'
+        required: false
+        type: boolean
+        default: false
+
+# Dos corridas a la vez se pisarian: la una borraria el original que la otra
+# acaba de repuntar. Con esto la segunda espera.
+concurrency:
+  group: optimizar-storage
+  cancel-in-progress: false
+
+jobs:
+  optimizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # Sin la clave el script falla igual, pero con un mensaje mucho menos
+      # claro y despues de haber instalado medio node_modules.
+      - name: Comprobar que la clave esta configurada
+        env:
+          CLAVE: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          if [ -z "$CLAVE" ]; then
+            echo "Falta el secret SUPABASE_SERVICE_ROLE_KEY."
+            echo "Se anade en Settings -> Secrets and variables -> Actions -> New repository secret."
+            exit 1
+          fi
+          echo "Clave presente."
+
+      - run: npm ci
+
+      # sharp no esta en package.json a proposito: solo lo necesita este script.
+      - run: npm i --no-save sharp
+
+      - name: Ejecutar el script
+        env:
+          SUPABASE_URL: https://qwpjclqinruhtxgkrxwr.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FASE: ${{ inputs.fase }}
+          APLICAR: ${{ inputs.aplicar }}
+        run: |
+          if [ "$APLICAR" = "true" ]; then
+            echo "== $FASE (APLICANDO DE VERDAD) =="
+            node scripts/optimizar-storage.mjs "$FASE" --aplicar
+          else
+            echo "== $FASE (simulacro: no se escribe nada) =="
+            node scripts/optimizar-storage.mjs "$FASE"
+          fi
