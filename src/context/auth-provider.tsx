@@ -258,9 +258,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Solo-lectura: puede entrar y ver, pero no modificar. Aplica si la prueba
       // venció, o si la suscripción pagada venció (paid_until en el pasado). El
       // super admin nunca queda en solo-lectura (gestiona/reactiva empresas).
+      //
+      // Un pago vigente manda por encima de la prueba: quien pagó no puede
+      // quedar bloqueado porque a la empresa se le olvidó pasarla a 'active'.
+      // Pasaba de verdad — una empresa con paid_until a fin de mes estuvo en
+      // solo-lectura porque su trial_ends_at ya había pasado.
+      const pagoVigente = !!paidUntil && new Date(paidUntil + 'T23:59:59').getTime() >= Date.now();
       const trialExpired = compStatus === 'trial' && !!trialEndsAt && new Date(trialEndsAt).getTime() < Date.now();
       const subLapsed = compStatus === 'active' && !!paidUntil && new Date(paidUntil + 'T23:59:59').getTime() < Date.now();
-      const isReadOnly = !data.is_super_admin && (trialExpired || subLapsed);
+      const isReadOnly = !data.is_super_admin && !pagoVigente && (trialExpired || subLapsed);
       // Activa/desactiva el bloqueo central de escrituras en el cliente Supabase.
       setReadOnlyMode(isReadOnly);
 

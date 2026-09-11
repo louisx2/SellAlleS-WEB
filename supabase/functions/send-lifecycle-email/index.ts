@@ -120,7 +120,9 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto):
 
     case 'prueba-por-vencer': {
       const dias = Number(vars.daysLeft ?? 0);
-      const cuando = dias === 1 ? 'mañana' : `en ${dias} días`;
+      // El barrido ya manda este correo el mismo día del corte, así que el 0
+      // tiene que leerse: "en 0 días" no lo dice nadie.
+      const cuando = dias <= 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`;
       return {
         subject: `Tu prueba de SellAlleS termina ${cuando}`,
         text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nLa prueba gratis de ${vars.companyName ?? 'tu empresa'} termina ${cuando} (${fmtFecha(vars.trialEndsAt)}).\n\nCuando termine podrás seguir viendo tus datos, pero no registrar ni modificar nada hasta activar tu cuenta.\n\nEquipo SellAlleS`,
@@ -156,7 +158,7 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto):
 
     case 'cobro-por-vencer': {
       const dias = Number(vars.daysLeft ?? 0);
-      const cuando = dias === 1 ? 'mañana' : `en ${dias} días`;
+      const cuando = dias <= 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`;
       return {
         subject: `Tu suscripción de SellAlleS vence ${cuando}`,
         text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nLa suscripción de ${vars.companyName ?? 'tu empresa'} vence ${cuando} (${fmtFecha(vars.paidUntil)}).\n\nPara renovarla, escríbenos y coordinamos la transferencia.\n\nEquipo SellAlleS`,
