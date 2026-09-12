@@ -25,6 +25,7 @@ import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToSale } from '@/lib/supabase/mappers';
+import { fetchAllRows } from '@/lib/supabase/paginate';
 import type { Sale } from '@/lib/types';
 import { ExportButton } from '@/components/reports/export-button';
 
@@ -113,17 +114,25 @@ export default function SalesSummaryReportPage() {
     const cargar = async () => {
       if (!desdeIso || !hastaIso) return;
       setLoading(true);
-      let q = supabase
-        .from('sales')
-        .select(SALE_SELECT)
-        .gte('created_at', desdeIso)
-        .lte('created_at', hastaIso)
-        .order('created_at', { ascending: false });
-      if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);
-      const { data, error } = await q;
-      if (cancelado) return;
-      setTodas(error || !data ? [] : data.map(rowToSale));
-      setLoading(false);
+      try {
+        const filas = await fetchAllRows((desde, hasta) => {
+          let q = supabase
+            .from('sales')
+            .select(SALE_SELECT)
+            .gte('created_at', desdeIso)
+            .lte('created_at', hastaIso)
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(desde, hasta);
+          if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);
+          return q;
+        });
+        if (cancelado) return;
+        setTodas(filas.map(rowToSale));
+      } catch {
+        if (!cancelado) setTodas([]);
+      }
+      if (!cancelado) setLoading(false);
     };
     cargar();
     return () => { cancelado = true; };
@@ -133,18 +142,30 @@ export default function SalesSummaryReportPage() {
     let cancelado = false;
     const cargar = async () => {
       if (!desdeIso || !hastaIso) return;
-      let q = supabase
-        .from('credit_payments')
-        .select('amount')
-        .gte('date', desdeIso)
-        .lte('date', hastaIso);
-      if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);
-      const { data } = await q;
-      if (cancelado) return;
-      setCobrosCredito({
-        monto: (data ?? []).reduce((a: number, r: any) => a + Number(r.amount ?? 0), 0),
-        abonos: (data ?? []).length,
-      });
+      // Si no se limpia, al cambiar de rango o sucursal el KPI sigue mostrando
+      // el total anterior junto a las ventas del período nuevo.
+      setCobrosCredito({ monto: 0, abonos: 0 });
+      try {
+        const filas = await fetchAllRows((desde, hasta) => {
+          let q = supabase
+            .from('credit_payments')
+            .select('amount')
+            .gte('date', desdeIso)
+            .lte('date', hastaIso)
+            .order('id', { ascending: true })
+            .range(desde, hasta);
+          if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);
+          return q;
+        });
+        if (cancelado) return;
+        setCobrosCredito({
+          monto: filas.reduce((a: number, r: any) => a + Number(r.amount ?? 0), 0),
+          abonos: filas.length,
+        });
+      } catch {
+        // Un total parcial se leería como el del período completo.
+        if (!cancelado) setCobrosCredito({ monto: 0, abonos: 0 });
+      }
     };
     cargar();
     return () => { cancelado = true; };

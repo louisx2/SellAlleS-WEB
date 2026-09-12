@@ -14,6 +14,7 @@ import { useSales } from '@/context/sales-provider';
 import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/paginate';
 import {
   loadDashboardConfig, saveDashboardConfig, defaultDashboardConfig, type DashboardConfig,
 } from '@/lib/dashboard-config';
@@ -88,18 +89,26 @@ export default function DashboardPage() {
     let cancelado = false;
     (async () => {
       const hasta = new Date(today); hasta.setHours(23, 59, 59, 999);
-      const { data } = await supabase
-        .from('credit_payments')
-        .select('amount, branches(name)')
-        .gte('date', today.toISOString())
-        .lte('date', hasta.toISOString());
-      if (cancelado) return;
-      setCollectedToday(
-        (data ?? []).map((r: any) => ({
-          branchName: r.branches?.name ?? '',
-          amount: Number(r.amount ?? 0),
-        }))
-      );
+      try {
+        const filas = await fetchAllRows((desde, fin) =>
+          supabase
+            .from('credit_payments')
+            .select('amount, branches(name)')
+            .gte('date', today.toISOString())
+            .lte('date', hasta.toISOString())
+            .order('id', { ascending: true })
+            .range(desde, fin));
+        if (cancelado) return;
+        setCollectedToday(
+          filas.map((r: any) => ({
+            branchName: r.branches?.name ?? '',
+            amount: Number(r.amount ?? 0),
+          }))
+        );
+      } catch {
+        // Mejor un KPI vacío que uno a medias que parezca el total del día.
+        if (!cancelado) setCollectedToday([]);
+      }
     })();
     return () => { cancelado = true; };
   }, [today]);
@@ -110,7 +119,11 @@ export default function DashboardPage() {
     const allowedNames = allowedBranches.map((b) => b.name);
     return collectedToday
       .filter((c) => (selectedBranch === 'all'
-        ? appUser?.isSuperAdmin || allowedNames.includes(c.branchName)
+        // Un abono puede quedar sin sucursal (branch_id nulo) y no por eso deja
+        // de ser dinero cobrado. Se cuenta para quien ya ve toda la empresa; a
+        // un usuario limitado a sus sucursales no se le suma dinero que no
+        // podría ver eligiéndolas una por una.
+        ? appUser?.isSuperAdmin || allowedNames.includes(c.branchName) || (isAdmin && !c.branchName)
         : c.branchName === selectedBranch))
       .reduce((a, c) => a + c.amount, 0);
   }, [collectedToday, selectedBranch, allowedBranches, appUser]);
