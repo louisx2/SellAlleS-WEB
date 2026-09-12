@@ -63,7 +63,6 @@ const reportsNavItems = [
     { href: '/reports/top-products', label: 'Productos Más Vendidos' },
     { href: '/reports/date-range', label: 'Ingresos por Fechas' },
     { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
-    { href: '/reports/cobros', label: 'Cobros de Crédito' },
     { href: '/reports/inventory', label: 'Valorización de Inventario' },
     { href: '/reports/taxes', label: 'Impuestos' },
     { href: '/reports/ganancias', label: 'Reporte de Ganancias' },

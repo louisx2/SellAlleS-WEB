@@ -50,6 +50,8 @@ export function SalePaymentsCard({ sale }: { sale: Sale }) {
         .from('credit_payments')
         .select('*, branches(name)')
         .eq('sale_id', sale.id)
+        // Un abono anulado nunca fue dinero: la propia columna lo advierte.
+        .is('voided_at', null)
         .order('date', { ascending: false });
       if (cancelado) return;
       // Sin esto, una consulta fallida se vería igual que "no tiene abonos".

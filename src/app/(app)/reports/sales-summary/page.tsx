@@ -152,6 +152,7 @@ export default function SalesSummaryReportPage() {
             .select('amount')
             .gte('date', desdeIso)
             .lte('date', hastaIso)
+            .is('voided_at', null)
             .order('id', { ascending: true })
             .range(desde, hasta);
           if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);

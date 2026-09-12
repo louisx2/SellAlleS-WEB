@@ -96,6 +96,7 @@ export default function DashboardPage() {
             .select('amount, branches(name)')
             .gte('date', today.toISOString())
             .lte('date', hasta.toISOString())
+            .is('voided_at', null)
             .order('id', { ascending: true })
             .range(desde, fin));
         if (cancelado) return;
