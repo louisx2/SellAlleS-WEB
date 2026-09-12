@@ -14,7 +14,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { cn, formatCurrency } from '@/lib/utils';
 import {
   Calendar as CalendarIcon, DollarSign, Hash, Receipt, Loader2,
-  Package, Users2, TicketPercent, Ban, Store, Wallet, SlidersHorizontal,
+  Package, Users2, TicketPercent, Ban, Store, Wallet, SlidersHorizontal, HandCoins,
 } from 'lucide-react';
 import { SalesChart, TIPOS_GRAFICO, type TipoGrafico } from '@/components/reports/sales-chart';
 import { RecentSales } from '@/components/reports/recent-sales';
@@ -25,6 +25,7 @@ import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToSale } from '@/lib/supabase/mappers';
+import { fetchAllRows } from '@/lib/supabase/paginate';
 import type { Sale } from '@/lib/types';
 import { ExportButton } from '@/components/reports/export-button';
 
@@ -57,6 +58,9 @@ export default function SalesSummaryReportPage() {
   });
   const [selectedBranch, setSelectedBranch] = React.useState('all');
   const [todas, setTodas] = React.useState<Sale[]>([]);
+  // Abonos a deudas de crédito del rango. Van aparte de las ventas: es dinero
+  // cobrado de ventas anteriores, no una venta nueva del período.
+  const [cobrosCredito, setCobrosCredito] = React.useState({ monto: 0, abonos: 0 });
   const [loading, setLoading] = React.useState(true);
   // Venta cuyo ticket se está mirando, elegida en "Ventas recientes".
   const [ventaVista, setVentaVista] = React.useState<Sale | null>(null);
@@ -110,17 +114,59 @@ export default function SalesSummaryReportPage() {
     const cargar = async () => {
       if (!desdeIso || !hastaIso) return;
       setLoading(true);
-      let q = supabase
-        .from('sales')
-        .select(SALE_SELECT)
-        .gte('created_at', desdeIso)
-        .lte('created_at', hastaIso)
-        .order('created_at', { ascending: false });
-      if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);
-      const { data, error } = await q;
-      if (cancelado) return;
-      setTodas(error || !data ? [] : data.map(rowToSale));
-      setLoading(false);
+      try {
+        const filas = await fetchAllRows((desde, hasta) => {
+          let q = supabase
+            .from('sales')
+            .select(SALE_SELECT)
+            .gte('created_at', desdeIso)
+            .lte('created_at', hastaIso)
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .range(desde, hasta);
+          if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);
+          return q;
+        });
+        if (cancelado) return;
+        setTodas(filas.map(rowToSale));
+      } catch {
+        if (!cancelado) setTodas([]);
+      }
+      if (!cancelado) setLoading(false);
+    };
+    cargar();
+    return () => { cancelado = true; };
+  }, [desdeIso, hastaIso, selectedBranch]);
+
+  React.useEffect(() => {
+    let cancelado = false;
+    const cargar = async () => {
+      if (!desdeIso || !hastaIso) return;
+      // Si no se limpia, al cambiar de rango o sucursal el KPI sigue mostrando
+      // el total anterior junto a las ventas del período nuevo.
+      setCobrosCredito({ monto: 0, abonos: 0 });
+      try {
+        const filas = await fetchAllRows((desde, hasta) => {
+          let q = supabase
+            .from('credit_payments')
+            .select('amount')
+            .gte('date', desdeIso)
+            .lte('date', hastaIso)
+            .is('voided_at', null)
+            .order('id', { ascending: true })
+            .range(desde, hasta);
+          if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);
+          return q;
+        });
+        if (cancelado) return;
+        setCobrosCredito({
+          monto: filas.reduce((a: number, r: any) => a + Number(r.amount ?? 0), 0),
+          abonos: filas.length,
+        });
+      } catch {
+        // Un total parcial se leería como el del período completo.
+        if (!cancelado) setCobrosCredito({ monto: 0, abonos: 0 });
+      }
     };
     cargar();
     return () => { cancelado = true; };
@@ -304,6 +350,9 @@ export default function SalesSummaryReportPage() {
                  valor={String(kpis.anuladas)} pie={formatCurrency(kpis.montoAnulado)} />
             <Kpi titulo="Sucursales con ventas" icono={<Store className="h-4 w-4 text-muted-foreground" />}
                  valor={String(porSucursal.length)} pie={selectedBranch === 'all' ? 'en el rango' : 'filtrada'} />
+            <Kpi titulo="Cobros de crédito" icono={<HandCoins className="h-4 w-4 text-muted-foreground" />}
+                 valor={formatCurrency(cobrosCredito.monto)}
+                 pie={`${cobrosCredito.abonos} abonos de deudas · no suma a Ingresos`} />
           </div>
 
           <div className="mt-8 grid gap-8 md:grid-cols-2 lg:grid-cols-7">

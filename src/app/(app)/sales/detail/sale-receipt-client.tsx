@@ -21,6 +21,7 @@ import {
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
+import { SalePaymentsCard } from '@/components/sales/sale-payments-card';
 
 export default function SaleReceiptClient() {
   const searchParams = useSearchParams();
@@ -225,6 +226,10 @@ export default function SaleReceiptClient() {
             </Button>
         </CardFooter>
       </Card>
+
+      {/* Los abonos se buscan aquí antes que en /financing/detail o en el
+          estado de cuenta, que era donde vivía el único historial. */}
+      <SalePaymentsCard sale={sale} />
 
       {/* Email Sender Dialog */}
       <Dialog open={activeDialog === 'email'} onOpenChange={(open) => !open && setActiveDialog('none')}>

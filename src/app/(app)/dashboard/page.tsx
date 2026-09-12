@@ -5,7 +5,7 @@ import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { formatCurrency } from '@/lib/utils';
-import { DollarSign, Hash, CreditCard, ClipboardList, Settings2 } from 'lucide-react';
+import { DollarSign, Hash, CreditCard, ClipboardList, Settings2, HandCoins } from 'lucide-react';
 import { RecentSales } from '@/components/reports/recent-sales';
 import { FlexChart } from '@/components/dashboard/flex-chart';
 import { DashboardConfigDialog } from '@/components/dashboard/dashboard-config-dialog';
@@ -13,6 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useSales } from '@/context/sales-provider';
 import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
+import { supabase } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/paginate';
 import {
   loadDashboardConfig, saveDashboardConfig, defaultDashboardConfig, type DashboardConfig,
 } from '@/lib/dashboard-config';
@@ -45,6 +47,8 @@ export default function DashboardPage() {
   const [selectedBranch, setSelectedBranch] = useState('all');
   const [config, setConfig] = useState<DashboardConfig>(defaultDashboardConfig());
   const [configOpen, setConfigOpen] = useState(false);
+  // Abonos a deudas viejas: no son ventas de hoy, así que no salen de `sales`.
+  const [collectedToday, setCollectedToday] = useState<{ branchName: string; amount: number }[]>([]);
 
   // Config persistida por empresa + usuario (localStorage).
   useEffect(() => {
@@ -78,6 +82,52 @@ export default function DashboardPage() {
   }, [isAdmin, appUser?.branch]);
 
   const today = useMemo(() => { const n = new Date(); n.setHours(0, 0, 0, 0); return n; }, []);
+
+  // Cobros de crédito del día. Se consultan aparte porque un abono a una venta
+  // de la semana pasada no aparece en las ventas de hoy y quedaba invisible.
+  useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      const hasta = new Date(today); hasta.setHours(23, 59, 59, 999);
+      try {
+        const filas = await fetchAllRows((desde, fin) =>
+          supabase
+            .from('credit_payments')
+            .select('amount, branches(name)')
+            .gte('date', today.toISOString())
+            .lte('date', hasta.toISOString())
+            .is('voided_at', null)
+            .order('id', { ascending: true })
+            .range(desde, fin));
+        if (cancelado) return;
+        setCollectedToday(
+          filas.map((r: any) => ({
+            branchName: r.branches?.name ?? '',
+            amount: Number(r.amount ?? 0),
+          }))
+        );
+      } catch {
+        // Mejor un KPI vacío que uno a medias que parezca el total del día.
+        if (!cancelado) setCollectedToday([]);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [today]);
+
+  // Mismo criterio de sucursal que las ventas: la selección manda y, en "todas",
+  // solo cuentan las sucursales que el usuario tiene asignadas.
+  const collectedTotal = useMemo(() => {
+    const allowedNames = allowedBranches.map((b) => b.name);
+    return collectedToday
+      .filter((c) => (selectedBranch === 'all'
+        // Un abono puede quedar sin sucursal (branch_id nulo) y no por eso deja
+        // de ser dinero cobrado. Se cuenta para quien ya ve toda la empresa; a
+        // un usuario limitado a sus sucursales no se le suma dinero que no
+        // podría ver eligiéndolas una por una.
+        ? appUser?.isSuperAdmin || allowedNames.includes(c.branchName) || (isAdmin && !c.branchName)
+        : c.branchName === selectedBranch))
+      .reduce((a, c) => a + c.amount, 0);
+  }, [collectedToday, selectedBranch, allowedBranches, appUser]);
 
   const salesToday = useMemo(() => allSales.filter((s) => {
     const d = new Date(s.createdAt); d.setHours(0, 0, 0, 0);
@@ -125,7 +175,7 @@ export default function DashboardPage() {
   }, [salesToday, allowedBranches, appUser]);
 
   const v = config.visible;
-  const anyKpi = v.kpi_revenue || v.kpi_sales_count || v.kpi_credit || v.kpi_credit_tx;
+  const anyKpi = v.kpi_revenue || v.kpi_sales_count || v.kpi_credit || v.kpi_credit_tx || v.kpi_collected;
 
   return (
     <div>
@@ -168,6 +218,10 @@ export default function DashboardPage() {
           {v.kpi_credit_tx && (
             <KpiCard title="Transacciones a Crédito" value={`+${creditTxToday}`}
               subtitle="a crédito hoy" icon={ClipboardList} />
+          )}
+          {v.kpi_collected && (
+            <KpiCard title="Cobros de Crédito Hoy" value={formatCurrency(collectedTotal)}
+              subtitle="abonos recibidos de deudas" icon={HandCoins} accentClass="text-green-600" />
           )}
         </div>
       )}

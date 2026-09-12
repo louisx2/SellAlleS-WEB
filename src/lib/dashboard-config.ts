@@ -7,6 +7,7 @@ export type WidgetId =
   | 'kpi_sales_count'
   | 'kpi_credit'
   | 'kpi_credit_tx'
+  | 'kpi_collected'
   | 'chart_by_hour'
   | 'chart_by_branch'
   | 'recent_sales';
@@ -25,6 +26,7 @@ export const DASHBOARD_WIDGETS: WidgetMeta[] = [
   { id: 'kpi_sales_count', label: 'Cantidad de ventas de hoy' },
   { id: 'kpi_credit', label: 'Crédito otorgado hoy' },
   { id: 'kpi_credit_tx', label: 'Transacciones a crédito' },
+  { id: 'kpi_collected', label: 'Cobros de crédito recibidos hoy' },
   { id: 'chart_by_hour', label: 'Ventas por hora', chartTypes: ['bar', 'line', 'table'], defaultChart: 'bar' },
   { id: 'chart_by_branch', label: 'Ventas por sucursal', chartTypes: ['bar', 'pie', 'table'], defaultChart: 'bar', adminOnly: true },
   { id: 'recent_sales', label: 'Últimas ventas de hoy' },
