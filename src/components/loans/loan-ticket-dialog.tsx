@@ -8,13 +8,9 @@ import { Separator } from '@/components/ui/separator';
 import { Printer } from 'lucide-react';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
+import { FREQUENCY_LABEL } from '@/lib/frequency';
 import type { Loan } from '@/lib/types';
 
-const FREQUENCY_LABEL: Record<string, string> = {
-  weekly: 'Semanal',
-  biweekly: 'Quincenal',
-  monthly: 'Mensual',
-};
 
 // Ticket/contrato del préstamo: datos del cliente, términos y el cronograma
 // completo de cuotas. Imprimible en papel térmico (misma clase que el recibo).
@@ -65,7 +61,7 @@ function TicketBody({ loan }: { loan: Loan }) {
         </div>
         <div className="flex justify-between text-xs">
           <span>Plan:</span>
-          <span>{loan.installmentsCount} cuotas · {FREQUENCY_LABEL[loan.paymentFrequency] ?? 'Mensual'}</span>
+          <span>{loan.installmentsCount} cuotas · {FREQUENCY_LABEL[loan.paymentFrequency]}</span>
         </div>
       </div>
       {loan.installments && loan.installments.length > 0 && (

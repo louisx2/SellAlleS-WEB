@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
+import { FREQUENCY_SHORT } from '@/lib/frequency';
 import type { Loan } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
@@ -32,7 +33,7 @@ export const buildLoanColumns = (loanLateFeeRate: number): ColumnDef<Loan>[] => 
     header: 'Cuotas',
     cell: ({ row }) => {
       const status = calculateLoanStatus(row.original, loanLateFeeRate);
-      const freq = { weekly: 'sem.', biweekly: 'quinc.', monthly: 'mens.' }[row.original.paymentFrequency] ?? '';
+      const freq = FREQUENCY_SHORT[row.original.paymentFrequency];
       return <span>{status.installmentsPaid} de {status.totalInstallments} <span className="text-muted-foreground text-xs">({freq})</span></span>;
     },
   },

@@ -3,7 +3,7 @@
 import { Separator } from '@/components/ui/separator';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
-import { addMonths } from 'date-fns';
+import { FREQUENCY_LABEL, addPeriods } from '@/lib/frequency';
 import type { Sale } from '@/lib/types';
 
 interface PaymentPlanContentProps {
@@ -16,6 +16,8 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
   // Perfil de la sucursal de la venta (branchId guarda el nombre), con herencia de la empresa.
   const profile = useTicketProfile(sale.branchId);
   const fin = sale.financingDetails;
+  // Los planes anteriores a la frecuencia son todos mensuales.
+  const frequency = fin?.frequency ?? 'monthly';
 
   const rows = (sale.installments && sale.installments.length > 0)
     ? sale.installments.map((i) => ({
@@ -27,7 +29,7 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
       }))
     : Array.from({ length: fin?.installments ?? 0 }, (_, k) => ({
         number: k + 1,
-        dueDate: addMonths(new Date(sale.createdAt), k + 1),
+        dueDate: addPeriods(new Date(sale.createdAt), frequency, k + 1),
         amount: fin?.installmentAmount ?? 0,
         paidAmount: 0,
         status: 'pending' as const,
@@ -66,16 +68,22 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
           <span>{formatCurrency(fin?.downPayment ?? 0)}</span>
         </div>
         <div className="flex justify-between">
-          <span>Tasa de interés mensual:</span>
+          <span>{fin?.interestMode === 'per_installment' ? 'Tasa de interés por cuota:' : 'Tasa de interés mensual:'}</span>
           <span>{fin?.interestRate ?? 0}%</span>
         </div>
+        {fin?.lateFeeRate != null && (
+          <div className="flex justify-between">
+            <span>Mora por cuota vencida:</span>
+            <span>{fin.lateFeeRate}%</span>
+          </div>
+        )}
         <div className="flex justify-between font-semibold">
           <span>Total a pagar (con intereses):</span>
           <span>{formatCurrency(fin?.totalWithInterest ?? sale.total)}</span>
         </div>
         <div className="flex justify-between">
           <span>Cantidad de cuotas:</span>
-          <span>{rows.length}</span>
+          <span>{rows.length} ({FREQUENCY_LABEL[frequency]})</span>
         </div>
       </div>
       <Separator className="my-2" />

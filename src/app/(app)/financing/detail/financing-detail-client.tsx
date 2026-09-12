@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useSales } from '@/context/sales-provider';
+import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToCreditPayment } from '@/lib/supabase/mappers';
-import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
+import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
+import { FREQUENCY_LABEL } from '@/lib/frequency';
 import type { CreditPayment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -18,7 +20,8 @@ import {
 import { DialogTrigger } from '@/components/ui/dialog';
 import { AddFinancingPaymentDialog } from '@/components/financing/add-financing-payment-dialog';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
-import { ArrowLeft, DollarSign, Printer } from 'lucide-react';
+import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
+import { ArrowLeft, DollarSign, Printer, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -35,26 +38,31 @@ const INSTALLMENT_STATUS: Record<string, { label: string; variant: 'default' | '
 export default function FinancingDetailClient() {
   const searchParams = useSearchParams();
   const saleId = searchParams.get('id') ?? '';
-  const { sales } = useSales();
+  // `financingSales` incluye el pool compartido: un financiamiento cobrable
+  // desde esta sucursal pero originado en otra también abre su detalle.
+  const { sales, financingSales } = useSales();
+  const { appUser } = useAuth();
   const { profile } = useCompanyProfile();
   const [payments, setPayments] = useState<CreditPayment[]>([]);
   const [isPlanOpen, setPlanOpen] = useState(false);
+  const [voiding, setVoiding] = useState<CreditPayment | null>(null);
 
-  const sale = sales.find(s => s.id === saleId);
+  const sale = financingSales.find(s => s.id === saleId) ?? sales.find(s => s.id === saleId);
+  const canVoid = appUser?.role === 'admin';
 
-  // Historial de abonos de esta venta; se refresca cuando el provider
-  // recarga las ventas (p. ej. tras registrar un abono).
-  useEffect(() => {
+  // Historial de abonos de esta venta; se refresca cuando el provider recarga
+  // las ventas (p. ej. tras registrar un abono) y tras anular uno.
+  const loadPayments = useCallback(async () => {
     if (!saleId) return;
-    (async () => {
-      const { data } = await supabase
-        .from('credit_payments')
-        .select('*, branches(name)')
-        .eq('sale_id', saleId)
-        .order('date', { ascending: false });
-      if (data) setPayments(data.map(rowToCreditPayment));
-    })();
-  }, [saleId, sales]);
+    const { data } = await supabase
+      .from('credit_payments')
+      .select('*, branches(name)')
+      .eq('sale_id', saleId)
+      .order('date', { ascending: false });
+    if (data) setPayments(data.map(rowToCreditPayment));
+  }, [saleId]);
+
+  useEffect(() => { loadPayments(); }, [loadPayments, sales]);
 
   const status = useMemo(
     () => (sale ? calculateFinancingStatus(sale, profile.lateFeeRate) : null),
@@ -79,6 +87,10 @@ export default function FinancingDetailClient() {
   const fin = sale.financingDetails;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  // La mora del plan es la que va a cobrar la RPC de abonos: se congeló al
+  // crearlo. Los planes viejos no la traen y siguen la de la empresa.
+  const lateFeeRate = fin?.lateFeeRate ?? profile.lateFeeRate;
+  const frequency = fin?.frequency ?? 'monthly';
 
   return (
     <div className="space-y-6">
@@ -137,8 +149,14 @@ export default function FinancingDetailClient() {
               <p className="font-semibold">{formatCurrency(fin?.downPayment ?? 0)}</p>
             </div>
             <div>
-              <p className="text-muted-foreground">Tasa mensual / Cuotas</p>
-              <p className="font-semibold">{fin ? `${fin.interestRate}% · ${fin.installments} cuotas` : 'Crédito simple'}</p>
+              <p className="text-muted-foreground">
+                {fin?.interestMode === 'per_installment' ? 'Tasa por cuota / Cuotas' : 'Tasa mensual / Cuotas'}
+              </p>
+              <p className="font-semibold">
+                {fin
+                  ? `${fin.interestRate}% · ${fin.installments} cuotas (${FREQUENCY_LABEL[frequency]})`
+                  : 'Crédito simple'}
+              </p>
             </div>
             <div>
               <p className="text-muted-foreground">Total con intereses</p>
@@ -169,7 +187,7 @@ export default function FinancingDetailClient() {
           <CardHeader>
             <CardTitle>Plan de Cuotas</CardTitle>
             <CardDescription>
-              La mora ({profile.lateFeeRate}% por cuota vencida) se cobra primero al registrar un abono.
+              La mora ({lateFeeRate}% por cuota vencida) se cobra primero al registrar un abono.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -189,7 +207,7 @@ export default function FinancingDetailClient() {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
                   const isOverdue = cuota.status !== 'paid' && new Date(cuota.dueDate + 'T23:59:59') < today;
                   const feeDue = isOverdue
-                    ? Math.round(cuota.amount * profile.lateFeeRate / 100 * 100) / 100
+                    ? Math.round(cuota.amount * lateFeeRate / 100 * 100) / 100
                     : 0;
                   const st = INSTALLMENT_STATUS[cuota.status] ?? INSTALLMENT_STATUS.pending;
                   return (
@@ -229,6 +247,9 @@ export default function FinancingDetailClient() {
       <Card>
         <CardHeader>
           <CardTitle>Historial de Abonos</CardTitle>
+          <CardDescription>
+            Incluye el abono inicial de la venta. Un abono anulado queda a la vista, tachado y con su motivo.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {payments.length === 0 ? (
@@ -236,37 +257,75 @@ export default function FinancingDetailClient() {
               Aún no hay abonos registrados para esta venta.
             </p>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead className="text-right">Monto</TableHead>
-                  <TableHead className="text-right">Mora</TableHead>
-                  <TableHead>Método</TableHead>
-                  <TableHead>Sucursal</TableHead>
-                  <TableHead>Usuario</TableHead>
-                  <TableHead>Notas</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {payments.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell>{p.date.toLocaleString('es-DO')}</TableCell>
-                    <TableCell className="text-right font-medium">{formatCurrency(p.amount)}</TableCell>
-                    <TableCell className="text-right">{p.lateFeePaid > 0 ? formatCurrency(p.lateFeePaid) : '—'}</TableCell>
-                    <TableCell>{METHOD_LABEL[p.method]}</TableCell>
-                    <TableCell>{p.branchId || '—'}</TableCell>
-                    <TableCell>{p.userName ?? '—'}</TableCell>
-                    <TableCell className="max-w-48 truncate" title={p.notes}>{p.notes ?? '—'}</TableCell>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead className="text-right">Monto</TableHead>
+                    <TableHead className="text-right">Mora</TableHead>
+                    <TableHead>Método</TableHead>
+                    <TableHead>Referencia</TableHead>
+                    <TableHead>Sucursal</TableHead>
+                    <TableHead>Usuario</TableHead>
+                    <TableHead>Notas</TableHead>
+                    {canVoid && <TableHead className="text-right">Acción</TableHead>}
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {payments.map((p) => (
+                    <TableRow key={p.id} className={p.voidedAt ? 'opacity-60' : undefined}>
+                      <TableCell className="whitespace-nowrap">{p.date.toLocaleString('es-DO')}</TableCell>
+                      <TableCell className={cn('text-right font-medium', p.voidedAt && 'line-through')}>
+                        {formatCurrency(p.amount)}
+                      </TableCell>
+                      <TableCell className={cn('text-right', p.voidedAt && 'line-through')}>
+                        {p.lateFeePaid > 0 ? formatCurrency(p.lateFeePaid) : '—'}
+                      </TableCell>
+                      <TableCell>{METHOD_LABEL[p.method]}</TableCell>
+                      <TableCell className="max-w-40 truncate" title={p.reference}>{p.reference ?? '—'}</TableCell>
+                      <TableCell>{p.branchId || '—'}</TableCell>
+                      <TableCell>{p.userName ?? '—'}</TableCell>
+                      <TableCell className="max-w-48 truncate" title={p.voidedAt ? p.voidReason : p.notes}>
+                        {p.voidedAt ? (
+                          <span className="text-destructive">Anulado: {p.voidReason}</span>
+                        ) : (p.notes ?? '—')}
+                      </TableCell>
+                      {canVoid && (
+                        <TableCell className="text-right">
+                          {p.voidedAt ? (
+                            <Badge variant="destructive">Anulado</Badge>
+                          ) : p.kind === 'down_payment' ? (
+                            <span className="text-xs text-muted-foreground" title="Es parte de la venta: se revierte anulando la venta completa.">
+                              Inicial
+                            </span>
+                          ) : (
+                            <Button variant="ghost" size="sm" onClick={() => setVoiding(p)}>
+                              <Undo2 className="mr-1 h-3.5 w-3.5" />
+                              Anular
+                            </Button>
+                          )}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>
 
       <PaymentPlanDialog sale={sale} isOpen={isPlanOpen} onOpenChange={setPlanOpen} />
+
+      {voiding && (
+        <VoidPaymentDialog
+          payment={voiding}
+          open={!!voiding}
+          onOpenChange={(o) => !o && setVoiding(null)}
+          onVoided={loadPayments}
+        />
+      )}
     </div>
   );
 }

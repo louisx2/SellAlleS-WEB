@@ -342,6 +342,20 @@ export default function ReportsDashboardPage() {
             </Link>
           )}
 
+          {(hasCredit || hasFinancing || hasPrestamos) && (
+            <Link href="/reports/cobros">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold">Cobros Recibidos</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Cuánto pagaron y por cuál vía</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
           {hasFinancing && (
             <Link href="/reports/financiamientos">
               <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group bg-gradient-to-br from-emerald-500/5 to-transparent">

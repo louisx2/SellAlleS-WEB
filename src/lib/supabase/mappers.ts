@@ -121,6 +121,15 @@ export const rowToBranch = (r: any): Branch => ({
   facebook: r.facebook ?? undefined,
   email: r.email ?? undefined,
   cajaEnabled: r.caja_enabled ?? false,
+  financingEnabled: r.financing_enabled ?? true,
+  // null = la sucursal no tiene valor propio y hereda el de la empresa; se
+  // deja como undefined para que el `??` de quien lo consuma haga la herencia.
+  defaultInterestRate: r.default_interest_rate != null ? Number(r.default_interest_rate) : undefined,
+  lateFeeRate: r.late_fee_rate != null ? Number(r.late_fee_rate) : undefined,
+  financingInterestMode: r.financing_interest_mode ?? undefined,
+  financingDefaultFrequency: r.financing_default_frequency ?? undefined,
+  financingDefaultInstallments: r.financing_default_installments != null
+    ? Number(r.financing_default_installments) : undefined,
 });
 export const branchToRow = (b: Partial<Branch>) => ({
   name: b.name,
@@ -138,6 +147,15 @@ export const branchToRow = (b: Partial<Branch>) => ({
   facebook: b.facebook?.trim() || null,
   email: b.email?.trim() || null,
   caja_enabled: b.cajaEnabled ?? false,
+  financing_enabled: b.financingEnabled ?? true,
+  // undefined = "hereda": se guarda NULL, no el valor de la empresa. Guardar
+  // una copia haría que la sucursal dejara de seguir el ajuste de la empresa
+  // sin que nadie lo pidiera.
+  default_interest_rate: b.defaultInterestRate ?? null,
+  late_fee_rate: b.lateFeeRate ?? null,
+  financing_interest_mode: b.financingInterestMode ?? null,
+  financing_default_frequency: b.financingDefaultFrequency ?? null,
+  financing_default_installments: b.financingDefaultInstallments ?? null,
 });
 
 // ---------- Supplier ----------
@@ -267,6 +285,9 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   linkSlug: r.link_slug ?? '',
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
+  financingInterestMode: (r.financing_interest_mode ?? 'monthly_prorated') as CompanyProfile['financingInterestMode'],
+  financingDefaultFrequency: (r.financing_default_frequency ?? 'monthly') as CompanyProfile['financingDefaultFrequency'],
+  financingDefaultInstallments: Number(r.financing_default_installments ?? 12),
   loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
   defaultLoanInterestRate: Number(r.default_loan_interest_rate ?? 5),
   loyaltyEnabled: !!r.loyalty_enabled,
@@ -323,6 +344,8 @@ export const rowToCreditPayment = (r: any): CreditPayment => ({
   id: r.id,
   saleId: r.sale_id ?? undefined,
   customerId: r.customer_id ?? '',
+  customerName: r.customers?.name ?? undefined,
+  kind: r.kind ?? (r.sale_id ? 'sale' : 'customer'),
   amount: Number(r.amount),
   lateFeePaid: Number(r.late_fee_paid ?? 0),
   method: r.method ?? 'cash',
@@ -331,6 +354,9 @@ export const rowToCreditPayment = (r: any): CreditPayment => ({
   userName: r.user_name ?? undefined,
   date: new Date(r.date),
   branchId: r.branches?.name ?? '',
+  voidedAt: r.voided_at ? new Date(r.voided_at) : undefined,
+  voidedByName: r.voided_by_name ?? undefined,
+  voidReason: r.void_reason ?? undefined,
 });
 
 // jsonb devuelto por register_sale_payment / register_customer_payment.
@@ -343,6 +369,7 @@ export const rowToPaymentResult = (r: any): PaymentResult => ({
   installmentsPaid: r.installments_paid != null ? Number(r.installments_paid) : null,
   installmentsTotal: r.installments_total != null ? Number(r.installments_total) : null,
   customerBalance: r.customer_balance != null ? Number(r.customer_balance) : null,
+  salesTouched: r.sales_touched != null ? Number(r.sales_touched) : undefined,
 });
 
 export const rowToSale = (r: any): Sale => ({

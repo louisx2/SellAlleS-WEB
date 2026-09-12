@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { useCustomers } from '@/context/customer-provider';
 import { CreditDataTable } from '@/components/credit/credit-data-table';
 import { creditColumns } from '@/components/credit/credit-columns';
-import { PlusCircle } from 'lucide-react';
+import { PlusCircle, Wallet } from 'lucide-react';
 
 export default function CreditPage() {
   // El ámbito 'credito' va aparte del de 'clientes': una empresa puede querer
@@ -17,6 +17,12 @@ export default function CreditPage() {
   return (
     <div>
       <PageHeader title="Cuentas por Cobrar">
+        <Button asChild variant="outline">
+          <Link href="/reports/cobros">
+            <Wallet className="mr-2 h-4 w-4" />
+            Cobros recibidos
+          </Link>
+        </Button>
         {/* Las ventas a crédito se generan en el POS (método de pago "Crédito"). */}
         <Button asChild>
           <Link href="/pos">

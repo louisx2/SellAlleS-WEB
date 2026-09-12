@@ -25,8 +25,10 @@ import { FinancingDialog } from './financing-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '../ui/separator';
 import { Textarea } from '../ui/textarea';
+import Link from 'next/link';
 import { useAuth } from '@/context/auth-provider';
 import { useModules } from '@/context/modules-provider';
+import { useFinancingSettings } from '@/hooks/use-financing-settings';
 import { useCaja } from '@/context/caja-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -48,11 +50,15 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const { appUser } = useAuth();
   const { isModuleEnabled } = useModules();
   const { cashBlocked } = useCaja();
+  const branchFinancing = useFinancingSettings();
   // Los métodos de venta a plazo solo se ofrecen si la empresa tiene el módulo
   // activo (se configura en Plataforma → Módulos). Mantiene el checkout
   // consistente con lo que aparece en el menú.
   const creditEnabled = isModuleEnabled('credit');
-  const financingEnabled = isModuleEnabled('financing');
+  // Dos interruptores, como la caja: el módulo dice si la EMPRESA financia, y
+  // `financingEnabled` de la sucursal si esta en concreto lo hace. El trigger
+  // de la base rechaza igual la venta, esto solo evita ofrecer lo que no es.
+  const financingEnabled = isModuleEnabled('financing') && branchFinancing.financingEnabled;
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card' | 'transfer' | 'credit' | 'financing'>('cash');
   const [amountPaid, setAmountPaid] = useState<number | string>('');
   const [paymentReference, setPaymentReference] = useState('');
@@ -369,7 +375,11 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                       <p className="text-xs text-destructive mt-2">Debe seleccionar un cliente para vender a crédito o financiar.</p>
                   )}
                   {cashBlocked && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">No hay una caja abierta en esta sucursal. Abre caja para poder cobrar en efectivo.</p>
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                        No hay una caja abierta en esta sucursal.{' '}
+                        <Link href="/caja" className="underline font-medium">Abre caja</Link>{' '}
+                        para poder cobrar en efectivo.
+                      </p>
                   )}
                 </div>
 

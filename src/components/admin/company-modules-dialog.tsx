@@ -53,11 +53,31 @@ export function CompanyModulesDialog({ companyId, companyName, open, onOpenChang
     const { error } = await supabase
       .from('company_modules')
       .upsert({ company_id: companyId, module_key: key, enabled: value }, { onConflict: 'company_id,module_key' });
-    setSavingKey(null);
     if (error) {
+      setSavingKey(null);
       toast({ title: 'No se pudo guardar', description: error.message, variant: 'destructive' });
       return;
     }
+
+    // Caja tiene un segundo interruptor por sucursal (branches.caja_enabled).
+    // Al apagar el módulo hay que bajar también esas banderas: si no, quedan
+    // encendidas y escondidas (el switch de "Editar sucursal" solo se ve con el
+    // módulo activo), y al reencender el módulo meses después las sucursales
+    // empiezan a exigir caja de golpe sin que nadie lo haya pedido.
+    if (key === 'caja' && !value) {
+      const { error: branchError } = await supabase
+        .from('branches')
+        .update({ caja_enabled: false })
+        .eq('company_id', companyId)
+        .eq('caja_enabled', true);
+      if (branchError) {
+        setSavingKey(null);
+        toast({ title: 'Módulo apagado, pero quedaron sucursales', description: branchError.message, variant: 'destructive' });
+        return;
+      }
+    }
+
+    setSavingKey(null);
     setState((prev) => ({ ...prev, [key]: value }));
     // Si la empresa editada es la del propio super admin, refrescar su menú.
     reloadOwnModules();
