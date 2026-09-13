@@ -1,7 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Sale, PaymentMethod, PaymentResult, RefundMethod } from '@/lib/types';
+import type { Sale, PaymentMethod, PaymentResult, RefundMethod, FinancingDetails } from '@/lib/types';
+import type { InterestMode, PaymentFrequency } from '@/lib/frequency';
 import { supabase } from '@/lib/supabase/client';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { rowToSale, saleToRow, rowToPaymentResult } from '@/lib/supabase/mappers';
@@ -30,6 +31,12 @@ interface SalesContextType {
   /** Anula una venta pagada: emite nota de crédito B04 (si llevó NCF), repone
    *  inventario y registra la salida de caja si se devuelve efectivo. */
   annulSale: (saleId: string, reason?: string, refundMethod?: RefundMethod) => Promise<AnnulSaleResult>;
+  /**
+   * Corrige el plan de un financiamiento mal digitado: la base recalcula los
+   * montos y regenera las cuotas. Solo admin, y solo mientras nadie haya
+   * pagado una cuota. Deja el antes/después en la bitácora.
+   */
+  amendFinancing: (input: AmendFinancingInput) => Promise<AmendFinancingResult>;
   reload: () => Promise<void>;
   loading: boolean;
 }
@@ -40,6 +47,25 @@ export type AnnulSaleResult = {
   ncfModified?: string;
   total: number;
   refundMethod: RefundMethod;
+};
+
+export type AmendFinancingInput = {
+  saleId: string;
+  interestRate: number;
+  installments: number;
+  frequency: PaymentFrequency;
+  interestMode: InterestMode;
+  reason: string;
+};
+
+export type AmendFinancingResult = {
+  saleId: string;
+  before: FinancingDetails;
+  after: FinancingDetails;
+  /** Interés que cobraba el plan viejo y el que cobra el corregido. */
+  interestBefore: number;
+  interestAfter: number;
+  customerBalance: number | null;
 };
 
 export type VoidPaymentResult = {
@@ -245,8 +271,31 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  // Repreciar un plan toca la venta, sus cuotas, la bitácora y el balance del
+  // cliente: todo en la misma transacción de la base. Aquí solo se recarga.
+  const amendFinancing = async (input: AmendFinancingInput): Promise<AmendFinancingResult> => {
+    const { data, error } = await supabase.rpc('amend_sale_financing', {
+      p_sale_id: input.saleId,
+      p_interest_rate: input.interestRate,
+      p_installments: input.installments,
+      p_frequency: input.frequency,
+      p_interest_mode: input.interestMode,
+      p_reason: input.reason,
+    });
+    if (error) throw error;
+    await load();
+    return {
+      saleId: data.sale_id,
+      before: data.before,
+      after: data.after,
+      interestBefore: Number(data.interest_before ?? 0),
+      interestAfter: Number(data.interest_after ?? 0),
+      customerBalance: data.customer_balance != null ? Number(data.customer_balance) : null,
+    };
+  };
+
   return (
-    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, reload: reloadAll, loading }}>
+    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, amendFinancing, reload: reloadAll, loading }}>
       {children}
     </SalesContext.Provider>
   );

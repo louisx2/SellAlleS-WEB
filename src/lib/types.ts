@@ -269,6 +269,20 @@ export type FinancingInstallment = {
   paidAt?: string;
 };
 
+// Corrección al plan de un financiamiento ya vendido. La escribe solo
+// `amend_sale_financing`; el cliente la lee para mostrar qué cambió, quién y
+// por qué — un plan repreciado sin rastro no hay forma de explicárselo al
+// cliente cuando pregunta por qué su cuota no es la del recibo.
+export type FinancingAmendment = {
+  id: string;
+  saleId: string;
+  reason: string;
+  before: FinancingDetails;
+  after: FinancingDetails;
+  changedByName?: string;
+  createdAt: Date;
+};
+
 export type Sale = {
   id: string;
   items: CartItem[];
