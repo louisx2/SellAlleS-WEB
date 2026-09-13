@@ -1,4 +1,4 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
 
@@ -338,6 +338,16 @@ export const rowToFinancingInstallment = (r: any): FinancingInstallment => ({
   lateFeePaid: Number(r.late_fee_paid),
   status: r.status,
   paidAt: r.paid_at ?? undefined,
+});
+
+export const rowToFinancingAmendment = (r: any): FinancingAmendment => ({
+  id: r.id,
+  saleId: r.sale_id,
+  reason: r.reason,
+  before: r.details_before,
+  after: r.details_after,
+  changedByName: r.changed_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
 });
 
 export const rowToCreditPayment = (r: any): CreditPayment => ({

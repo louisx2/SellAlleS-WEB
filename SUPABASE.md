@@ -246,6 +246,50 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
   en cuotas iguales, así que pagar antes no ahorra intereses. Falta un "saldar
   anticipado" con descuento de intereses no devengados.
 
+## Corregir un plan mal digitado (migración `corregir_plan_de_financiamiento`)
+
+Una venta financiada con la tasa equivocada (8% donde iba 7%) no tenía arreglo
+desde la app: `financing_details` es jsonb en `sales`, las cuotas no son
+escribibles desde el navegador, y la única salida era un UPDATE a mano contra
+producción — sin validación, sin rastro, y con el riesgo de dejar las cuotas
+diciendo una cosa y el balance del cliente otra. Mismo razonamiento que
+`void_credit_payment`: cerrada la puerta de atrás, la operación legítima tiene
+que existir por delante.
+
+- **RPC `amend_sale_financing(sale_id, tasa, cuotas, frecuencia, modo, motivo)`**
+  (SECURITY DEFINER, solo admin de empresa): recalcula el plan con la misma
+  fórmula de la venta, regenera las cuotas y recalcula el balance del cliente,
+  todo en una transacción. **Se rechaza si alguna cuota tiene capital o mora
+  aplicados** — repreciar mueve el monto de todas las cuotas y lo ya pagado no
+  cuadraría con ninguna: primero se anulan esos abonos. Valida el límite de
+  crédito contra el balance *sin* esta venta, para no contar dos veces la deuda
+  vieja.
+- **Qué NO toca**: el abono inicial, la mora congelada, los días de gracia y las
+  fechas de vencimiento. El calendario se regenera desde la fecha de la **venta**,
+  no la de hoy: corregir la tasa no debe correrle los vencimientos al cliente.
+  Para cambiar el abono inicial hay que anular la venta.
+- **`financing_amendments`**: el antes y el después de `financing_details`, con
+  quién y por qué. Solo la escribe la RPC; la policy la deja leer únicamente a
+  admins de la empresa. Sin ese rastro no hay forma de explicarle al cliente por
+  qué su cuota ya no es la del recibo que tiene en la mano.
+- En la app: botón **Corregir Plan** en `/financing/detail`, visible solo para
+  admin, con la vista previa del antes/después y el historial de correcciones
+  al pie de la pantalla.
+
+La aritmética del plan dejó de estar escrita dos veces. `financing_months`,
+`financing_plan` (interés y cuota), `financing_due_date` (calendario) y
+`validate_financing_params` son ahora la única fuente de verdad, y
+`before_sale_credit_checks` / `after_sale_credit_effects` pasaron a llamarlas
+— antes cada uno tenía su copia de la fórmula. Se verificó contra los planes
+vivos: el resultado es idéntico peso por peso. `build_financing_schedule`
+genera las cuotas y solo la llaman funciones SECURITY DEFINER.
+
+⚠️ Cuidado con `revoke all on function … from public`: las default privileges
+de Supabase le dan EXECUTE a `anon` a toda función **nueva** con un grant
+directo, que el revoke a PUBLIC no toca. Hay que nombrar a `anon`
+explícitamente (mismo tropiezo que `cobros_sin_execute_para_anon`), y fijarles
+`set search_path to 'public'` o los advisors lo marcan.
+
 ## Reportes de crédito y financiamiento
 
 - `/reports/cobros` — **lo que entró**, por método de pago y por origen

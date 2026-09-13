@@ -7,10 +7,10 @@ import { useSales } from '@/context/sales-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
-import { rowToCreditPayment } from '@/lib/supabase/mappers';
+import { rowToCreditPayment, rowToFinancingAmendment } from '@/lib/supabase/mappers';
 import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
-import type { CreditPayment, PaymentMethod } from '@/lib/types';
+import type { CreditPayment, FinancingAmendment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,7 +21,8 @@ import { DialogTrigger } from '@/components/ui/dialog';
 import { AddFinancingPaymentDialog } from '@/components/financing/add-financing-payment-dialog';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
-import { ArrowLeft, DollarSign, Printer, Undo2 } from 'lucide-react';
+import { AmendFinancingDialog } from '@/components/financing/amend-financing-dialog';
+import { ArrowLeft, DollarSign, Pencil, Printer, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -44,11 +45,13 @@ export default function FinancingDetailClient() {
   const { appUser } = useAuth();
   const { profile } = useCompanyProfile();
   const [payments, setPayments] = useState<CreditPayment[]>([]);
+  const [amendments, setAmendments] = useState<FinancingAmendment[]>([]);
   const [isPlanOpen, setPlanOpen] = useState(false);
+  const [isAmendOpen, setAmendOpen] = useState(false);
   const [voiding, setVoiding] = useState<CreditPayment | null>(null);
 
   const sale = financingSales.find(s => s.id === saleId) ?? sales.find(s => s.id === saleId);
-  const canVoid = appUser?.role === 'admin';
+  const isAdmin = appUser?.role === 'admin';
 
   // Historial de abonos de esta venta; se refresca cuando el provider recarga
   // las ventas (p. ej. tras registrar un abono) y tras anular uno.
@@ -62,7 +65,20 @@ export default function FinancingDetailClient() {
     if (data) setPayments(data.map(rowToCreditPayment));
   }, [saleId]);
 
+  // Bitácora de correcciones al plan. La policy solo la deja ver a admins, así
+  // que para el resto ni se consulta.
+  const loadAmendments = useCallback(async () => {
+    if (!saleId || !isAdmin) return;
+    const { data } = await supabase
+      .from('financing_amendments')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('created_at', { ascending: false });
+    if (data) setAmendments(data.map(rowToFinancingAmendment));
+  }, [saleId, isAdmin]);
+
   useEffect(() => { loadPayments(); }, [loadPayments, sales]);
+  useEffect(() => { loadAmendments(); }, [loadAmendments, sales]);
 
   const status = useMemo(
     () => (sale ? calculateFinancingStatus(sale, profile.lateFeeRate) : null),
@@ -106,6 +122,12 @@ export default function FinancingDetailClient() {
             <Button variant="outline" onClick={() => setPlanOpen(true)}>
               <Printer className="mr-2 h-4 w-4" />
               Imprimir Plan de Pagos
+            </Button>
+          )}
+          {fin && isAdmin && (
+            <Button variant="outline" onClick={() => setAmendOpen(true)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Corregir Plan
             </Button>
           )}
           {status.pendingBalance > 0 && (
@@ -269,7 +291,7 @@ export default function FinancingDetailClient() {
                     <TableHead>Sucursal</TableHead>
                     <TableHead>Usuario</TableHead>
                     <TableHead>Notas</TableHead>
-                    {canVoid && <TableHead className="text-right">Acción</TableHead>}
+                    {isAdmin && <TableHead className="text-right">Acción</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -291,7 +313,7 @@ export default function FinancingDetailClient() {
                           <span className="text-destructive">Anulado: {p.voidReason}</span>
                         ) : (p.notes ?? '—')}
                       </TableCell>
-                      {canVoid && (
+                      {isAdmin && (
                         <TableCell className="text-right">
                           {p.voidedAt ? (
                             <Badge variant="destructive">Anulado</Badge>
@@ -316,7 +338,51 @@ export default function FinancingDetailClient() {
         </CardContent>
       </Card>
 
+      {amendments.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Correcciones al Plan</CardTitle>
+            <CardDescription>
+              Cada vez que se corrigieron los términos de este financiamiento, con el antes y el después.
+              Si el cliente tiene un recibo viejo, aquí está por qué ya no coincide.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {amendments.map((a) => (
+              <div key={a.id} className="rounded-lg border p-3 text-sm">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-medium">{a.createdAt.toLocaleString('es-DO')}</span>
+                  <span className="text-muted-foreground">{a.changedByName ?? 'Usuario desconocido'}</span>
+                </div>
+                <p className="mt-1 text-muted-foreground">{a.reason}</p>
+                <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <AmendField label="Tasa" before={`${a.before.interestRate}%`} after={`${a.after.interestRate}%`} />
+                  <AmendField label="Cuotas" before={`${a.before.installments}`} after={`${a.after.installments}`} />
+                  <AmendField
+                    label="Cuota"
+                    before={formatCurrency(a.before.installmentAmount)}
+                    after={formatCurrency(a.after.installmentAmount)}
+                  />
+                  <AmendField
+                    label="Total con interés"
+                    before={formatCurrency(a.before.totalWithInterest)}
+                    after={formatCurrency(a.after.totalWithInterest)}
+                  />
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <PaymentPlanDialog sale={sale} isOpen={isPlanOpen} onOpenChange={setPlanOpen} />
+
+      <AmendFinancingDialog
+        sale={sale}
+        open={isAmendOpen}
+        onOpenChange={setAmendOpen}
+        onAmended={loadAmendments}
+      />
 
       {voiding && (
         <VoidPaymentDialog
@@ -325,6 +391,26 @@ export default function FinancingDetailClient() {
           onOpenChange={(o) => !o && setVoiding(null)}
           onVoided={loadPayments}
         />
+      )}
+    </div>
+  );
+}
+
+// Un campo del antes/después: lo que no cambió se muestra una sola vez, para
+// que salte a la vista qué fue lo que se tocó.
+function AmendField({ label, before, after }: { label: string; before: string; after: string }) {
+  const changed = before !== after;
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      {changed ? (
+        <p className="font-medium">
+          <span className="text-muted-foreground line-through">{before}</span>
+          {' → '}
+          <span className="text-primary">{after}</span>
+        </p>
+      ) : (
+        <p className="text-muted-foreground">{after}</p>
       )}
     </div>
   );
