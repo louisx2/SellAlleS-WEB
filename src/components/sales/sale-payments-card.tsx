@@ -67,7 +67,7 @@ export function SalePaymentsCard({ sale }: { sale: Sale }) {
   // saberlo para no hacerla parpadear en cada recibo.
   if (!abierta && (loading || payments.length === 0)) return null;
 
-  const status = calculateFinancingStatus(sale, profile.lateFeeRate);
+  const status = calculateFinancingStatus(sale, profile.lateFeeRate, profile.lateFeeGraceDays);
   const esFinanciamiento = !!sale.financingDetails || sale.paymentStatus === 'in_financing';
   const deuda = esFinanciamiento && sale.financingDetails
     ? Number(sale.financingDetails.totalWithInterest)

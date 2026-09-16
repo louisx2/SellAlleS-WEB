@@ -126,6 +126,9 @@ export const rowToBranch = (r: any): Branch => ({
   // deja como undefined para que el `??` de quien lo consuma haga la herencia.
   defaultInterestRate: r.default_interest_rate != null ? Number(r.default_interest_rate) : undefined,
   lateFeeRate: r.late_fee_rate != null ? Number(r.late_fee_rate) : undefined,
+  lateFeeMode: r.late_fee_mode ?? undefined,
+  lateFeeGraceDays: r.late_fee_grace_days != null ? Number(r.late_fee_grace_days) : undefined,
+  lateFeeMaxRate: r.late_fee_max_rate != null ? Number(r.late_fee_max_rate) : undefined,
   financingInterestMode: r.financing_interest_mode ?? undefined,
   financingDefaultFrequency: r.financing_default_frequency ?? undefined,
   financingDefaultInstallments: r.financing_default_installments != null
@@ -153,6 +156,9 @@ export const branchToRow = (b: Partial<Branch>) => ({
   // sin que nadie lo pidiera.
   default_interest_rate: b.defaultInterestRate ?? null,
   late_fee_rate: b.lateFeeRate ?? null,
+  late_fee_mode: b.lateFeeMode ?? null,
+  late_fee_grace_days: b.lateFeeGraceDays ?? null,
+  late_fee_max_rate: b.lateFeeMaxRate ?? null,
   financing_interest_mode: b.financingInterestMode ?? null,
   financing_default_frequency: b.financingDefaultFrequency ?? null,
   financing_default_installments: b.financingDefaultInstallments ?? null,
@@ -284,11 +290,17 @@ export const rowToCompanyProfile = (r: any): CompanyProfile => ({
   ticketSocialDisplay: (r.ticket_social_display ?? 'company') as CompanyProfile['ticketSocialDisplay'],
   linkSlug: r.link_slug ?? '',
   lateFeeRate: Number(r.late_fee_rate ?? 5),
+  lateFeeMode: (r.late_fee_mode ?? 'once') as CompanyProfile['lateFeeMode'],
+  lateFeeGraceDays: Number(r.late_fee_grace_days ?? 0),
+  lateFeeMaxRate: Number(r.late_fee_max_rate ?? 0),
   defaultInterestRate: Number(r.default_interest_rate ?? 3.5),
   financingInterestMode: (r.financing_interest_mode ?? 'monthly_prorated') as CompanyProfile['financingInterestMode'],
   financingDefaultFrequency: (r.financing_default_frequency ?? 'monthly') as CompanyProfile['financingDefaultFrequency'],
   financingDefaultInstallments: Number(r.financing_default_installments ?? 12),
   loanLateFeeRate: Number(r.loan_late_fee_rate ?? 5),
+  loanLateFeeMode: (r.loan_late_fee_mode ?? 'once') as CompanyProfile['loanLateFeeMode'],
+  loanLateFeeGraceDays: Number(r.loan_late_fee_grace_days ?? 0),
+  loanLateFeeMaxRate: Number(r.loan_late_fee_max_rate ?? 0),
   defaultLoanInterestRate: Number(r.default_loan_interest_rate ?? 5),
   loyaltyEnabled: !!r.loyalty_enabled,
   loyaltyPurchasesRequired: r.loyalty_purchases_required != null ? Number(r.loyalty_purchases_required) : null,
@@ -626,6 +638,13 @@ export const rowToLoan = (r: any): Loan => ({
   notes: r.notes ?? undefined,
   userName: r.user_name ?? undefined,
   createdAt: new Date(r.created_at),
+  // Política congelada al desembolsar. null = préstamo anterior a la mora
+  // configurable: se deja undefined para que la herencia la haga el `??` de
+  // resolveLateFeePolicy, igual que con los overrides de sucursal.
+  lateFeeRate: r.late_fee_rate != null ? Number(r.late_fee_rate) : undefined,
+  lateFeeMode: r.late_fee_mode ?? undefined,
+  lateFeeGraceDays: r.late_fee_grace_days != null ? Number(r.late_fee_grace_days) : undefined,
+  lateFeeMaxRate: r.late_fee_max_rate != null ? Number(r.late_fee_max_rate) : undefined,
   installments: (r.loan_installments ?? [])
     .map(rowToLoanInstallment)
     .sort((a: LoanInstallment, b: LoanInstallment) => a.number - b.number),

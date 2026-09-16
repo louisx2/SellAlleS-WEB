@@ -9,6 +9,7 @@ import { rowToLoanPayment } from '@/lib/supabase/mappers';
 import { formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
+import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
 import type { LoanPayment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -73,8 +74,8 @@ export default function LoanDetailClient() {
   }, [loan?.installments?.length]);
 
   const status = useMemo(
-    () => (loan ? calculateLoanStatus(loan, profile.loanLateFeeRate) : null),
-    [loan, profile.loanLateFeeRate],
+    () => (loan ? calculateLoanStatus(loan, profile.loanLateFeeRate, profile.loanLateFeeGraceDays) : null),
+    [loan, profile.loanLateFeeRate, profile.loanLateFeeGraceDays],
   );
 
   // Aún leyendo el id de la URL o cargando la lista: no mostrar "no encontrado".
@@ -189,7 +190,8 @@ export default function LoanDetailClient() {
           <CardHeader>
             <CardTitle>Plan de Cuotas</CardTitle>
             <CardDescription>
-              La mora ({profile.loanLateFeeRate}% por cuota vencida) se cobra primero al registrar un abono.
+              {lateFeeModeHelp(status.lateFeePolicy.mode, status.lateFeePolicy.rate, loan.paymentFrequency)}
+              {' '}Se cobra antes que el capital al registrar un abono.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -207,8 +209,12 @@ export default function LoanDetailClient() {
               <TableBody>
                 {loan.installments.map((cuota) => {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
-                  const isOverdue = cuota.status !== 'paid' && new Date(cuota.dueDate + 'T23:59:59') < today;
-                  const feeDue = isOverdue ? Math.round((cuota.amount * profile.loanLateFeeRate) / 100 * 100) / 100 : 0;
+                  // Vencida = la que ya devenga mora, con la gracia del préstamo
+                  // ya descontada. Misma cuenta que hace la base al cobrar.
+                  const feeDue = cuota.status !== 'paid' ? lateFeeDue(cuota, status.lateFeePolicy, today) : 0;
+                  const isOverdue =
+                    cuota.status !== 'paid' &&
+                    overdueDays(cuota.dueDate, today, status.lateFeePolicy.graceDays) > 0;
                   const st = INSTALLMENT_STATUS[cuota.status] ?? INSTALLMENT_STATUS.pending;
                   return (
                     <TableRow key={cuota.id} className={isOverdue ? 'bg-destructive/5' : undefined}>
@@ -223,9 +229,9 @@ export default function LoanDetailClient() {
                         {isOverdue ? (
                           <div className="flex flex-col">
                             <Badge variant="destructive" className="w-fit">Vencida</Badge>
-                            {feeDue > cuota.lateFeePaid && (
+                            {feeDue > 0 && (
                               <span className="text-xs text-destructive mt-1">
-                                Mora: {formatCurrency(Math.max(feeDue - cuota.lateFeePaid, 0))}
+                                Mora: {formatCurrency(feeDue)}
                               </span>
                             )}
                           </div>

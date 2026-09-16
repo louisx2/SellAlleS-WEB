@@ -1,7 +1,9 @@
 import type { UnitCode } from './units';
 import type { InterestMode, PaymentFrequency } from './frequency';
+import type { LateFeeMode } from './late-fee';
 
 export type { InterestMode, PaymentFrequency } from './frequency';
+export type { LateFeeMode } from './late-fee';
 
 export type Product = {
   id: string;
@@ -160,6 +162,9 @@ export type Branch = {
   // que abre el diálogo del POS; el cajero puede cambiarlos en cada venta.
   defaultInterestRate?: number;
   lateFeeRate?: number;
+  lateFeeMode?: LateFeeMode;
+  lateFeeGraceDays?: number;
+  lateFeeMaxRate?: number;
   financingInterestMode?: InterestMode;
   financingDefaultFrequency?: PaymentFrequency;
   financingDefaultInstallments?: number;
@@ -250,9 +255,13 @@ export type FinancingDetails = {
   totalWithInterest: number;
   downPayment?: number;
   // Congeladas al crear el plan: cambiar la mora de la sucursal no debe
-  // repreciar una deuda que ya está corriendo.
+  // repreciar una deuda que ya está corriendo. La ausencia de `lateFeeMode`
+  // marca un plan anterior a la mora configurable — se cobra como siempre se
+  // le cobró (multa fija). Ver src/lib/late-fee.ts.
   lateFeeRate?: number;
+  lateFeeMode?: LateFeeMode;
   lateFeeGraceDays?: number;
+  lateFeeMaxRate?: number;
 };
 
 // Cuota de un plan de financiamiento. La genera y actualiza la base
@@ -390,13 +399,21 @@ export type CompanyProfile = {
   // sellalles.com/<linkSlug>/c/7Kq2Wp. Vacío = se deriva del nombre.
   linkSlug: string;
   lateFeeRate: number;         // % de mora sobre la cuota vencida
+  lateFeeMode: LateFeeMode;    // cómo corre esa mora (ver src/lib/late-fee.ts)
+  lateFeeGraceDays: number;    // días después del vencimiento antes de cobrarla
+  lateFeeMaxRate: number;      // tope de mora como % de la base; 0 = sin tope
   defaultInterestRate: number; // % de interés mensual sugerido en el POS
   // Valores por defecto del financiamiento para toda la empresa. Cada sucursal
   // puede sobrescribirlos; ver Branch.
   financingInterestMode: InterestMode;
   financingDefaultFrequency: PaymentFrequency;
   financingDefaultInstallments: number;
-  loanLateFeeRate: number;         // % de mora de préstamos (independiente de lateFeeRate)
+  // Los de préstamos son independientes de los de financiamiento, tasa, modo,
+  // gracia y tope incluidos.
+  loanLateFeeRate: number;
+  loanLateFeeMode: LateFeeMode;
+  loanLateFeeGraceDays: number;
+  loanLateFeeMaxRate: number;
   defaultLoanInterestRate: number; // % de interés mensual sugerido para préstamos
   loyaltyEnabled: boolean;
   loyaltyPurchasesRequired: number | null; // null = sin configurar
@@ -501,6 +518,14 @@ export type Loan = {
   notes?: string;
   userName?: string;
   createdAt: Date;
+  // Política de mora congelada al desembolsar, igual que en financiamiento:
+  // subir la mora de la empresa no reprecia un préstamo que ya está corriendo.
+  // Ausente = préstamo anterior a la mora configurable (multa fija con los
+  // ajustes de la empresa, que es como se le ha venido cobrando).
+  lateFeeRate?: number;
+  lateFeeMode?: LateFeeMode;
+  lateFeeGraceDays?: number;
+  lateFeeMaxRate?: number;
   installments?: LoanInstallment[];
   payments?: LoanPayment[];
 };

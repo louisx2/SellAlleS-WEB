@@ -201,13 +201,12 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
   total − inicial para crédito) y genera las cuotas en `financing_installments`
   (vencimiento mensual desde la fecha de venta; la última cuota absorbe el
   redondeo para que la suma sea exacta).
-- **`apply_payment_to_sale(sale_id, monto, tasa_mora, hoy, gracia)`** (interno,
-  sin EXECUTE para `authenticated`): el único motor que aplica dinero a una
-  venta. Cobra primero la **mora** (`companies.late_fee_rate`% por cuota
-  vencida, cargo único por cuota, exigible pasados
-  `companies.late_fee_grace_days`), luego capital FIFO a las cuotas, y sube
-  `sales.amount_paid` solo con el capital. Devuelve el detalle de la aplicación
-  para poder revertirla cuota por cuota.
+- **`apply_payment_to_sale(sale_id, monto)`** (interno, sin EXECUTE para
+  `authenticated`): el único motor que aplica dinero a una venta. Cobra primero
+  la **mora** con la política congelada en el plan, luego capital FIFO a las
+  cuotas, y sube `sales.amount_paid` solo con el capital. Devuelve el detalle de
+  la aplicación para poder revertirla cuota por cuota. No recibe tasa ni fecha:
+  las resuelve de la venta, para que no haya dos maneras de decidir qué se cobra.
 - **RPC `register_sale_payment(sale_id, amount, method, branch_id, notes, reference)`**
   (SECURITY DEFINER): abono a una venta. Valida acceso con `can_collect_sale()`,
   que replica la policy de `sales`, y comprueba que la sucursal del cobro sea de
@@ -216,7 +215,8 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
 - **RPC `register_customer_payment(customer_id, amount, method, branch_id, notes, reference)`**
   (SECURITY DEFINER): abono a la deuda general. Se reparte entre **todas** las
   ventas abiertas del cliente — `credit` **y** `in_financing` — de la de
-  vencimiento más viejo a la más nueva, mora antes que capital.
+  vencimiento más viejo a la más nueva, mora antes que capital. El techo del
+  abono sale de `sale_late_fee_due(sale_id)`, no de una copia de la fórmula.
 - **RPC `void_credit_payment(payment_id, reason)`** (SECURITY DEFINER, solo
   admin de empresa): anula un abono por reverso. No lo borra: marca `voided_at`
   y devuelve capital y mora a las cuotas exactas que los recibieron, según
@@ -237,11 +237,44 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
   con `current_date`, a partir de las 8:00 PM en RD ya era "mañana", así que a
   quien pagaba el día del vencimiento se le cobraba mora y el plan de cuotas de
   una venta de noche arrancaba un día tarde.
-- `companies.late_fee_rate` (default 5), `companies.default_interest_rate`
-  (default 3.5) y `companies.late_fee_grace_days` (default 0 = la mora aplica
-  al día siguiente del vencimiento).
-- La mora exigible NO se materializa: se deriva al leer (cuota vencida ×
-  tasa − ya cobrada), igual en SQL y en `calculateFinancingStatus` del cliente.
+- La mora exigible NO se materializa: se deriva al leer, igual en SQL y en el
+  cliente. Lo único persistido es `late_fee_paid` por cuota.
+
+### La política de mora (migración `mora_configurable`)
+
+La mora dejó de ser un cargo único: es una política de cuatro campos que se
+**congela en cada venta y en cada préstamo** al crearlos.
+
+| modo | base | devengado por cuota |
+|---|---|---|
+| `once` | la cuota pactada | `base × tasa%`, una vez |
+| `daily` | saldo insoluto | `base × tasa% × días/30` |
+| `per_period` | saldo insoluto | `base × tasa% × ceil(días / días_del_período)` |
+
+`días = hoy − vencimiento − gracia`, con `hoy = company_today()`. El **tope**
+(`late_fee_max_rate`, % sobre la base, 0 = sin tope) corta el acumulado; sin él
+una cuota olvidada en modo `daily` crece sin techo.
+
+Las dos bases son distintas a propósito: `once` es una **multa** por incumplir,
+así que cae sobre la cuota pactada; `daily` y `per_period` son **intereses** por
+el dinero que sigue en la calle, así que abonar baja la mora que corre.
+
+- `public.late_fee_accrued(...)` es la única fuente de verdad del monto, y
+  `src/lib/late-fee.ts` su espejo exacto — verificado sobre 600 casos, mismo
+  centavo en los 600 (por eso `round2` del cliente corrige el error binario de
+  `Math.round`: en float 100.5 vive como 100.49999999999999 y redondeaba al revés
+  que `round(numeric, 2)`).
+- `late_fee_policy(financing_details, tasa_empresa, gracia_empresa)` resuelve la
+  política de una venta. **La ausencia de `lateFeeMode` marca un contrato
+  anterior**: resuelve a `once` con los ajustes de la empresa, que es exactamente
+  como se le venía cobrando. Por eso cambiar los ajustes nunca reprecia una deuda
+  viva.
+- Ajustes por empresa: `late_fee_rate` (default 5), `late_fee_mode`,
+  `late_fee_grace_days`, `late_fee_max_rate` para financiamiento, y
+  `loan_late_fee_*` para préstamos (independientes, gracia incluida).
+  `branches.late_fee_*` sobrescribe los de financiamiento; NULL = hereda.
+- `companies.default_interest_rate` (default 3.5) no es mora: es el interés
+  sugerido en el POS.
 - El interés es **add-on**: se calcula una vez sobre todo el plazo y se reparte
   en cuotas iguales, así que pagar antes no ahorra intereses. Falta un "saldar
   anticipado" con descuento de intereses no devengados.

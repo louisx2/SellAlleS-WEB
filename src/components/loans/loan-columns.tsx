@@ -10,9 +10,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FileText } from 'lucide-react';
 
-// Factoría: la tasa de mora viene de companies.loan_late_fee_rate (perfil de
-// empresa), independiente de la de ventas financiadas.
-export const buildLoanColumns = (loanLateFeeRate: number): ColumnDef<Loan>[] => [
+// Factoría: tasa y gracia vienen de los ajustes de préstamos de la empresa
+// (companies.loan_late_fee_*), independientes de los de ventas financiadas.
+// Solo aplican a los préstamos sin política congelada; los demás traen la suya.
+export const buildLoanColumns = (loanLateFeeRate: number, graceDays = 0): ColumnDef<Loan>[] => [
   {
     id: 'customerName',
     accessorFn: (row) => row.customer?.name ?? 'Cliente',
@@ -32,7 +33,7 @@ export const buildLoanColumns = (loanLateFeeRate: number): ColumnDef<Loan>[] => 
     id: 'installments',
     header: 'Cuotas',
     cell: ({ row }) => {
-      const status = calculateLoanStatus(row.original, loanLateFeeRate);
+      const status = calculateLoanStatus(row.original, loanLateFeeRate, graceDays);
       const freq = FREQUENCY_SHORT[row.original.paymentFrequency];
       return <span>{status.installmentsPaid} de {status.totalInstallments} <span className="text-muted-foreground text-xs">({freq})</span></span>;
     },
@@ -41,7 +42,7 @@ export const buildLoanColumns = (loanLateFeeRate: number): ColumnDef<Loan>[] => 
     id: 'nextDueDate',
     header: 'Próximo Pago',
     cell: ({ row }) => {
-      const status = calculateLoanStatus(row.original, loanLateFeeRate);
+      const status = calculateLoanStatus(row.original, loanLateFeeRate, graceDays);
       if (status.pendingBalance <= 0) return <Badge variant="secondary">Completado</Badge>;
       return status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—';
     },
@@ -50,7 +51,7 @@ export const buildLoanColumns = (loanLateFeeRate: number): ColumnDef<Loan>[] => 
     id: 'pendingBalance',
     header: 'Balance Pendiente',
     cell: ({ row }) => {
-      const status = calculateLoanStatus(row.original, loanLateFeeRate);
+      const status = calculateLoanStatus(row.original, loanLateFeeRate, graceDays);
       return <div className="font-medium text-destructive">{formatCurrency(status.pendingBalance)}</div>;
     },
   },
@@ -58,7 +59,7 @@ export const buildLoanColumns = (loanLateFeeRate: number): ColumnDef<Loan>[] => 
     id: 'status',
     header: 'Estado',
     cell: ({ row }) => {
-      const status = calculateLoanStatus(row.original, loanLateFeeRate);
+      const status = calculateLoanStatus(row.original, loanLateFeeRate, graceDays);
       if (status.pendingBalance <= 0) return <Badge variant="default" className="bg-green-600">Pagado</Badge>;
       if (status.isOverdue) {
         return (

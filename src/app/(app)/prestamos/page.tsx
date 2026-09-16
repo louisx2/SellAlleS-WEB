@@ -15,7 +15,7 @@ import { PlusCircle, HandCoins, Wallet, TrendingUp } from 'lucide-react';
 export default function PrestamosPage() {
   const { loans } = useLoans();
   const { profile } = useCompanyProfile();
-  const columns = useMemo(() => buildLoanColumns(profile.loanLateFeeRate), [profile.loanLateFeeRate]);
+  const columns = useMemo(() => buildLoanColumns(profile.loanLateFeeRate, profile.loanLateFeeGraceDays), [profile.loanLateFeeRate, profile.loanLateFeeGraceDays]);
 
   // Resumen del negocio de prestamista: cuánto está en la calle, cuánto falta
   // por cobrar y cuánto es ganancia (interés) del total prestado.
