@@ -32,6 +32,8 @@ import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useModules } from '@/context/modules-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
+import { LateFeeFields, INHERIT } from '@/components/credit/late-fee-fields';
+import { LATE_FEE_MODE_LABEL, type LateFeeMode } from '@/lib/late-fee';
 import { Loader2, Upload } from 'lucide-react';
 
 interface BranchDialogProps {
@@ -78,6 +80,9 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
   const [financia, setFinancia] = useState(branch?.financingEnabled ?? true);
   const [finRate, setFinRate] = useState(numOrEmpty(branch?.defaultInterestRate));
   const [finMora, setFinMora] = useState(numOrEmpty(branch?.lateFeeRate));
+  const [finMoraMode, setFinMoraMode] = useState<LateFeeMode | typeof INHERIT>(branch?.lateFeeMode ?? INHERIT);
+  const [finMoraGracia, setFinMoraGracia] = useState(numOrEmpty(branch?.lateFeeGraceDays));
+  const [finMoraTope, setFinMoraTope] = useState(numOrEmpty(branch?.lateFeeMaxRate));
   const [finCuotas, setFinCuotas] = useState(numOrEmpty(branch?.financingDefaultInstallments));
   const [finMode, setFinMode] = useState<InterestMode | typeof HEREDA>(branch?.financingInterestMode ?? HEREDA);
   const [finFreq, setFinFreq] = useState<PaymentFrequency | typeof HEREDA>(branch?.financingDefaultFrequency ?? HEREDA);
@@ -92,6 +97,9 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
       setFinancia(branch?.financingEnabled ?? true);
       setFinRate(numOrEmpty(branch?.defaultInterestRate));
       setFinMora(numOrEmpty(branch?.lateFeeRate));
+      setFinMoraMode(branch?.lateFeeMode ?? INHERIT);
+      setFinMoraGracia(numOrEmpty(branch?.lateFeeGraceDays));
+      setFinMoraTope(numOrEmpty(branch?.lateFeeMaxRate));
       setFinCuotas(numOrEmpty(branch?.financingDefaultInstallments));
       setFinMode(branch?.financingInterestMode ?? HEREDA);
       setFinFreq(branch?.financingDefaultFrequency ?? HEREDA);
@@ -227,6 +235,8 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
     const rateOverride = pct(finRate);
     const moraOverride = pct(finMora);
     const cuotasOverride = pct(finCuotas);
+    const graciaOverride = pct(finMoraGracia);
+    const topeOverride = pct(finMoraTope);
     const fueraDeRango = [rateOverride, moraOverride].some(
       (v) => v !== undefined && (isNaN(v) || v < 0 || v > 100),
     );
@@ -234,6 +244,22 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
       toast({
         title: 'Valores inválidos',
         description: 'El interés y la mora de la sucursal deben ser porcentajes entre 0 y 100.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (graciaOverride !== undefined && (!Number.isInteger(graciaOverride) || graciaOverride < 0 || graciaOverride > 365)) {
+      toast({
+        title: 'Gracia inválida',
+        description: 'Los días de gracia deben ser un número entero de 0 a 365.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (topeOverride !== undefined && (isNaN(topeOverride) || topeOverride < 0 || topeOverride > 1000)) {
+      toast({
+        title: 'Tope inválido',
+        description: 'El tope de mora debe ir de 0 (sin tope) a 1000.',
         variant: 'destructive',
       });
       return;
@@ -263,6 +289,9 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
       financingEnabled: financia,
       defaultInterestRate: rateOverride,
       lateFeeRate: moraOverride,
+      lateFeeMode: finMoraMode === INHERIT ? undefined : finMoraMode,
+      lateFeeGraceDays: graciaOverride,
+      lateFeeMaxRate: topeOverride,
       financingDefaultInstallments: cuotasOverride,
       financingInterestMode: finMode === HEREDA ? undefined : finMode,
       financingDefaultFrequency: finFreq === HEREDA ? undefined : finFreq,
@@ -352,34 +381,38 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
                       Valores con los que abre el POS al financiar en esta sucursal. Déjalos vacíos
                       para seguir los de la empresa; el cajero puede cambiarlos en cada venta.
                     </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label htmlFor="branch-fin-rate" className="text-xs">Interés sugerido (%)</Label>
-                        <Input
-                          id="branch-fin-rate"
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.1"
-                          value={finRate}
-                          onChange={(e) => setFinRate(e.target.value)}
-                          placeholder={`Empresa: ${profile.defaultInterestRate}%`}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label htmlFor="branch-fin-mora" className="text-xs">Mora por cuota vencida (%)</Label>
-                        <Input
-                          id="branch-fin-mora"
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.1"
-                          value={finMora}
-                          onChange={(e) => setFinMora(e.target.value)}
-                          placeholder={`Empresa: ${profile.lateFeeRate}%`}
-                        />
-                      </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="branch-fin-rate" className="text-xs">Interés sugerido (%)</Label>
+                      <Input
+                        id="branch-fin-rate"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.1"
+                        value={finRate}
+                        onChange={(e) => setFinRate(e.target.value)}
+                        placeholder={`Empresa: ${profile.defaultInterestRate}%`}
+                      />
                     </div>
+
+                    <LateFeeFields
+                      idPrefix="branch-fin-mora"
+                      rate={finMora}
+                      onRateChange={setFinMora}
+                      mode={finMoraMode}
+                      onModeChange={setFinMoraMode}
+                      graceDays={finMoraGracia}
+                      onGraceDaysChange={setFinMoraGracia}
+                      maxRate={finMoraTope}
+                      onMaxRateChange={setFinMoraTope}
+                      frequency={finFreq === HEREDA ? profile.financingDefaultFrequency : finFreq}
+                      inheritLabel={`Como la empresa (${LATE_FEE_MODE_LABEL[profile.lateFeeMode]})`}
+                      inherited={{
+                        rate: profile.lateFeeRate,
+                        graceDays: profile.lateFeeGraceDays,
+                        maxRate: profile.lateFeeMaxRate,
+                      }}
+                    />
 
                     <div className="space-y-1">
                       <Label htmlFor="branch-fin-mode" className="text-xs">Cómo se cobra el interés</Label>

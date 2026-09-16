@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase/client';
 import { rowToCreditPayment } from '@/lib/supabase/mappers';
 import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
+import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
 import type { CreditPayment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -65,8 +66,8 @@ export default function FinancingDetailClient() {
   useEffect(() => { loadPayments(); }, [loadPayments, sales]);
 
   const status = useMemo(
-    () => (sale ? calculateFinancingStatus(sale, profile.lateFeeRate) : null),
-    [sale, profile.lateFeeRate]
+    () => (sale ? calculateFinancingStatus(sale, profile.lateFeeRate, profile.lateFeeGraceDays) : null),
+    [sale, profile.lateFeeRate, profile.lateFeeGraceDays]
   );
 
   if (!sale || !status) {
@@ -87,9 +88,9 @@ export default function FinancingDetailClient() {
   const fin = sale.financingDetails;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  // La mora del plan es la que va a cobrar la RPC de abonos: se congeló al
+  // La política del plan es la que va a cobrar la RPC de abonos: se congeló al
   // crearlo. Los planes viejos no la traen y siguen la de la empresa.
-  const lateFeeRate = fin?.lateFeeRate ?? profile.lateFeeRate;
+  const policy = status.lateFeePolicy;
   const frequency = fin?.frequency ?? 'monthly';
 
   return (
@@ -187,7 +188,8 @@ export default function FinancingDetailClient() {
           <CardHeader>
             <CardTitle>Plan de Cuotas</CardTitle>
             <CardDescription>
-              La mora ({lateFeeRate}% por cuota vencida) se cobra primero al registrar un abono.
+              {lateFeeModeHelp(policy.mode, policy.rate, frequency)} Se cobra antes que el capital
+              al registrar un abono.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -205,10 +207,11 @@ export default function FinancingDetailClient() {
               <TableBody>
                 {sale.installments.map((cuota) => {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
-                  const isOverdue = cuota.status !== 'paid' && new Date(cuota.dueDate + 'T23:59:59') < today;
-                  const feeDue = isOverdue
-                    ? Math.round(cuota.amount * lateFeeRate / 100 * 100) / 100
-                    : 0;
+                  // Vencida = la que ya devenga mora, con la gracia del plan ya
+                  // descontada. Misma cuenta que hace la base al cobrar.
+                  const feeDue = cuota.status !== 'paid' ? lateFeeDue(cuota, policy, today) : 0;
+                  const isOverdue =
+                    cuota.status !== 'paid' && overdueDays(cuota.dueDate, today, policy.graceDays) > 0;
                   const st = INSTALLMENT_STATUS[cuota.status] ?? INSTALLMENT_STATUS.pending;
                   return (
                     <TableRow key={cuota.id} className={isOverdue ? 'bg-destructive/5' : undefined}>
@@ -223,9 +226,9 @@ export default function FinancingDetailClient() {
                         {isOverdue ? (
                           <div className="flex flex-col">
                             <Badge variant="destructive" className="w-fit">Vencida</Badge>
-                            {feeDue > cuota.lateFeePaid && (
+                            {feeDue > 0 && (
                               <span className="text-xs text-destructive mt-1">
-                                Mora: {formatCurrency(Math.max(feeDue - cuota.lateFeePaid, 0))}
+                                Mora: {formatCurrency(feeDue)}
                               </span>
                             )}
                           </div>

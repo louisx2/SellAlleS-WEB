@@ -4,6 +4,11 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 // ventas a crédito/financiadas que vencen en los próximos 3 días o que ya
 // están vencidas, y aún no recibieron aviso (reminder_sent_at is null).
 // Idempotente: marcar reminder_sent_at evita reenviar el mismo aviso.
+//
+// Qué está vencido y cuánta mora debe lo decide `pending_due_reminders` en la
+// base: con la fecha del NEGOCIO (acá era UTC, y a las 8 PM en RD ya decía
+// "venció" un día antes) y con la política congelada de cada contrato, que es
+// la que de verdad va a cobrar la RPC de abonos.
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -49,58 +54,45 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-    const cutoff = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const { data: rows, error } = await admin.rpc('pending_due_reminders', { p_days_ahead: 3 });
+    if (error) return json(500, { error: error.message });
+
     let sent = 0;
     let failed = 0;
 
-    // Cuotas de préstamos.
-    const { data: loanRows } = await admin
-      .from('loan_installments')
-      .select('id, due_date, amount, loan_id, loans(customer_id, company_id, customers(name, email), companies(name))')
-      .is('reminder_sent_at', null)
-      .neq('status', 'paid')
-      .lte('due_date', cutoff);
+    for (const row of (rows ?? []) as any[]) {
+      const overdue = !!row.is_overdue;
+      const lateFee = Number(row.late_fee ?? 0);
+      const amountDue = Number(row.amount_due ?? 0);
+      const business = row.company_name ?? 'el negocio';
 
-    for (const row of (loanRows ?? []) as any[]) {
-      const email = row.loans?.customers?.email;
-      if (!email) continue;
+      // La mora es el número que hace que alguien pague: si hay, va en el
+      // asunto y sumada al total, no escondida en el cuerpo.
+      const subject = overdue
+        ? lateFee > 0
+          ? `Tienes una cuota atrasada (mora ${formatCurrency(lateFee)})`
+          : 'Tienes una cuota atrasada'
+        : 'Tu cuota está por vencer';
+
+      const moraHtml =
+        lateFee > 0
+          ? `<p>Mora acumulada: <strong>${formatCurrency(lateFee)}</strong>.` +
+            ` Total a pagar hoy: <strong>${formatCurrency(amountDue + lateFee)}</strong>.</p>`
+          : '';
+
       try {
-        const overdue = row.due_date < new Date().toISOString().slice(0, 10);
         await sendEmail(
-          email,
-          overdue ? 'Tienes una cuota atrasada' : 'Tu cuota está por vencer',
-          `<p>Hola ${row.loans.customers.name},</p>` +
-            `<p>Tu cuota de <strong>${formatCurrency(row.amount)}</strong> con ${row.loans.companies?.name ?? 'el negocio'} ` +
-            `${overdue ? 'venció el' : 'vence el'} ${row.due_date}.</p>`,
+          row.customer_email,
+          subject,
+          `<p>Hola ${row.customer_name},</p>` +
+            `<p>Tu cuota de <strong>${formatCurrency(amountDue)}</strong> con ${business} ` +
+            `${overdue ? 'venció el' : 'vence el'} ${row.due_date}.</p>` +
+            moraHtml,
         );
-        await admin.from('loan_installments').update({ reminder_sent_at: new Date().toISOString() }).eq('id', row.id);
-        sent++;
-      } catch {
-        failed++;
-      }
-    }
-
-    // Cuotas de ventas a crédito/financiadas.
-    const { data: saleRows } = await admin
-      .from('financing_installments')
-      .select('id, due_date, amount, sale_id, sales(customer_id, company_id, customers(name, email), companies(name))')
-      .is('reminder_sent_at', null)
-      .neq('status', 'paid')
-      .lte('due_date', cutoff);
-
-    for (const row of (saleRows ?? []) as any[]) {
-      const email = row.sales?.customers?.email;
-      if (!email) continue;
-      try {
-        const overdue = row.due_date < new Date().toISOString().slice(0, 10);
-        await sendEmail(
-          email,
-          overdue ? 'Tienes una cuota atrasada' : 'Tu cuota está por vencer',
-          `<p>Hola ${row.sales.customers.name},</p>` +
-            `<p>Tu cuota de <strong>${formatCurrency(row.amount)}</strong> con ${row.sales.companies?.name ?? 'el negocio'} ` +
-            `${overdue ? 'venció el' : 'vence el'} ${row.due_date}.</p>`,
-        );
-        await admin.from('financing_installments').update({ reminder_sent_at: new Date().toISOString() }).eq('id', row.id);
+        const table = row.kind === 'loan' ? 'loan_installments' : 'financing_installments';
+        await admin.from(table)
+          .update({ reminder_sent_at: new Date().toISOString() })
+          .eq('id', row.installment_id);
         sent++;
       } catch {
         failed++;

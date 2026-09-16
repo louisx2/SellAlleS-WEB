@@ -7,7 +7,7 @@ import { FinancingActions } from './financing-actions';
 import { Badge } from '../ui/badge';
 
 // Factoría: la tasa de mora viene de companies.late_fee_rate (perfil de empresa).
-export const buildFinancingColumns = (lateFeeRate: number): ColumnDef<Sale>[] => [
+export const buildFinancingColumns = (lateFeeRate: number, graceDays = 0): ColumnDef<Sale>[] => [
   {
     accessorKey: 'customer.name',
     header: 'Cliente',
@@ -24,7 +24,7 @@ export const buildFinancingColumns = (lateFeeRate: number): ColumnDef<Sale>[] =>
     id: 'installments',
     header: 'Cuotas Pagadas',
     cell: ({ row }) => {
-      const status = calculateFinancingStatus(row.original, lateFeeRate);
+      const status = calculateFinancingStatus(row.original, lateFeeRate, graceDays);
       if (status.totalInstallments === 0) return 'N/A';
       return (
         <span>
@@ -37,7 +37,7 @@ export const buildFinancingColumns = (lateFeeRate: number): ColumnDef<Sale>[] =>
     id: 'nextDueDate',
     header: 'Próximo Pago',
     cell: ({ row }) => {
-       const status = calculateFinancingStatus(row.original, lateFeeRate);
+       const status = calculateFinancingStatus(row.original, lateFeeRate, graceDays);
        if (status.pendingBalance <= 0) return <Badge variant="secondary">Completado</Badge>;
        if (!status.nextDueDate) return '—';
        return status.nextDueDate.toLocaleDateString('es-DO');
@@ -47,7 +47,7 @@ export const buildFinancingColumns = (lateFeeRate: number): ColumnDef<Sale>[] =>
     id: 'pendingBalance',
     header: 'Balance Pendiente',
     cell: ({ row }) => {
-      const status = calculateFinancingStatus(row.original, lateFeeRate);
+      const status = calculateFinancingStatus(row.original, lateFeeRate, graceDays);
       return <div className="font-medium text-destructive">{formatCurrency(status.pendingBalance)}</div>;
     },
   },
@@ -59,7 +59,7 @@ export const buildFinancingColumns = (lateFeeRate: number): ColumnDef<Sale>[] =>
          return <Badge variant="outline">Crédito Simple</Badge>
       }
 
-      const status = calculateFinancingStatus(row.original, lateFeeRate);
+      const status = calculateFinancingStatus(row.original, lateFeeRate, graceDays);
 
       if (status.pendingBalance <= 0) {
         return <Badge variant="default" className="bg-green-600">Pagado</Badge>;
@@ -80,7 +80,7 @@ export const buildFinancingColumns = (lateFeeRate: number): ColumnDef<Sale>[] =>
   {
     id: 'actions',
     cell: ({ row }) => {
-      const status = calculateFinancingStatus(row.original, lateFeeRate);
+      const status = calculateFinancingStatus(row.original, lateFeeRate, graceDays);
       return <FinancingActions sale={row.original} canPay={status.pendingBalance > 0} />;
     }
   },

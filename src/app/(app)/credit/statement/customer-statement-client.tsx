@@ -163,7 +163,7 @@ export default function CustomerStatementClient() {
                 </TableHeader>
                 <TableBody>
                   {openSales.map((sale) => {
-                    const status = calculateFinancingStatus(sale, profile.lateFeeRate);
+                    const status = calculateFinancingStatus(sale, profile.lateFeeRate, profile.lateFeeGraceDays);
                     const isFinancing = sale.paymentStatus === 'in_financing';
                     return (
                       <TableRow key={sale.id}>
