@@ -4,7 +4,7 @@ import type { PaymentFrequency } from '@/lib/frequency';
  * La mora, en un solo lugar.
  *
  * Espejo EXACTO de `late_fee_accrued` / `late_fee_due` / `late_fee_policy` en
- * la base (migración `20260916120000_mora_configurable`). Acá solo se MUESTRA;
+ * la base (migración `20260916200000_mora_configurable`). Acá solo se MUESTRA;
  * el dinero que se cobra de verdad lo calcula el servidor. Si una cambia, la
  * otra cambia: que el badge diga un número y la RPC cobre otro es el peor bug
  * posible en este módulo.

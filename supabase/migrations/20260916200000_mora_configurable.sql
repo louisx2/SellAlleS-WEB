@@ -494,9 +494,9 @@ $function$;
 
 -- ── 7. El motor de abonos a ventas ──────────────────────────────────────────
 -- Cambia la firma: ya no recibe tasa/gracia/hoy, los resuelve de la venta. Así
--- no hay dos maneras de decidir qué mora se cobra.
-
-drop function if exists public.apply_payment_to_sale(uuid, numeric, numeric, date, int);
+-- no hay dos maneras de decidir qué mora se cobra. La firma vieja se borra AL
+-- FINAL del archivo, no aquí: si algo fallara a mitad, las RPC actuales
+-- seguirían teniendo a quién llamar en vez de quedarse sin motor de cobro.
 
 create or replace function public.apply_payment_to_sale(
   p_sale_id uuid,
@@ -1255,3 +1255,9 @@ comment on function public.pending_due_reminders(int) is
 
 revoke all on function public.pending_due_reminders(int) from public, anon, authenticated;
 grant execute on function public.pending_due_reminders(int) to service_role;
+
+-- ── 12. Y ahora sí, fuera la firma vieja ────────────────────────────────────
+-- Última por seguridad: para cuando esto corre, las dos RPC de abonos ya
+-- apuntan a la nueva. Nadie más la llamaba — verificado en pg_proc.
+
+drop function if exists public.apply_payment_to_sale(uuid, numeric, numeric, date, int);
