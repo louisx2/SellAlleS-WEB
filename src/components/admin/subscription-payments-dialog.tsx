@@ -34,7 +34,6 @@ interface PlanRates {
   monthlyPrice: number | null;
   annualPricePerMonth: number | null;
   customMonthlyPrice: number | null;
-  billingCycle: 'monthly' | 'annual';
   /** La tarifa del plan se cobra por cada sucursal activa. */
   activeBranches: number;
 }
@@ -208,7 +207,7 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
               <div className="space-y-1">
                 <Label>Tarifa del plan</Label>
                 <div className="flex flex-wrap gap-2">
-                  {planRates.customMonthlyPrice != null ? (
+                  {planRates.monthlyPrice == null && planRates.customMonthlyPrice != null ? (
                     <Button
                       type="button" variant="outline" size="sm"
                       onClick={() => {

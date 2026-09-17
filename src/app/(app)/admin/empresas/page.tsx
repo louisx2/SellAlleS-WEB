@@ -201,7 +201,6 @@ export default function CompaniesManagementPage() {
       monthlyPrice: plan?.monthly_price ?? null,
       annualPricePerMonth: plan?.annual_price_per_month ?? null,
       customMonthlyPrice: sub?.custom_monthly_price ?? null,
-      billingCycle: sub?.billing_cycle ?? 'monthly',
       activeBranches: (companies.find((c) => c.id === companyId)?.branches ?? []).filter((b) => b.is_active).length,
     };
   };
