@@ -34,6 +34,9 @@ interface PlanRates {
   monthlyPrice: number | null;
   annualPricePerMonth: number | null;
   customMonthlyPrice: number | null;
+  billingCycle: 'monthly' | 'annual';
+  /** La tarifa del plan se cobra por cada sucursal activa. */
+  activeBranches: number;
 }
 
 interface Props {
@@ -198,7 +201,10 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
 
         {showForm && (
           <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border p-4">
-            {(planRates?.monthlyPrice != null || planRates?.customMonthlyPrice != null) && (
+            {(planRates?.monthlyPrice != null || planRates?.customMonthlyPrice != null) && (() => {
+              const sucursales = Math.max(planRates.activeBranches, 1);
+              const porSucursal = sucursales > 1 ? ` × ${sucursales} sucursales` : '';
+              return (
               <div className="space-y-1">
                 <Label>Tarifa del plan</Label>
                 <div className="flex flex-wrap gap-2">
@@ -219,31 +225,32 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
                         <Button
                           type="button" variant="outline" size="sm"
                           onClick={() => {
-                            setAmount(planRates.monthlyPrice as number);
+                            setAmount((planRates.monthlyPrice as number) * sucursales);
                             const base = company?.paid_until && company.paid_until >= today() ? company.paid_until : today();
                             setPeriodStart(base); setPeriodEnd(addMonths(base, 1));
                           }}
                         >
-                          Mensual ({formatCurrency(planRates.monthlyPrice)})
+                          Mensual ({formatCurrency(planRates.monthlyPrice)}{porSucursal})
                         </Button>
                       )}
                       {planRates.annualPricePerMonth != null && (
                         <Button
                           type="button" variant="outline" size="sm"
                           onClick={() => {
-                            setAmount((planRates.annualPricePerMonth as number) * 12);
+                            setAmount((planRates.annualPricePerMonth as number) * 12 * sucursales);
                             const base = company?.paid_until && company.paid_until >= today() ? company.paid_until : today();
                             setPeriodStart(base); setPeriodEnd(addMonths(base, 12));
                           }}
                         >
-                          Anual ({formatCurrency(planRates.annualPricePerMonth)}/mes × 12)
+                          Anual ({formatCurrency(planRates.annualPricePerMonth)}/mes × 12{porSucursal})
                         </Button>
                       )}
                     </>
                   )}
                 </div>
               </div>
-            )}
+              );
+            })()}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <Label htmlFor="sp-amount">Monto *</Label>
