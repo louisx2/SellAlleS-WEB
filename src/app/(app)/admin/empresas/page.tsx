@@ -31,9 +31,11 @@ import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
 import { PasswordInput } from '@/components/ui/password-input';
+import { formatCurrency } from '@/lib/utils';
+import { BILLING_CYCLE_LABEL, planRatePerBranch, type BillingCycle } from '@/lib/subscription-pricing';
 
 interface Plan { id: string; name: string; price: number; max_users?: number; monthly_price?: number | null; annual_price_per_month?: number | null; }
-interface Sub { id: string; company_id: string; plan_id: string | null; custom_monthly_price?: number | null; }
+interface Sub { id: string; company_id: string; plan_id: string | null; custom_monthly_price?: number | null; billing_cycle?: BillingCycle | null; }
 
 const NONE = 'none';
 const CUSTOM_PLAN_NAME = 'A medida';
@@ -48,6 +50,8 @@ const emptyForm = {
   customBusinessType: '',
   maxUsers: 2,
   customMonthlyPrice: '',
+  // Los planes con tarifa se cobran por sucursal, mensual o anual.
+  billingCycle: 'monthly' as BillingCycle,
   // Fechas que gobiernan el bloqueo de la app: si la prueba vence o la
   // suscripción caduca, la empresa pasa a solo-lectura. Vacías = nunca vence.
   trialEndsAt: '',
@@ -134,7 +138,7 @@ export default function CompaniesManagementPage() {
     ] = await Promise.all([
       compsQuery,
       supabase.from('plans').select('id, name, price, max_users, monthly_price, annual_price_per_month').order('sort_order'),
-      supabase.from('subscriptions').select('id, company_id, plan_id, custom_monthly_price'),
+      supabase.from('subscriptions').select('id, company_id, plan_id, custom_monthly_price, billing_cycle'),
     ]);
 
     if (comps) setCompanies(comps as Company[]);
@@ -197,6 +201,7 @@ export default function CompaniesManagementPage() {
       monthlyPrice: plan?.monthly_price ?? null,
       annualPricePerMonth: plan?.annual_price_per_month ?? null,
       customMonthlyPrice: sub?.custom_monthly_price ?? null,
+      activeBranches: (companies.find((c) => c.id === companyId)?.branches ?? []).filter((b) => b.is_active).length,
     };
   };
 
@@ -219,6 +224,7 @@ export default function CompaniesManagementPage() {
       customBusinessType: isPreset ? '' : (c.business_type ?? ''),
       maxUsers: c.max_users ?? 2,
       customMonthlyPrice: subs[c.id]?.custom_monthly_price != null ? String(subs[c.id].custom_monthly_price) : '',
+      billingCycle: subs[c.id]?.billing_cycle ?? 'monthly',
       trialEndsAt: aInputFecha(c.trial_ends_at),
       paidUntil: aInputFecha(c.paid_until),
     });
@@ -383,11 +389,14 @@ export default function CompaniesManagementPage() {
         const customMonthlyPrice = selectedPlanName === CUSTOM_PLAN_NAME && form.customMonthlyPrice.trim()
           ? Number(form.customMonthlyPrice)
           : null;
+        const billingCycle: BillingCycle = planRatePerBranch(plans.find((p) => p.id === form.planId), 'monthly')
+          ? form.billingCycle
+          : 'monthly';
         const existing = subs[companyId];
         if (existing) {
-          await supabase.from('subscriptions').update({ plan_id: form.planId, custom_monthly_price: customMonthlyPrice }).eq('id', existing.id);
+          await supabase.from('subscriptions').update({ plan_id: form.planId, custom_monthly_price: customMonthlyPrice, billing_cycle: billingCycle }).eq('id', existing.id);
         } else {
-          await supabase.from('subscriptions').insert({ company_id: companyId, plan_id: form.planId, status: 'active', custom_monthly_price: customMonthlyPrice });
+          await supabase.from('subscriptions').insert({ company_id: companyId, plan_id: form.planId, status: 'active', custom_monthly_price: customMonthlyPrice, billing_cycle: billingCycle });
         }
       }
 
@@ -814,6 +823,30 @@ export default function CompaniesManagementPage() {
                   </Select>
                 </div>
               </div>
+
+              {(() => {
+                const plan = plans.find((p) => p.id === form.planId);
+                if (!planRatePerBranch(plan, 'monthly')) return null;
+                const tarifa = planRatePerBranch(plan, form.billingCycle) ?? 0;
+                return (
+                  <div className="grid gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                    <Label>Forma de pago</Label>
+                    <Select value={form.billingCycle} onValueChange={(v) => setForm({ ...form, billingCycle: v as BillingCycle })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {(Object.keys(BILLING_CYCLE_LABEL) as BillingCycle[]).map((k) => (
+                          <SelectItem key={k} value={k}>
+                            {BILLING_CYCLE_LABEL[k]} ({formatCurrency(planRatePerBranch(plan, k) ?? 0)}/mes por sucursal)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Se cobra {formatCurrency(tarifa)} al mes por cada sucursal activa. El panel de super admin usa esto para calcular el MRR.
+                    </p>
+                  </div>
+                );
+              })()}
 
               {plans.find((p) => p.id === form.planId)?.name === CUSTOM_PLAN_NAME && (
                 <div className="grid gap-2 animate-in fade-in slide-in-from-top-1 duration-200">
