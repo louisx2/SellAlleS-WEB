@@ -279,6 +279,47 @@ el dinero que sigue en la calle, así que abonar baja la mora que corre.
   en cuotas iguales, así que pagar antes no ahorra intereses. Falta un "saldar
   anticipado" con descuento de intereses no devengados.
 
+### `financing_details` es un objeto o es NULL (migración `abono_bloqueado_por_plan_fantasma`)
+
+Una venta a crédito simple se quedó sin poder recibir abonos: la caja devolvía
+«No se pudo aplicar RD$4,200.00 del abono a ninguna venta abierta» aunque el
+cliente tuviera RD$10,500 de deuda. El disparador fue **anular un abono**.
+
+El POS manda `financing_details: null` en el JSON de la venta y
+`create_sale_with_items` lo extraía con `p_sale->'financing_details'`, que para
+un `null` de JSON devuelve el **jsonb `null` literal**, no SQL NULL. Y en SQL
+`'null'::jsonb is not null` es TRUE. `void_credit_payment` decidía el estado de
+la venta con ese `is not null`, así que al devolver el dinero marcaba la venta
+como `in_financing` — sin plan y sin una sola cuota. Desde ahí
+`apply_payment_to_sale` la veía financiada, buscaba cuotas donde poner el
+dinero, no encontraba ninguna y devolvía `consumed = 0`: el abono quedaba en el
+aire y la RPC lo rechazaba entero.
+
+Había **549 ventas** con ese jsonb `null` guardado (539 pagadas, 9 vivas a
+crédito, 1 ya convertida). Cada una de las 9 era la misma avería esperando una
+anulación. Cerrado por cuatro lados:
+
+- **El dato** — las 549 normalizadas a SQL NULL, y el trigger
+  `trg_before_sale_00_financing_details` (BEFORE INSERT **OR UPDATE**) deja en
+  NULL cualquier `financing_details` que no sea un objeto, venga por la ruta que
+  venga. El `00` del nombre no es decorativo: los triggers BEFORE del mismo
+  evento corren en orden alfabético, así que normaliza **antes** de que
+  `before_sale_credit_checks` valide el plan, y una venta marcada
+  `in_financing` sin plan se rechaza con el mensaje que corresponde.
+- **La estructura** — `check (financing_details is null or jsonb_typeof(...) =
+  'object')`. Los CHECK se evalúan después de los triggers BEFORE, así que el
+  normalizador lo satisface siempre y el CHECK atrapa lo que se lo salte.
+- **La decisión** — `public.sale_is_financed(jsonb)` es ahora la única manera de
+  preguntar si una venta está financiada. Nadie vuelve a usar `is not null`.
+- **El motor** — `apply_payment_to_sale` gana una red: si al terminar el
+  recorrido de cuotas queda deuda de la venta que ninguna cuota abierta
+  representa (no hay plan, el plan no cubre el total, las cuotas cerraron por
+  redondeo), el resto entra al capital en vez de devolverse sin aplicar. Un
+  abono que cabe en la deuda siempre encuentra dónde entrar.
+
+Las ventas financiadas de verdad no cambian de comportamiento: para ellas la red
+calcula cero, porque sus cuotas abiertas suman exactamente la deuda.
+
 ## Reportes de crédito y financiamiento
 
 - `/reports/cobros` — **lo que entró**, por método de pago y por origen
