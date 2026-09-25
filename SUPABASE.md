@@ -362,6 +362,32 @@ registrarla en la lista `fuentes` del script o borrará archivos en uso. Hoy son
 exactamente cinco: `products.image`, y `logo_url`/`ticket_logo_url` en
 `companies` y `branches`.
 
+## Facturas de suscripción (migración `facturas_de_suscripcion`)
+
+Cada fila de `subscription_payments` es también su factura. El trigger
+`subscription_payments_emitir_factura` (BEFORE INSERT) le pone el número y
+congela en la fila lo que la factura imprime:
+
+- `invoice_number`: consecutivo, único y sin huecos. Sale de
+  `subscription_invoice_counter`, una fila que solo sube (bloqueada hasta el
+  commit y revertida con la transacción). No se usa `max()+1` porque
+  `delete_company_cascade` borra los pagos de la empresa y el siguiente número
+  podría repetir uno ya entregado; ni una secuencia, que deja huecos. Un número
+  mandado por el cliente se ignora.
+- `invoice_issuer`: emisor tomado de `platform_settings.invoice_*` (se editan en
+  Administrar > Configuración de la Plataforma). Sin teléfono o correo propios,
+  usa los canales de soporte encendidos.
+- `invoice_customer`: nombre, RNC, dirección, teléfono y correo de la empresa.
+- `invoice_itbis`: ITBIS incluido en `amount` (18% hacia adentro) si
+  `invoice_itbis_included`; si no, 0.
+
+El PDF no se guarda: `src/lib/subscription-invoice.ts` lo dibuja con jsPDF a
+partir de la fila, y por eso reimprimir una factura vieja da la misma factura.
+Al registrar el pago, el panel lo adjunta al correo `recibo-suscripcion` de
+`send-lifecycle-email`; la empresa lo descarga desde Mi Suscripción.
+
+La factura lleva numeración interna, no NCF.
+
 ## Próximos pasos
 
 1. Retirar `src/lib/database.ts` (resto del modo demo, ya sin usos activos).

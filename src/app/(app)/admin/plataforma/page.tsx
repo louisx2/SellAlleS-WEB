@@ -10,8 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Mail, Shield, CalendarClock } from 'lucide-react';
+import { MessageCircle, Mail, Shield, CalendarClock, FileText } from 'lucide-react';
+import { formatCedulaOrRnc } from '@/lib/format';
 import {
   waLink, supportMailto, parseDiasLista, formatDiasLista,
   DEFAULT_TRIAL_SETTINGS, type SupportContact, type TrialSettings,
@@ -22,6 +24,23 @@ import {
 // Postgres en vez de un mensaje entendible.
 const NUMBER_RE = /^[0-9]{8,15}$/;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** Emisor de las facturas de suscripción. La base copia estos datos en cada
+ *  factura al emitirla, así que editarlos no cambia las ya emitidas. */
+interface DatosFacturacion {
+  legalName: string;
+  /** Solo dígitos: 9 (RNC) u 11 (cédula). */
+  rnc: string;
+  address: string;
+  phone: string;
+  email: string;
+  notes: string;
+  itbisIncluded: boolean;
+}
+
+const FACTURACION_VACIA: DatosFacturacion = {
+  legalName: '', rnc: '', address: '', phone: '', email: '', notes: '', itbisIncluded: false,
+};
 
 export default function PlatformSettingsPage() {
   const { appUser } = useAuth();
@@ -36,14 +55,25 @@ export default function PlatformSettingsPage() {
   const [trial, setTrial] = useState<TrialSettings>(DEFAULT_TRIAL_SETTINGS);
   const [avisosPruebaTexto, setAvisosPruebaTexto] = useState(formatDiasLista(DEFAULT_TRIAL_SETTINGS.trialReminderDays));
   const [avisosCobroTexto, setAvisosCobroTexto] = useState(formatDiasLista(DEFAULT_TRIAL_SETTINGS.paymentReminderDays));
+  // Lo mismo con los datos de facturación: solo los usa esta pantalla y la base.
+  const [facturacion, setFacturacion] = useState<DatosFacturacion>(FACTURACION_VACIA);
 
   useEffect(() => {
     supabase
       .from('platform_settings')
-      .select('trial_days, trial_reminder_days, payment_reminder_days')
+      .select('trial_days, trial_reminder_days, payment_reminder_days, invoice_legal_name, invoice_rnc, invoice_address, invoice_phone, invoice_email, invoice_notes, invoice_itbis_included')
       .maybeSingle()
       .then(({ data }) => {
         if (!data) return;
+        setFacturacion({
+          legalName: data.invoice_legal_name ?? '',
+          rnc: data.invoice_rnc ?? '',
+          address: data.invoice_address ?? '',
+          phone: data.invoice_phone ?? '',
+          email: data.invoice_email ?? '',
+          notes: data.invoice_notes ?? '',
+          itbisIncluded: data.invoice_itbis_included ?? false,
+        });
         const t: TrialSettings = {
           trialDays: data.trial_days ?? DEFAULT_TRIAL_SETTINGS.trialDays,
           trialReminderDays: data.trial_reminder_days ?? DEFAULT_TRIAL_SETTINGS.trialReminderDays,
@@ -63,6 +93,11 @@ export default function PlatformSettingsPage() {
   const set = <K extends keyof SupportContact>(key: K, value: SupportContact[K]) => {
     setDirty(true);
     setForm((f) => ({ ...f, [key]: value }));
+  };
+
+  const setFactura = <K extends keyof DatosFacturacion>(key: K, value: DatosFacturacion[K]) => {
+    setDirty(true);
+    setFacturacion((f) => ({ ...f, [key]: value }));
   };
 
   if (!appUser?.isSuperAdmin) {
@@ -111,6 +146,20 @@ export default function PlatformSettingsPage() {
       return;
     }
 
+    const facturaEmail = facturacion.email.trim();
+    if (facturacion.rnc && facturacion.rnc.length !== 9 && facturacion.rnc.length !== 11) {
+      toast({
+        variant: 'destructive',
+        title: 'RNC o cédula incompleto',
+        description: 'El RNC lleva 9 dígitos y la cédula 11. Déjalo vacío si la factura no debe mostrarlo.',
+      });
+      return;
+    }
+    if (facturaEmail && !EMAIL_RE.test(facturaEmail)) {
+      toast({ variant: 'destructive', title: 'Correo de facturación inválido', description: 'Revisa la dirección.' });
+      return;
+    }
+
     setSaving(true);
     const { error } = await supabase
       .from('platform_settings')
@@ -124,6 +173,13 @@ export default function PlatformSettingsPage() {
         trial_days: trial.trialDays,
         trial_reminder_days: avisosPrueba,
         payment_reminder_days: avisosCobro,
+        invoice_legal_name: facturacion.legalName.trim() || null,
+        invoice_rnc: facturacion.rnc || null,
+        invoice_address: facturacion.address.trim() || null,
+        invoice_phone: facturacion.phone.trim() || null,
+        invoice_email: facturaEmail || null,
+        invoice_notes: facturacion.notes.trim() || null,
+        invoice_itbis_included: facturacion.itbisIncluded,
       })
       .eq('id', true);
     setSaving(false);
@@ -134,7 +190,7 @@ export default function PlatformSettingsPage() {
     }
     setDirty(false);
     await reload();
-    toast({ title: 'Configuración guardada', description: 'Los canales de contacto se actualizaron en toda la plataforma.' });
+    toast({ title: 'Configuración guardada', description: 'Los cambios se aplicaron en toda la plataforma.' });
   };
 
   // Vista previa de los enlaces que verán los clientes, con los valores del
@@ -310,6 +366,99 @@ export default function PlatformSettingsPage() {
             <p className="text-xs text-muted-foreground">
               Números separados por comas. Se guardan de mayor a menor y sin repetidos.
             </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <FileText className="h-5 w-5 text-primary" />
+              Datos de facturación
+            </CardTitle>
+            <CardDescription>
+              Lo que sale como emisor en la factura de cada pago de suscripción. Cada factura
+              guarda una copia al emitirse: cambiar esto no altera las que ya se enviaron.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="inv-name">Nombre o razón social</Label>
+                <Input
+                  id="inv-name"
+                  placeholder="SellAlleS"
+                  value={facturacion.legalName}
+                  onChange={(e) => setFactura('legalName', e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="inv-rnc">RNC o cédula</Label>
+                <Input
+                  id="inv-rnc"
+                  inputMode="numeric"
+                  placeholder="Vacío: no se muestra"
+                  value={formatCedulaOrRnc(facturacion.rnc)}
+                  onChange={(e) => setFactura('rnc', e.target.value.replace(/\D/g, '').slice(0, 11))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="inv-address">Dirección</Label>
+              <Input
+                id="inv-address"
+                value={facturacion.address}
+                onChange={(e) => setFactura('address', e.target.value)}
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="inv-phone">Teléfono</Label>
+                <Input
+                  id="inv-phone"
+                  placeholder="Vacío: el WhatsApp de soporte"
+                  value={facturacion.phone}
+                  onChange={(e) => setFactura('phone', e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="inv-email">Correo</Label>
+                <Input
+                  id="inv-email"
+                  type="email"
+                  placeholder="Vacío: el correo de soporte"
+                  value={facturacion.email}
+                  onChange={(e) => setFactura('email', e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="inv-notes">Notas al pie</Label>
+              <Textarea
+                id="inv-notes"
+                rows={3}
+                placeholder="Ej: Gracias por su pago. Transferencias a Banco Popular, cuenta 000-000000-0."
+                value={facturacion.notes}
+                onChange={(e) => setFactura('notes', e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="inv-itbis">El monto cobrado incluye ITBIS (18%)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Actívalo solo si SellAlleS está formalizado y cobra ITBIS: la factura desglosa
+                  subtotal e ITBIS sin cambiar el total.
+                </p>
+              </div>
+              <Switch
+                id="inv-itbis"
+                checked={facturacion.itbisIncluded}
+                onCheckedChange={(v) => setFactura('itbisIncluded', v)}
+              />
+            </div>
           </CardContent>
         </Card>
 

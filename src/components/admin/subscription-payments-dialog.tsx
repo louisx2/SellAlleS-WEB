@@ -16,11 +16,11 @@ import { rowToSubscriptionPayment } from '@/lib/supabase/mappers';
 import type { SubscriptionPayment, Company } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency } from '@/lib/utils';
-import { Loader2, PlusCircle } from 'lucide-react';
+import {
+  METODO_DE_PAGO, numeroDeFactura, nombreArchivoFactura, facturaEnBase64, descargarFactura,
+} from '@/lib/subscription-invoice';
+import { Download, Loader2, Mail, PlusCircle } from 'lucide-react';
 
-const METHOD_LABEL: Record<string, string> = {
-  transfer: 'Transferencia', cash: 'Efectivo', card: 'Tarjeta', other: 'Otro',
-};
 const fmtDate = (s?: string | null) => (s ? new Date(s + 'T00:00:00').toLocaleDateString('es-DO') : '—');
 const today = () => new Date().toISOString().slice(0, 10);
 // Suma meses a una fecha yyyy-mm-dd y devuelve yyyy-mm-dd.
@@ -54,6 +54,8 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  /** Acción en curso sobre una factura del historial: `${id}:descargar` o `${id}:reenviar`. */
+  const [ocupado, setOcupado] = useState<string | null>(null);
 
   const [amount, setAmount] = useState<number | ''>('');
   const [paidAt, setPaidAt] = useState(today());
@@ -86,52 +88,85 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
     }
   }, [company, defaultPlanName, load]);
 
-  // Manda el recibo al administrador de la empresa. La deduplicación real vive
-  // en send-lifecycle-email (clave única en platform_email_log); aquí la clave
-  // se arma con el id del pago cuando la RPC lo devuelve, y si no, con fecha y
-  // monto: registrar dos veces el mismo pago el mismo día es justo lo que se
-  // quiere evitar.
-  const enviarReciboPorCorreo = async (pagoId: string | null, monto: number) => {
-    if (!company) return;
-    try {
-      const { data: admins } = await supabase
-        .from('profiles')
-        .select('name, email')
-        .eq('company_id', company.id)
-        .eq('role', 'admin')
-        .not('email', 'is', null)
-        .limit(1);
-      const destinatario = admins?.[0];
-      if (!destinatario?.email) return;
+  // Manda la factura al administrador de la empresa y devuelve a qué dirección.
+  // La deduplicación real vive en send-lifecycle-email (clave única en
+  // platform_email_log): la clave del registro es el id del pago, así que el
+  // mismo pago no sale dos veces aunque la llamada se repita; el reenvío manual
+  // lleva la hora para que sí salga cada vez que se pide.
+  const enviarFactura = async (pago: SubscriptionPayment, reenvio = false): Promise<string> => {
+    if (!company) throw new Error('No hay empresa seleccionada.');
+    const { data: admins } = await supabase
+      .from('profiles')
+      .select('name, email')
+      .eq('company_id', company.id)
+      .eq('role', 'admin')
+      .eq('is_active', true)
+      .not('email', 'is', null)
+      .order('created_at')
+      .limit(1);
+    const destinatario = admins?.[0];
+    if (!destinatario?.email) throw new Error('La empresa no tiene un administrador activo con correo.');
 
-      const clave = pagoId
-        ? `${company.id}:pago:${pagoId}`
-        : `${company.id}:pago:${paidAt || today()}:${monto}`;
+    // Si el PDF fallara, el correo sale igual, como recibo y sin adjunto: la
+    // empresa se entera del pago y la factura sigue en su Mi Suscripción.
+    let attachment: { filename: string; content: string } | undefined;
+    if (pago.invoiceNumber != null) {
+      try {
+        attachment = { filename: nombreArchivoFactura(pago), content: await facturaEnBase64(pago) };
+      } catch (err) {
+        console.error('No se pudo armar el PDF de la factura:', err);
+      }
+    }
 
-      const { data, error } = await supabase.functions.invoke('send-lifecycle-email', {
-        body: {
-          template: 'recibo-suscripcion',
-          to: destinatario.email,
-          companyId: company.id,
-          dedupeKey: clave,
-          vars: {
-            companyName: company.name,
-            userName: destinatario.name,
-            amount: monto,
-            method: METHOD_LABEL[method] ?? method,
-            paidAt: paidAt || today(),
-            paidUntil: periodEnd || null,
-          },
+    const { data, error } = await supabase.functions.invoke('send-lifecycle-email', {
+      body: {
+        template: 'recibo-suscripcion',
+        to: destinatario.email,
+        companyId: company.id,
+        dedupeKey: reenvio
+          ? `${company.id}:pago:${pago.id}:reenvio:${Date.now()}`
+          : `${company.id}:pago:${pago.id}`,
+        attachment,
+        vars: {
+          companyName: company.name,
+          userName: destinatario.name,
+          amount: pago.amount,
+          method: METODO_DE_PAGO[pago.method] ?? pago.method,
+          paidAt: pago.paidAt,
+          paidUntil: pago.periodEnd ?? null,
+          invoiceNumber: pago.invoiceNumber != null ? numeroDeFactura(pago.invoiceNumber) : null,
         },
-      });
-      const msg = (data as { error?: string })?.error ?? error?.message;
-      if (msg) throw new Error(msg);
+      },
+    });
+    const respuesta = data as { error?: string; skipped?: string } | null;
+    const msg = respuesta?.error ?? error?.message;
+    if (msg) throw new Error(msg);
+    if (respuesta?.skipped === 'correo_rebotado') {
+      throw new Error(`Los correos a ${destinatario.email} rebotan; no se le vuelve a escribir.`);
+    }
+    return destinatario.email;
+  };
+
+  const descargar = async (pago: SubscriptionPayment) => {
+    setOcupado(`${pago.id}:descargar`);
+    try {
+      await descargarFactura(pago);
     } catch (err: any) {
-      toast({
-        title: 'El pago se registró, pero no se envió el recibo',
-        description: err?.message ?? 'Error enviando el correo.',
-        variant: 'destructive',
-      });
+      toast({ title: 'No se pudo generar la factura', description: err?.message ?? 'Error generando el PDF.', variant: 'destructive' });
+    } finally {
+      setOcupado(null);
+    }
+  };
+
+  const reenviar = async (pago: SubscriptionPayment) => {
+    setOcupado(`${pago.id}:reenviar`);
+    try {
+      const destino = await enviarFactura(pago, true);
+      toast({ title: 'Factura enviada', description: `Se envió a ${destino}.` });
+    } catch (err: any) {
+      toast({ title: 'No se pudo enviar la factura', description: err?.message ?? 'Error enviando el correo.', variant: 'destructive' });
+    } finally {
+      setOcupado(null);
     }
   };
 
@@ -145,7 +180,9 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
     }
     setSaving(true);
     try {
-      const { data: pagoId, error } = await supabase.rpc('record_subscription_payment', {
+      // La RPC devuelve la fila del pago entera, ya con el número de factura
+      // que le puso la base.
+      const { data: fila, error } = await supabase.rpc('record_subscription_payment', {
         p_company_id: company.id,
         p_amount: value,
         p_paid_at: paidAt || today(),
@@ -158,15 +195,23 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
         p_activate: activate,
       });
       if (error) throw error;
+      const pago = rowToSubscriptionPayment(fila);
+      const factura = pago.invoiceNumber != null ? ` Factura No. ${numeroDeFactura(pago.invoiceNumber)}.` : '';
       toast({
         title: 'Pago registrado',
-        description: activate ? `${company.name}: pago registrado y empresa activada.` : `${company.name}: pago registrado.`,
+        description: (activate ? `${company.name}: pago registrado y empresa activada.` : `${company.name}: pago registrado.`) + factura,
       });
 
-      // El recibo por correo es un extra: si falla, el pago YA quedó registrado
-      // y no se debe hacer creer lo contrario. Por eso va en su propio try y
-      // solo avisa, sin revertir nada.
-      void enviarReciboPorCorreo(pagoId as string | null, value);
+      // La factura por correo es un extra: si falla, el pago YA quedó registrado
+      // y no se debe hacer creer lo contrario. Por eso solo avisa, sin revertir
+      // nada; desde el historial se puede reenviar.
+      void enviarFactura(pago).catch((err: any) => {
+        toast({
+          title: 'El pago se registró, pero no se envió la factura',
+          description: err?.message ?? 'Error enviando el correo.',
+          variant: 'destructive',
+        });
+      });
 
       setShowForm(false);
       await load();
@@ -180,7 +225,7 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
 
   return (
     <Dialog open={company !== null} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Pagos de suscripción — {company?.name}</DialogTitle>
           <DialogDescription>
@@ -347,6 +392,7 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
                   <TableHead>Referencia</TableHead>
                   <TableHead>Período</TableHead>
                   <TableHead>Registró</TableHead>
+                  <TableHead>Factura</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -354,12 +400,33 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
                   <TableRow key={p.id}>
                     <TableCell className="whitespace-nowrap">{fmtDate(p.paidAt)}</TableCell>
                     <TableCell className="text-right font-medium">{formatCurrency(p.amount)}</TableCell>
-                    <TableCell>{METHOD_LABEL[p.method] ?? p.method}</TableCell>
+                    <TableCell>{METODO_DE_PAGO[p.method] ?? p.method}</TableCell>
                     <TableCell className="text-muted-foreground">{p.reference || '—'}</TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
                       {p.periodStart || p.periodEnd ? `${fmtDate(p.periodStart)} – ${fmtDate(p.periodEnd)}` : '—'}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{p.recordedByName || '—'}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {p.invoiceNumber != null ? (
+                        <div className="flex items-center gap-1">
+                          <span className="font-mono text-xs">{numeroDeFactura(p.invoiceNumber)}</span>
+                          <Button
+                            type="button" variant="ghost" size="icon" className="h-7 w-7"
+                            title="Descargar factura" aria-label={`Descargar factura ${numeroDeFactura(p.invoiceNumber)}`}
+                            disabled={ocupado !== null} onClick={() => descargar(p)}
+                          >
+                            {ocupado === `${p.id}:descargar` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                          </Button>
+                          <Button
+                            type="button" variant="ghost" size="icon" className="h-7 w-7"
+                            title="Reenviar factura por correo" aria-label={`Reenviar factura ${numeroDeFactura(p.invoiceNumber)}`}
+                            disabled={ocupado !== null} onClick={() => reenviar(p)}
+                          >
+                            {ocupado === `${p.id}:reenviar` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+                          </Button>
+                        </div>
+                      ) : '—'}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

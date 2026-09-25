@@ -1,5 +1,5 @@
 // Punto único de envío de los correos transaccionales de la PLATAFORMA
-// (bienvenida, prueba por vencer, suspensión, activación, recibo de pago).
+// (bienvenida, prueba por vencer, suspensión, activación, factura de pago).
 // No cubre los correos que una empresa manda a SUS clientes; esos siguen en
 // send-sale-receipt y compañía.
 //
@@ -13,9 +13,13 @@
 // con el código que las usa.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
+// x-impersonate-company va en la lista porque el cliente la manda en todas sus
+// peticiones mientras el super admin está dentro de una empresa (ver
+// lib/supabase/client.ts); sin ella el navegador bloquea el POST en el
+// preflight y la factura no sale.
 const cors = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-impersonate-company',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
@@ -99,7 +103,7 @@ function envolver(titulo: string, cuerpo: string, contacto: Contacto): string {
 
 interface Render { subject: string; html: string; text: string; }
 
-function render(template: Template, vars: Record<string, unknown>, c: Contacto): Render {
+function render(template: Template, vars: Record<string, unknown>, c: Contacto, conAdjunto: boolean): Render {
   const empresa = esc(vars.companyName ?? 'tu empresa');
   const nombre = vars.userName ? ` ${esc(vars.userName)}` : '';
 
@@ -168,20 +172,29 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto):
       };
     }
 
-    case 'recibo-suscripcion':
+    case 'recibo-suscripcion': {
+      // Con la factura adjunta el correo se presenta como factura; sin ella
+      // (el adjunto falló o lo llama alguien que no lo manda) sigue siendo el
+      // recibo de siempre, para no prometer un PDF que no viene.
+      const factura = conAdjunto && vars.invoiceNumber ? String(vars.invoiceNumber) : null;
       return {
-        subject: `Recibo de pago — SellAlleS${vars.paidUntil ? ` (hasta ${fmtFecha(vars.paidUntil)})` : ''}`,
-        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nRecibimos tu pago de ${fmtMoneda(vars.amount)} para ${vars.companyName ?? 'tu empresa'}.${vars.paidUntil ? ` Tu suscripción queda cubierta hasta el ${fmtFecha(vars.paidUntil)}.` : ''}\n\nEquipo SellAlleS`,
-        html: envolver('Recibo de pago', `
+        subject: factura
+          ? `Factura No. ${factura} — SellAlleS`
+          : `Recibo de pago — SellAlleS${vars.paidUntil ? ` (hasta ${fmtFecha(vars.paidUntil)})` : ''}`,
+        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nRecibimos tu pago de ${fmtMoneda(vars.amount)} para ${vars.companyName ?? 'tu empresa'}.${vars.paidUntil ? ` Tu suscripción queda cubierta hasta el ${fmtFecha(vars.paidUntil)}.` : ''}${factura ? `\n\nTe adjuntamos la factura No. ${factura} en PDF.` : ''}\n\nEquipo SellAlleS`,
+        html: envolver(factura ? `Factura No. ${factura}` : 'Recibo de pago', `
           <p>Hola${nombre},</p>
           <p>Recibimos tu pago de suscripción para <strong>${empresa}</strong>.</p>
+          ${factura ? `<p>Te adjuntamos la factura <strong>No. ${esc(factura)}</strong> en PDF. También la puedes descargar cuando quieras desde <strong>Mi Suscripción</strong>.</p>` : ''}
           <div style="background:#F9FAFB;padding:15px;border-radius:5px;margin:20px 0;">
+            ${factura ? `<p style="margin:0 0 8px 0;"><strong>Factura:</strong> No. ${esc(factura)}</p>` : ''}
             <p style="margin:0 0 8px 0;"><strong>Monto:</strong> ${esc(fmtMoneda(vars.amount))}</p>
             ${vars.method ? `<p style="margin:0 0 8px 0;"><strong>Método:</strong> ${esc(vars.method)}</p>` : ''}
             ${vars.paidAt ? `<p style="margin:0 0 8px 0;"><strong>Fecha:</strong> ${esc(fmtFecha(vars.paidAt))}</p>` : ''}
             ${vars.paidUntil ? `<p style="margin:0;"><strong>Cubre hasta:</strong> ${esc(fmtFecha(vars.paidUntil))}</p>` : ''}
           </div>`, c),
       };
+    }
   }
 }
 
@@ -228,6 +241,22 @@ Deno.serve(async (req) => {
     if (!template || !validas.includes(template)) return json(400, { error: 'Plantilla no reconocida.' });
     if (!to || !to.includes('@')) return json(400, { error: 'Destinatario inválido.' });
     if (!dedupeKey) return json(400, { error: 'Falta dedupeKey.' });
+
+    // Adjunto opcional: hoy solo la factura de suscripción, un PDF de pocos KB
+    // armado en el navegador. El tope deja aire de sobra y a la vez impide usar
+    // esto para mandar archivos cualquiera.
+    let attachments: { filename: string; content: string }[] | undefined;
+    if (body?.attachment) {
+      const filename = String(body.attachment.filename ?? '').trim();
+      const content = String(body.attachment.content ?? '');
+      const valido =
+        /^[\w.-]{1,80}\.pdf$/i.test(filename) &&
+        content.length > 0 &&
+        content.length <= 2_000_000 &&
+        /^[A-Za-z0-9+/]+={0,2}$/.test(content);
+      if (!valido) return json(400, { error: 'Adjunto inválido: se espera un PDF en base64.' });
+      attachments = [{ filename, content }];
+    }
 
     // No insistirle a una dirección que ya rebotó: cada rebote extra empeora la
     // reputación del dominio y termina afectando hasta los correos de auth.
@@ -285,7 +314,7 @@ Deno.serve(async (req) => {
     if (!apiKey) return json(500, { error: 'Falta RESEND_API_KEY.' });
     const from = Deno.env.get('RESEND_FROM_EMAIL') ?? 'SellAlleS <soporte@sellalles.com>';
 
-    const { subject, html, text } = render(template, vars, contacto);
+    const { subject, html, text } = render(template, vars, contacto, !!attachments);
 
     try {
       const resp = await fetch('https://api.resend.com/emails', {
@@ -297,6 +326,7 @@ Deno.serve(async (req) => {
           subject,
           html,
           text,
+          ...(attachments ? { attachments } : {}),
           ...(contacto.emailEnabled && contacto.email ? { reply_to: contacto.email } : {}),
         }),
       });
