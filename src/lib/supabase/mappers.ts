@@ -725,5 +725,26 @@ export const rowToSubscriptionPayment = (r: any): SubscriptionPayment => ({
   notes: r.notes ?? undefined,
   recordedByName: r.recorded_by_name ?? undefined,
   createdAt: new Date(r.created_at),
+  invoiceNumber: r.invoice_number ?? undefined,
+  invoiceIssuer: r.invoice_issuer
+    ? {
+        legalName: r.invoice_issuer.legal_name ?? 'SellAlleS',
+        rnc: r.invoice_issuer.rnc ?? undefined,
+        address: r.invoice_issuer.address ?? undefined,
+        phone: r.invoice_issuer.phone ?? undefined,
+        email: r.invoice_issuer.email ?? undefined,
+        notes: r.invoice_issuer.notes ?? undefined,
+      }
+    : undefined,
+  invoiceCustomer: r.invoice_customer
+    ? {
+        name: r.invoice_customer.name ?? '',
+        rnc: r.invoice_customer.rnc ?? undefined,
+        address: r.invoice_customer.address ?? undefined,
+        phone: r.invoice_customer.phone ?? undefined,
+        email: r.invoice_customer.email ?? undefined,
+      }
+    : undefined,
+  invoiceItbis: Number(r.invoice_itbis ?? 0),
 });
 

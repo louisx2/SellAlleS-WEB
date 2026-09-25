@@ -4,22 +4,18 @@ import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { supabase } from '@/lib/supabase/client';
 import { rowToSubscriptionPayment } from '@/lib/supabase/mappers';
 import type { SubscriptionPayment } from '@/lib/types';
 import { useAuth } from '@/context/auth-provider';
+import { useToast } from '@/hooks/use-toast';
 import { usePlatformSettings } from '@/context/platform-settings-provider';
 import { waLink } from '@/lib/support-contact';
 import { formatCurrency } from '@/lib/utils';
-import { CheckCircle2, Clock, AlertTriangle } from 'lucide-react';
-
-const METHOD_LABEL: Record<string, string> = {
-  transfer: 'Transferencia',
-  cash: 'Efectivo',
-  card: 'Tarjeta',
-  other: 'Otro',
-};
+import { METODO_DE_PAGO, codigoDeFactura, descargarFactura } from '@/lib/subscription-invoice';
+import { CheckCircle2, Clock, AlertTriangle, Download, Loader2 } from 'lucide-react';
 
 function fmtDate(s?: string) {
   if (!s) return '—';
@@ -29,10 +25,23 @@ function fmtDate(s?: string) {
 export default function SuscripcionPage() {
   const { appUser } = useAuth();
   const { support } = usePlatformSettings();
+  const { toast } = useToast();
   const activationWaLink = waLink(support, 'Hola, quiero activar mi cuenta de SellAlleS');
   const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
   const [payments, setPayments] = useState<SubscriptionPayment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [descargando, setDescargando] = useState<string | null>(null);
+
+  const descargar = async (pago: SubscriptionPayment) => {
+    setDescargando(pago.id);
+    try {
+      await descargarFactura(pago);
+    } catch (err: any) {
+      toast({ title: 'No se pudo generar la factura', description: err?.message ?? 'Error generando el PDF.', variant: 'destructive' });
+    } finally {
+      setDescargando(null);
+    }
+  };
 
   const load = useCallback(async () => {
     if (!activeCompanyId) { setPayments([]); setLoading(false); return; }
@@ -150,6 +159,7 @@ export default function SuscripcionPage() {
                       <TableHead>Referencia</TableHead>
                       <TableHead>Período</TableHead>
                       <TableHead>Plan</TableHead>
+                      <TableHead>Factura</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -157,12 +167,26 @@ export default function SuscripcionPage() {
                       <TableRow key={p.id}>
                         <TableCell className="whitespace-nowrap">{fmtDate(p.paidAt)}</TableCell>
                         <TableCell className="text-right font-medium">{formatCurrency(p.amount)}</TableCell>
-                        <TableCell>{METHOD_LABEL[p.method] ?? p.method}</TableCell>
+                        <TableCell>{METODO_DE_PAGO[p.method] ?? p.method}</TableCell>
                         <TableCell className="text-muted-foreground">{p.reference || '—'}</TableCell>
                         <TableCell className="whitespace-nowrap text-muted-foreground">
                           {p.periodStart || p.periodEnd ? `${fmtDate(p.periodStart)} – ${fmtDate(p.periodEnd)}` : '—'}
                         </TableCell>
                         <TableCell className="text-muted-foreground">{p.planName || '—'}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {p.invoiceNumber != null ? (
+                            <Button
+                              variant="ghost" size="sm" className="h-8 px-2"
+                              disabled={descargando !== null} onClick={() => descargar(p)}
+                              title="Descargar la factura en PDF"
+                            >
+                              {descargando === p.id
+                                ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                                : <Download className="mr-1.5 h-4 w-4" />}
+                              <span className="font-mono text-xs">{codigoDeFactura(p)}</span>
+                            </Button>
+                          ) : '—'}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

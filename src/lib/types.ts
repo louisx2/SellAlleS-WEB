@@ -606,6 +606,30 @@ export type SubscriptionPayment = {
   notes?: string;
   recordedByName?: string;
   createdAt: Date;
+  /** Número de la factura del pago. Lo asigna la base al registrarlo. */
+  invoiceNumber?: number;
+  /** Datos de SellAlleS y de la empresa tal como estaban al emitir la factura. */
+  invoiceIssuer?: SubscriptionInvoiceIssuer;
+  invoiceCustomer?: SubscriptionInvoiceCustomer;
+  /** ITBIS incluido en `amount`; 0 si la factura no lo desglosa. */
+  invoiceItbis: number;
+};
+
+export type SubscriptionInvoiceIssuer = {
+  legalName: string;
+  rnc?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+};
+
+export type SubscriptionInvoiceCustomer = {
+  name: string;
+  rnc?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
 };
 
 export type Supplier = {
