@@ -381,6 +381,11 @@ congela en la fila lo que la factura imprime:
 - `invoice_itbis`: ITBIS incluido en `amount` (18% hacia adentro) si
   `invoice_itbis_included`; si no, 0.
 
+El consecutivo no sale en la factura ni en nada que vea la empresa: con una
+tarifa fija, número × tarifa diría cuánto factura SellAlleS. La factura muestra
+el código del pago (los 8 primeros caracteres del id, como el ticket del punto
+de venta); el consecutivo queda para el panel del super admin.
+
 El PDF no se guarda: `src/lib/subscription-invoice.ts` lo dibuja con jsPDF a
 partir de la fila, y por eso reimprimir una factura vieja da la misma factura.
 Al registrar el pago, el panel lo adjunta al correo `recibo-suscripcion` de

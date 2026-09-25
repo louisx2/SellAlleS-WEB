@@ -22,13 +22,21 @@ export const METODO_DE_PAGO: Record<SubscriptionPayment['method'], string> = {
   other: 'Otro',
 };
 
-/** 7 -> "000007". Pasado el millón crece solo. */
+/** Lo que ve el cliente: el mismo estilo que el ticket del punto de venta, los
+ *  8 primeros caracteres del id del pago. El consecutivo de la base no se
+ *  imprime: con una tarifa fija, número × tarifa le diría a cualquier cliente
+ *  cuánto factura SellAlleS. */
+export function codigoDeFactura(p: SubscriptionPayment): string {
+  return p.id.slice(0, 8).toUpperCase();
+}
+
+/** Consecutivo interno, 7 -> "000007". Solo para el panel del super admin. */
 export function numeroDeFactura(n: number): string {
   return String(n).padStart(6, '0');
 }
 
 export function nombreArchivoFactura(p: SubscriptionPayment): string {
-  return `factura-sellalles-${numeroDeFactura(p.invoiceNumber ?? 0)}.pdf`;
+  return `factura-sellalles-${codigoDeFactura(p)}.pdf`;
 }
 
 /** yyyy-mm-dd -> dd/mm/yyyy, sin pasar por Date: así no hay zona horaria que
@@ -103,7 +111,7 @@ async function crearFactura(p: SubscriptionPayment): Promise<jsPDF> {
 
   const emisor = p.invoiceIssuer ?? { legalName: 'SellAlleS' };
   const cliente = p.invoiceCustomer ?? { name: '' };
-  const numero = numeroDeFactura(p.invoiceNumber);
+  const numero = codigoDeFactura(p);
   const subtotal = Math.round((p.amount - p.invoiceItbis) * 100) / 100;
 
   doc.setProperties({

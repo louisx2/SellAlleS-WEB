@@ -14,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { usePlatformSettings } from '@/context/platform-settings-provider';
 import { waLink } from '@/lib/support-contact';
 import { formatCurrency } from '@/lib/utils';
-import { METODO_DE_PAGO, numeroDeFactura, descargarFactura } from '@/lib/subscription-invoice';
+import { METODO_DE_PAGO, codigoDeFactura, descargarFactura } from '@/lib/subscription-invoice';
 import { CheckCircle2, Clock, AlertTriangle, Download, Loader2 } from 'lucide-react';
 
 function fmtDate(s?: string) {
@@ -183,7 +183,7 @@ export default function SuscripcionPage() {
                               {descargando === p.id
                                 ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
                                 : <Download className="mr-1.5 h-4 w-4" />}
-                              <span className="font-mono text-xs">{numeroDeFactura(p.invoiceNumber)}</span>
+                              <span className="font-mono text-xs">{codigoDeFactura(p)}</span>
                             </Button>
                           ) : '—'}
                         </TableCell>

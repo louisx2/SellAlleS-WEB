@@ -17,7 +17,7 @@ import type { SubscriptionPayment, Company } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency } from '@/lib/utils';
 import {
-  METODO_DE_PAGO, numeroDeFactura, nombreArchivoFactura, facturaEnBase64, descargarFactura,
+  METODO_DE_PAGO, codigoDeFactura, numeroDeFactura, nombreArchivoFactura, facturaEnBase64, descargarFactura,
 } from '@/lib/subscription-invoice';
 import { Download, Loader2, Mail, PlusCircle } from 'lucide-react';
 
@@ -134,7 +134,7 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
           method: METODO_DE_PAGO[pago.method] ?? pago.method,
           paidAt: pago.paidAt,
           paidUntil: pago.periodEnd ?? null,
-          invoiceNumber: pago.invoiceNumber != null ? numeroDeFactura(pago.invoiceNumber) : null,
+          invoiceNumber: pago.invoiceNumber != null ? codigoDeFactura(pago) : null,
         },
       },
     });
@@ -196,7 +196,7 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
       });
       if (error) throw error;
       const pago = rowToSubscriptionPayment(fila);
-      const factura = pago.invoiceNumber != null ? ` Factura No. ${numeroDeFactura(pago.invoiceNumber)}.` : '';
+      const factura = pago.invoiceNumber != null ? ` Factura No. ${codigoDeFactura(pago)}.` : '';
       toast({
         title: 'Pago registrado',
         description: (activate ? `${company.name}: pago registrado y empresa activada.` : `${company.name}: pago registrado.`) + factura,
@@ -409,17 +409,21 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
                     <TableCell className="whitespace-nowrap">
                       {p.invoiceNumber != null ? (
                         <div className="flex items-center gap-1">
-                          <span className="font-mono text-xs">{numeroDeFactura(p.invoiceNumber)}</span>
+                          {/* El código es lo que ve la empresa; el consecutivo, solo aquí. */}
+                          <div className="leading-tight">
+                            <span className="font-mono text-xs">{codigoDeFactura(p)}</span>
+                            <div className="text-[10px] text-muted-foreground">interno {numeroDeFactura(p.invoiceNumber)}</div>
+                          </div>
                           <Button
                             type="button" variant="ghost" size="icon" className="h-7 w-7"
-                            title="Descargar factura" aria-label={`Descargar factura ${numeroDeFactura(p.invoiceNumber)}`}
+                            title="Descargar factura" aria-label={`Descargar factura ${codigoDeFactura(p)}`}
                             disabled={ocupado !== null} onClick={() => descargar(p)}
                           >
                             {ocupado === `${p.id}:descargar` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                           </Button>
                           <Button
                             type="button" variant="ghost" size="icon" className="h-7 w-7"
-                            title="Reenviar factura por correo" aria-label={`Reenviar factura ${numeroDeFactura(p.invoiceNumber)}`}
+                            title="Reenviar factura por correo" aria-label={`Reenviar factura ${codigoDeFactura(p)}`}
                             disabled={ocupado !== null} onClick={() => reenviar(p)}
                           >
                             {ocupado === `${p.id}:reenviar` ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
