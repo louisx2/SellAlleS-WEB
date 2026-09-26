@@ -160,8 +160,8 @@ export default function CobrosPage() {
     <div className="max-w-6xl mx-auto">
       <PageHeader title="Cobros" />
       <p className="-mt-4 mb-6 text-sm text-muted-foreground">
-        Quién está al día con SellAlleS. Cada sucursal activa paga su cuota por adelantado cada mes desde que se creó
-        (o desde que se creó la empresa, si es más reciente); a eso se le resta todo lo pagado.
+        Quién está al día con SellAlleS. Cada sucursal activa paga su cuota por adelantado cada mes desde el día en
+        que se creó, aunque después se haya movido de empresa; a eso se le resta todo lo pagado.
       </p>
 
       {/* Resumen: una tarjeta por color. Tocarla deja solo ese grupo; tocarla

@@ -138,8 +138,10 @@ export default function SuscripcionPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Historial de pagos</CardTitle>
-            <CardDescription>Pagos de tu suscripción registrados por SellAlleS.</CardDescription>
+            <CardTitle className="text-base">Historial de pagos y facturas</CardTitle>
+            <CardDescription>
+              Pagos de tu suscripción registrados por SellAlleS. Cada uno tiene su factura, que puedes descargar en PDF.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -149,7 +151,41 @@ export default function SuscripcionPage() {
                 Aún no hay pagos registrados. Cuando pagues por transferencia y lo confirmemos, aparecerá aquí.
               </p>
             ) : (
-              <div className="overflow-x-auto">
+              <>
+              {/* Celular: una tarjeta por pago, con la factura a la vista. En la
+                  tabla quedaba en la última columna, fuera de la pantalla. */}
+              <div className="space-y-3 md:hidden">
+                {payments.map((p) => (
+                  <div key={p.id} className="rounded-lg border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{formatCurrency(p.amount)}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {fmtDate(p.paidAt)} · {METODO_DE_PAGO[p.method] ?? p.method}{p.planName ? ` · ${p.planName}` : ''}
+                        </p>
+                        {(p.periodStart || p.periodEnd) && (
+                          <p className="text-xs text-muted-foreground">Cubre {fmtDate(p.periodStart)} – {fmtDate(p.periodEnd)}</p>
+                        )}
+                      </div>
+                      {p.invoiceNumber != null && (
+                        <span className="font-mono text-xs text-muted-foreground">{codigoDeFactura(p)}</span>
+                      )}
+                    </div>
+                    {p.invoiceNumber != null && (
+                      <Button
+                        variant="outline" size="sm" className="mt-3 w-full"
+                        disabled={descargando !== null} onClick={() => descargar(p)}
+                      >
+                        {descargando === p.id
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <Download className="mr-2 h-4 w-4" />}
+                        Descargar factura (PDF)
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -175,16 +211,19 @@ export default function SuscripcionPage() {
                         <TableCell className="text-muted-foreground">{p.planName || '—'}</TableCell>
                         <TableCell className="whitespace-nowrap">
                           {p.invoiceNumber != null ? (
-                            <Button
-                              variant="ghost" size="sm" className="h-8 px-2"
-                              disabled={descargando !== null} onClick={() => descargar(p)}
-                              title="Descargar la factura en PDF"
-                            >
-                              {descargando === p.id
-                                ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                                : <Download className="mr-1.5 h-4 w-4" />}
-                              <span className="font-mono text-xs">{codigoDeFactura(p)}</span>
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs text-muted-foreground">{codigoDeFactura(p)}</span>
+                              <Button
+                                variant="outline" size="sm" className="h-8"
+                                disabled={descargando !== null} onClick={() => descargar(p)}
+                                title="Descargar la factura en PDF"
+                              >
+                                {descargando === p.id
+                                  ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                                  : <Download className="mr-1.5 h-4 w-4" />}
+                                PDF
+                              </Button>
+                            </div>
                           ) : '—'}
                         </TableCell>
                       </TableRow>
@@ -192,6 +231,7 @@ export default function SuscripcionPage() {
                   </TableBody>
                 </Table>
               </div>
+              </>
             )}
           </CardContent>
         </Card>

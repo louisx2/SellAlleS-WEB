@@ -5,11 +5,12 @@
 // inicio, y a lo cargado se le resta todo lo pagado (subscription_payments).
 // Lo que falta es lo que debe; los pagos se aplican a las cuotas más viejas.
 //
-// La fecha de inicio de una sucursal es la más reciente entre la creación de
-// la empresa y la de la sucursal: una sucursal que se agrega después empieza a
-// pagar desde que se agregó, y una que se pasó de otra empresa (Michelle Auto
-// Service salió de Pujols) empieza con la empresa nueva. Si la empresa tuvo
-// prueba, se cobra desde el día siguiente a que terminó.
+// Cada sucursal se cobra desde que se creó, aunque después se haya movido de
+// empresa: Michelle Auto Service nació el 16/7 como sucursal de Pujols Group,
+// se separó como empresa el 24/8, y su primer mes es el que empezó el 16/7.
+// Si la empresa tuvo prueba, se cobra desde el día siguiente a que terminó.
+// La fecha de la empresa solo manda cuando la cuenta es de la empresa entera
+// (plan a medida, o sin sucursales activas).
 //
 // La tarifa es la de hoy del plan (ver subscription-pricing.ts) y cuentan las
 // sucursales activas hoy: no hay historial de precios ni de desactivaciones.
@@ -198,15 +199,15 @@ export function cobroDeEmpresa(
   if (mensual <= 0) return { ...base, estado: 'sin_tarifa' };
 
   // ── Cuotas ──
-  let inicioEmpresa = fechaLocal(company.created_at);
-  if (company.trial_ends_at) inicioEmpresa = mayor(inicioEmpresa, sumarDias(fechaLocal(company.trial_ends_at), 1));
+  const finPrueba = company.trial_ends_at ? sumarDias(fechaLocal(company.trial_ends_at), 1) : null;
+  const inicioEmpresa = mayor(fechaLocal(company.created_at), finPrueba ?? '');
 
   const definiciones: { branchId: string | null; nombre: string; desde: string; cuota: number }[] =
     tarifaPorSucursal != null && activas.length > 0
       ? activas.map((b) => ({
           branchId: b.id,
           nombre: b.name,
-          desde: mayor(inicioEmpresa, b.created_at ? fechaLocal(b.created_at) : inicioEmpresa),
+          desde: b.created_at ? mayor(fechaLocal(b.created_at), finPrueba ?? '') : inicioEmpresa,
           cuota: tarifaPorSucursal * meses,
         }))
       : [{ branchId: null, nombre: 'Toda la empresa', desde: inicioEmpresa, cuota: montoPeriodo }];
