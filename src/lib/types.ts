@@ -198,7 +198,8 @@ export type Company = {
   business_type?: string | null;
   max_users?: number;
   // max_users por sucursal: null = sin límite (el tope de la empresa sigue aplicando aparte).
-  branches?: { id: string; name: string; location: string | null; is_active: boolean; max_users?: number | null; created_at?: string }[];
+  // cuota_mensual: precio acordado de la sucursal (null = la tarifa del plan).
+  branches?: { id: string; name: string; location: string | null; is_active: boolean; max_users?: number | null; created_at?: string; cuota_mensual?: number | string | null }[];
 };
 
 export type PermissionAction = 'view' | 'create' | 'edit' | 'delete';

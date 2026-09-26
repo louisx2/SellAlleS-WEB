@@ -31,7 +31,8 @@ export default function PlatformDashboardPage() {
   const [profiles, setProfiles] = useState<{ id: string; created_at: string; company_id: string | null }[]>([]);
   const [platformSales, setPlatformSales] = useState<PlatformSale[]>([]);
   // Sucursales activas por empresa: el plan se cobra por sucursal.
-  const [activeBranches, setActiveBranches] = useState<Record<string, number>>({});
+  // Precio propio de cada sucursal activa (null = la tarifa del plan).
+  const [activeBranches, setActiveBranches] = useState<Record<string, (number | null)[]>>({});
   const [dashboardMode, setDashboardMode] = useState<'real' | 'demo' | 'all'>('real');
 
   const load = useCallback(async () => {
@@ -53,7 +54,7 @@ export default function PlatformDashboardPage() {
       supabase.from('profiles').select('id, created_at, company_id'),
       // RLS: el super admin ve las ventas de todos los tenants.
       supabase.from('sales').select('company_id, total, created_at').gte('created_at', thirtyDaysAgo.toISOString()),
-      supabase.from('branches').select('company_id').eq('is_active', true),
+      supabase.from('branches').select('company_id, cuota_mensual').eq('is_active', true),
     ]);
 
     if (comps) setCompanies(comps as Company[]);
@@ -67,9 +68,11 @@ export default function PlatformDashboardPage() {
       setProfiles(profs as any[]);
     }
     if (brs) {
-      const conteo: Record<string, number> = {};
-      (brs as { company_id: string }[]).forEach((b) => { conteo[b.company_id] = (conteo[b.company_id] ?? 0) + 1; });
-      setActiveBranches(conteo);
+      const precios: Record<string, (number | null)[]> = {};
+      (brs as { company_id: string; cuota_mensual: number | string | null }[]).forEach((b) => {
+        (precios[b.company_id] ??= []).push(b.cuota_mensual != null ? Number(b.cuota_mensual) : null);
+      });
+      setActiveBranches(precios);
     }
     if (sls) setPlatformSales((sls as any[]).map((s) => ({ ...s, total: Number(s.total) })));
   }, []);
@@ -132,7 +135,7 @@ export default function PlatformDashboardPage() {
     if (c.status === 'active') {
       const sub = subs[c.id];
       const plan = plans.find(p => p.id === sub?.plan_id);
-      const ingreso = companyMonthlyRevenue(plan, sub, activeBranches[c.id] ?? 0);
+      const ingreso = companyMonthlyRevenue(plan, sub, activeBranches[c.id] ?? []);
       if (ingreso > 0) payingCompanies += 1;
       projectedMRR += ingreso;
     }

@@ -37,6 +37,9 @@ interface PlanRates {
   customMonthlyPrice: number | null;
   /** La tarifa del plan se cobra por cada sucursal activa. */
   activeBranches: number;
+  /** Lo que paga al mes cuando alguna sucursal tiene precio propio: entonces
+   *  no es tarifa × sucursales, y el botón anual no aplica. */
+  mensualReal?: number;
 }
 
 interface Props {
@@ -258,7 +261,18 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
                     </Button>
                   ) : (
                     <>
-                      {planRates.monthlyPrice != null && (
+                      {planRates.mensualReal != null ? (
+                        <Button
+                          type="button" variant="outline" size="sm"
+                          onClick={() => {
+                            setAmount(planRates.mensualReal as number);
+                            const base = company?.paid_until && company.paid_until >= today() ? company.paid_until : today();
+                            setPeriodStart(base); setPeriodEnd(addMonths(base, 1));
+                          }}
+                        >
+                          Mensual ({formatCurrency(planRates.mensualReal)}, con precios especiales)
+                        </Button>
+                      ) : planRates.monthlyPrice != null && (
                         <Button
                           type="button" variant="outline" size="sm"
                           onClick={() => {
@@ -270,7 +284,7 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
                           Mensual ({formatCurrency(planRates.monthlyPrice)}{porSucursal})
                         </Button>
                       )}
-                      {planRates.annualPricePerMonth != null && (
+                      {planRates.annualPricePerMonth != null && planRates.mensualReal == null && (
                         <Button
                           type="button" variant="outline" size="sm"
                           onClick={() => {

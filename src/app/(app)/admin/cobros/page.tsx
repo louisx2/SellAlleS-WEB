@@ -13,7 +13,8 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { SubscriptionPaymentsDialog } from '@/components/admin/subscription-payments-dialog';
-import { COLOR, FilaEmpresa, type Fila, type Plan, type Sub, type UltimoPago } from '@/components/admin/cobros-fila';
+import { COLOR, FilaEmpresa, type Fila, type Plan, type PrecioSucursal, type Sub, type UltimoPago } from '@/components/admin/cobros-fila';
+import { PrecioSucursalDialog } from '@/components/admin/precio-sucursal-dialog';
 import {
   BandejaPorConfirmar, ConfirmarComprobanteDialog, RechazarComprobanteDialog,
 } from '@/components/admin/comprobantes-por-confirmar';
@@ -46,6 +47,7 @@ export default function CobrosPage() {
   const [rechazando, setRechazando] = useState<ReportePago | null>(null);
   const [soloVentas, setSoloVentas] = useState<{ company: Company; activar: boolean } | null>(null);
   const [cambiandoSoloVentas, setCambiandoSoloVentas] = useState(false);
+  const [editandoPrecio, setEditandoPrecio] = useState<PrecioSucursal | null>(null);
 
   const [tipo, setTipo] = useState<'real' | 'demo' | 'todas'>('real');
   const [grupo, setGrupo] = useState<GrupoCobro | 'todos'>('todos');
@@ -66,7 +68,7 @@ export default function CobrosPage() {
       { data: reps },
     ] = await Promise.all([
       supabase.from('companies')
-        .select('*, branches!branches_company_id_fkey(id, name, location, is_active, max_users, created_at)')
+        .select('*, branches!branches_company_id_fkey(id, name, location, is_active, max_users, created_at, cuota_mensual)')
         .order('name'),
       supabase.from('plans').select('id, name, monthly_price, annual_price_per_month'),
       supabase.from('subscriptions').select('company_id, plan_id, custom_monthly_price, billing_cycle'),
@@ -305,6 +307,7 @@ export default function CobrosPage() {
                       onToggle={() => toggle(f.company.id)}
                       onPagar={() => setPagosDe(f.company)}
                       onSoloVentas={(activar) => setSoloVentas({ company: f.company, activar })}
+                      onEditarPrecio={setEditandoPrecio}
                     />
                   ))}
                 </div>
@@ -322,11 +325,15 @@ export default function CobrosPage() {
           annualPricePerMonth: plans.find((p) => p.id === subs[pagosDe.id]?.plan_id)?.annual_price_per_month ?? null,
           customMonthlyPrice: subs[pagosDe.id]?.custom_monthly_price ?? null,
           activeBranches: (pagosDe.branches ?? []).filter((b) => b.is_active).length,
+          // Con precios por sucursal, lo del mes sale de la cuenta, no de tarifa × sucursales.
+          mensualReal: cuentas[pagosDe.id]?.preciosEspeciales ? cuentas[pagosDe.id].mensual : undefined,
         } : undefined}
         pendiente={pagosDe ? filas.find((f) => f.company.id === pagosDe.id)?.cobro.pagarPendiente ?? null : null}
         onOpenChange={(o) => { if (!o) setPagosDe(null); }}
         onRecorded={load}
       />
+
+      <PrecioSucursalDialog sucursal={editandoPrecio} onClose={() => setEditandoPrecio(null)} onDone={load} />
 
       <ConfirmarComprobanteDialog
         reporte={confirmando}

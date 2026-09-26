@@ -131,6 +131,8 @@ export interface CuentaSucursal {
   pendientes: number;
   /** Fecha de su cuota más vieja sin cubrir. */
   debeDesde: string | null;
+  /** Paga un precio acordado (branches.cuota_mensual), no la tarifa del plan. */
+  precioEspecial: boolean;
 }
 
 export interface CobroEmpresa {
@@ -171,6 +173,8 @@ export interface CobroEmpresa {
    *  sin estar ya en solo ventas. Es solo una sugerencia. */
   sugerirSoloVentas: boolean;
   soloVentasSugerirDias: number;
+  /** Cuántas sucursales activas tienen precio propio. */
+  preciosEspeciales: number;
 }
 
 const num = (v: unknown, def = 0): number => {
@@ -203,6 +207,7 @@ export function cuentaDesdeJson(j: any): CobroEmpresa {
       proximaCuota: texto(c.proxima_cuota),
       pendientes: num(c.pendientes),
       debeDesde: texto(c.debe_desde),
+      precioEspecial: !!c.precio_especial,
     })),
     cargado: num(j?.cargado),
     pagado: num(j?.pagado),
@@ -217,6 +222,7 @@ export function cuentaDesdeJson(j: any): CobroEmpresa {
     soloVentasDesde: texto(j?.solo_ventas_desde),
     sugerirSoloVentas: !!j?.sugerir_solo_ventas,
     soloVentasSugerirDias: num(j?.solo_ventas_sugerir_dias, 10),
+    preciosEspeciales: num(j?.precios_especiales),
   };
 }
 

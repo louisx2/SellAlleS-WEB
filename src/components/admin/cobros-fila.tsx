@@ -2,7 +2,7 @@
 
 // Una empresa en Cobros (/admin/cobros), pintada con el color de su grupo.
 
-import { ChevronDown, ChevronRight, Clock, Lock, LockOpen, PlusCircle, Store } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, Lock, LockOpen, Pencil, PlusCircle, Store } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -92,13 +92,18 @@ export function detalleEstado(c: CobroEmpresa): string | null {
   }
 }
 
-export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas }: {
+/** Una sucursal a la que se le cambia el precio desde Cobros. */
+export interface PrecioSucursal { id: string; nombre: string; precio: number | null; tarifa: number }
+
+export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas, onEditarPrecio }: {
   fila: Fila;
   abierta: boolean;
   onToggle: () => void;
   onPagar: () => void;
   /** Pone o quita el modo solo ventas (siempre a mano, con confirmación). */
   onSoloVentas: (activar: boolean) => void;
+  /** Cambiar el precio propio de una sucursal (solo con planes por sucursal). */
+  onEditarPrecio: (sucursal: PrecioSucursal) => void;
 }) {
   const { company, plan, cobro, ultimoPago, grupo } = fila;
   const color = COLOR[grupo];
@@ -106,6 +111,16 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas }: 
   const inactivas = (company.branches ?? []).filter((b) => !b.is_active).length;
   const debe = cobro.saldo > 0 && grupo === 'atrasados';
   const seCobra = cobro.cuentas.length > 0;
+  // El precio propio de cada sucursal, tal como está guardado (null = tarifa).
+  const precioDe = (branchId: string): number | null => {
+    const v = (company.branches ?? []).find((b) => b.id === branchId)?.cuota_mensual;
+    return v != null ? Number(v) : null;
+  };
+  const tarifa = cobro.tarifaPorSucursal;
+  // Sucursales activas que no generan cuotas porque su precio es 0.
+  const gratis = tarifa != null
+    ? (company.branches ?? []).filter((b) => b.is_active && !cobro.cuentas.some((c) => c.branchId === b.id))
+    : [];
 
   return (
     <Card className={cn('overflow-hidden border-l-[6px]', color.franja, color.fondo)}>
@@ -157,7 +172,13 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas }: 
             <div>
               <p className="text-[11px] uppercase text-muted-foreground">{cobro.ciclo === 'annual' ? 'Por año' : 'Por mes'}</p>
               <p className="font-semibold">{cobro.montoPeriodo > 0 ? formatCurrency(cobro.montoPeriodo) : '—'}</p>
-              {cobro.tarifaPorSucursal != null && cobro.tarifaPorSucursal > 0 && cobro.sucursalesActivas > 1 && (
+              {cobro.preciosEspeciales > 0 ? (
+                <p className="text-[11px] text-violet-700 dark:text-violet-400">
+                  {cobro.preciosEspeciales === cobro.sucursalesActivas
+                    ? 'precio especial'
+                    : `${cobro.preciosEspeciales} con precio especial`}
+                </p>
+              ) : cobro.tarifaPorSucursal != null && cobro.tarifaPorSucursal > 0 && cobro.sucursalesActivas > 1 && (
                 <p className="text-[11px] text-muted-foreground">
                   {formatCurrency(cobro.tarifaPorSucursal)} × {cobro.sucursalesActivas}{cobro.ciclo === 'annual' ? ' × 12' : ''}
                 </p>
@@ -220,12 +241,49 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas }: 
                       <span className="flex min-w-0 items-center gap-2">
                         <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{c.nombre}</span>
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        se cobra desde {fmtDate(c.desde)} · {cuotas(c.cuotas)} de {formatCurrency(c.cuota)} = {formatCurrency(c.cargado)} · próxima {fmtDate(c.proximaCuota)}
-                        {c.pendientes > 0 && (
-                          <span className={cn('font-medium', color.texto)}> · debe {cuotas(c.pendientes)} desde {fmtDate(c.debeDesde)}</span>
+                        {c.precioEspecial && (
+                          <Badge variant="outline" className="border-violet-300 bg-violet-50 px-1.5 py-0 text-[10px] text-violet-800 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300">
+                            precio especial
+                          </Badge>
                         )}
+                      </span>
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span>
+                          se cobra desde {fmtDate(c.desde)} · {cuotas(c.cuotas)} de {formatCurrency(c.cuota)} = {formatCurrency(c.cargado)} · próxima {fmtDate(c.proximaCuota)}
+                          {c.pendientes > 0 && (
+                            <span className={cn('font-medium', color.texto)}> · debe {cuotas(c.pendientes)} desde {fmtDate(c.debeDesde)}</span>
+                          )}
+                        </span>
+                        {tarifa != null && c.branchId && (
+                          <Button
+                            type="button" size="icon" variant="ghost" className="h-6 w-6 shrink-0"
+                            title="Cambiar el precio de esta sucursal" aria-label={`Cambiar el precio de ${c.nombre}`}
+                            onClick={() => onEditarPrecio({ id: c.branchId!, nombre: c.nombre, precio: precioDe(c.branchId!), tarifa })}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                  {gratis.map((b) => (
+                    <li key={b.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 py-1.5">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{b.name}</span>
+                        <Badge variant="outline" className="border-violet-300 bg-violet-50 px-1.5 py-0 text-[10px] text-violet-800 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300">
+                          precio especial
+                        </Badge>
+                      </span>
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span>no se cobra (precio RD$0)</span>
+                        <Button
+                          type="button" size="icon" variant="ghost" className="h-6 w-6 shrink-0"
+                          title="Cambiar el precio de esta sucursal" aria-label={`Cambiar el precio de ${b.name}`}
+                          onClick={() => onEditarPrecio({ id: b.id, nombre: b.name, precio: precioDe(b.id), tarifa: tarifa! })}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
                       </span>
                     </li>
                   ))}
