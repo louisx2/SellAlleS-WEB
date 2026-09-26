@@ -29,6 +29,7 @@ export default function CobrosPage() {
   const [plans, setPlans] = useState<Plan[]>([]);
   const [subs, setSubs] = useState<Record<string, Sub>>({});
   const [ultimos, setUltimos] = useState<Record<string, UltimoPago>>({});
+  const [pagados, setPagados] = useState<Record<string, number>>({});
 
   const [tipo, setTipo] = useState<'real' | 'demo' | 'todas'>('real');
   const [grupo, setGrupo] = useState<GrupoCobro | 'todos'>('todos');
@@ -47,7 +48,7 @@ export default function CobrosPage() {
       { data: pagos },
     ] = await Promise.all([
       supabase.from('companies')
-        .select('*, branches!branches_company_id_fkey(id, name, location, is_active, max_users)')
+        .select('*, branches!branches_company_id_fkey(id, name, location, is_active, max_users, created_at)')
         .order('name'),
       supabase.from('plans').select('id, name, monthly_price, annual_price_per_month'),
       supabase.from('subscriptions').select('company_id, plan_id, custom_monthly_price, billing_cycle'),
@@ -70,12 +71,16 @@ export default function CobrosPage() {
       };
     });
     setSubs(mapaSubs);
-    // Vienen del más reciente al más viejo: el primero de cada empresa es el último pago.
+    // Vienen del más reciente al más viejo: el primero de cada empresa es el
+    // último pago. La suma de todos es lo que se descuenta de sus cuotas.
     const mapaUltimos: Record<string, UltimoPago> = {};
+    const mapaPagados: Record<string, number> = {};
     ((pagos ?? []) as any[]).forEach((p) => {
       if (!mapaUltimos[p.company_id]) mapaUltimos[p.company_id] = { paidAt: p.paid_at, amount: Number(p.amount) };
+      mapaPagados[p.company_id] = (mapaPagados[p.company_id] ?? 0) + Number(p.amount);
     });
     setUltimos(mapaUltimos);
+    setPagados(mapaPagados);
     setLoading(false);
   }, [toast]);
 
@@ -93,14 +98,14 @@ export default function CobrosPage() {
     .map((company) => {
       const sub = subs[company.id];
       const plan = plans.find((p) => p.id === sub?.plan_id);
-      const cobro = cobroDeEmpresa(company, plan, sub, hoy);
+      const cobro = cobroDeEmpresa(company, plan, sub, pagados[company.id] ?? 0, hoy);
       return { company, plan, sub, cobro, grupo: GRUPO_DE_ESTADO[cobro.estado], ultimoPago: ultimos[company.id] };
     })
     .sort((a, b) =>
       ESTADO_COBRO_ORDEN.indexOf(a.cobro.estado) - ESTADO_COBRO_ORDEN.indexOf(b.cobro.estado)
       || (a.cobro.dias ?? 0) - (b.cobro.dias ?? 0)
       || a.company.name.localeCompare(b.company.name, 'es')),
-  [companies, subs, plans, ultimos, tipo, hoy]);
+  [companies, subs, plans, ultimos, pagados, tipo, hoy]);
 
   const porGrupo = useMemo(() => {
     const m = {} as Record<GrupoCobro, Fila[]>;
@@ -113,9 +118,9 @@ export default function CobrosPage() {
     const fs = porGrupo[g];
     const suma = (sel: (f: Fila) => number) => fs.reduce((acc, f) => acc + sel(f), 0);
     switch (g) {
-      case 'atrasados': return fs.length ? `${formatCurrency(suma((f) => f.cobro.montoPeriodo))} por cobrar` : 'nadie atrasado';
-      case 'por_vencer': return `vencen en ${DIAS_AVISO} días o menos`;
-      case 'al_dia': return `${formatCurrency(suma((f) => f.cobro.mensual))}/mes cubiertos`;
+      case 'atrasados': return fs.length ? `deben ${formatCurrency(suma((f) => Math.max(f.cobro.saldo, 0)))}` : 'nadie atrasado';
+      case 'por_vencer': return `les toca pagar en ${DIAS_AVISO} días o menos`;
+      case 'al_dia': return fs.length ? `${formatCurrency(suma((f) => f.cobro.mensual))}/mes al corriente` : 'ninguna todavía';
       case 'prueba': {
         const vencidas = fs.filter((f) => f.cobro.estado === 'prueba_vencida').length;
         return vencidas ? `${vencidas} con la prueba terminada` : 'todas dentro del plazo';
@@ -155,7 +160,8 @@ export default function CobrosPage() {
     <div className="max-w-6xl mx-auto">
       <PageHeader title="Cobros" />
       <p className="-mt-4 mb-6 text-sm text-muted-foreground">
-        Quién está al día con SellAlleS. Se cobra por sucursal activa: el monto es la tarifa del plan por cada una.
+        Quién está al día con SellAlleS. Cada sucursal activa paga su cuota por adelantado cada mes desde que se creó
+        (o desde que se creó la empresa, si es más reciente); a eso se le resta todo lo pagado.
       </p>
 
       {/* Resumen: una tarjeta por color. Tocarla deja solo ese grupo; tocarla
@@ -249,6 +255,7 @@ export default function CobrosPage() {
           customMonthlyPrice: subs[pagosDe.id]?.custom_monthly_price ?? null,
           activeBranches: (pagosDe.branches ?? []).filter((b) => b.is_active).length,
         } : undefined}
+        pendiente={pagosDe ? filas.find((f) => f.company.id === pagosDe.id)?.cobro.pagarPendiente ?? null : null}
         onOpenChange={(o) => { if (!o) setPagosDe(null); }}
         onRecorded={load}
       />

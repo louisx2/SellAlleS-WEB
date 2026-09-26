@@ -20,9 +20,11 @@ import {
   METODO_DE_PAGO, codigoDeFactura, numeroDeFactura, nombreArchivoFactura, facturaEnBase64, descargarFactura,
 } from '@/lib/subscription-invoice';
 import { Download, Loader2, Mail, PlusCircle } from 'lucide-react';
+import { hoyLocal } from '@/lib/subscription-status';
 
 const fmtDate = (s?: string | null) => (s ? new Date(s + 'T00:00:00').toLocaleDateString('es-DO') : '—');
-const today = () => new Date().toISOString().slice(0, 10);
+// Fecha local: con toISOString, de noche en RD ya salía el día siguiente.
+const today = () => hoyLocal();
 // Suma meses a una fecha yyyy-mm-dd y devuelve yyyy-mm-dd.
 function addMonths(dateStr: string, months: number): string {
   const d = new Date(dateStr + 'T00:00:00');
@@ -46,9 +48,12 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   /** Se llama tras registrar un pago (para refrescar el listado de empresas). */
   onRecorded?: () => void;
+  /** Lo que debe según su cuenta (Cobros): el monto y el período que deja
+   *  cubierto si lo paga todo. Sin esto no se ofrece el botón. */
+  pendiente?: { monto: number; desde: string; hasta: string } | null;
 }
 
-export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates, onOpenChange, onRecorded }: Props) {
+export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates, onOpenChange, onRecorded, pendiente }: Props) {
   const { toast } = useToast();
   const [payments, setPayments] = useState<SubscriptionPayment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -245,6 +250,26 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
 
         {showForm && (
           <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border p-4">
+            {pendiente && pendiente.monto > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/40">
+                <div className="text-sm">
+                  <p className="font-medium text-red-700 dark:text-red-400">Debe {formatCurrency(pendiente.monto)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Cuotas desde el {fmtDate(pendiente.desde)}; pagándolo queda al día hasta el {fmtDate(pendiente.hasta)}.
+                  </p>
+                </div>
+                <Button
+                  type="button" size="sm" variant="outline"
+                  onClick={() => {
+                    setAmount(pendiente.monto);
+                    setPeriodStart(pendiente.desde);
+                    setPeriodEnd(pendiente.hasta);
+                  }}
+                >
+                  Pagar lo pendiente
+                </Button>
+              </div>
+            )}
             {(planRates?.monthlyPrice != null || planRates?.customMonthlyPrice != null) && (() => {
               const sucursales = Math.max(planRates.activeBranches, 1);
               const porSucursal = sucursales > 1 ? ` × ${sucursales} sucursales` : '';

@@ -24,7 +24,10 @@ export interface Fila {
   ultimoPago: UltimoPago | undefined;
 }
 
-const fmtDate = (s?: string | null) => (s ? new Date(`${s.slice(0, 10)}T00:00:00`).toLocaleDateString('es-DO') : '—');
+export const fmtDate = (s?: string | null) => (s ? new Date(`${s.slice(0, 10)}T00:00:00`).toLocaleDateString('es-DO') : '—');
+
+const cuotas = (n: number) => `${n} ${n === 1 ? 'cuota' : 'cuotas'}`;
+const enDias = (n: number) => `${n} ${n === 1 ? 'día' : 'días'}`;
 
 // Un color por grupo, el mismo en la tarjeta del resumen, el título de la
 // sección, la franja de cada empresa y su etiqueta: rojo atrasados, ámbar por
@@ -75,13 +78,14 @@ export const COLOR: Record<GrupoCobro, { franja: string; punto: string; fondo: s
 export function detalleEstado(c: CobroEmpresa): string | null {
   if (c.dias == null) return null;
   const n = Math.abs(c.dias);
-  const dias = `${n} ${n === 1 ? 'día' : 'días'}`;
   switch (c.estado) {
-    case 'vencida': return `venció hace ${dias} · en solo lectura`;
-    case 'prueba_vencida': return `terminó hace ${dias} · en solo lectura`;
-    case 'por_vencer': return c.dias === 0 ? 'vence hoy' : `vence en ${dias}`;
-    case 'prueba': return c.dias === 0 ? 'termina hoy' : `le quedan ${dias}`;
-    case 'al_dia': return `le quedan ${dias}`;
+    case 'atrasada':
+    case 'nunca_pago':
+      return `${cuotas(c.cuotasPendientes)} sin pagar · la más vieja hace ${enDias(n)}`;
+    case 'prueba_vencida': return `terminó hace ${enDias(n)} · en solo lectura`;
+    case 'por_vencer': return c.dias === 0 ? 'le toca pagar hoy' : `le toca pagar en ${enDias(n)}`;
+    case 'prueba': return c.dias === 0 ? 'termina hoy' : `le quedan ${enDias(n)}`;
+    case 'al_dia': return `próximo pago en ${enDias(n)}`;
     default: return null;
   }
 }
@@ -96,6 +100,8 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
   const color = COLOR[grupo];
   const detalle = detalleEstado(cobro);
   const inactivas = (company.branches ?? []).filter((b) => !b.is_active).length;
+  const debe = cobro.saldo > 0 && grupo === 'atrasados';
+  const seCobra = cobro.cuentas.length > 0;
 
   return (
     <Card className={cn('overflow-hidden border-l-[6px]', color.franja, color.fondo)}>
@@ -124,7 +130,7 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
             </div>
           </button>
 
-          <div className="grid grid-cols-3 gap-3 text-sm md:w-[420px] md:shrink-0">
+          <div className="grid grid-cols-3 gap-3 text-sm md:w-[440px] md:shrink-0">
             <div>
               <p className="text-[11px] uppercase text-muted-foreground">{cobro.ciclo === 'annual' ? 'Por año' : 'Por mes'}</p>
               <p className="font-semibold">{cobro.montoPeriodo > 0 ? formatCurrency(cobro.montoPeriodo) : '—'}</p>
@@ -134,10 +140,21 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
                 </p>
               )}
             </div>
-            <div>
-              <p className="text-[11px] uppercase text-muted-foreground">Pagado hasta</p>
-              <p className={cn('font-medium', grupo === 'atrasados' && color.texto)}>{fmtDate(company.paid_until)}</p>
-            </div>
+            {debe ? (
+              <div>
+                <p className="text-[11px] uppercase text-muted-foreground">Debe</p>
+                <p className={cn('font-bold', color.texto)}>{formatCurrency(cobro.saldo)}</p>
+                <p className="text-[11px] text-muted-foreground">desde {fmtDate(cobro.debeDesde)}</p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-[11px] uppercase text-muted-foreground">Próximo cobro</p>
+                <p className="font-medium">{fmtDate(cobro.proximoCobro)}</p>
+                {cobro.saldo < 0 && seCobra && (
+                  <p className="text-[11px] text-muted-foreground">{formatCurrency(-cobro.saldo)} a favor</p>
+                )}
+              </div>
+            )}
             <div>
               <p className="text-[11px] uppercase text-muted-foreground">Último pago</p>
               <p className="font-medium">{ultimoPago ? fmtDate(ultimoPago.paidAt) : '—'}</p>
@@ -153,34 +170,53 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
 
         {abierta && (
           <div className="border-t bg-background/60 px-3 py-2 text-sm">
-            <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Sucursales</p>
-            {(company.branches ?? []).length === 0 ? (
-              <p className="text-muted-foreground">Sin sucursales.</p>
-            ) : (
-              <ul className="divide-y">
-                {[...(company.branches ?? [])]
-                  .sort((a, b) => Number(b.is_active) - Number(a.is_active) || a.name.localeCompare(b.name, 'es'))
-                  .map((b) => (
-                    <li key={b.id} className="flex items-center justify-between gap-3 py-1.5">
+            {seCobra ? (
+              <>
+                <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Cuenta por sucursal</p>
+                <ul className="divide-y">
+                  {cobro.cuentas.map((c) => (
+                    <li key={c.branchId ?? 'empresa'} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 py-1.5">
                       <span className="flex min-w-0 items-center gap-2">
                         <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                        <span className={cn('truncate', !b.is_active && 'text-muted-foreground line-through')}>{b.name}</span>
+                        <span className="truncate">{c.nombre}</span>
                       </span>
-                      <span className="shrink-0 text-xs text-muted-foreground">
-                        {!b.is_active
-                          ? 'Inactiva · no se cobra'
-                          : cobro.tarifaPorSucursal != null && cobro.tarifaPorSucursal > 0
-                            ? `${formatCurrency(cobro.tarifaPorSucursal)}/mes`
-                            : 'Activa'}
+                      <span className="text-xs text-muted-foreground">
+                        se cobra desde {fmtDate(c.desde)} · {cuotas(c.cuotas)} de {formatCurrency(c.cuota)} = {formatCurrency(c.cargado)} · próxima {fmtDate(c.proximaCuota)}
                       </span>
                     </li>
                   ))}
-              </ul>
-            )}
-            {cobro.tarifaPorSucursal == null && cobro.mensual > 0 && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Plan a medida: {formatCurrency(cobro.mensual)}/mes acordado para toda la empresa, sin importar las sucursales.
-              </p>
+                </ul>
+                <div className="mt-2 flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-2 text-xs">
+                  <span>Cargado: <strong>{formatCurrency(cobro.cargado)}</strong></span>
+                  <span>Pagado: <strong>{formatCurrency(cobro.pagado)}</strong></span>
+                  <span className={cn(cobro.saldo > 0 && color.texto)}>
+                    {cobro.saldo > 0 ? 'Debe' : cobro.saldo < 0 ? 'A favor' : 'Saldo'}: <strong>{formatCurrency(Math.abs(cobro.saldo))}</strong>
+                  </span>
+                </div>
+                {inactivas > 0 && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Las sucursales inactivas no se cobran: {(company.branches ?? []).filter((b) => !b.is_active).map((b) => b.name).join(', ')}.
+                  </p>
+                )}
+                {cobro.tarifaPorSucursal == null && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Plan a medida: {formatCurrency(cobro.mensual)}/mes acordado para toda la empresa, sin importar las sucursales.
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Sucursales</p>
+                <ul className="divide-y">
+                  {(company.branches ?? []).map((b) => (
+                    <li key={b.id} className="flex items-center gap-2 py-1.5">
+                      <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className={cn('truncate', !b.is_active && 'text-muted-foreground line-through')}>{b.name}</span>
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-xs text-muted-foreground">No se le está cobrando: {ESTADO_COBRO_LABEL[cobro.estado].toLowerCase()}.</p>
+              </>
             )}
           </div>
         )}
