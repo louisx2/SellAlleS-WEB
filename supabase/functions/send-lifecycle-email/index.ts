@@ -48,7 +48,19 @@ type Template =
   | 'prueba-vencida'
   | 'cuenta-activada'
   | 'recibo-suscripcion'
-  | 'cobro-por-vencer';
+  | 'cobro-por-vencer'
+  | 'cuota-vencida'
+  | 'pago-rechazado'
+  | 'comprobante-recibido'
+  | 'resumen-cobros';
+
+// Plantillas que recibe el super admin, no una empresa: no llevan el bloque
+// de "contáctanos" de soporte, que sería escribirse a sí mismo.
+const PARA_LA_PLATAFORMA: Template[] = ['comprobante-recibido', 'resumen-cobros'];
+
+// Dirección de la app para los botones de los correos. Sin ella los correos
+// salen sin botón y dicen dónde está cada cosa en palabras.
+const APP_URL = (Deno.env.get('APP_URL') ?? '').replace(/\/+$/, '');
 
 interface Contacto {
   whatsappEnabled: boolean;
@@ -90,6 +102,41 @@ function bloqueContacto(c: Contacto): string {
   if (!partes.length) return '';
   return `<div style="margin:24px 0;">${partes.join(' &nbsp; ')}${c.hours ? `<p style="font-size:12px;color:#6B7280;margin-top:8px;">${esc(c.hours)}</p>` : ''}</div>`;
 }
+
+interface CuentaBancaria { bank?: string; type?: string; number?: string; holder?: string; holderId?: string | null; currency?: string }
+
+/** Las cuentas de SellAlleS para transferir, tal como se configuran en la
+ *  plataforma. Sin cuentas activas no se muestra nada. */
+function bloqueBancos(v: unknown): string {
+  const cuentas = Array.isArray(v) ? (v as CuentaBancaria[]) : [];
+  if (!cuentas.length) return '';
+  const filas = cuentas.map((a) => `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #E5E7EB;"><strong>${esc(a.bank)}</strong><br><span style="color:#6B7280;font-size:12px;">Cuenta de ${esc(a.type === 'corriente' ? 'cheques / corriente' : 'ahorro')}${a.currency && a.currency !== 'DOP' ? ` · ${esc(a.currency)}` : ''}</span></td>
+      <td style="padding:8px 10px;border-bottom:1px solid #E5E7EB;font-family:monospace;font-size:15px;">${esc(a.number)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #E5E7EB;font-size:13px;">${esc(a.holder)}${a.holderId ? `<br><span style="color:#6B7280;">${esc(a.holderId)}</span>` : ''}</td>
+    </tr>`).join('');
+  return `
+    <p style="margin-top:20px;"><strong>Cuentas para transferir:</strong></p>
+    <table style="width:100%;border-collapse:collapse;background:#F9FAFB;border-radius:5px;">${filas}</table>`;
+}
+
+function textoBancos(v: unknown): string {
+  const cuentas = Array.isArray(v) ? (v as CuentaBancaria[]) : [];
+  if (!cuentas.length) return '';
+  return '\n\nCuentas para transferir:\n' + cuentas
+    .map((a) => `- ${a.bank} (${a.type === 'corriente' ? 'corriente' : 'ahorro'}): ${a.number} a nombre de ${a.holder}${a.holderId ? `, ${a.holderId}` : ''}`)
+    .join('\n');
+}
+
+function boton(ruta: string, texto: string): string {
+  if (!APP_URL) return '';
+  return `<p style="margin:24px 0;"><a href="${esc(APP_URL + ruta)}" style="display:inline-block;background:#4F46E5;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none;font-weight:600;">${esc(texto)}</a></p>`;
+}
+
+const SIN_CONTACTO: Contacto = {
+  whatsappEnabled: false, whatsappNumber: null, whatsappLabel: null, emailEnabled: false, email: null, hours: null,
+};
 
 function envolver(titulo: string, cuerpo: string, contacto: Contacto): string {
   return `
@@ -159,16 +206,117 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto, 
       };
 
     case 'cobro-por-vencer': {
+      // Dos formas de llegar: la de antes (por paid_until) y la de ahora, por
+      // la cuenta de cada sucursal (dueDate + amount + bankAccounts).
       const dias = Number(vars.daysLeft ?? 0);
-      const cuando = dias === 1 ? 'mañana' : `en ${dias} días`;
+      const cuando = dias === 0 ? 'hoy' : dias === 1 ? 'mañana' : `en ${dias} días`;
+      const fecha = vars.dueDate ?? vars.paidUntil;
+      const monto = vars.amount != null ? fmtMoneda(vars.amount) : null;
       return {
-        subject: `Tu suscripción de SellAlleS vence ${cuando}`,
-        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nLa suscripción de ${vars.companyName ?? 'tu empresa'} vence ${cuando} (${fmtFecha(vars.paidUntil)}).\n\nPara renovarla, escríbenos y coordinamos la transferencia.\n\nEquipo SellAlleS`,
-        html: envolver(`Tu suscripción vence ${cuando}`, `
+        subject: `Tu cuota de SellAlleS vence ${cuando}`,
+        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nLa próxima cuota de ${vars.companyName ?? 'tu empresa'} vence ${cuando} (${fmtFecha(fecha)})${monto ? `: ${monto}` : ''}.\n\nCuando transfieras, sube el comprobante en Mi Suscripción y lo confirmamos.${textoBancos(vars.bankAccounts)}\n\nEquipo SellAlleS`,
+        html: envolver(`Tu cuota vence ${cuando}`, `
           <p>Hola${nombre},</p>
-          <p>La suscripción de <strong>${empresa}</strong> vence <strong>${esc(cuando)}</strong>${vars.paidUntil ? ` (${esc(fmtFecha(vars.paidUntil))})` : ''}.</p>
-          <p>Si vence sin renovar, vas a <strong>seguir viendo tus datos</strong>, pero no podrás registrar ventas ni modificar información hasta ponerte al día. Nada se borra.</p>
-          <p>Escríbenos y coordinamos la transferencia:</p>`, c),
+          <p>La próxima cuota de <strong>${empresa}</strong> vence <strong>${esc(cuando)}</strong>${fecha ? ` (${esc(fmtFecha(fecha))})` : ''}${monto ? `: <strong>${esc(monto)}</strong>` : ''}.</p>
+          ${bloqueBancos(vars.bankAccounts)}
+          <p>Cuando transfieras, <strong>sube el comprobante en Mi Suscripción</strong> y lo confirmamos. Te llega la factura por correo.</p>
+          ${boton('/suscripcion', 'Ir a Mi Suscripción')}`, c),
+      };
+    }
+
+    case 'cuota-vencida': {
+      const cuotas = Number(vars.cuotasPendientes ?? 0);
+      return {
+        subject: `Tienes ${cuotas === 1 ? 'una cuota pendiente' : `${cuotas} cuotas pendientes`} en SellAlleS`,
+        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\n${vars.companyName ?? 'Tu empresa'} tiene ${cuotas} ${cuotas === 1 ? 'cuota pendiente' : 'cuotas pendientes'} por ${fmtMoneda(vars.saldo)}${vars.debeDesde ? `, desde el ${fmtFecha(vars.debeDesde)}` : ''}.\n\nCuando transfieras, sube el comprobante en Mi Suscripción y lo confirmamos.${textoBancos(vars.bankAccounts)}\n\nEquipo SellAlleS`,
+        html: envolver('Tienes cuotas pendientes', `
+          <p>Hola${nombre},</p>
+          <p><strong>${empresa}</strong> tiene <strong>${cuotas} ${cuotas === 1 ? 'cuota pendiente' : 'cuotas pendientes'}</strong> por <strong>${esc(fmtMoneda(vars.saldo))}</strong>${vars.debeDesde ? `, desde el ${esc(fmtFecha(vars.debeDesde))}` : ''}.</p>
+          ${bloqueBancos(vars.bankAccounts)}
+          <p>Cuando transfieras, <strong>sube el comprobante en Mi Suscripción</strong> y lo confirmamos. Si ya pagaste, ignora este mensaje.</p>
+          ${boton('/suscripcion', 'Ir a Mi Suscripción')}`, c),
+      };
+    }
+
+    case 'pago-rechazado':
+      return {
+        subject: 'No pudimos confirmar tu pago — SellAlleS',
+        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nRevisamos el comprobante de ${fmtMoneda(vars.amount)}${vars.paidAt ? ` del ${fmtFecha(vars.paidAt)}` : ''} de ${vars.companyName ?? 'tu empresa'} y no lo pudimos confirmar.\n\nMotivo: ${vars.reason ?? ''}\n\nPuedes subir uno nuevo en Mi Suscripción.\n\nEquipo SellAlleS`,
+        html: envolver('No pudimos confirmar tu pago', `
+          <p>Hola${nombre},</p>
+          <p>Revisamos el comprobante de <strong>${esc(fmtMoneda(vars.amount))}</strong>${vars.paidAt ? ` del ${esc(fmtFecha(vars.paidAt))}` : ''} de <strong>${empresa}</strong> y no lo pudimos confirmar.</p>
+          <div style="background:#FEF2F2;border:1px solid #FECACA;padding:12px 15px;border-radius:5px;margin:16px 0;">
+            <p style="margin:0;"><strong>Motivo:</strong> ${esc(vars.reason)}</p>
+          </div>
+          <p>Puedes subir un comprobante nuevo en <strong>Mi Suscripción</strong>. Si crees que es un error, escríbenos:</p>
+          ${boton('/suscripcion', 'Ir a Mi Suscripción')}`, c),
+      };
+
+    case 'comprobante-recibido':
+      return {
+        subject: `Comprobante por confirmar: ${String(vars.companyName ?? '')} — ${fmtMoneda(vars.amount)}`,
+        text: `${vars.companyName ?? 'Una empresa'} subió un comprobante de ${fmtMoneda(vars.amount)}${vars.paidAt ? ` del ${fmtFecha(vars.paidAt)}` : ''}${vars.bank ? ` a ${vars.bank}` : ''}${vars.reference ? ` (ref. ${vars.reference})` : ''}.\nLo subió: ${vars.reportedBy ?? '—'}.\nSegún su cuenta debía ${fmtMoneda(vars.saldo)}.\n\nVerifica en tu banco y confírmalo en Cobros.`,
+        html: envolver('Comprobante por confirmar', `
+          <p><strong>${empresa}</strong> subió un comprobante de pago.</p>
+          <div style="background:#FFFBEB;border:1px solid #FDE68A;padding:15px;border-radius:5px;margin:16px 0;">
+            <p style="margin:0 0 8px 0;"><strong>Monto:</strong> ${esc(fmtMoneda(vars.amount))}</p>
+            ${vars.paidAt ? `<p style="margin:0 0 8px 0;"><strong>Fecha de la transferencia:</strong> ${esc(fmtFecha(vars.paidAt))}</p>` : ''}
+            ${vars.bank ? `<p style="margin:0 0 8px 0;"><strong>Cuenta:</strong> ${esc(vars.bank)}</p>` : ''}
+            ${vars.reference ? `<p style="margin:0 0 8px 0;"><strong>Referencia:</strong> ${esc(vars.reference)}</p>` : ''}
+            ${vars.notes ? `<p style="margin:0 0 8px 0;"><strong>Nota:</strong> ${esc(vars.notes)}</p>` : ''}
+            <p style="margin:0;"><strong>Lo subió:</strong> ${esc(vars.reportedBy ?? '—')}</p>
+          </div>
+          <p>Según su cuenta debía <strong>${esc(fmtMoneda(vars.saldo))}</strong>${Number(vars.cuotasPendientes ?? 0) > 0 ? ` (${esc(vars.cuotasPendientes)} cuotas)` : ''}.</p>
+          <p><strong>Verifica en tu banco</strong> que el dinero llegó y confírmalo en <strong>Cobros → Por confirmar</strong>. La factura se crea al confirmar.</p>
+          ${boton('/admin/cobros', 'Abrir Cobros')}`, c),
+      };
+
+    case 'resumen-cobros': {
+      type Pendiente = { companyName?: string; amount?: number; paidAt?: string; bank?: string; reference?: string };
+      type Suc = { nombre?: string; pendientes?: number; debeDesde?: string };
+      type Atrasado = { companyName?: string; saldo?: number; diasAtraso?: number; cuotasPendientes?: number; debeDesde?: string; nuncaPago?: boolean; soloVentas?: boolean; sugerirSoloVentas?: boolean; porConfirmar?: number; sucursales?: Suc[] };
+      type PorVencer = { companyName?: string; proximoCobro?: string; dias?: number; mensual?: number };
+      const pendientes = (Array.isArray(vars.pendientes) ? vars.pendientes : []) as Pendiente[];
+      const atrasados = (Array.isArray(vars.atrasados) ? vars.atrasados : []) as Atrasado[];
+      const porVencer = (Array.isArray(vars.porVencer) ? vars.porVencer : []) as PorVencer[];
+      const totalAtrasado = atrasados.reduce((acc, a) => acc + Number(a.saldo ?? 0), 0);
+      const sugeridas = atrasados.filter((a) => a.sugerirSoloVentas);
+
+      const seccion = (titulo: string, color: string, filas: string) => `
+        <h3 style="color:${color};margin:24px 0 8px 0;font-size:16px;">${titulo}</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">${filas}</table>`;
+      const td = 'padding:8px 6px;border-bottom:1px solid #E5E7EB;vertical-align:top;';
+
+      const htmlPendientes = pendientes.length ? seccion(`🟡 Comprobantes por confirmar (${pendientes.length})`, '#B45309',
+        pendientes.map((p) => `<tr><td style="${td}"><strong>${esc(p.companyName)}</strong><br><span style="color:#6B7280;font-size:12px;">${esc(p.bank ?? 'Cuenta no indicada')}${p.reference ? ` · ref. ${esc(p.reference)}` : ''}</span></td><td style="${td}text-align:right;">${esc(fmtMoneda(p.amount))}<br><span style="color:#6B7280;font-size:12px;">${esc(fmtFecha(p.paidAt))}</span></td></tr>`).join('')) : '';
+
+      const htmlAtrasados = atrasados.length ? seccion(`🔴 Atrasados (${atrasados.length}) — ${fmtMoneda(totalAtrasado)}`, '#B91C1C',
+        atrasados.map((a) => {
+          const sucs = (a.sucursales ?? []).map((x) => `${esc(x.nombre)}: ${esc(x.pendientes)} ${Number(x.pendientes) === 1 ? 'cuota' : 'cuotas'} desde ${esc(fmtFecha(x.debeDesde))}`).join('<br>');
+          const marcas = [
+            a.nuncaPago ? 'nunca ha pagado' : null,
+            a.soloVentas ? 'ya está en solo ventas' : null,
+            a.sugerirSoloVentas ? '<strong style="color:#B91C1C;">sugerido: pasar a solo ventas</strong>' : null,
+            Number(a.porConfirmar ?? 0) > 0 ? `tiene ${esc(fmtMoneda(a.porConfirmar))} por confirmar` : null,
+          ].filter(Boolean).join(' · ');
+          return `<tr><td style="${td}"><strong>${esc(a.companyName)}</strong> — ${esc(a.diasAtraso)} días de atraso${marcas ? `<br><span style="font-size:12px;color:#6B7280;">${marcas}</span>` : ''}${sucs ? `<br><span style="font-size:12px;">${sucs}</span>` : ''}</td><td style="${td}text-align:right;white-space:nowrap;"><strong>${esc(fmtMoneda(a.saldo))}</strong><br><span style="color:#6B7280;font-size:12px;">${esc(a.cuotasPendientes)} cuotas</span></td></tr>`;
+        }).join('')) : '';
+
+      const htmlPorVencer = porVencer.length ? seccion(`🟢 Les toca pagar pronto (${porVencer.length})`, '#047857',
+        porVencer.map((v) => `<tr><td style="${td}"><strong>${esc(v.companyName)}</strong><br><span style="color:#6B7280;font-size:12px;">${Number(v.dias) === 0 ? 'hoy' : `en ${esc(v.dias)} días`} (${esc(fmtFecha(v.proximoCobro))})</span></td><td style="${td}text-align:right;">${esc(fmtMoneda(v.mensual))}/mes</td></tr>`).join('')) : '';
+
+      const lineas: string[] = [];
+      if (pendientes.length) lineas.push(`Comprobantes por confirmar: ${pendientes.length}`);
+      if (atrasados.length) lineas.push(`Atrasados: ${atrasados.length} (${fmtMoneda(totalAtrasado)})${sugeridas.length ? `, ${sugeridas.length} para pasar a solo ventas` : ''}`);
+      if (porVencer.length) lineas.push(`Les toca pagar pronto: ${porVencer.length}`);
+
+      return {
+        subject: `Resumen de cobros ${fmtFecha(vars.fecha)}${pendientes.length ? ` — ${pendientes.length} por confirmar` : ''}`,
+        text: `Resumen de cobros del ${fmtFecha(vars.fecha)}\n\n${lineas.join('\n')}\n\nEl detalle está en Cobros.`,
+        html: envolver(`Resumen de cobros — ${fmtFecha(vars.fecha)}`, `
+          ${htmlPendientes}${htmlAtrasados}${htmlPorVencer}
+          ${sugeridas.length ? `<p style="margin-top:20px;">Pasar a solo ventas es manual: desde Cobros, en cada empresa.</p>` : ''}
+          ${boton('/admin/cobros', 'Abrir Cobros')}`, c),
       };
     }
 
@@ -236,7 +384,8 @@ Deno.serve(async (req) => {
 
     const validas: Template[] = [
       'bienvenida', 'prueba-por-vencer', 'prueba-vencida', 'cuenta-activada',
-      'recibo-suscripcion', 'cobro-por-vencer',
+      'recibo-suscripcion', 'cobro-por-vencer', 'cuota-vencida', 'pago-rechazado',
+      'comprobante-recibido', 'resumen-cobros',
     ];
     if (!template || !validas.includes(template)) return json(400, { error: 'Plantilla no reconocida.' });
     if (!to || !to.includes('@')) return json(400, { error: 'Destinatario inválido.' });
@@ -314,7 +463,9 @@ Deno.serve(async (req) => {
     if (!apiKey) return json(500, { error: 'Falta RESEND_API_KEY.' });
     const from = Deno.env.get('RESEND_FROM_EMAIL') ?? 'SellAlleS <soporte@sellalles.com>';
 
-    const { subject, html, text } = render(template, vars, contacto, !!attachments);
+    const { subject, html, text } = render(
+      template, vars, PARA_LA_PLATAFORMA.includes(template) ? SIN_CONTACTO : contacto, !!attachments,
+    );
 
     try {
       const resp = await fetch('https://api.resend.com/emails', {

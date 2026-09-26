@@ -6,6 +6,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { supabase } from '@/lib/supabase/client';
 import { rowToSubscriptionPayment } from '@/lib/supabase/mappers';
 import type { SubscriptionPayment } from '@/lib/types';
@@ -13,24 +17,123 @@ import { useAuth } from '@/context/auth-provider';
 import { useToast } from '@/hooks/use-toast';
 import { usePlatformSettings } from '@/context/platform-settings-provider';
 import { waLink } from '@/lib/support-contact';
-import { formatCurrency } from '@/lib/utils';
+import { cn, formatCurrency } from '@/lib/utils';
 import { METODO_DE_PAGO, codigoDeFactura, descargarFactura } from '@/lib/subscription-invoice';
-import { CheckCircle2, Clock, AlertTriangle, Download, Loader2 } from 'lucide-react';
+import { montoProximaCuota, type CobroEmpresa } from '@/lib/subscription-status';
+import {
+  ESTADO_REPORTE, TIPO_DE_CUENTA, cargarCuentasBancarias, rowToReportePago,
+  type CuentaBancaria, type ReportePago,
+} from '@/lib/payment-reports';
+import { useMiCuenta, avisarCambioDeMiCuenta } from '@/hooks/use-mi-cuenta';
+import { ReportarPagoDialog } from '@/components/subscription/reportar-pago-dialog';
+import { ComprobanteVista } from '@/components/subscription/comprobante-vista';
+import {
+  CheckCircle2, Clock, AlertTriangle, Download, Loader2, Lock, Copy, Check, Landmark, Paperclip, Hourglass, Store,
+} from 'lucide-react';
 
-function fmtDate(s?: string) {
+function fmtDate(s?: string | null) {
   if (!s) return '—';
-  return new Date(s + 'T00:00:00').toLocaleDateString('es-DO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return new Date(s.slice(0, 10) + 'T00:00:00').toLocaleDateString('es-DO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+const fmtLargo = (s?: string | null) => (s ? new Date(`${s.slice(0, 10)}T00:00:00`).toLocaleDateString('es-DO', { day: 'numeric', month: 'long' }) : '');
+const cuotasTxt = (n: number) => `${n} ${n === 1 ? 'cuota' : 'cuotas'}`;
+
+type Tono = 'rojo' | 'ambar' | 'verde' | 'azul' | 'gris';
+const TONO: Record<Tono, { caja: string; texto: string; icono: string }> = {
+  rojo: { caja: 'border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/40', texto: 'text-red-700 dark:text-red-400', icono: 'text-red-600' },
+  ambar: { caja: 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40', texto: 'text-amber-700 dark:text-amber-400', icono: 'text-amber-600' },
+  verde: { caja: 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40', texto: 'text-emerald-700 dark:text-emerald-400', icono: 'text-emerald-600' },
+  azul: { caja: 'border-sky-200 bg-sky-50 dark:border-sky-900 dark:bg-sky-950/40', texto: 'text-sky-700 dark:text-sky-400', icono: 'text-sky-600' },
+  gris: { caja: '', texto: 'text-muted-foreground', icono: 'text-muted-foreground' },
+};
+
+/** Qué decirle al cliente de su cuenta, y cuánto proponerle al reportar. */
+function resumen(c: CobroEmpresa): { tono: Tono; titulo: string; detalle: string; monto: number | null; notaMonto?: string } {
+  switch (c.estado) {
+    case 'atrasada':
+    case 'nunca_pago': {
+      const falta = Math.max(c.saldo - c.porConfirmar, 0);
+      return {
+        tono: 'rojo',
+        titulo: `Debes ${formatCurrency(c.saldo)}`,
+        detalle: `${cuotasTxt(c.cuotasPendientes)} sin pagar, desde el ${fmtLargo(c.debeDesde)}. Pagándolo quedas al día hasta el ${fmtLargo(c.pagarPendiente?.hasta)}.`,
+        monto: falta > 0 ? falta : c.saldo,
+        notaMonto: `Es lo que debes${c.porConfirmar > 0 ? ', menos lo que ya reportaste' : ''}. Si pagaste otro monto, cámbialo.`,
+      };
+    }
+    case 'por_vencer':
+      return {
+        tono: 'ambar',
+        titulo: c.dias === 0 ? 'Tu cuota vence hoy' : `Tu cuota vence ${c.dias === 1 ? 'mañana' : `en ${c.dias} días`}`,
+        detalle: `Próxima cuota: ${formatCurrency(montoProximaCuota(c))} el ${fmtLargo(c.proximoCobro)}.`,
+        monto: montoProximaCuota(c),
+        notaMonto: 'Es tu próxima cuota. Si pagaste más meses, cámbialo.',
+      };
+    case 'al_dia':
+      return {
+        tono: 'verde',
+        titulo: 'Estás al día',
+        detalle: `Próxima cuota: ${formatCurrency(montoProximaCuota(c))} el ${fmtLargo(c.proximoCobro)}.${c.saldo < -0.005 ? ` Tienes ${formatCurrency(-c.saldo)} a favor.` : ''}`,
+        monto: montoProximaCuota(c),
+        notaMonto: 'Es tu próxima cuota. Si pagaste más meses, cámbialo.',
+      };
+    case 'prueba':
+      return {
+        tono: 'azul',
+        titulo: 'Prueba gratis',
+        detalle: c.dias != null
+          ? `Te ${c.dias === 1 ? 'queda' : 'quedan'} ${c.dias} ${c.dias === 1 ? 'día' : 'días'}.${c.mensual > 0 ? ` Después, ${formatCurrency(c.mensual)} al mes.` : ''}`
+          : 'Estás en período de prueba.',
+        monto: c.montoPeriodo > 0 ? c.montoPeriodo : null,
+      };
+    case 'prueba_vencida':
+      return {
+        tono: 'rojo',
+        titulo: 'Tu prueba terminó',
+        detalle: `Puedes ver tus datos pero no modificarlos. Para activar la cuenta, transfiere${c.montoPeriodo > 0 ? ` ${formatCurrency(c.montoPeriodo)}` : ''} y sube el comprobante.`,
+        monto: c.montoPeriodo > 0 ? c.montoPeriodo : null,
+      };
+    case 'suspendida':
+      return { tono: 'gris', titulo: 'Cuenta suspendida', detalle: 'Escríbenos para reactivarla.', monto: null };
+    default:
+      return { tono: 'gris', titulo: 'Cuenta activa', detalle: 'Tu cuenta no tiene una cuota configurada.', monto: null };
+  }
+}
+
+function BotonCopiar({ texto }: { texto: string }) {
+  const [copiado, setCopiado] = useState(false);
+  return (
+    <Button
+      type="button" size="icon" variant="ghost" className="h-7 w-7"
+      title="Copiar" aria-label={`Copiar ${texto}`}
+      onClick={() => {
+        navigator.clipboard?.writeText(texto).then(() => {
+          setCopiado(true);
+          setTimeout(() => setCopiado(false), 1500);
+        }).catch(() => {});
+      }}
+    >
+      {copiado ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+    </Button>
+  );
 }
 
 export default function SuscripcionPage() {
   const { appUser } = useAuth();
   const { support } = usePlatformSettings();
   const { toast } = useToast();
-  const activationWaLink = waLink(support, 'Hola, quiero activar mi cuenta de SellAlleS');
+  const activationWaLink = waLink(support, 'Hola, tengo una pregunta sobre mi suscripción de SellAlleS');
   const activeCompanyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+  const esAdmin = !!appUser?.isCompanyAdmin;
   const [payments, setPayments] = useState<SubscriptionPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [descargando, setDescargando] = useState<string | null>(null);
+  const [bancos, setBancos] = useState<CuentaBancaria[]>([]);
+  const [reportes, setReportes] = useState<ReportePago[]>([]);
+  const [reportando, setReportando] = useState(false);
+  const [retirar, setRetirar] = useState<ReportePago | null>(null);
+  const [retirando, setRetirando] = useState(false);
+  const { cuenta, cargando: cargandoCuenta, recargar: recargarCuenta } = useMiCuenta(esAdmin, activeCompanyId);
 
   const descargar = async (pago: SubscriptionPayment) => {
     setDescargando(pago.id);
@@ -45,96 +148,233 @@ export default function SuscripcionPage() {
 
   const load = useCallback(async () => {
     if (!activeCompanyId) { setPayments([]); setLoading(false); return; }
-    const { data, error } = await supabase
-      .from('subscription_payments')
-      .select('*')
-      .eq('company_id', activeCompanyId)
-      .order('paid_at', { ascending: false });
+    const [{ data, error }, { data: reps }] = await Promise.all([
+      supabase
+        .from('subscription_payments')
+        .select('*')
+        .eq('company_id', activeCompanyId)
+        .order('paid_at', { ascending: false }),
+      esAdmin
+        ? supabase
+            .from('subscription_payment_reports')
+            .select('*')
+            .eq('company_id', activeCompanyId)
+            .order('created_at', { ascending: false })
+            .limit(50)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
     if (!error && data) setPayments(data.map(rowToSubscriptionPayment));
+    setReportes(((reps ?? []) as any[]).map(rowToReportePago));
     setLoading(false);
-  }, [activeCompanyId]);
+  }, [activeCompanyId, esAdmin]);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!esAdmin) return;
+    cargarCuentasBancarias().then(setBancos).catch(() => setBancos([]));
+  }, [esAdmin]);
 
-  // Estado de la cuenta a partir del contexto de auth.
-  const status = appUser?.companyStatus;
-  const trialEndsAt = appUser?.companyTrialEndsAt;
-  const paidUntil = appUser?.companyPaidUntil;
-  const isReadOnly = !!appUser?.isReadOnly;
-  const trialDaysLeft = trialEndsAt
-    ? Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
-    : null;
+  const alReportar = () => {
+    load();
+    recargarCuenta();
+    avisarCambioDeMiCuenta();
+  };
 
-  let estado: { label: string; desc: string; icon: React.ReactNode; badge: React.ReactNode };
-  if (isReadOnly) {
-    // Vencido: distingue prueba de suscripción pagada.
-    estado = status === 'trial'
-      ? {
-          label: 'Prueba terminada',
-          desc: 'Tu prueba gratis de 14 días terminó. Activa tu cuenta por transferencia para seguir registrando y modificando datos.',
-          icon: <AlertTriangle className="h-5 w-5 text-red-600" />,
-          badge: <Badge variant="destructive">Solo lectura</Badge>,
-        }
-      : {
-          label: 'Suscripción vencida',
-          desc: 'Tu suscripción venció. Renueva tu pago por transferencia para seguir registrando y modificando datos.',
-          icon: <AlertTriangle className="h-5 w-5 text-red-600" />,
-          badge: <Badge variant="destructive">Solo lectura</Badge>,
-        };
-  } else if (status === 'active') {
-    estado = {
-      label: 'Cuenta activa',
-      desc: paidUntil
-        ? `Tu suscripción está al día, pagada hasta el ${fmtDate(paidUntil)}.`
-        : 'Tu suscripción está al día. ¡Gracias!',
-      icon: <CheckCircle2 className="h-5 w-5 text-emerald-600" />,
-      badge: <Badge className="bg-emerald-600">Activa</Badge>,
-    };
-  } else if (status === 'trial') {
-    estado = {
-      label: 'Prueba gratis',
-      desc: trialDaysLeft != null && trialDaysLeft >= 0
-        ? `Te ${trialDaysLeft === 1 ? 'queda' : 'quedan'} ${trialDaysLeft} ${trialDaysLeft === 1 ? 'día' : 'días'} de prueba.`
-        : 'Estás en período de prueba.',
-      icon: <Clock className="h-5 w-5 text-amber-600" />,
-      badge: <Badge className="bg-amber-500 text-amber-950">Prueba</Badge>,
-    };
-  } else {
-    estado = {
-      label: 'Cuenta',
-      desc: '',
-      icon: <CheckCircle2 className="h-5 w-5 text-muted-foreground" />,
-      badge: null,
-    };
-  }
+  const confirmarRetiro = async () => {
+    if (!retirar) return;
+    setRetirando(true);
+    const { error } = await supabase.rpc('anular_reporte_de_pago', { p_report_id: retirar.id });
+    setRetirando(false);
+    if (error) {
+      toast({ title: 'No se pudo retirar', description: error.message, variant: 'destructive' });
+      return;
+    }
+    toast({ title: 'Comprobante retirado' });
+    setRetirar(null);
+    alReportar();
+  };
+
+  const r = cuenta ? resumen(cuenta) : null;
+  const tono = r ? TONO[r.tono] : TONO.gris;
+  const IconoEstado = r?.tono === 'verde' ? CheckCircle2 : r?.tono === 'ambar' || r?.tono === 'azul' ? Clock : AlertTriangle;
+  const sePuedeReportar = esAdmin && !!activeCompanyId && cuenta?.estado !== 'suspendida';
 
   return (
     <div>
       <PageHeader title="Mi Suscripción" />
 
       <div className="space-y-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              {estado.icon}
-              {estado.label}
-            </CardTitle>
-            {estado.badge}
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {estado.desc && <p className="text-sm text-muted-foreground">{estado.desc}</p>}
-            {(isReadOnly || status === 'trial') && activationWaLink && (
-              <a
-                href={activationWaLink}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 transition-colors"
-              >
-                Activar / pagar por WhatsApp
-              </a>
-            )}
-          </CardContent>
-        </Card>
+        {!esAdmin && appUser?.companyStatus && (
+          <Card>
+            <CardContent className="flex items-center gap-2 py-4 text-sm">
+              {appUser.isReadOnly
+                ? <><AlertTriangle className="h-4 w-4 text-red-600" /> La prueba de la empresa terminó. El administrador puede activarla desde aquí.</>
+                : appUser.companyStatus === 'trial'
+                  ? <><Clock className="h-4 w-4 text-amber-600" /> La empresa está en prueba gratis.</>
+                  : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> La cuenta de la empresa está activa.</>}
+            </CardContent>
+          </Card>
+        )}
+
+        {esAdmin && (cargandoCuenta ? (
+          <Card><CardContent className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></CardContent></Card>
+        ) : cuenta && r && (
+          <Card className={cn('border', tono.caja)}>
+            <CardHeader className="pb-2">
+              <CardTitle className={cn('flex items-center gap-2 text-lg', tono.texto)}>
+                <IconoEstado className={cn('h-5 w-5', tono.icono)} />
+                {r.titulo}
+              </CardTitle>
+              <CardDescription className="text-foreground/80">{r.detalle}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {cuenta.soloVentas && (
+                <div className="flex items-start gap-2 rounded-md border border-red-300 bg-white/60 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+                  <Lock className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    Tu cuenta está en <strong>modo solo ventas</strong>: puedes vender, cobrar, usar la caja, cotizar y registrar
+                    servicios. Inventario, usuarios, gastos y la configuración quedan en consulta hasta que te pongas al día.
+                  </span>
+                </div>
+              )}
+              {cuenta.comprobantesPorConfirmar > 0 && (
+                <div className="flex items-start gap-2 rounded-md border border-sky-300 bg-white/60 p-3 text-sm text-sky-900 dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-100">
+                  <Hourglass className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>
+                    Estamos revisando {cuenta.comprobantesPorConfirmar === 1 ? 'tu comprobante' : `tus ${cuenta.comprobantesPorConfirmar} comprobantes`} por{' '}
+                    <strong>{formatCurrency(cuenta.porConfirmar)}</strong>. Cuando confirmemos que llegó, te enviamos la factura.
+                  </span>
+                </div>
+              )}
+
+              {cuenta.cuentas.length > 0 && (
+                <div className="rounded-md border bg-background/70 p-3">
+                  <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">
+                    {cuenta.tarifaPorSucursal != null ? 'Cuota por sucursal' : 'Tu cuota'}
+                  </p>
+                  <ul className="divide-y text-sm">
+                    {cuenta.cuentas.map((x) => (
+                      <li key={x.branchId ?? 'empresa'} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-0.5 py-1.5">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="truncate">{x.nombre}</span>
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatCurrency(x.cuota)} {cuenta.ciclo === 'annual' ? 'al año' : 'al mes'} · desde el {fmtDate(x.desde)}
+                          {x.pendientes > 0
+                            ? <span className="font-medium text-red-700 dark:text-red-400"> · debe {cuotasTxt(x.pendientes)}</span>
+                            : x.proximaCuota ? ` · próxima ${fmtDate(x.proximaCuota)}` : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-2 flex flex-wrap justify-end gap-x-6 gap-y-1 border-t pt-2 text-xs">
+                    <span>Total de cuotas: <strong>{formatCurrency(cuenta.cargado)}</strong></span>
+                    <span>Pagado: <strong>{formatCurrency(cuenta.pagado)}</strong></span>
+                    <span className={cn(cuenta.saldo > 0 && 'text-red-700 dark:text-red-400')}>
+                      {cuenta.saldo > 0 ? 'Debes' : cuenta.saldo < 0 ? 'A favor' : 'Saldo'}: <strong>{formatCurrency(Math.abs(cuenta.saldo))}</strong>
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2">
+                {sePuedeReportar && (
+                  <Button onClick={() => setReportando(true)}>
+                    <Paperclip className="mr-2 h-4 w-4" />
+                    Reportar un pago
+                  </Button>
+                )}
+                {activationWaLink && (
+                  <Button asChild variant="outline">
+                    <a href={activationWaLink} target="_blank" rel="noopener noreferrer">Preguntar por WhatsApp</a>
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+
+        {esAdmin && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base"><Landmark className="h-5 w-5 text-primary" /> Cómo pagar</CardTitle>
+              <CardDescription>
+                Transfiere a cualquiera de estas cuentas y luego toca <strong>Reportar un pago</strong> para subir el comprobante.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {bancos.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Todavía no hay cuentas publicadas. Escríbenos y te las pasamos.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {bancos.map((b) => (
+                    <div key={b.id} className="rounded-lg border p-3">
+                      <p className="font-semibold">{b.bank}</p>
+                      <p className="text-xs text-muted-foreground">Cuenta de {TIPO_DE_CUENTA[b.accountType].toLowerCase()}{b.currency !== 'DOP' ? ` · ${b.currency}` : ''}</p>
+                      <div className="mt-1 flex items-center gap-1">
+                        <span className="font-mono text-base">{b.accountNumber}</span>
+                        <BotonCopiar texto={b.accountNumber.replace(/[^0-9A-Za-z]/g, '')} />
+                      </div>
+                      <p className="text-sm">{b.holderName}</p>
+                      {b.holderId && <p className="text-xs text-muted-foreground">{b.holderId}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {esAdmin && reportes.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Comprobantes enviados</CardTitle>
+              <CardDescription>
+                <span className="inline-flex flex-wrap gap-x-3 gap-y-1">
+                  {(['por_confirmar', 'confirmado', 'rechazado'] as const).map((e) => (
+                    <span key={e} className="inline-flex items-center gap-1">
+                      <Badge variant="outline" className={ESTADO_REPORTE[e].badge}>{ESTADO_REPORTE[e].label}</Badge>
+                      <span className="text-xs">{ESTADO_REPORTE[e].descripcion}</span>
+                    </span>
+                  ))}
+                </span>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {reportes.map((x) => {
+                const e = ESTADO_REPORTE[x.status];
+                return (
+                  <div key={x.id} className={cn('flex gap-3 rounded-lg border p-3', e.caja)}>
+                    <ComprobanteVista reporte={x} className="h-20 w-16" />
+                    <div className="min-w-0 flex-1 text-sm">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{formatCurrency(x.confirmedAmount ?? x.amount)}</span>
+                        <Badge variant="outline" className={e.badge}>{e.label}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Transferido el {fmtDate(x.paidAt)}{x.bankLabel ? ` a ${x.bankLabel}` : ''}{x.reference ? ` · ref. ${x.reference}` : ''}
+                      </p>
+                      {x.status === 'confirmado' && x.confirmedAmount != null && Math.abs(x.confirmedAmount - x.amount) > 0.005 && (
+                        <p className="text-xs text-muted-foreground">Reportaste {formatCurrency(x.amount)}; llegaron {formatCurrency(x.confirmedAmount)}.</p>
+                      )}
+                      {x.status === 'rechazado' && x.rejectReason && (
+                        <p className={cn('text-xs font-medium', e.texto)}>Motivo: {x.rejectReason}</p>
+                      )}
+                      {x.status === 'por_confirmar' && <p className={cn('text-xs', e.texto)}>{e.descripcion}</p>}
+                      {x.status === 'confirmado' && <p className={cn('text-xs', e.texto)}>Confirmado el {fmtDate(x.reviewedAt)}. La factura está abajo.</p>}
+                    </div>
+                    {x.status === 'por_confirmar' && (
+                      <Button size="sm" variant="ghost" className="self-start text-muted-foreground" onClick={() => setRetirar(x)}>
+                        Retirar
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>
@@ -236,6 +476,37 @@ export default function SuscripcionPage() {
           </CardContent>
         </Card>
       </div>
+
+      {activeCompanyId && (
+        <ReportarPagoDialog
+          open={reportando}
+          onOpenChange={setReportando}
+          companyId={activeCompanyId}
+          bancos={bancos}
+          montoSugerido={r?.monto ?? null}
+          notaMonto={r?.notaMonto}
+          onReportado={alReportar}
+        />
+      )}
+
+      <AlertDialog open={!!retirar} onOpenChange={(o) => { if (!o && !retirando) setRetirar(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Retirar este comprobante?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {retirar && <>{formatCurrency(retirar.amount)} del {fmtDate(retirar.paidAt)}. </>}
+              Úsalo si te equivocaste de monto o de archivo; después puedes subir el correcto.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={retirando}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); confirmarRetiro(); }} disabled={retirando}>
+              {retirando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Retirar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

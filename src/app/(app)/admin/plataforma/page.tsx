@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Mail, Shield, CalendarClock, FileText } from 'lucide-react';
+import { MessageCircle, Mail, Shield, CalendarClock, FileText, BadgeDollarSign } from 'lucide-react';
+import { CuentasBancariasCard } from '@/components/admin/cuentas-bancarias-card';
 import { formatCedulaOrRnc } from '@/lib/format';
 import {
   waLink, supportMailto, parseDiasLista, formatDiasLista,
@@ -42,6 +43,16 @@ const FACTURACION_VACIA: DatosFacturacion = {
   legalName: '', rnc: '', address: '', phone: '', email: '', notes: '', itbisIncluded: false,
 };
 
+/** Cómo se avisa y se cobra la cuota. */
+interface AjustesCobro {
+  /** Vacío: support_email. Le llegan los comprobantes y el resumen de la noche. */
+  notifyEmail: string;
+  /** Días de atraso para sugerir solo ventas (nunca bloquea sola). */
+  sugerirDias: number;
+  /** Recordatorios de cuota a las empresas. */
+  avisosActivos: boolean;
+}
+
 export default function PlatformSettingsPage() {
   const { appUser } = useAuth();
   const { support, reload } = usePlatformSettings();
@@ -57,11 +68,12 @@ export default function PlatformSettingsPage() {
   const [avisosCobroTexto, setAvisosCobroTexto] = useState(formatDiasLista(DEFAULT_TRIAL_SETTINGS.paymentReminderDays));
   // Lo mismo con los datos de facturación: solo los usa esta pantalla y la base.
   const [facturacion, setFacturacion] = useState<DatosFacturacion>(FACTURACION_VACIA);
+  const [cobro, setCobro] = useState<AjustesCobro>({ notifyEmail: '', sugerirDias: 10, avisosActivos: false });
 
   useEffect(() => {
     supabase
       .from('platform_settings')
-      .select('trial_days, trial_reminder_days, payment_reminder_days, invoice_legal_name, invoice_rnc, invoice_address, invoice_phone, invoice_email, invoice_notes, invoice_itbis_included')
+      .select('trial_days, trial_reminder_days, payment_reminder_days, invoice_legal_name, invoice_rnc, invoice_address, invoice_phone, invoice_email, invoice_notes, invoice_itbis_included, payment_notify_email, solo_ventas_sugerir_dias, avisos_cobro_activos')
       .maybeSingle()
       .then(({ data }) => {
         if (!data) return;
@@ -73,6 +85,11 @@ export default function PlatformSettingsPage() {
           email: data.invoice_email ?? '',
           notes: data.invoice_notes ?? '',
           itbisIncluded: data.invoice_itbis_included ?? false,
+        });
+        setCobro({
+          notifyEmail: data.payment_notify_email ?? '',
+          sugerirDias: data.solo_ventas_sugerir_dias ?? 10,
+          avisosActivos: data.avisos_cobro_activos ?? false,
         });
         const t: TrialSettings = {
           trialDays: data.trial_days ?? DEFAULT_TRIAL_SETTINGS.trialDays,
@@ -159,6 +176,15 @@ export default function PlatformSettingsPage() {
       toast({ variant: 'destructive', title: 'Correo de facturación inválido', description: 'Revisa la dirección.' });
       return;
     }
+    const notifyEmail = cobro.notifyEmail.trim();
+    if (notifyEmail && !EMAIL_RE.test(notifyEmail)) {
+      toast({ variant: 'destructive', title: 'Correo para avisos de pago inválido', description: 'Revisa la dirección o déjalo vacío.' });
+      return;
+    }
+    if (!Number.isInteger(cobro.sugerirDias) || cobro.sugerirDias < 1 || cobro.sugerirDias > 365) {
+      toast({ variant: 'destructive', title: 'Días para sugerir solo ventas inválidos', description: 'Debe ser entre 1 y 365.' });
+      return;
+    }
 
     setSaving(true);
     const { error } = await supabase
@@ -180,6 +206,9 @@ export default function PlatformSettingsPage() {
         invoice_email: facturaEmail || null,
         invoice_notes: facturacion.notes.trim() || null,
         invoice_itbis_included: facturacion.itbisIncluded,
+        payment_notify_email: notifyEmail || null,
+        solo_ventas_sugerir_dias: cobro.sugerirDias,
+        avisos_cobro_activos: cobro.avisosActivos,
       })
       .eq('id', true);
     setSaving(false);
@@ -359,7 +388,8 @@ export default function PlatformSettingsPage() {
                   onChange={(e) => { setDirty(true); setAvisosCobroTexto(e.target.value); }}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Cuenta desde la fecha de <strong>Pagado hasta</strong> de cada empresa.
+                  Cuenta desde la próxima cuota de cada empresa (la de Cobros). Solo sale si los
+                  recordatorios de cuota están encendidos, abajo.
                 </p>
               </div>
             </div>
@@ -368,6 +398,69 @@ export default function PlatformSettingsPage() {
             </p>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <BadgeDollarSign className="h-5 w-5 text-emerald-600" />
+              Cobros de suscripción
+            </CardTitle>
+            <CardDescription>
+              Los avisos cuando una empresa sube un comprobante, el resumen de cada noche y los recordatorios
+              de cuota a las empresas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="cobro-email">Correo para avisos de pago</Label>
+              <Input
+                id="cobro-email"
+                type="email"
+                placeholder={form.email ? `Vacío: ${form.email}` : 'tu@correo.com'}
+                value={cobro.notifyEmail}
+                onChange={(e) => { setDirty(true); setCobro({ ...cobro, notifyEmail: e.target.value }); }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Te llega un correo cada vez que una empresa sube un comprobante, y a las 8:05 p.m. un resumen con los
+                comprobantes por confirmar, los atrasados y a quién le toca pagar pronto (solo si hay algo).
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="cobro-dias">Sugerir solo ventas a los días de atraso</Label>
+              <Input
+                id="cobro-dias"
+                type="number"
+                min={1}
+                max={365}
+                className="max-w-[140px]"
+                value={cobro.sugerirDias}
+                onChange={(e) => { setDirty(true); setCobro({ ...cobro, sugerirDias: parseInt(e.target.value) || 0 }); }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Solo lo sugiere en Cobros y en el resumen de la noche. Pasar una empresa a solo ventas lo haces tú, a mano.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="cobro-avisos">Recordatorios de cuota a las empresas</Label>
+                <p className="text-xs text-muted-foreground">
+                  Un correo a su administrador los días de antes que pusiste arriba, y otro el día que vence cada
+                  cuota, con las cuentas para transferir. No se manda si ya subieron un comprobante.
+                  Enciéndelo cuando tengas las cuentas cargadas.
+                </p>
+              </div>
+              <Switch
+                id="cobro-avisos"
+                checked={cobro.avisosActivos}
+                onCheckedChange={(v) => { setDirty(true); setCobro({ ...cobro, avisosActivos: v }); }}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <CuentasBancariasCard />
 
         <Card>
           <CardHeader>
