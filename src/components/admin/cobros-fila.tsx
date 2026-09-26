@@ -110,7 +110,7 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas }: 
   return (
     <Card className={cn('overflow-hidden border-l-[6px]', color.franja, color.fondo)}>
       <CardContent className="p-0">
-        <div className="flex flex-col gap-3 p-3 md:flex-row md:items-center">
+        <div className="flex flex-col gap-3 p-3 xl:flex-row xl:items-center">
           <button
             type="button"
             onClick={onToggle}
@@ -149,7 +149,11 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas }: 
             </div>
           </button>
 
-          <div className="grid grid-cols-3 gap-3 text-sm md:w-[440px] md:shrink-0">
+          {/* En tablet los montos y los botones comparten renglón debajo del
+              nombre; desde xl (contents) pasan a ser columnas de la fila. Antes
+              se ponían lado a lado ya en md y el nombre quedaba de 60 px. */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center xl:contents">
+          <div className="grid grid-cols-3 gap-3 text-sm sm:flex-1 xl:w-[440px] xl:flex-none xl:shrink-0">
             <div>
               <p className="text-[11px] uppercase text-muted-foreground">{cobro.ciclo === 'annual' ? 'Por año' : 'Por mes'}</p>
               <p className="font-semibold">{cobro.montoPeriodo > 0 ? formatCurrency(cobro.montoPeriodo) : '—'}</p>
@@ -181,26 +185,27 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas }: 
             </div>
           </div>
 
-          <div className="flex gap-2 md:shrink-0 md:flex-col">
-            <Button size="sm" className="flex-1 md:flex-none" onClick={onPagar}>
+          <div className="flex gap-2 sm:shrink-0 sm:flex-col">
+            <Button size="sm" className="flex-1 sm:flex-none" onClick={onPagar}>
               <PlusCircle className="mr-1.5 h-4 w-4" />
               Registrar pago
             </Button>
             {cobro.soloVentas ? (
-              <Button size="sm" variant="outline" className="flex-1 md:flex-none" onClick={() => onSoloVentas(false)}>
+              <Button size="sm" variant="outline" className="flex-1 sm:flex-none" onClick={() => onSoloVentas(false)}>
                 <LockOpen className="mr-1.5 h-4 w-4" />
                 Quitar solo ventas
               </Button>
             ) : (cobro.sugerirSoloVentas || (debe && abierta)) && (
               <Button
                 size="sm" variant="outline"
-                className="flex-1 border-red-300 text-red-700 hover:bg-red-50 md:flex-none dark:border-red-900 dark:text-red-400"
+                className="flex-1 border-red-300 text-red-700 hover:bg-red-50 sm:flex-none dark:border-red-900 dark:text-red-400"
                 onClick={() => onSoloVentas(true)}
               >
                 <Lock className="mr-1.5 h-4 w-4" />
                 Pasar a solo ventas
               </Button>
             )}
+          </div>
           </div>
         </div>
 

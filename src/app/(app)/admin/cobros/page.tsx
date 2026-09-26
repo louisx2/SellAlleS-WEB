@@ -290,7 +290,7 @@ export default function CobrosPage() {
             const color = COLOR[g.key];
             return (
               <section key={g.key}>
-                <div className="mb-2 flex items-baseline gap-2">
+                <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <span className={cn('h-3 w-3 shrink-0 rounded-full self-center', color.punto)} />
                   <h2 className={cn('text-lg font-semibold', color.texto)}>{g.label}</h2>
                   <span className="text-sm text-muted-foreground">({filasGrupo.length})</span>

@@ -207,7 +207,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let activeBranch = branchList.length > 0 ? branchList[0] : { id: '', name: '' };
       let requireSelection = false;
 
-      if (isMultiCompanyLobby) {
+      // El super admin en la plataforma (sin estar dentro de una empresa) no
+      // opera ninguna sucursal. Si su propia empresa tiene varias y está
+      // asignado a ellas, el selector le salía igual al entrar al panel.
+      const enPlataforma = !!data.is_super_admin && !savedImpersonatedId;
+
+      if (isMultiCompanyLobby || enPlataforma) {
         // Sin selector de sucursal en el lobby: la sucursal se elige al ENTRAR
         // a una empresa, no antes de decidir a cuál entrar.
       } else if (branchList.length > 1) {

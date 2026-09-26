@@ -80,11 +80,11 @@ export function BandejaPorConfirmar({ pendientes, todos, empresas, cuentas, onCo
   const total = pendientes.reduce((acc, r) => acc + r.amount, 0);
   return (
     <section className="mb-8">
-      <div className="mb-2 flex items-baseline gap-2">
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="h-3 w-3 shrink-0 self-center rounded-full bg-amber-500" />
         <h2 className="text-lg font-semibold text-amber-700 dark:text-amber-400">Comprobantes por confirmar</h2>
         <span className="text-sm text-muted-foreground">({pendientes.length} · {formatCurrency(total)})</span>
-        <span className="hidden text-xs text-muted-foreground sm:inline">· Verifica en el banco antes de confirmar: al confirmar se crea la factura</span>
+        <span className="hidden text-xs text-muted-foreground lg:inline">· Verifica en el banco antes de confirmar: al confirmar se crea la factura</span>
       </div>
       <div className="space-y-2">
         {pendientes.map((r) => {
