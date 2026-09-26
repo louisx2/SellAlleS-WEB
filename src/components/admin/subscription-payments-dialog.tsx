@@ -20,9 +20,11 @@ import {
   METODO_DE_PAGO, codigoDeFactura, numeroDeFactura, nombreArchivoFactura, facturaEnBase64, descargarFactura,
 } from '@/lib/subscription-invoice';
 import { Download, Loader2, Mail, PlusCircle } from 'lucide-react';
+import { hoyLocal } from '@/lib/subscription-status';
 
 const fmtDate = (s?: string | null) => (s ? new Date(s + 'T00:00:00').toLocaleDateString('es-DO') : '—');
-const today = () => new Date().toISOString().slice(0, 10);
+// Fecha local: con toISOString, de noche en RD ya salía el día siguiente.
+const today = () => hoyLocal();
 // Suma meses a una fecha yyyy-mm-dd y devuelve yyyy-mm-dd.
 function addMonths(dateStr: string, months: number): string {
   const d = new Date(dateStr + 'T00:00:00');
@@ -46,9 +48,12 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   /** Se llama tras registrar un pago (para refrescar el listado de empresas). */
   onRecorded?: () => void;
+  /** Lo que debe según su cuenta (Cobros): el monto y el período que deja
+   *  cubierto si lo paga todo. Sin esto no se ofrece el botón. */
+  pendiente?: { monto: number; desde: string; hasta: string } | null;
 }
 
-export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates, onOpenChange, onRecorded }: Props) {
+export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates, onOpenChange, onRecorded, pendiente }: Props) {
   const { toast } = useToast();
   const [payments, setPayments] = useState<SubscriptionPayment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -66,6 +71,12 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
   const [planName, setPlanName] = useState('');
   const [notes, setNotes] = useState('');
   const [activate, setActivate] = useState(true);
+  // Se pregunta en cada pago: un pago viejo que se registra tarde, o uno en
+  // efectivo que ya se entregó en papel, no siempre amerita correo.
+  const [enviarCorreo, setEnviarCorreo] = useState(true);
+  // A quién le llegaría: el primer administrador activo con correo. undefined
+  // mientras se busca, null si la empresa no tiene ninguno.
+  const [destinatario, setDestinatario] = useState<{ name: string | null; email: string } | null | undefined>(undefined);
 
   const load = useCallback(async () => {
     if (!company) return;
@@ -85,8 +96,34 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
       setShowForm(false);
       setAmount(''); setPaidAt(today()); setMethod('transfer'); setReference('');
       setPeriodStart(''); setPeriodEnd(''); setPlanName(defaultPlanName ?? ''); setNotes(''); setActivate(true);
+      setEnviarCorreo(true);
     }
   }, [company, defaultPlanName, load]);
+
+  const buscarDestinatario = useCallback(async (companyId: string) => {
+    const { data: admins } = await supabase
+      .from('profiles')
+      .select('name, email')
+      .eq('company_id', companyId)
+      .eq('role', 'admin')
+      .eq('is_active', true)
+      .not('email', 'is', null)
+      .order('created_at')
+      .limit(1);
+    const admin = admins?.[0];
+    return admin?.email ? { name: admin.name ?? null, email: admin.email as string } : null;
+  }, []);
+
+  // Solo al cambiar de empresa: tras registrar un pago llega la misma empresa
+  // recargada y no hace falta volver a buscar.
+  const companyId = company?.id;
+  useEffect(() => {
+    if (!companyId) return;
+    let cancelado = false;
+    setDestinatario(undefined);
+    buscarDestinatario(companyId).then((d) => { if (!cancelado) setDestinatario(d); });
+    return () => { cancelado = true; };
+  }, [companyId, buscarDestinatario]);
 
   // Manda la factura al administrador de la empresa y devuelve a qué dirección.
   // La deduplicación real vive en send-lifecycle-email (clave única en
@@ -95,17 +132,8 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
   // lleva la hora para que sí salga cada vez que se pide.
   const enviarFactura = async (pago: SubscriptionPayment, reenvio = false): Promise<string> => {
     if (!company) throw new Error('No hay empresa seleccionada.');
-    const { data: admins } = await supabase
-      .from('profiles')
-      .select('name, email')
-      .eq('company_id', company.id)
-      .eq('role', 'admin')
-      .eq('is_active', true)
-      .not('email', 'is', null)
-      .order('created_at')
-      .limit(1);
-    const destinatario = admins?.[0];
-    if (!destinatario?.email) throw new Error('La empresa no tiene un administrador activo con correo.');
+    const destinatario = await buscarDestinatario(company.id);
+    if (!destinatario) throw new Error('La empresa no tiene un administrador activo con correo.');
 
     // Si el PDF fallara, el correo sale igual, como recibo y sin adjunto: la
     // empresa se entera del pago y la factura sigue en su Mi Suscripción.
@@ -197,21 +225,26 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
       if (error) throw error;
       const pago = rowToSubscriptionPayment(fila);
       const factura = pago.invoiceNumber != null ? ` Factura No. ${codigoDeFactura(pago)}.` : '';
+      const correo = enviarCorreo && destinatario
+        ? ` Enviando la factura a ${destinatario.email}.`
+        : ' No se envió correo; la empresa la puede descargar en Mi Suscripción.';
       toast({
         title: 'Pago registrado',
-        description: (activate ? `${company.name}: pago registrado y empresa activada.` : `${company.name}: pago registrado.`) + factura,
+        description: (activate ? `${company.name}: pago registrado y empresa activada.` : `${company.name}: pago registrado.`) + factura + correo,
       });
 
       // La factura por correo es un extra: si falla, el pago YA quedó registrado
       // y no se debe hacer creer lo contrario. Por eso solo avisa, sin revertir
       // nada; desde el historial se puede reenviar.
-      void enviarFactura(pago).catch((err: any) => {
-        toast({
-          title: 'El pago se registró, pero no se envió la factura',
-          description: err?.message ?? 'Error enviando el correo.',
-          variant: 'destructive',
+      if (enviarCorreo && destinatario) {
+        void enviarFactura(pago).catch((err: any) => {
+          toast({
+            title: 'El pago se registró, pero no se envió la factura',
+            description: err?.message ?? 'Error enviando el correo.',
+            variant: 'destructive',
+          });
         });
-      });
+      }
 
       setShowForm(false);
       await load();
@@ -245,6 +278,26 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
 
         {showForm && (
           <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border p-4">
+            {pendiente && pendiente.monto > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/40">
+                <div className="text-sm">
+                  <p className="font-medium text-red-700 dark:text-red-400">Debe {formatCurrency(pendiente.monto)}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Cuotas desde el {fmtDate(pendiente.desde)}; pagándolo queda al día hasta el {fmtDate(pendiente.hasta)}.
+                  </p>
+                </div>
+                <Button
+                  type="button" size="sm" variant="outline"
+                  onClick={() => {
+                    setAmount(pendiente.monto);
+                    setPeriodStart(pendiente.desde);
+                    setPeriodEnd(pendiente.hasta);
+                  }}
+                >
+                  Pagar lo pendiente
+                </Button>
+              </div>
+            )}
             {(planRates?.monthlyPrice != null || planRates?.customMonthlyPrice != null) && (() => {
               const sucursales = Math.max(planRates.activeBranches, 1);
               const porSucursal = sucursales > 1 ? ` × ${sucursales} sucursales` : '';
@@ -366,6 +419,25 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
             <div className="flex items-center justify-between rounded-lg border p-3">
               <Label htmlFor="sp-activate" className="font-normal">Activar la empresa (pasa a estado Activa)</Label>
               <Switch id="sp-activate" checked={activate} onCheckedChange={setActivate} />
+            </div>
+            <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="sp-correo" className="font-normal">Enviar la factura por correo</Label>
+                <p className="text-xs text-muted-foreground">
+                  {destinatario === undefined
+                    ? 'Buscando el correo del administrador…'
+                    : destinatario
+                      ? <>Le llega a {destinatario.name ? `${destinatario.name} ` : ''}&lt;{destinatario.email}&gt;, con el PDF adjunto.</>
+                      : 'La empresa no tiene un administrador activo con correo: no se puede enviar.'}
+                  {' '}Si no se envía, la descarga igual desde Mi Suscripción.
+                </p>
+              </div>
+              <Switch
+                id="sp-correo"
+                checked={enviarCorreo && !!destinatario}
+                disabled={!destinatario}
+                onCheckedChange={setEnviarCorreo}
+              />
             </div>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="secondary" onClick={() => setShowForm(false)} disabled={saving}>Cancelar</Button>
