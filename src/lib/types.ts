@@ -101,6 +101,8 @@ export type User = {
   // Admin de la empresa activa (o super admin dentro de ella): el que ve el
   // aviso de cuotas y reporta los pagos.
   isCompanyAdmin?: boolean;
+  // Dueño del negocio (profile_companies.es_dueno): ve el aviso de cuotas.
+  isCompanyOwner?: boolean;
   impersonatedCompanyId?: string;
   impersonatedCompanyName?: string;
   isSuperAdmin?: boolean;

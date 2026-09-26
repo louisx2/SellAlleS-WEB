@@ -114,11 +114,13 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSupportDialog, setShowSupportDialog] = useState(false);
 
-  // Aviso de cuotas: solo para el admin de la empresa en la que se opera (no
-  // en el lobby de Mis Empresas ni en las empresas demo). El super admin, fuera
-  // de una empresa, ve en cambio cuántos comprobantes esperan su revisión.
+  // Aviso de cuotas: solo para el dueño del negocio en la empresa en la que
+  // opera (no para los demás admins, ni en el lobby de Mis Empresas, ni en las
+  // empresas demo). El super admin lo ve dentro de una empresa, para saber lo
+  // que ve el dueño; fuera de ellas ve cuántos comprobantes esperan revisión.
   const multiEmpresaEnLobby = !!(appUser && !appUser.isSuperAdmin && (appUser.companies?.length ?? 0) > 1 && !appUser.impersonatedCompanyId);
-  const verAvisoDeCuota = !!appUser?.isCompanyAdmin && !appUser.companyDemoExpiresAt && !multiEmpresaEnLobby;
+  const verAvisoDeCuota = !!(appUser?.isCompanyOwner || (appUser?.isSuperAdmin && appUser.impersonatedCompanyId))
+    && !appUser?.companyDemoExpiresAt && !multiEmpresaEnLobby;
   const { cuenta: miCuenta } = useMiCuenta(verAvisoDeCuota, appUser?.impersonatedCompanyId || appUser?.companyId);
   const comprobantesPendientes = useComprobantesPendientes(!!appUser?.isSuperAdmin && !appUser.impersonatedCompanyId);
   
