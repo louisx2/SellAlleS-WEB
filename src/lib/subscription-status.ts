@@ -25,7 +25,7 @@ export const DIAS_AVISO = 7;
 
 export const ESTADO_COBRO_LABEL: Record<EstadoCobro, string> = {
   vencida: 'Vencida',
-  sin_registro: 'Sin pagos registrados',
+  sin_registro: 'Nunca ha pagado',
   prueba_vencida: 'Prueba vencida',
   por_vencer: 'Por vencer',
   prueba: 'En prueba',
@@ -33,6 +33,28 @@ export const ESTADO_COBRO_LABEL: Record<EstadoCobro, string> = {
   sin_tarifa: 'Sin tarifa',
   suspendida: 'Suspendida',
 };
+
+/** Cómo se agrupan en Cobros, cada grupo con su color. */
+export type GrupoCobro = 'atrasados' | 'por_vencer' | 'al_dia' | 'prueba' | 'no_se_cobran';
+
+export const GRUPO_DE_ESTADO: Record<EstadoCobro, GrupoCobro> = {
+  vencida: 'atrasados',
+  sin_registro: 'atrasados',
+  por_vencer: 'por_vencer',
+  al_dia: 'al_dia',
+  prueba: 'prueba',
+  prueba_vencida: 'prueba',
+  sin_tarifa: 'no_se_cobran',
+  suspendida: 'no_se_cobran',
+};
+
+export const GRUPOS_COBRO: { key: GrupoCobro; label: string; descripcion: string }[] = [
+  { key: 'atrasados', label: 'Atrasados', descripcion: 'Activas con el pago vencido o que nunca han pagado' },
+  { key: 'por_vencer', label: 'Por vencer', descripcion: `Su pago vence en los próximos días` },
+  { key: 'al_dia', label: 'Al día', descripcion: 'Pagadas por adelantado' },
+  { key: 'prueba', label: 'En prueba', descripcion: 'Todavía no pagan; las de prueba terminada están en solo lectura' },
+  { key: 'no_se_cobran', label: 'No se cobran', descripcion: 'Plan sin precio o empresa suspendida' },
+];
 
 /** Orden de la lista: primero lo que hay que cobrar. */
 export const ESTADO_COBRO_ORDEN: EstadoCobro[] = [
