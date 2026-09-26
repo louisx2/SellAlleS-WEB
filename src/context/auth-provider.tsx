@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, Rea
 import { useRouter, usePathname } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
 import type { User as AppUser, RolePermissions } from '@/lib/types';
-import { supabase, setReadOnlyMode, cabeceraImpersonacionHorneada } from '@/lib/supabase/client';
+import { supabase, setReadOnlyMode, setSoloVentasMode, cabeceraImpersonacionHorneada } from '@/lib/supabase/client';
 import {
   DEFAULT_ADMIN_PERMISSIONS, DEFAULT_CASHIER_PERMISSIONS,
   MANAGEMENT_PERMISSIONS, unionPermissions,
@@ -240,10 +240,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // usuarios comparaba los usuarios de la sucursal contra ese 2.
       const empresaActiva = savedImpersonatedId || data.company_id;
       let maxUsers: number | null = null;
+      let soloVentas = false;
       if (empresaActiva) {
         const { data: comp } = await supabase
-          .from('companies').select('max_users').eq('id', empresaActiva).maybeSingle();
+          .from('companies').select('max_users, solo_ventas').eq('id', empresaActiva).maybeSingle();
         maxUsers = (comp as any)?.max_users ?? null;
+        soloVentas = !!(comp as any)?.solo_ventas;
       }
 
       // El cupo de TODAS las sucursales accesibles, en una sola consulta, para que
@@ -255,14 +257,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .from('branches').select('id, max_users').in('id', idsSucursales);
         for (const s of (sucs ?? []) as any[]) branchMaxUsersById[s.id] = s.max_users ?? null;
       }
-      // Solo-lectura: puede entrar y ver, pero no modificar. Aplica si la prueba
-      // venció, o si la suscripción pagada venció (paid_until en el pasado). El
-      // super admin nunca queda en solo-lectura (gestiona/reactiva empresas).
+      // Solo-lectura: puede entrar y ver, pero no modificar. Aplica solo si la
+      // prueba venció. Una empresa activa atrasada NO se bloquea sola (antes
+      // bastaba con que paid_until quedara en el pasado): el super admin
+      // decide a mano pasarla a "solo ventas" desde Cobros. El super admin
+      // nunca queda bloqueado (gestiona/reactiva empresas).
       const trialExpired = compStatus === 'trial' && !!trialEndsAt && new Date(trialEndsAt).getTime() < Date.now();
-      const subLapsed = compStatus === 'active' && !!paidUntil && new Date(paidUntil + 'T23:59:59').getTime() < Date.now();
-      const isReadOnly = !data.is_super_admin && (trialExpired || subLapsed);
+      const isReadOnly = !data.is_super_admin && trialExpired;
+      const isSoloVentas = !data.is_super_admin && !isReadOnly && soloVentas;
       // Activa/desactiva el bloqueo central de escrituras en el cliente Supabase.
       setReadOnlyMode(isReadOnly);
+      setSoloVentasMode(isSoloVentas);
 
       const user: AppUser = {
         id: data.id,
@@ -278,6 +283,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         companyTrialEndsAt: trialEndsAt,
         companyPaidUntil: paidUntil,
         isReadOnly,
+        isSoloVentas,
+        // Quien ve el aviso de cuotas y reporta el pago: el admin de la empresa,
+        // o el super admin mientras está dentro de una.
+        isCompanyAdmin: esAdminDeEmpresa || (!!data.is_super_admin && !!savedImpersonatedId),
         impersonatedCompanyId: savedImpersonatedId || undefined,
         impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,
@@ -340,6 +349,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }, 0);
       } else {
         setReadOnlyMode(false);
+        setSoloVentasMode(false);
         setAppUser(null);
         clearLocal();
         setLoading(false);

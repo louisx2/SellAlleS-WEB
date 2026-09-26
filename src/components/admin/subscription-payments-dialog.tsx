@@ -16,9 +16,8 @@ import { rowToSubscriptionPayment } from '@/lib/supabase/mappers';
 import type { SubscriptionPayment, Company } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency } from '@/lib/utils';
-import {
-  METODO_DE_PAGO, codigoDeFactura, numeroDeFactura, nombreArchivoFactura, facturaEnBase64, descargarFactura,
-} from '@/lib/subscription-invoice';
+import { METODO_DE_PAGO, codigoDeFactura, numeroDeFactura, descargarFactura } from '@/lib/subscription-invoice';
+import { adminDeEmpresa, enviarFactura as enviarFacturaPorCorreo } from '@/lib/subscription-emails';
 import { Download, Loader2, Mail, PlusCircle } from 'lucide-react';
 import { hoyLocal } from '@/lib/subscription-status';
 
@@ -100,20 +99,6 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
     }
   }, [company, defaultPlanName, load]);
 
-  const buscarDestinatario = useCallback(async (companyId: string) => {
-    const { data: admins } = await supabase
-      .from('profiles')
-      .select('name, email')
-      .eq('company_id', companyId)
-      .eq('role', 'admin')
-      .eq('is_active', true)
-      .not('email', 'is', null)
-      .order('created_at')
-      .limit(1);
-    const admin = admins?.[0];
-    return admin?.email ? { name: admin.name ?? null, email: admin.email as string } : null;
-  }, []);
-
   // Solo al cambiar de empresa: tras registrar un pago llega la misma empresa
   // recargada y no hace falta volver a buscar.
   const companyId = company?.id;
@@ -121,58 +106,13 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
     if (!companyId) return;
     let cancelado = false;
     setDestinatario(undefined);
-    buscarDestinatario(companyId).then((d) => { if (!cancelado) setDestinatario(d); });
+    adminDeEmpresa(companyId).then((d) => { if (!cancelado) setDestinatario(d); });
     return () => { cancelado = true; };
-  }, [companyId, buscarDestinatario]);
+  }, [companyId]);
 
-  // Manda la factura al administrador de la empresa y devuelve a qué dirección.
-  // La deduplicación real vive en send-lifecycle-email (clave única en
-  // platform_email_log): la clave del registro es el id del pago, así que el
-  // mismo pago no sale dos veces aunque la llamada se repita; el reenvío manual
-  // lleva la hora para que sí salga cada vez que se pide.
-  const enviarFactura = async (pago: SubscriptionPayment, reenvio = false): Promise<string> => {
-    if (!company) throw new Error('No hay empresa seleccionada.');
-    const destinatario = await buscarDestinatario(company.id);
-    if (!destinatario) throw new Error('La empresa no tiene un administrador activo con correo.');
-
-    // Si el PDF fallara, el correo sale igual, como recibo y sin adjunto: la
-    // empresa se entera del pago y la factura sigue en su Mi Suscripción.
-    let attachment: { filename: string; content: string } | undefined;
-    if (pago.invoiceNumber != null) {
-      try {
-        attachment = { filename: nombreArchivoFactura(pago), content: await facturaEnBase64(pago) };
-      } catch (err) {
-        console.error('No se pudo armar el PDF de la factura:', err);
-      }
-    }
-
-    const { data, error } = await supabase.functions.invoke('send-lifecycle-email', {
-      body: {
-        template: 'recibo-suscripcion',
-        to: destinatario.email,
-        companyId: company.id,
-        dedupeKey: reenvio
-          ? `${company.id}:pago:${pago.id}:reenvio:${Date.now()}`
-          : `${company.id}:pago:${pago.id}`,
-        attachment,
-        vars: {
-          companyName: company.name,
-          userName: destinatario.name,
-          amount: pago.amount,
-          method: METODO_DE_PAGO[pago.method] ?? pago.method,
-          paidAt: pago.paidAt,
-          paidUntil: pago.periodEnd ?? null,
-          invoiceNumber: pago.invoiceNumber != null ? codigoDeFactura(pago) : null,
-        },
-      },
-    });
-    const respuesta = data as { error?: string; skipped?: string } | null;
-    const msg = respuesta?.error ?? error?.message;
-    if (msg) throw new Error(msg);
-    if (respuesta?.skipped === 'correo_rebotado') {
-      throw new Error(`Los correos a ${destinatario.email} rebotan; no se le vuelve a escribir.`);
-    }
-    return destinatario.email;
+  const enviarFactura = (pago: SubscriptionPayment, reenvio = false): Promise<string> => {
+    if (!company) return Promise.reject(new Error('No hay empresa seleccionada.'));
+    return enviarFacturaPorCorreo(company, pago, reenvio);
   };
 
   const descargar = async (pago: SubscriptionPayment) => {

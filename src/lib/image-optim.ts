@@ -109,6 +109,37 @@ async function exportar(
 }
 
 /**
+ * Una sola variante, para documentos: el comprobante de una transferencia es
+ * casi siempre una captura de la app del banco (1170×2532 en un iPhone) y lo
+ * que importa es que el número de referencia se lea. Por eso el lado mayor va
+ * a 2000 px y no a los 1280 de un producto. Si el original ya pesaba menos que
+ * el resultado, se queda el original (siempre que sea un formato que el
+ * navegador sepa mostrar).
+ */
+export async function comprimirDocumento(
+  file: File,
+  maxLado = 2000,
+  calidad = 0.85
+): Promise<{ blob: Blob; ext: 'webp' | 'jpg' | 'png'; mime: string }> {
+  const fuente = await decodificar(file);
+  const ancho = 'width' in fuente ? fuente.width : (fuente as HTMLImageElement).naturalWidth;
+  const alto = 'height' in fuente ? fuente.height : (fuente as HTMLImageElement).naturalHeight;
+  if (!ancho || !alto) throw new Error('La imagen no tiene dimensiones válidas');
+  try {
+    const salida = await exportar(escalar(fuente, ancho, alto, maxLado), calidad);
+    const originalSirve = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type)
+      && Math.max(ancho, alto) <= maxLado;
+    if (originalSirve && file.size <= salida.blob.size) {
+      const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+      return { blob: file, ext, mime: file.type };
+    }
+    return salida;
+  } finally {
+    if ('close' in fuente) fuente.close();
+  }
+}
+
+/**
  * Convierte el archivo elegido por el usuario en las dos variantes que la app
  * sirve. Devuelve siempre ambas, aunque la original ya fuese pequeña: el
  * beneficio real no está en el tamaño del archivo sino en que la grilla deje de

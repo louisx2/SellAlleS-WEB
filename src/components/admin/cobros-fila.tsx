@@ -2,7 +2,7 @@
 
 // Una empresa en Cobros (/admin/cobros), pintada con el color de su grupo.
 
-import { ChevronDown, ChevronRight, PlusCircle, Store } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, Lock, LockOpen, PlusCircle, Store } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -25,6 +25,8 @@ export interface Fila {
 }
 
 export const fmtDate = (s?: string | null) => (s ? new Date(`${s.slice(0, 10)}T00:00:00`).toLocaleDateString('es-DO') : '—');
+/** Para timestamptz: la fecha local del instante, no la de UTC. */
+export const fmtInstante = (s?: string | null) => (s ? new Date(s).toLocaleDateString('es-DO') : '—');
 
 const cuotas = (n: number) => `${n} ${n === 1 ? 'cuota' : 'cuotas'}`;
 const enDias = (n: number) => `${n} ${n === 1 ? 'día' : 'días'}`;
@@ -90,11 +92,13 @@ export function detalleEstado(c: CobroEmpresa): string | null {
   }
 }
 
-export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
+export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas }: {
   fila: Fila;
   abierta: boolean;
   onToggle: () => void;
   onPagar: () => void;
+  /** Pone o quita el modo solo ventas (siempre a mano, con confirmación). */
+  onSoloVentas: (activar: boolean) => void;
 }) {
   const { company, plan, cobro, ultimoPago, grupo } = fila;
   const color = COLOR[grupo];
@@ -121,6 +125,21 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
                 <span className="font-semibold">{company.name}</span>
                 <Badge variant="outline" className={color.etiqueta}>{ESTADO_COBRO_LABEL[cobro.estado]}</Badge>
                 {detalle && <span className={cn('text-xs font-medium', color.texto)}>{detalle}</span>}
+                {cobro.soloVentas && (
+                  <Badge variant="outline" className="border-red-300 bg-red-100 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+                    <Lock className="mr-1 h-3 w-3" /> Solo ventas
+                  </Badge>
+                )}
+                {cobro.sugerirSoloVentas && (
+                  <Badge variant="outline" className="border-dashed border-red-400 text-red-700 dark:text-red-400">
+                    Sugerido: solo ventas ({cobro.diasAtraso} días)
+                  </Badge>
+                )}
+                {cobro.comprobantesPorConfirmar > 0 && (
+                  <Badge variant="outline" className="border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                    <Clock className="mr-1 h-3 w-3" /> {formatCurrency(cobro.porConfirmar)} por confirmar
+                  </Badge>
+                )}
               </div>
               <p className="text-xs text-muted-foreground">
                 {plan?.name ?? 'Sin plan'} · {BILLING_CYCLE_LABEL[cobro.ciclo]} ·{' '}
@@ -162,10 +181,27 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
             </div>
           </div>
 
-          <Button size="sm" className="md:shrink-0" onClick={onPagar}>
-            <PlusCircle className="mr-1.5 h-4 w-4" />
-            Registrar pago
-          </Button>
+          <div className="flex gap-2 md:shrink-0 md:flex-col">
+            <Button size="sm" className="flex-1 md:flex-none" onClick={onPagar}>
+              <PlusCircle className="mr-1.5 h-4 w-4" />
+              Registrar pago
+            </Button>
+            {cobro.soloVentas ? (
+              <Button size="sm" variant="outline" className="flex-1 md:flex-none" onClick={() => onSoloVentas(false)}>
+                <LockOpen className="mr-1.5 h-4 w-4" />
+                Quitar solo ventas
+              </Button>
+            ) : (cobro.sugerirSoloVentas || (debe && abierta)) && (
+              <Button
+                size="sm" variant="outline"
+                className="flex-1 border-red-300 text-red-700 hover:bg-red-50 md:flex-none dark:border-red-900 dark:text-red-400"
+                onClick={() => onSoloVentas(true)}
+              >
+                <Lock className="mr-1.5 h-4 w-4" />
+                Pasar a solo ventas
+              </Button>
+            )}
+          </div>
         </div>
 
         {abierta && (
@@ -182,6 +218,9 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
                       </span>
                       <span className="text-xs text-muted-foreground">
                         se cobra desde {fmtDate(c.desde)} · {cuotas(c.cuotas)} de {formatCurrency(c.cuota)} = {formatCurrency(c.cargado)} · próxima {fmtDate(c.proximaCuota)}
+                        {c.pendientes > 0 && (
+                          <span className={cn('font-medium', color.texto)}> · debe {cuotas(c.pendientes)} desde {fmtDate(c.debeDesde)}</span>
+                        )}
                       </span>
                     </li>
                   ))}
@@ -196,6 +235,11 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar }: {
                 {inactivas > 0 && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     Las sucursales inactivas no se cobran: {(company.branches ?? []).filter((b) => !b.is_active).map((b) => b.name).join(', ')}.
+                  </p>
+                )}
+                {cobro.soloVentas && (
+                  <p className="mt-1 text-xs text-red-700 dark:text-red-400">
+                    En solo ventas desde el {fmtInstante(cobro.soloVentasDesde)}: vende, cobra y usa la caja; lo demás queda en consulta.
                   </p>
                 )}
                 {cobro.tarifaPorSucursal == null && (

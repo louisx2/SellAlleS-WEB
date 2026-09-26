@@ -12,16 +12,14 @@
 // La fecha de la empresa solo manda cuando la cuenta es de la empresa entera
 // (plan a medida, o sin sucursales activas).
 //
-// La tarifa es la de hoy del plan (ver subscription-pricing.ts) y cuentan las
-// sucursales activas hoy: no hay historial de precios ni de desactivaciones.
+// La cuenta la calcula la base (_cuenta_de_suscripcion), una sola vez para
+// todos: Cobros, el banner de los administradores, Mi Suscripción, los correos
+// y el resumen de la noche leen lo mismo. Aquí solo se traduce ese jsonb.
 //
-// Ojo: el bloqueo de solo lectura (auth-provider) sigue mirando
-// companies.paid_until, que se mueve al registrar un pago con período.
+// Atrasarse no bloquea nada solo: pasar una empresa a "solo ventas" lo decide
+// el super admin desde Cobros (la cuenta nada más lo sugiere).
 
-import type { Company } from '@/lib/types';
-import {
-  companyMonthlyRevenue, planRatePerBranch, type BillingCycle, type PricedPlan, type PricedSub,
-} from '@/lib/subscription-pricing';
+import type { BillingCycle } from '@/lib/subscription-pricing';
 
 export type EstadoCobro =
   | 'atrasada'       // ya pagó alguna vez, pero debe cuotas vencidas
@@ -114,8 +112,6 @@ export function sumarMeses(ymd: string, n: number): string {
   return `${ny}-${dos(nm + 1)}-${dos(Math.min(d, ultimo))}`;
 }
 
-const mayor = (a: string, b: string) => (a > b ? a : b);
-
 // ── Cuenta ─────────────────────────────────────────────────────────────────
 
 export interface CuentaSucursal {
@@ -130,7 +126,11 @@ export interface CuentaSucursal {
   cuotas: number;
   cargado: number;
   /** Fecha de la próxima cuota que todavía no llega. */
-  proximaCuota: string;
+  proximaCuota: string | null;
+  /** De sus cuotas vencidas, las que lo pagado no alcanza a cubrir. */
+  pendientes: number;
+  /** Fecha de su cuota más vieja sin cubrir. */
+  debeDesde: string | null;
 }
 
 export interface CobroEmpresa {
@@ -139,6 +139,8 @@ export interface CobroEmpresa {
    *  faltan para la próxima cuota que no alcanza a cubrir lo pagado. En prueba,
    *  días para el fin de la prueba. null si no aplica. */
   dias: number | null;
+  /** Días de atraso (0 si no debe nada vencido). */
+  diasAtraso: number;
   sucursalesActivas: number;
   ciclo: BillingCycle;
   /** Tarifa por sucursal, por mes. null = plan sin tarifa por sucursal. */
@@ -160,110 +162,69 @@ export interface CobroEmpresa {
   proximoCobro: string | null;
   /** Para "pagar lo pendiente": el monto y el período que deja cubierto. */
   pagarPendiente: { monto: number; desde: string; hasta: string } | null;
+  /** Suma de los comprobantes que subió la empresa y faltan por confirmar. */
+  porConfirmar: number;
+  comprobantesPorConfirmar: number;
+  soloVentas: boolean;
+  soloVentasDesde: string | null;
+  /** Lleva los días configurados de atraso, sin comprobantes en revisión y
+   *  sin estar ya en solo ventas. Es solo una sugerencia. */
+  sugerirSoloVentas: boolean;
+  soloVentasSugerirDias: number;
 }
 
-interface Cargo { fecha: string; monto: number; nombre: string }
+const num = (v: unknown, def = 0): number => {
+  const n = Number(v);
+  return v == null || Number.isNaN(n) ? def : n;
+};
+const numONull = (v: unknown): number | null => (v == null ? null : num(v));
+const texto = (v: unknown): string | null => (v == null ? null : String(v));
 
-export function cobroDeEmpresa(
-  company: Company,
-  plan: PricedPlan | undefined,
-  sub: PricedSub | undefined,
-  pagado: number,
-  hoy: string = hoyLocal(),
-): CobroEmpresa {
-  const activas = (company.branches ?? []).filter((b) => b.is_active);
-  const sucursalesActivas = activas.length;
-  const ciclo: BillingCycle = sub?.billing_cycle === 'annual' ? 'annual' : 'monthly';
-  const meses = ciclo === 'annual' ? 12 : 1;
-  const tarifaPorSucursal = planRatePerBranch(plan, ciclo);
-  const mensual = companyMonthlyRevenue(plan, sub, sucursalesActivas);
-  const montoPeriodo = mensual * meses;
-
-  const base: CobroEmpresa = {
-    estado: 'al_dia', dias: null, sucursalesActivas, ciclo, tarifaPorSucursal, mensual, montoPeriodo,
-    cuentas: [], cargado: 0, pagado, saldo: -pagado, cuotasPendientes: 0,
-    debeDesde: null, proximoCobro: null, pagarPendiente: null,
+/** Traduce el jsonb de _cuenta_de_suscripcion (vía mi_cuenta_de_suscripcion o
+ *  cuentas_de_suscripcion). */
+export function cuentaDesdeJson(j: any): CobroEmpresa {
+  const pp = j?.pagar_pendiente;
+  return {
+    estado: (j?.estado ?? 'sin_tarifa') as EstadoCobro,
+    dias: numONull(j?.dias),
+    diasAtraso: num(j?.dias_atraso),
+    sucursalesActivas: num(j?.sucursales_activas),
+    ciclo: j?.ciclo === 'annual' ? 'annual' : 'monthly',
+    tarifaPorSucursal: numONull(j?.tarifa_por_sucursal),
+    mensual: num(j?.mensual),
+    montoPeriodo: num(j?.monto_periodo),
+    cuentas: ((j?.cuentas ?? []) as any[]).map((c) => ({
+      branchId: c.branch_id ?? null,
+      nombre: String(c.nombre ?? ''),
+      desde: String(c.desde ?? ''),
+      cuota: num(c.cuota),
+      cuotas: num(c.cuotas),
+      cargado: num(c.cargado),
+      proximaCuota: texto(c.proxima_cuota),
+      pendientes: num(c.pendientes),
+      debeDesde: texto(c.debe_desde),
+    })),
+    cargado: num(j?.cargado),
+    pagado: num(j?.pagado),
+    saldo: num(j?.saldo),
+    cuotasPendientes: num(j?.cuotas_pendientes),
+    debeDesde: texto(j?.debe_desde),
+    proximoCobro: texto(j?.proximo_cobro),
+    pagarPendiente: pp ? { monto: num(pp.monto), desde: String(pp.desde), hasta: String(pp.hasta) } : null,
+    porConfirmar: num(j?.por_confirmar),
+    comprobantesPorConfirmar: num(j?.comprobantes_por_confirmar),
+    soloVentas: !!j?.solo_ventas,
+    soloVentasDesde: texto(j?.solo_ventas_desde),
+    sugerirSoloVentas: !!j?.sugerir_solo_ventas,
+    soloVentasSugerirDias: num(j?.solo_ventas_sugerir_dias, 10),
   };
+}
 
-  if (company.status === 'suspended') return { ...base, estado: 'suspendida' };
-
-  if (company.status === 'trial') {
-    // trial_ends_at es un instante (fin del día local guardado en UTC): se
-    // pasa a fecha local, que cortar el ISO lo correría un día.
-    const fin = company.trial_ends_at ? fechaLocal(company.trial_ends_at) : null;
-    if (!fin) return { ...base, estado: 'prueba' };
-    const dias = diasEntre(hoy, fin);
-    return { ...base, estado: dias < 0 ? 'prueba_vencida' : 'prueba', dias };
-  }
-
-  if (mensual <= 0) return { ...base, estado: 'sin_tarifa' };
-
-  // ── Cuotas ──
-  const finPrueba = company.trial_ends_at ? sumarDias(fechaLocal(company.trial_ends_at), 1) : null;
-  const inicioEmpresa = mayor(fechaLocal(company.created_at), finPrueba ?? '');
-
-  const definiciones: { branchId: string | null; nombre: string; desde: string; cuota: number }[] =
-    tarifaPorSucursal != null && activas.length > 0
-      ? activas.map((b) => ({
-          branchId: b.id,
-          nombre: b.name,
-          desde: b.created_at ? mayor(fechaLocal(b.created_at), finPrueba ?? '') : inicioEmpresa,
-          cuota: tarifaPorSucursal * meses,
-        }))
-      : [{ branchId: null, nombre: 'Toda la empresa', desde: inicioEmpresa, cuota: montoPeriodo }];
-
-  const vencidos: Cargo[] = [];
-  const cuentas: CuentaSucursal[] = definiciones.map((d) => {
-    let k = 0;
-    while (sumarMeses(d.desde, k * meses) <= hoy) {
-      vencidos.push({ fecha: sumarMeses(d.desde, k * meses), monto: d.cuota, nombre: d.nombre });
-      k += 1;
-    }
-    return { ...d, cuotas: k, cargado: k * d.cuota, proximaCuota: sumarMeses(d.desde, k * meses) };
-  });
-
-  const cargado = cuentas.reduce((acc, c) => acc + c.cargado, 0);
-  const saldo = Math.round((cargado - pagado) * 100) / 100;
-  const resumen = { ...base, cuentas, cargado, saldo };
-
-  // Lo pagado se aplica a las cuotas más viejas primero.
-  vencidos.sort((a, b) => (a.fecha === b.fecha ? a.nombre.localeCompare(b.nombre) : a.fecha < b.fecha ? -1 : 1));
-  let resto = pagado;
-  let primeraSinCubrir = -1;
-  for (let i = 0; i < vencidos.length; i++) {
-    if (resto + 0.005 >= vencidos[i].monto) { resto -= vencidos[i].monto; continue; }
-    primeraSinCubrir = i;
-    break;
-  }
-
-  if (primeraSinCubrir >= 0) {
-    const debeDesde = vencidos[primeraSinCubrir].fecha;
-    // Pagando todo lo pendiente queda cubierto hasta la próxima cuota de
-    // cualquiera de sus sucursales.
-    const hasta = cuentas.map((c) => c.proximaCuota).sort()[0];
-    return {
-      ...resumen,
-      estado: pagado > 0 ? 'atrasada' : 'nunca_pago',
-      dias: -diasEntre(debeDesde, hoy),
-      cuotasPendientes: vencidos.length - primeraSinCubrir,
-      debeDesde,
-      proximoCobro: debeDesde,
-      pagarPendiente: { monto: saldo, desde: debeDesde, hasta },
-    };
-  }
-
-  // Al día: ¿hasta cuándo alcanza lo que sobró? Se siguen aplicando las
-  // cuotas que vienen, en orden, hasta la primera que no cubre.
-  const siguientes = cuentas.map((c) => ({ ...c, k: c.cuotas }));
-  let proximoCobro = siguientes.map((c) => c.proximaCuota).sort()[0];
-  for (let vueltas = 0; vueltas < 1000; vueltas++) {
-    siguientes.sort((a, b) => (sumarMeses(a.desde, a.k * meses) < sumarMeses(b.desde, b.k * meses) ? -1 : 1));
-    const c = siguientes[0];
-    const fecha = sumarMeses(c.desde, c.k * meses);
-    if (resto + 0.005 < c.cuota) { proximoCobro = fecha; break; }
-    resto -= c.cuota;
-    c.k += 1;
-  }
-  const dias = diasEntre(hoy, proximoCobro);
-  return { ...resumen, estado: dias <= DIAS_AVISO ? 'por_vencer' : 'al_dia', dias, proximoCobro };
+/** Lo que toca pagar en la próxima cuota: las cuotas de las sucursales que
+ *  vencen ese día (igual que el recordatorio por correo). */
+export function montoProximaCuota(c: CobroEmpresa): number {
+  const delDia = c.cuentas
+    .filter((x) => x.proximaCuota && x.proximaCuota === c.proximoCobro)
+    .reduce((acc, x) => acc + x.cuota, 0);
+  return delDia > 0 ? delDia : (c.cuentas[0]?.cuota ?? c.montoPeriodo);
 }
