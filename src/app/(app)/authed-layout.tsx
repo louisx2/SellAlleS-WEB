@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw } from 'lucide-react';
+import { ArrowRightLeft, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -76,6 +76,7 @@ const adminNavItems: NavItem[] = [
     { href: '/inventory', icon: Package, label: 'Inventario', permission: 'products' },
     { href: '/categories', icon: FolderOpen, label: 'Categorías', permission: 'products' },
     { href: '/locations', icon: MapPin, label: 'Ubicaciones', permission: 'products' },
+    { href: '/transferencias', icon: ArrowRightLeft, label: 'Transferencias', permission: 'products' },
     { href: '/customers', icon: UsersRound, label: 'Clientes', permission: 'customers' },
     { href: '/suppliers', icon: Truck, label: 'Proveedores', module: 'suppliers', permission: 'suppliers' },
     { href: '/company-profile', icon: Building, label: 'Perfil de Sucursal', permission: 'company-profile' },

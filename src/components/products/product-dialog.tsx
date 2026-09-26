@@ -11,6 +11,10 @@ import {
   DialogClose,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -20,8 +24,9 @@ import { Textarea } from '@/components/ui/textarea';
 import type { Product } from '@/lib/types';
 import {
   UNITS, DEFAULT_UNIT_CODE, getUnit, unitAllowsDecimals, normalizeQty,
-  normalizeUnitCode, parseQtyInput, formatQty, type UnitCode,
+  normalizeUnitCode, parseQtyInput, formatQty, formatQuantity, type UnitCode,
 } from '@/lib/units';
+import { findInOtherBranches, transferLink, type ExistingElsewhere } from '@/lib/transfers';
 import { useToast } from '@/hooks/use-toast';
 import { useProducts } from '@/context/product-provider';
 import { useSuppliers } from '@/context/supplier-provider';
@@ -31,7 +36,7 @@ import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { ProductImage, SUFIJO_THUMB } from '@/components/products/product-image';
 import { optimizarImagen } from '@/lib/image-optim';
-import { ImagePlus, Loader2, X } from 'lucide-react';
+import { ArrowRightLeft, ImagePlus, Loader2, X } from 'lucide-react';
 import { useRef, useState } from 'react';
 
 interface ProductDialogProps {
@@ -47,9 +52,14 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const { suppliers } = useSuppliers();
   const { categories } = useCategories();
   const { locations } = useLocations();
-  const { appUser } = useAuth();
+  const { appUser, setActiveBranch } = useAuth();
 
   const isEditMode = !!product;
+  // Aviso al crear: lo mismo ya tiene existencias en otra sucursal. Mientras
+  // se decide, el artículo espera aquí sin guardarse.
+  const [enOtras, setEnOtras] = useState<ExistingElsewhere[]>([]);
+  const [pendiente, setPendiente] = useState<Omit<Product, 'id'> | null>(null);
+  const [comprobando, setComprobando] = useState(false);
   // Soporta uso como wrapper con trigger propio (children) o como diálogo
   // controlado desde fuera (open/onOpenChange), p. ej. desde un menú de acciones.
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
@@ -213,6 +223,25 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       image: imageUrl.trim() || 'placeholder',
     };
 
+    // Cada sucursal tiene su inventario y puede comprar lo mismo por su
+    // cuenta, así que esto es solo un aviso: si la mercancía en realidad salió
+    // de otra sucursal, crearla aquí deja sin descontar la de allá. Se ofrece
+    // ir a transferirla; crear igual sigue siendo posible.
+    if (!isEditMode && productData.tracksStock && appUser?.activeBranchId) {
+      setComprobando(true);
+      const encontrados = await findInOtherBranches(appUser.activeBranchId, productData.code ?? '', productData.name);
+      setComprobando(false);
+      if (encontrados.length > 0) {
+        setEnOtras(encontrados);
+        setPendiente(productData);
+        return;
+      }
+    }
+
+    await guardar(productData);
+  };
+
+  const guardar = async (productData: Omit<Product, 'id'>) => {
     try {
       if (isEditMode && product) {
         // Se parte del producto original: productData solo trae lo que hay en el
@@ -240,6 +269,24 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
        });
     }
   };
+
+  const cerrarAviso = () => { setEnOtras([]); setPendiente(null); };
+
+  const crearDeTodosModos = async () => {
+    const data = pendiente;
+    cerrarAviso();
+    if (data) await guardar(data);
+  };
+
+  // Hay que estar en la sucursal que tiene el artículo para mandarlo: se
+  // cambia a ella y se abre Inventario con el envío ya armado hacia esta.
+  const irATransferir = (e: ExistingElsewhere) => {
+    const destino = appUser?.activeBranchId;
+    setActiveBranch(e.branchId, e.branchName);
+    setTimeout(() => { window.location.href = transferLink(e.productId, destino); }, 100);
+  };
+  const puedeIrA = (e: ExistingElsewhere) =>
+    e.canTransfer && !!appUser?.branches?.some((b) => b.id === e.branchId);
   
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -462,10 +509,55 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
              <DialogClose asChild>
                 <Button type="button" variant="secondary">Cancelar</Button>
             </DialogClose>
-            <Button type="submit">Guardar Cambios</Button>
+            <Button type="submit" disabled={comprobando}>
+              {comprobando && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Guardar Cambios
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
+
+      <AlertDialog open={enOtras.length > 0} onOpenChange={(o) => { if (!o) cerrarAviso(); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Este artículo ya existe en otra sucursal</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  Cada sucursal lleva su propio inventario. Si esta sucursal lo compró por su cuenta,
+                  créalo normalmente. Pero si la mercancía salió de la otra sucursal, no la crees aquí:
+                  transfiérela desde allá, para que allá se descuente lo que salió.
+                </p>
+                <ul className="space-y-2">
+                  {enOtras.map((e) => (
+                    <li key={e.productId} className="rounded-md border p-2 text-foreground">
+                      <p className="font-medium">{e.branchName}: {formatQuantity(e.stock, e.unit)}</p>
+                      <p className="text-xs text-muted-foreground break-words">
+                        {e.productName}{e.productCode ? ` · ${e.productCode}` : ''}
+                      </p>
+                      {puedeIrA(e) && (
+                        <Button type="button" size="sm" variant="outline" className="mt-2" onClick={() => irATransferir(e)}>
+                          <ArrowRightLeft className="mr-1.5 h-4 w-4" />
+                          Ir a {e.branchName} y transferir
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                {!enOtras.some(puedeIrA) && (
+                  <p className="text-xs">
+                    Tu usuario no puede transferir desde esa sucursal: pídeselo a quien la administra.
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={crearDeTodosModos}>Crear de todos modos</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

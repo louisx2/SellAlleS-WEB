@@ -12,22 +12,21 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ProductDialog } from './product-dialog';
-import { TransferProductDialog } from './transfer-product-dialog';
+import { useOpenTransfer } from './transfer-product-dialog';
 import type { Product } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useProducts } from '@/context/product-provider';
-import { useAuth } from '@/context/auth-provider';
 
 interface ProductActionsProps {
   product: Product;
 }
 
 export function ProductActions({ product }: ProductActionsProps) {
-  const { appUser } = useAuth();
   const { toast } = useToast();
   const { deleteProduct } = useProducts();
+  // null si quien mira no puede transferir desde esta sucursal.
+  const openTransfer = useOpenTransfer();
   const [editOpen, setEditOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
 
   const handleDelete = async () => {
     // Se avisan las dos salidas posibles: un artículo ya vendido no se puede
@@ -77,8 +76,8 @@ export function ProductActions({ product }: ProductActionsProps) {
             <Pencil className="mr-2 h-4 w-4" />
             <span>Editar</span>
           </DropdownMenuItem>
-          {product.tracksStock && appUser?.role === 'admin' && (
-            <DropdownMenuItem onSelect={() => setTimeout(() => setTransferOpen(true), 0)}>
+          {product.tracksStock && product.stock > 0 && openTransfer && (
+            <DropdownMenuItem onSelect={() => openTransfer({ products: [product] })}>
               <ArrowRightLeft className="mr-2 h-4 w-4" />
               <span>Transferir</span>
             </DropdownMenuItem>
@@ -91,7 +90,6 @@ export function ProductActions({ product }: ProductActionsProps) {
       </DropdownMenu>
 
       <ProductDialog product={product} open={editOpen} onOpenChange={setEditOpen} />
-      <TransferProductDialog product={product} open={transferOpen} onOpenChange={setTransferOpen} />
     </>
   );
 }
