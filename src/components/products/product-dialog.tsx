@@ -223,9 +223,10 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       image: imageUrl.trim() || 'placeholder',
     };
 
-    // Crear algo que ya tiene existencias en otra sucursal suele ser mercancía
-    // que llegó de allá: si se crea aquí, allá nunca se descuenta. Se avisa y
-    // se ofrece ir a transferirla; crear igual sigue siendo posible.
+    // Cada sucursal tiene su inventario y puede comprar lo mismo por su
+    // cuenta, así que esto es solo un aviso: si la mercancía en realidad salió
+    // de otra sucursal, crearla aquí deja sin descontar la de allá. Se ofrece
+    // ir a transferirla; crear igual sigue siendo posible.
     if (!isEditMode && productData.tracksStock && appUser?.activeBranchId) {
       setComprobando(true);
       const encontrados = await findInOtherBranches(appUser.activeBranchId, productData.code ?? '', productData.name);
@@ -519,12 +520,13 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       <AlertDialog open={enOtras.length > 0} onOpenChange={(o) => { if (!o) cerrarAviso(); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Esto ya tiene existencias en otra sucursal</AlertDialogTitle>
+            <AlertDialogTitle>Este artículo ya existe en otra sucursal</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
                 <p>
-                  Si esta mercancía llegó de allá, no la crees aquí: transfiérela desde esa sucursal.
-                  Así allá se descuenta lo que salió y el inventario de las dos cuadra.
+                  Cada sucursal lleva su propio inventario. Si esta sucursal lo compró por su cuenta,
+                  créalo normalmente. Pero si la mercancía salió de la otra sucursal, no la crees aquí:
+                  transfiérela desde allá, para que allá se descuente lo que salió.
                 </p>
                 <ul className="space-y-2">
                   {enOtras.map((e) => (
