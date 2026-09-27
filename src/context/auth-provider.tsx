@@ -71,7 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         branches!profiles_branch_id_fkey(id, name, is_active),
         profile_branches(branch_id, branches(id, name, is_active), roles(id, name, permissions)),
         profile_roles(roles(id, name, description, permissions)),
-        profile_companies(role, companies(id, name, status, is_demo))
+        profile_companies(role, es_dueno, companies(id, name, status, is_demo))
       `)
       .eq('id', userId)
       .maybeSingle();
@@ -171,8 +171,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Administrar la empresa NO es de la sucursal: viene de ser admin en
       // profile_companies. Por eso se suma aparte a lo que dé el rol de sucursal.
-      const rolEnLaEmpresa = (data.profile_companies ?? [])
-        .find((pc: any) => pc.companies?.id === data.company_id)?.role ?? data.role;
+      const membresia = (data.profile_companies ?? [])
+        .find((pc: any) => pc.companies?.id === data.company_id);
+      const rolEnLaEmpresa = membresia?.role ?? data.role;
       const esAdminDeEmpresa = !data.is_super_admin && rolEnLaEmpresa === 'admin';
 
       const permisosDeSucursal = (branchId?: string): RolePermissions | undefined => {
@@ -292,6 +293,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Quien ve el aviso de cuotas y reporta el pago: el admin de la empresa,
         // o el super admin mientras está dentro de una.
         isCompanyAdmin: esAdminDeEmpresa || (!!data.is_super_admin && !!savedImpersonatedId),
+        // El dueño del negocio (lo marca el super admin): el único que ve el
+        // aviso de cuotas en cada pantalla.
+        isCompanyOwner: esAdminDeEmpresa && !!(membresia as any)?.es_dueno,
         impersonatedCompanyId: savedImpersonatedId || undefined,
         impersonatedCompanyName: savedImpersonatedName || undefined,
         isSuperAdmin: !!data.is_super_admin,

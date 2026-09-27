@@ -12,8 +12,22 @@ import type { ReportePago } from '@/lib/payment-reports';
 
 export interface Destinatario { name: string | null; email: string }
 
-/** El primer administrador activo con correo de la empresa. */
+/** A quién escribirle por la cuenta de la empresa: su dueño, y si no tiene
+ *  (o no tiene correo), el primer administrador activo. Lo mismo que hace la
+ *  base con _contacto_de_cobro para los recordatorios. */
 export async function adminDeEmpresa(companyId: string): Promise<Destinatario | null> {
+  const { data: duenos } = await supabase
+    .from('profile_companies')
+    .select('created_at, profiles!inner(name, email, is_active, email_bounced_at, is_super_admin)')
+    .eq('company_id', companyId)
+    .eq('role', 'admin')
+    .eq('es_dueno', true)
+    .order('created_at');
+  const dueno = ((duenos ?? []) as any[])
+    .map((d) => d.profiles)
+    .find((p) => p?.email && p.is_active && !p.email_bounced_at && !p.is_super_admin);
+  if (dueno) return { name: dueno.name ?? null, email: dueno.email as string };
+
   const { data: admins } = await supabase
     .from('profiles')
     .select('name, email')

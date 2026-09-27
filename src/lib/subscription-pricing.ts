@@ -4,6 +4,8 @@
 // depende de cómo pague la empresa: mensual o anual (el anual se guarda como
 // su equivalente por mes). El plan "A medida" no tiene tarifa: lleva un monto
 // mensual acordado para toda la empresa, que no se multiplica por sucursales.
+// Una sucursal puede tener su propio precio (branches.cuota_mensual), que
+// reemplaza la tarifa del plan solo para ella.
 
 export type BillingCycle = 'monthly' | 'annual';
 
@@ -32,13 +34,19 @@ export function planRatePerBranch(plan: PricedPlan | undefined, cycle: BillingCy
   return mensual;
 }
 
-/** Ingreso mensual que deja una empresa. */
+/** Ingreso mensual que deja una empresa. `activeBranches` es cuántas
+ *  sucursales activas tiene, o el precio propio de cada una (null = la tarifa
+ *  del plan), igual que calcula la base en _cuenta_de_suscripcion. */
 export function companyMonthlyRevenue(
   plan: PricedPlan | undefined,
   sub: PricedSub | undefined,
-  activeBranches: number,
+  activeBranches: number | (number | null)[],
 ): number {
   const tarifa = planRatePerBranch(plan, sub?.billing_cycle);
-  if (tarifa != null) return tarifa * Math.max(activeBranches, 1);
+  if (tarifa != null) {
+    if (typeof activeBranches === 'number') return tarifa * Math.max(activeBranches, 1);
+    if (activeBranches.length === 0) return tarifa;
+    return activeBranches.reduce<number>((acc, precio) => acc + (precio ?? tarifa), 0);
+  }
   return num(sub?.custom_monthly_price) ?? 0;
 }
