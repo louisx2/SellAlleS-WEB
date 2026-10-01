@@ -14,7 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Loader2, Download, Send, Copy, Link as LinkIcon } from 'lucide-react';
-import { ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from './receipt-content';
+import { ReceiptBarcode, ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from './receipt-content';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -375,6 +375,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
             <div className="border-t pt-3">
               <ReceiptTotals sale={sale} />
             </div>
+            <ReceiptBarcode sale={sale} className="mt-2" />
           </div>
         </div>
 
