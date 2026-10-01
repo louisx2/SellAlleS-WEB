@@ -182,10 +182,9 @@ export default function SuscripcionPage() {
   };
 
   // En tiempo real: cuando SellAlleS confirma o rechaza un comprobante, o
-  // registra un pago, la página, la cuenta y el aviso se ponen al día sin
-  // recargar. Realtime solo entrega lo de esta empresa (las mismas políticas).
-  useRealtimeReload('subscription_payment_reports', alReportar, !!activeCompanyId);
-  useRealtimeReload('subscription_payments', alReportar, !!activeCompanyId);
+  // registra un pago, las listas de esta página se ponen al día sin recargar
+  // (la cuenta y el aviso de arriba ya lo hacen en useMiCuenta).
+  useRealtimeReload(['subscription_payment_reports', 'subscription_payments'], load, esAdmin && !!activeCompanyId);
 
   const confirmarRetiro = async () => {
     if (!retirar) return;

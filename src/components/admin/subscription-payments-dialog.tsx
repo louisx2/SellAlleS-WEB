@@ -80,27 +80,32 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
   // mientras se busca, null si la empresa no tiene ninguno.
   const [destinatario, setDestinatario] = useState<{ name: string | null; email: string } | null | undefined>(undefined);
 
+  // Atado al id y no al objeto: Cobros se recarga solo (Realtime, volver a la
+  // pestaña) y entrega la misma empresa como objeto nuevo; eso no debe cerrar
+  // ni vaciar el formulario que se está llenando. Tras registrar un pago, el
+  // diálogo ya cierra el formulario y recarga por su cuenta (ver guardar).
+  const idEmpresa = company?.id;
   const load = useCallback(async () => {
-    if (!company) return;
+    if (!idEmpresa) return;
     setLoading(true);
     const { data, error } = await supabase
       .from('subscription_payments')
       .select('*')
-      .eq('company_id', company.id)
+      .eq('company_id', idEmpresa)
       .order('paid_at', { ascending: false });
     if (!error && data) setPayments(data.map(rowToSubscriptionPayment));
     setLoading(false);
-  }, [company]);
+  }, [idEmpresa]);
 
   useEffect(() => {
-    if (company) {
+    if (idEmpresa) {
       load();
       setShowForm(false);
       setAmount(''); setPaidAt(today()); setMethod('transfer'); setReference('');
       setPeriodStart(''); setPeriodEnd(''); setPlanName(defaultPlanName ?? ''); setNotes(''); setActivate(true);
       setEnviarCorreo(true);
     }
-  }, [company, defaultPlanName, load]);
+  }, [idEmpresa, defaultPlanName, load]);
 
   // Solo al cambiar de empresa: tras registrar un pago llega la misma empresa
   // recargada y no hace falta volver a buscar.

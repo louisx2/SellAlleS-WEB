@@ -16,11 +16,22 @@ import { supabase } from '@/lib/supabase/client';
  */
 const ESPERA_MS = 800;
 
-export function useRealtimeReload(tabla: string, reload: () => void | Promise<void>, activo = true) {
+/**
+ * `tabla` puede ser una o varias: varias van en un solo canal y comparten la
+ * espera, así un cambio que toca dos tablas (confirmar un comprobante crea el
+ * pago) es una sola recarga.
+ */
+export function useRealtimeReload(
+  tabla: string | string[],
+  reload: () => void | Promise<void>,
+  activo = true,
+) {
   // El provider recrea `reload` cuando cambian sus dependencias; la suscripción
   // no debe rehacerse por eso, así que se lee siempre la última por referencia.
   const reloadRef = useRef(reload);
   useEffect(() => { reloadRef.current = reload; }, [reload]);
+
+  const tablas = (Array.isArray(tabla) ? tabla : [tabla]).join(',');
 
   useEffect(() => {
     if (!activo) return;
@@ -34,10 +45,11 @@ export function useRealtimeReload(tabla: string, reload: () => void | Promise<vo
     // Nombre único por suscripción: la misma tabla la puede escuchar más de una
     // pantalla a la vez (Cobros y el contador del menú), y supabase-js no deja
     // agregar escuchas a un canal ya suscrito con el mismo nombre.
-    const canal = supabase
-      .channel(`recargar:${tabla}:${Math.random().toString(36).slice(2)}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: tabla }, pedirRecarga)
-      .subscribe();
+    let canal = supabase.channel(`recargar:${tablas}:${Math.random().toString(36).slice(2)}`);
+    for (const t of tablas.split(',')) {
+      canal = canal.on('postgres_changes', { event: '*', schema: 'public', table: t }, pedirRecarga);
+    }
+    canal.subscribe();
 
     // El móvil corta la conexión cuando la app pasa a segundo plano, así que al
     // volver hay un hueco de eventos perdidos. Sin esto, el realtime deja de
@@ -52,5 +64,5 @@ export function useRealtimeReload(tabla: string, reload: () => void | Promise<vo
       document.removeEventListener('visibilitychange', alVolverAPrimerPlano);
       supabase.removeChannel(canal);
     };
-  }, [tabla, activo]);
+  }, [tablas, activo]);
 }

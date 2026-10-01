@@ -64,11 +64,11 @@ export default function CobrosPage() {
     // PostgREST lo ve ambiguo (ver admin/empresas) y no devuelve nada.
     const [
       { data: comps, error: eComps },
-      { data: pls },
-      { data: ss },
-      { data: pagos },
+      { data: pls, error: ePls },
+      { data: ss, error: eSs },
+      { data: pagos, error: ePagos },
       { data: ctas, error: eCtas },
-      { data: reps },
+      { data: reps, error: eReps },
     ] = await Promise.all([
       supabase.from('companies')
         .select('*, branches!branches_company_id_fkey(id, name, location, is_active, max_users, created_at, cuota_mensual)')
@@ -81,6 +81,10 @@ export default function CobrosPage() {
       // transferencia parece repetida.
       supabase.from('subscription_payment_reports').select('*').order('created_at', { ascending: false }).limit(500),
     ]);
+    // Una recarga en silencio que falla (el teléfono volvió antes que la red)
+    // deja lo que ya estaba en pantalla: vaciar Cobros haría creer que no hay
+    // nada por confirmar. La próxima recarga lo pone al día.
+    if (silencioso && (eComps || ePls || eSs || ePagos || eCtas || eReps)) return;
     if (eComps) {
       toast({ title: 'No se pudieron cargar las empresas', description: eComps.message, variant: 'destructive' });
     }
@@ -115,7 +119,8 @@ export default function CobrosPage() {
     });
     setUltimos(mapaUltimos);
     setLoading(false);
-    avisarCambioDeComprobantes();
+    // en silencio no: el contador del menú escucha los mismos cambios por su cuenta
+    if (!silencioso) avisarCambioDeComprobantes();
   }, [toast]);
 
   useEffect(() => { if (appUser?.isSuperAdmin) load(); }, [appUser?.isSuperAdmin, load]);
@@ -123,8 +128,7 @@ export default function CobrosPage() {
   // En tiempo real: un comprobante que llega (desde la app o desde otro
   // sistema, como Anadsll) o un pago registrado se ven sin recargar.
   const recargarEnSilencio = useCallback(() => load(true), [load]);
-  useRealtimeReload('subscription_payment_reports', recargarEnSilencio, !!appUser?.isSuperAdmin);
-  useRealtimeReload('subscription_payments', recargarEnSilencio, !!appUser?.isSuperAdmin);
+  useRealtimeReload(['subscription_payment_reports', 'subscription_payments'], recargarEnSilencio, !!appUser?.isSuperAdmin);
 
   // Tras registrar un pago se recargan las empresas: el diálogo abierto pasa a
   // la versión nueva, para que su "pagado hasta" no se quede en el viejo.
