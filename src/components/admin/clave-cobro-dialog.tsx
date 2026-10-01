@@ -37,13 +37,17 @@ export function ClaveCobroDialog({ companyId, companyName, open, onOpenChange }:
   const [trabajando, setTrabajando] = useState(false);
   const [etiqueta, setEtiqueta] = useState('Anadsll');
   const [claveNueva, setClaveNueva] = useState<string | null>(null);
+  // Si no se pudo leer el estado no se sabe si hay una clave viva: ni se genera (revocaría la actual) ni se revoca.
+  const [errorCarga, setErrorCarga] = useState(false);
 
   const cargar = useCallback(async () => {
     if (!companyId) return;
     setCargando(true);
+    setErrorCarga(false);
     const { data, error } = await supabase.rpc('estado_clave_cobro_externo', { p_company_id: companyId });
     setCargando(false);
     if (error) {
+      setErrorCarga(true);
       toast({ title: 'No se pudo leer la clave', description: error.message, variant: 'destructive' });
       return;
     }
@@ -55,7 +59,11 @@ export function ClaveCobroDialog({ companyId, companyName, open, onOpenChange }:
 
   useEffect(() => {
     if (open) {
+      // nada de la empresa anterior (ni un estado viejo ni una clave mostrada) queda a la vista
+      setEstado(null);
       setClaveNueva(null);
+      setEtiqueta('Anadsll');
+      setErrorCarga(false);
       void cargar();
     }
   }, [open, cargar]);
@@ -77,6 +85,7 @@ export function ClaveCobroDialog({ companyId, companyName, open, onOpenChange }:
 
   const revocar = async () => {
     if (!companyId) return;
+    if (!window.confirm('¿Revocar la clave? El sistema que la usa deja de conectarse en el acto.')) return;
     setTrabajando(true);
     const { error } = await supabase.rpc('revocar_clave_cobro_externo', { p_company_id: companyId });
     setTrabajando(false);
@@ -99,6 +108,10 @@ export function ClaveCobroDialog({ companyId, companyName, open, onOpenChange }:
     }
   };
 
+  // Mientras se lee el estado (o si falló) no se puede generar ni revocar: no se sabe si hay una clave viva.
+  const leyendo = cargando || (estado === null && !errorCarga);
+  const puedeActuar = !cargando && !errorCarga && estado !== null;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -110,14 +123,19 @@ export function ClaveCobroDialog({ companyId, companyName, open, onOpenChange }:
           </DialogDescription>
         </DialogHeader>
 
-        {cargando ? (
+        {leyendo ? (
           <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> Cargando…
           </div>
         ) : (
           <div className="space-y-4">
             <div className="rounded-lg border p-3 text-sm">
-              {estado?.activa ? (
+              {errorCarga ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-muted-foreground">No se pudo leer el estado de la clave.</p>
+                  <Button type="button" variant="outline" size="sm" onClick={() => void cargar()}>Reintentar</Button>
+                </div>
+              ) : estado?.activa ? (
                 <>
                   <p className="font-medium">Hay una clave activa{estado.etiqueta ? ` (${estado.etiqueta})` : ''}.</p>
                   <p className="text-muted-foreground">Creada: {fechaHora(estado.creadaEn)} · Último uso: {fechaHora(estado.ultimoUso)}</p>
@@ -147,10 +165,10 @@ export function ClaveCobroDialog({ companyId, companyName, open, onOpenChange }:
         )}
 
         <DialogFooter className="gap-2 sm:gap-0">
-          {estado?.activa && (
+          {puedeActuar && estado?.activa && (
             <Button type="button" variant="destructive" onClick={revocar} disabled={trabajando}>Revocar</Button>
           )}
-          <Button type="button" onClick={generar} disabled={trabajando || cargando}>
+          <Button type="button" onClick={generar} disabled={trabajando || !puedeActuar}>
             {trabajando ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {estado?.activa ? 'Generar otra (revoca la actual)' : 'Generar clave'}
           </Button>
