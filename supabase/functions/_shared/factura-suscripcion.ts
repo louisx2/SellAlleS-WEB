@@ -90,7 +90,8 @@ export function nombreArchivoFactura(p: { id: string }): string {
 }
 
 /** Una fila de subscription_payments (snake_case, montos como texto) → lo que necesita el dibujo.
- *  Misma traducción que rowToSubscriptionPayment de src/lib/supabase/mappers.ts. */
+ *  rowToSubscriptionPayment de src/lib/supabase/mappers.ts se construye sobre esta función (y le suma
+ *  companyId, notes y recordedByName), así que la app y la Edge Function leen la fila igual. */
 // deno-lint-ignore no-explicit-any
 export function pagoDesdeFila(r: Record<string, any>): PagoConFactura {
   return {
