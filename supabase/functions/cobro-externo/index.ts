@@ -132,7 +132,7 @@ Deno.serve(async (req) => {
       case 'subida': {
         const mime = String(cuerpo.mime ?? '');
         const tamano = Number(cuerpo.tamano);
-        const ext = EXTENSION[mime];
+        const ext = Object.hasOwn(EXTENSION, mime) ? EXTENSION[mime] : undefined;
         if (!ext) return json(400, { error: 'El comprobante tiene que ser una foto o un PDF.' });
         if (!(tamano > 0) || tamano > TAMANO_MAXIMO) {
           return json(400, { error: 'El archivo pesa más de 10 MB. Sube una captura de pantalla o un PDF más liviano.' });
@@ -151,13 +151,18 @@ Deno.serve(async (req) => {
       case 'reportar': {
         const bancoId = cuerpo.banco_id == null || cuerpo.banco_id === '' ? null : String(cuerpo.banco_id);
         if (bancoId && !UUID.test(bancoId)) return json(400, { error: 'La cuenta bancaria elegida no existe.' });
-        if (!FECHA.test(String(cuerpo.fecha ?? ''))) return json(400, { error: 'La fecha del pago no es válida.' });
+        const fecha = String(cuerpo.fecha ?? '');
+        if (!FECHA.test(fecha)) return json(400, { error: 'La fecha del pago no es válida.' });
+        const f = new Date(`${fecha}T00:00:00Z`);
+        if (Number.isNaN(f.getTime()) || f.toISOString().slice(0, 10) !== fecha) {
+          return json(400, { error: 'La fecha del pago no es válida.' });
+        }
         const { data, error } = await db.rpc('_reportar_pago', {
           p_company_id: empresa,
           p_reportado_por: null,
           p_reportado_por_nombre: conexion.etiqueta,
           p_amount: Number(cuerpo.monto),
-          p_paid_at: String(cuerpo.fecha),
+          p_paid_at: fecha,
           p_bank_account_id: bancoId,
           p_reference: textoONull(cuerpo.referencia),
           p_notes: textoONull(cuerpo.nota),
@@ -166,7 +171,11 @@ Deno.serve(async (req) => {
           p_file_mime: textoONull(cuerpo.mime),
           p_file_sha256: textoONull(cuerpo.sha256),
         });
-        if (error) return json(400, { error: error.message });
+        if (error) {
+          if (error.code === 'P0001') return json(400, { error: error.message });
+          console.error('cobro-externo reportar:', error);
+          return json(500, { error: 'No se pudo registrar el pago. Intenta de nuevo.' });
+        }
         return json(200, { reporte: { id: (data as { id: string }).id } });
       }
 
@@ -174,15 +183,23 @@ Deno.serve(async (req) => {
         const id = String(cuerpo.reporte_id ?? '');
         if (!UUID.test(id)) return json(404, { error: 'No encontrado.' });
         const { error } = await db.rpc('_anular_reporte', { p_company_id: empresa, p_report_id: id });
-        if (error) return json(400, { error: error.message });
+        if (error) {
+          if (error.code === 'P0001') return json(400, { error: error.message });
+          console.error('cobro-externo retirar:', error);
+          return json(500, { error: 'No se pudo retirar el comprobante. Intenta de nuevo.' });
+        }
         return json(200, { ok: true });
       }
 
       case 'comprobante': {
         const id = String(cuerpo.reporte_id ?? '');
         if (!UUID.test(id)) return json(404, { error: 'No encontrado.' });
-        const { data: fila } = await db.from('subscription_payment_reports')
+        const { data: fila, error: errorFila } = await db.from('subscription_payment_reports')
           .select('file_path').eq('id', id).eq('company_id', empresa).maybeSingle();
+        if (errorFila) {
+          console.error('cobro-externo comprobante:', errorFila);
+          return json(500, { error: 'No se pudo abrir el comprobante.' });
+        }
         if (!fila) return json(404, { error: 'No encontrado.' });
         const { data, error } = await db.storage.from(BUCKET).createSignedUrl(fila.file_path, 300);
         if (error || !data) return json(500, { error: 'No se pudo abrir el comprobante.' });
@@ -192,8 +209,12 @@ Deno.serve(async (req) => {
       case 'factura': {
         const id = String(cuerpo.pago_id ?? '');
         if (!UUID.test(id)) return json(404, { error: 'No encontrado.' });
-        const { data: fila } = await db.from('subscription_payments')
+        const { data: fila, error: errorFila } = await db.from('subscription_payments')
           .select('*').eq('id', id).eq('company_id', empresa).maybeSingle();
+        if (errorFila) {
+          console.error('cobro-externo factura:', errorFila);
+          return json(500, { error: 'No se pudo generar la factura.' });
+        }
         if (!fila) return json(404, { error: 'No encontrado.' });
         if (fila.invoice_number == null) return json(404, { error: 'Este pago no tiene factura.' });
         const pago = pagoDesdeFila(fila);
