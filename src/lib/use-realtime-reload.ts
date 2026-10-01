@@ -16,13 +16,14 @@ import { supabase } from '@/lib/supabase/client';
  */
 const ESPERA_MS = 800;
 
-export function useRealtimeReload(tabla: string, reload: () => void | Promise<void>) {
+export function useRealtimeReload(tabla: string, reload: () => void | Promise<void>, activo = true) {
   // El provider recrea `reload` cuando cambian sus dependencias; la suscripción
   // no debe rehacerse por eso, así que se lee siempre la última por referencia.
   const reloadRef = useRef(reload);
   useEffect(() => { reloadRef.current = reload; }, [reload]);
 
   useEffect(() => {
+    if (!activo) return;
     let temporizador: ReturnType<typeof setTimeout> | null = null;
 
     const pedirRecarga = () => {
@@ -30,8 +31,11 @@ export function useRealtimeReload(tabla: string, reload: () => void | Promise<vo
       temporizador = setTimeout(() => { void reloadRef.current(); }, ESPERA_MS);
     };
 
+    // Nombre único por suscripción: la misma tabla la puede escuchar más de una
+    // pantalla a la vez (Cobros y el contador del menú), y supabase-js no deja
+    // agregar escuchas a un canal ya suscrito con el mismo nombre.
     const canal = supabase
-      .channel(`recargar:${tabla}`)
+      .channel(`recargar:${tabla}:${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: tabla }, pedirRecarga)
       .subscribe();
 
@@ -48,5 +52,5 @@ export function useRealtimeReload(tabla: string, reload: () => void | Promise<vo
       document.removeEventListener('visibilitychange', alVolverAPrimerPlano);
       supabase.removeChannel(canal);
     };
-  }, [tabla]);
+  }, [tabla, activo]);
 }

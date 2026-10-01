@@ -19,6 +19,7 @@ import {
   BandejaPorConfirmar, ConfirmarComprobanteDialog, RechazarComprobanteDialog,
 } from '@/components/admin/comprobantes-por-confirmar';
 import { avisarCambioDeComprobantes } from '@/hooks/use-comprobantes-pendientes';
+import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { useAuth } from '@/context/auth-provider';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
@@ -55,8 +56,10 @@ export default function CobrosPage() {
   const [abiertas, setAbiertas] = useState<Set<string>>(new Set());
   const [pagosDe, setPagosDe] = useState<Company | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // silencioso: la recarga que llega por Realtime no muestra el "cargando" ni
+  // le quita la pantalla a quien está trabajando en Cobros.
+  const load = useCallback(async (silencioso = false) => {
+    if (!silencioso) setLoading(true);
     // El embed de sucursales va por su FK: con el nombre de la tabla a secas
     // PostgREST lo ve ambiguo (ver admin/empresas) y no devuelve nada.
     const [
@@ -116,6 +119,12 @@ export default function CobrosPage() {
   }, [toast]);
 
   useEffect(() => { if (appUser?.isSuperAdmin) load(); }, [appUser?.isSuperAdmin, load]);
+
+  // En tiempo real: un comprobante que llega (desde la app o desde otro
+  // sistema, como Anadsll) o un pago registrado se ven sin recargar.
+  const recargarEnSilencio = useCallback(() => load(true), [load]);
+  useRealtimeReload('subscription_payment_reports', recargarEnSilencio, !!appUser?.isSuperAdmin);
+  useRealtimeReload('subscription_payments', recargarEnSilencio, !!appUser?.isSuperAdmin);
 
   // Tras registrar un pago se recargan las empresas: el diálogo abierto pasa a
   // la versión nueva, para que su "pagado hasta" no se quede en el viejo.

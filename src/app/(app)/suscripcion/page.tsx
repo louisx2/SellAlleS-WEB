@@ -25,6 +25,7 @@ import {
   type CuentaBancaria, type ReportePago,
 } from '@/lib/payment-reports';
 import { useMiCuenta, avisarCambioDeMiCuenta } from '@/hooks/use-mi-cuenta';
+import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { ReportarPagoDialog } from '@/components/subscription/reportar-pago-dialog';
 import { ComprobanteVista } from '@/components/subscription/comprobante-vista';
 import {
@@ -179,6 +180,12 @@ export default function SuscripcionPage() {
     recargarCuenta();
     avisarCambioDeMiCuenta();
   };
+
+  // En tiempo real: cuando SellAlleS confirma o rechaza un comprobante, o
+  // registra un pago, la página, la cuenta y el aviso se ponen al día sin
+  // recargar. Realtime solo entrega lo de esta empresa (las mismas políticas).
+  useRealtimeReload('subscription_payment_reports', alReportar, !!activeCompanyId);
+  useRealtimeReload('subscription_payments', alReportar, !!activeCompanyId);
 
   const confirmarRetiro = async () => {
     if (!retirar) return;
