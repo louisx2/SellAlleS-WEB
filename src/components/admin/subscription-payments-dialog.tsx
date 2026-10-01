@@ -194,7 +194,12 @@ export function SubscriptionPaymentsDialog({ company, defaultPlanName, planRates
         });
       }
 
+      // el próximo "Registrar pago" de esta misma empresa empieza vacío (antes lo
+      // vaciaba la recarga de Cobros; ahora el formulario no depende de ella)
       setShowForm(false);
+      setAmount(''); setPaidAt(today()); setMethod('transfer'); setReference('');
+      setPeriodStart(''); setPeriodEnd(''); setPlanName(defaultPlanName ?? ''); setNotes(''); setActivate(true);
+      setEnviarCorreo(true);
       await load();
       onRecorded?.();
     } catch (err: any) {

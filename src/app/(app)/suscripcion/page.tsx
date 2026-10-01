@@ -149,7 +149,7 @@ export default function SuscripcionPage() {
 
   const load = useCallback(async () => {
     if (!activeCompanyId) { setPayments([]); setLoading(false); return; }
-    const [{ data, error }, { data: reps }] = await Promise.all([
+    const [{ data, error }, { data: reps, error: errorReps }] = await Promise.all([
       supabase
         .from('subscription_payments')
         .select('*')
@@ -162,10 +162,11 @@ export default function SuscripcionPage() {
             .eq('company_id', activeCompanyId)
             .order('created_at', { ascending: false })
             .limit(50)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as any[], error: null }),
     ]);
     if (!error && data) setPayments(data.map(rowToSubscriptionPayment));
-    setReportes(((reps ?? []) as any[]).map(rowToReportePago));
+    // si falla (la red al volver a la pestaña), se dejan los comprobantes que había
+    if (!errorReps) setReportes(((reps ?? []) as any[]).map(rowToReportePago));
     setLoading(false);
   }, [activeCompanyId, esAdmin]);
 
