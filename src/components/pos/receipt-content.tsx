@@ -217,10 +217,15 @@ export function ReceiptTotals({ sale }: ReceiptProps) {
 }
 
 
-export function ReceiptContent({ sale }: ReceiptProps) {
-  const profile = useTicketProfile(sale.branchId);
+/** Código de barras o QR con el ID de la venta, según la configuración de
+ *  impresión. Se genera aquí mismo como imagen `data:` en vez de pedírselo a
+ *  bwipjs-api / qrserver: así no depende de que esos servicios respondan, y
+ *  html2canvas lo puede pintar en el PDF que se le envía al cliente (una imagen
+ *  de otro dominio sin CORS sale en blanco o rompe el lienzo). */
+export function ReceiptBarcode({ sale, className }: ReceiptProps & { className?: string }) {
   const [showBarcode, setShowBarcode] = useState(true);
   const [barcodeType, setBarcodeType] = useState<'code128' | 'qr'>('code128');
+  const [src, setSrc] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -228,6 +233,52 @@ export function ReceiptContent({ sale }: ReceiptProps) {
       setBarcodeType((localStorage.getItem('barcodeType') as any) || 'code128');
     }
   }, []);
+
+  useEffect(() => {
+    if (!showBarcode) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        let url: string;
+        if (barcodeType === 'qr') {
+          const QRCode = (await import('qrcode')).default;
+          url = await QRCode.toDataURL(sale.id, { margin: 1, width: 200 });
+        } else {
+          const JsBarcode = (await import('jsbarcode')).default;
+          const canvas = document.createElement('canvas');
+          JsBarcode(canvas, sale.id.slice(0, 8).toUpperCase(), {
+            format: 'CODE128',
+            displayValue: false,
+            height: 40,
+            margin: 0,
+          });
+          url = canvas.toDataURL('image/png');
+        }
+        if (!cancelado) setSrc(url);
+      } catch (error) {
+        console.error('No se pudo generar el código de la factura', error);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [showBarcode, barcodeType, sale.id]);
+
+  if (!showBarcode || !src) return null;
+
+  return (
+    <div className={cn('flex flex-col items-center justify-center mt-6 pt-4 border-t border-dashed gap-1', className)}>
+      {barcodeType === 'code128' ? (
+        <img src={src} alt="Código de barras" className="h-10 w-auto mix-blend-multiply" />
+      ) : (
+        <img src={src} alt="Código QR" className="w-20 h-20" />
+      )}
+    </div>
+  );
+}
+
+export function ReceiptContent({ sale }: ReceiptProps) {
+  const profile = useTicketProfile(sale.branchId);
 
   return (
      <div className="space-y-4">
@@ -264,23 +315,7 @@ export function ReceiptContent({ sale }: ReceiptProps) {
           .map((linea) => (
             <div key={linea} className="text-center text-xs mt-1">{linea}</div>
           ))}
-        {showBarcode && (
-          <div className="flex flex-col items-center justify-center mt-6 pt-4 border-t border-dashed gap-1">
-            {barcodeType === 'code128' ? (
-              <img 
-                src={`https://bwipjs-api.metafloor.com/?bcid=code128&text=${sale.id.slice(0, 8).toUpperCase()}&scale=2&height=10`} 
-                alt="Código de barras"
-                className="h-10 w-auto mix-blend-multiply"
-              />
-            ) : (
-              <img 
-                src={`https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${sale.id}`} 
-                alt="Código QR"
-                className="w-20 h-20"
-              />
-            )}
-          </div>
-        )}
+        <ReceiptBarcode sale={sale} />
         <div className="text-center mt-4 pt-2 border-t border-dashed">
           <p className="text-[10px] text-muted-foreground font-mono">
             SellAlleS Web <span className="opacity-70">by SmartCore</span>
