@@ -1,6 +1,7 @@
 import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
+import { pagoDesdeFila } from '../../../supabase/functions/_shared/factura-suscripcion';
 
 // ---------- Role ----------
 export const rowToRole = (r: any): Role => ({
@@ -712,39 +713,12 @@ export const rowToCajaCloseResult = (r: any): CajaCloseResult => ({
 });
 
 // ---------- Suscripción ----------
+// La parte del pago que alimenta la factura la traduce pagoDesdeFila, del módulo compartido con la Edge
+// Function cobro-externo: así la factura de la app y la que descarga Anadsll no se pueden separar.
 export const rowToSubscriptionPayment = (r: any): SubscriptionPayment => ({
-  id: r.id,
+  ...pagoDesdeFila(r),
   companyId: r.company_id,
-  amount: Number(r.amount),
-  paidAt: r.paid_at,
-  method: r.method,
-  reference: r.reference ?? undefined,
-  periodStart: r.period_start ?? undefined,
-  periodEnd: r.period_end ?? undefined,
-  planName: r.plan_name ?? undefined,
   notes: r.notes ?? undefined,
   recordedByName: r.recorded_by_name ?? undefined,
-  createdAt: new Date(r.created_at),
-  invoiceNumber: r.invoice_number ?? undefined,
-  invoiceIssuer: r.invoice_issuer
-    ? {
-        legalName: r.invoice_issuer.legal_name ?? 'SellAlleS',
-        rnc: r.invoice_issuer.rnc ?? undefined,
-        address: r.invoice_issuer.address ?? undefined,
-        phone: r.invoice_issuer.phone ?? undefined,
-        email: r.invoice_issuer.email ?? undefined,
-        notes: r.invoice_issuer.notes ?? undefined,
-      }
-    : undefined,
-  invoiceCustomer: r.invoice_customer
-    ? {
-        name: r.invoice_customer.name ?? '',
-        rnc: r.invoice_customer.rnc ?? undefined,
-        address: r.invoice_customer.address ?? undefined,
-        phone: r.invoice_customer.phone ?? undefined,
-        email: r.invoice_customer.email ?? undefined,
-      }
-    : undefined,
-  invoiceItbis: Number(r.invoice_itbis ?? 0),
 });
 

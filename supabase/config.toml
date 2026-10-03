@@ -385,6 +385,10 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# cobro-externo se autentica con la clave del encabezado x-clave-cobro, no con el JWT de Supabase.
+[functions.cobro-externo]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
