@@ -11,18 +11,19 @@ import { rowToCreditPayment } from '@/lib/supabase/mappers';
 import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
+import { formatQtyCompact } from '@/lib/units';
 import type { CreditPayment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { DialogTrigger } from '@/components/ui/dialog';
 import { AddFinancingPaymentDialog } from '@/components/financing/add-financing-payment-dialog';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
-import { ArrowLeft, DollarSign, Printer, Undo2 } from 'lucide-react';
+import { ArrowLeft, DollarSign, FileText, Printer, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -49,6 +50,9 @@ export default function FinancingDetailClient() {
   const [voiding, setVoiding] = useState<CreditPayment | null>(null);
 
   const sale = financingSales.find(s => s.id === saleId) ?? sales.find(s => s.id === saleId);
+  // La factura solo abre las ventas propias de la sucursal: una del pool
+  // compartido no está en `sales` y ahí daría "Venta no encontrada".
+  const hasInvoice = sales.some(s => s.id === saleId);
   const canVoid = appUser?.role === 'admin';
 
   // Historial de abonos de esta venta; se refresca cuando el provider recarga
@@ -102,7 +106,15 @@ export default function FinancingDetailClient() {
             Volver
           </Link>
         </Button>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {hasInvoice && (
+            <Button asChild variant="outline">
+              <Link href={`/sales/detail?id=${sale.id}`}>
+                <FileText className="mr-2 h-4 w-4" />
+                Ver Factura
+              </Link>
+            </Button>
+          )}
           {fin && (
             <Button variant="outline" onClick={() => setPlanOpen(true)}>
               <Printer className="mr-2 h-4 w-4" />
@@ -180,6 +192,61 @@ export default function FinancingDetailClient() {
               <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Artículos Financiados</CardTitle>
+          <CardDescription>Lo que se llevó el cliente en esta venta, al precio que se le cobró.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {sale.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              Esta venta no tiene artículos registrados.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Artículo</TableHead>
+                    <TableHead className="text-right">Cantidad</TableHead>
+                    <TableHead className="text-right">Precio</TableHead>
+                    <TableHead className="text-right">Importe</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sale.items.map((item) => {
+                    const price = item.customPrice ?? item.product.price;
+                    return (
+                      <TableRow key={item.cartItemId}>
+                        <TableCell className="font-medium">{item.product.name}</TableCell>
+                        <TableCell className="text-right whitespace-nowrap">
+                          {formatQtyCompact(item.quantity, item.product.unit)}
+                        </TableCell>
+                        <TableCell className="text-right">{formatCurrency(price)}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(price * item.quantity)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+                {/* Con ITBIS sumado encima, las líneas no llegan solas al total. */}
+                <TableFooter>
+                  {!sale.itbisIncluded && sale.itbisAmount > 0 && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right font-normal">ITBIS</TableCell>
+                      <TableCell className="text-right font-normal">{formatCurrency(sale.itbisAmount)}</TableCell>
+                    </TableRow>
+                  )}
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-right">Total de la venta</TableCell>
+                    <TableCell className="text-right">{formatCurrency(sale.total)}</TableCell>
+                  </TableRow>
+                </TableFooter>
+              </Table>
+            </div>
+          )}
         </CardContent>
       </Card>
 

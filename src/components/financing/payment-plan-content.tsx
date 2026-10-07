@@ -4,6 +4,7 @@ import { Separator } from '@/components/ui/separator';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
 import { FREQUENCY_LABEL, addPeriods } from '@/lib/frequency';
+import { formatQtyCompact } from '@/lib/units';
 import type { Sale } from '@/lib/types';
 
 interface PaymentPlanContentProps {
@@ -58,6 +59,30 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
         <p className="font-semibold uppercase">Cliente: {sale.customer?.name ?? 'Consumidor Final'}</p>
       </div>
       <Separator className="my-2" />
+      {/* Lo que se financió: el documento que firma el cliente debe decirlo. */}
+      {sale.items.length > 0 && (
+        <>
+          <div className="text-xs space-y-1 py-1">
+            <p className="font-semibold uppercase">Artículos financiados</p>
+            {sale.items.map((item) => {
+              const price = item.customPrice ?? item.product.price;
+              return (
+                <div key={item.cartItemId} className="flex justify-between gap-2">
+                  <span>{formatQtyCompact(item.quantity, item.product.unit)} x {item.product.name}</span>
+                  <span className="whitespace-nowrap">{formatCurrency(price * item.quantity)}</span>
+                </div>
+              );
+            })}
+            {!sale.itbisIncluded && sale.itbisAmount > 0 && (
+              <div className="flex justify-between gap-2">
+                <span>ITBIS</span>
+                <span className="whitespace-nowrap">{formatCurrency(sale.itbisAmount)}</span>
+              </div>
+            )}
+          </div>
+          <Separator className="my-2" />
+        </>
+      )}
       <div className="text-xs space-y-1 py-1">
         <div className="flex justify-between">
           <span>Total de la venta:</span>
