@@ -121,7 +121,7 @@ export default function FinancingDetailClient() {
               Imprimir Plan de Pagos
             </Button>
           )}
-          {status.pendingBalance > 0 && (
+          {status.pendingBalance > 0 && !sale.cancelledAt && (
             <AddFinancingPaymentDialog sale={sale}>
               <DialogTrigger asChild>
                 <Button>
@@ -138,7 +138,9 @@ export default function FinancingDetailClient() {
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-3">
             {sale.customer?.name ?? 'Consumidor Final'}
-            {status.pendingBalance <= 0 ? (
+            {sale.cancelledAt ? (
+              <Badge variant="destructive">Anulada</Badge>
+            ) : status.pendingBalance <= 0 ? (
               <Badge className="bg-green-600">Pagado</Badge>
             ) : status.isOverdue ? (
               <Badge variant="destructive">Atrasado</Badge>

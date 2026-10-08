@@ -40,6 +40,8 @@ export type AnnulSaleResult = {
   ncfModified?: string;
   total: number;
   refundMethod: RefundMethod;
+  // Abono inicial anulado junto con una venta a crédito o financiada.
+  paymentsVoided: number;
 };
 
 export type VoidPaymentResult = {
@@ -94,6 +96,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       .select(SALE_SELECT)
       .in('branch_id', otras)
       .in('payment_status', ['credit', 'in_financing'])
+      .is('cancelled_at', null)
       .order('created_at', { ascending: false });
     if (!error && data) setSharedFinancing(data.map(rowToSale));
   }, [sharingLoading, otrasKey]);
@@ -108,8 +111,10 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   // dashboard y en todo lo que lea de este provider.
   useRealtimeReload('sales', reloadAll);
 
+  // Una venta a crédito anulada ya no se cobra: fuera de Financiamientos y del
+  // estado de cuenta (sigue en Movimientos, tachada).
   const financingSales = [
-    ...sales.filter((s) => s.paymentStatus === 'credit' || s.paymentStatus === 'in_financing'),
+    ...sales.filter((s) => !s.cancelledAt && (s.paymentStatus === 'credit' || s.paymentStatus === 'in_financing')),
     ...sharedFinancing,
   ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
@@ -242,6 +247,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       ncfModified: data.ncf_modified ?? undefined,
       total: Number(data.total ?? 0),
       refundMethod: data.refund_method,
+      paymentsVoided: Number(data.payments_voided ?? 0),
     };
   };
 
