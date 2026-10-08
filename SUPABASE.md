@@ -279,6 +279,28 @@ el dinero que sigue en la calle, así que abonar baja la mora que corre.
   en cuotas iguales, así que pagar antes no ahorra intereses. Falta un "saldar
   anticipado" con descuento de intereses no devengados.
 
+### Anular una venta a crédito o financiada (migración `anular_ventas_a_credito`)
+
+`annul_sale` acepta ventas a crédito y financiadas, además de las pagadas.
+Igual que con una pagada, repone el inventario, emite la B04 si la venta llevó
+NCF y marca `cancelled_at`. Además:
+
+- Anula el abono inicial (`credit_payments.kind = 'down_payment'`) y baja
+  `amount_paid`. Un abono anulado no cuenta en `close_caja_session`, que es lo
+  correcto tanto si el dinero se le devuelve al cliente como si nunca entró.
+- La devolución sale por donde entró el abono inicial, o `none` si se pide a
+  propósito. Si el abono fue en efectivo en una sesión de caja que ya cerró y
+  se devuelve, la salida va a la caja abierta (mismo criterio que
+  `void_credit_payment`).
+- Recalcula `customers.credit_balance` (ya ignora las ventas anuladas).
+- Rechaza la venta si tiene abonos posteriores vigentes: los que la nombran,
+  los generales cuyo `allocation` la tocó, y los viejos sin reparto (se
+  detectan por `amount_paid` mayor que el abono inicial). Esos se anulan antes,
+  uno a uno, con `void_credit_payment`.
+
+Las cuotas (`financing_installments`) quedan como estaban: los recordatorios
+(`pending_due_reminders`) y los cobros ya ignoran las ventas anuladas.
+
 ## Reportes de crédito y financiamiento
 
 - `/reports/cobros` — **lo que entró**, por método de pago y por origen
