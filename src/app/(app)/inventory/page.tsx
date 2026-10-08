@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { ProductDataTable } from '@/components/products/product-data-table';
-import { productColumns } from '@/components/products/product-columns';
+import { buildProductColumns } from '@/components/products/product-columns';
+import { CategoryFilterSelect, matchesCategory, type CategoryFilterValue } from '@/components/products/category-filter';
 import { ProductDialog } from '@/components/products/product-dialog';
 import { ImportProductsDialog } from '@/components/products/import-products-dialog';
 import { ArchivedProductsDialog } from '@/components/products/archived-products-dialog';
@@ -41,7 +42,24 @@ function InventoryContent() {
   const { locations } = useLocations();
   const { toast } = useToast();
   const [importOpen, setImportOpen] = useState(false);
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterValue>('all');
   const openTransfer = useOpenTransfer();
+
+  const categoryName = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
+  const columns = useMemo(() => buildProductColumns(categoryName), [categoryName]);
+  // Si la categoría elegida se borra (o deja de compartirse), se vuelve a "Todas".
+  const activeFilter: CategoryFilterValue =
+    categoryFilter === 'all' || categoryFilter === 'none' || categoryName.has(categoryFilter)
+      ? categoryFilter
+      : 'all';
+  const visibleProducts = useMemo(() => {
+    const knownIds = new Set(categoryName.keys());
+    return products.filter((p) => matchesCategory(p, activeFilter, knownIds));
+  }, [products, activeFilter, categoryName]);
+  const filterLabel =
+    activeFilter === 'all' ? null
+      : activeFilter === 'none' ? 'sin categoría'
+        : `en ${categoryName.get(activeFilter)}`;
 
   // /inventory?transferir=<id>&destino=<id>: llega del aviso de "ya existe en
   // otra sucursal" al crear un artículo, después de cambiar a esta sucursal.
@@ -70,10 +88,12 @@ function InventoryContent() {
     }
   }, [loading, products, openTransfer, toast]);
 
-  const differentItems = products.length;
+  // Las tarjetas siguen al filtro de categoría: así se ve cuánto hay invertido
+  // en cada una.
+  const differentItems = visibleProducts.length;
   // Los productos sin inventario (platos, servicios) no suman existencias ni
   // inversión: su stock es siempre 0 y no representa mercancía en almacén.
-  const stocked = products.filter((p) => p.tracksStock);
+  const stocked = visibleProducts.filter((p) => p.tracksStock);
   const totalStock = stocked.reduce((acc, product) => acc + product.stock, 0);
   const totalInvestment = stocked.reduce((acc, product) => acc + (product.cost * product.stock), 0);
 
@@ -172,7 +192,9 @@ function InventoryContent() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{differentItems}</div>
-            <p className="text-xs text-muted-foreground">productos en catálogo</p>
+            <p className="text-xs text-muted-foreground">
+              {filterLabel ? `productos ${filterLabel}` : 'productos en catálogo'}
+            </p>
           </CardContent>
         </Card>
 
@@ -185,7 +207,9 @@ function InventoryContent() {
             <div className="text-2xl font-bold">{formatQty(totalStock)}</div>
             {/* Se suman existencias de unidades distintas (libras + cajas…):
                 es un conteo bruto, no una magnitud comparable. */}
-            <p className="text-xs text-muted-foreground">suma de existencias (unidades mixtas)</p>
+            <p className="text-xs text-muted-foreground">
+              suma de existencias{filterLabel ? ` ${filterLabel}` : ''} (unidades mixtas)
+            </p>
           </CardContent>
         </Card>
 
@@ -196,12 +220,25 @@ function InventoryContent() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(totalInvestment)}</div>
-            <p className="text-xs text-muted-foreground">costo total del inventario</p>
+            <p className="text-xs text-muted-foreground">
+              {filterLabel ? `costo del inventario ${filterLabel}` : 'costo total del inventario'}
+            </p>
           </CardContent>
         </Card>
       </div>
 
-      <ProductDataTable columns={productColumns} data={products} />
+      <ProductDataTable
+        columns={columns}
+        data={visibleProducts}
+        toolbar={
+          <CategoryFilterSelect
+            categories={categories}
+            products={products}
+            value={activeFilter}
+            onChange={setCategoryFilter}
+          />
+        }
+      />
 
       <ImportProductsDialog open={importOpen} onOpenChange={setImportOpen} />
     </div>
