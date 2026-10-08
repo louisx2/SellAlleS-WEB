@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import type {
   ColumnDef,
   SortingState,
@@ -31,11 +31,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  // Filtros extra que la página aplica antes de pasar `data` (p. ej. categoría).
+  toolbar?: ReactNode;
 }
 
 export function ProductDataTable<TData, TValue>({
   columns,
   data,
+  toolbar,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
@@ -84,22 +87,25 @@ export function ProductDataTable<TData, TValue>({
 
   return (
     <div className="rounded-md border bg-card">
-      <div className="flex items-center gap-2 p-4 max-w-md">
-        <Input
-          placeholder={filterType === 'name' ? 'Buscar por nombre...' : 'Buscar por código...'}
-          value={searchValue}
-          onChange={(event) => handleSearchChange(event.target.value)}
-          className="flex-1"
-        />
-        <Select value={filterType} onValueChange={(v) => handleFilterTypeChange(v as 'name' | 'code')}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Filtrar por" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="name">Nombre</SelectItem>
-            <SelectItem value="code">Código</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-center gap-2 p-4">
+        <div className="flex items-center gap-2 w-full max-w-md">
+          <Input
+            placeholder={filterType === 'name' ? 'Buscar por nombre...' : 'Buscar por código...'}
+            value={searchValue}
+            onChange={(event) => handleSearchChange(event.target.value)}
+            className="flex-1"
+          />
+          <Select value={filterType} onValueChange={(v) => handleFilterTypeChange(v as 'name' | 'code')}>
+            <SelectTrigger className="w-[140px]">
+              <SelectValue placeholder="Filtrar por" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Nombre</SelectItem>
+              <SelectItem value="code">Código</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {toolbar}
       </div>
       <Table>
         <TableHeader>

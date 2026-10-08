@@ -8,7 +8,9 @@ import { Badge } from '@/components/ui/badge';
 import { ProductActions } from './product-actions';
 import { cn } from '@/lib/utils';
 
-export const productColumns: ColumnDef<Product>[] = [
+// Factoría: el nombre de la categoría sale del provider de categorías (el
+// producto solo guarda el id).
+export const buildProductColumns = (categoryName: Map<string, string>): ColumnDef<Product>[] => [
   {
     accessorKey: 'name',
     header: 'Nombre',
@@ -16,6 +18,15 @@ export const productColumns: ColumnDef<Product>[] = [
   {
     accessorKey: 'code',
     header: 'Código',
+  },
+  {
+    id: 'category',
+    header: 'Categoría',
+    cell: ({ row }) => {
+      const id = row.original.categoryId;
+      const name = id ? categoryName.get(id) : undefined;
+      return name ?? <span className="text-muted-foreground">—</span>;
+    },
   },
   {
     accessorKey: 'price',
