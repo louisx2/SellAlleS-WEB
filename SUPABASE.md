@@ -302,7 +302,7 @@ NCF y marca `cancelled_at`. Además:
 Las cuotas (`financing_installments`) quedan como estaban: los recordatorios
 (`pending_due_reminders`) y los cobros ya ignoran las ventas anuladas.
 
-### Fechas de pago (migración `fechas_de_pago_de_financiamientos`)
+### Fechas de pago (migraciones `fechas_de_pago_1_calendario` a `fechas_de_pago_4_corregir_plan`)
 
 - **Primer pago al vender**: el POS puede mandar
   `financing_details.firstDueDate` (yyyy-mm-dd). `before_sale_credit_checks`
