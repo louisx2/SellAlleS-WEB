@@ -1,8 +1,15 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { Customer, Sale } from "./types";
-import { addDays, isPast } from 'date-fns';
+import { isPast } from 'date-fns';
 import { addPeriods } from './frequency';
+import {
+  lateFeeDue,
+  overdueDays,
+  resolveLateFeePolicy,
+  totalLateFeeDue,
+  type LateFeePolicy,
+} from './late-fee';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -45,30 +52,41 @@ export type FinancingStatus = {
   lateFee: number;           // mora exigible ahora mismo
   paymentDue: number;        // sugerido: lo pendiente de la próxima cuota + mora
   installmentAmount: number;
+  // La que va a cobrar la RPC: sale del plan congelado, no de los ajustes de
+  // hoy. La UI la usa para explicar de dónde viene el número.
+  lateFeePolicy: LateFeePolicy;
 };
 
 // Estado del plan derivado de las cuotas reales (financing_installments),
 // que genera y actualiza la base.
 //
-// `fallbackLateFeeRate` (% de la empresa) solo se usa para los planes creados
-// antes de que la mora se congelara en la venta. Cuando el plan trae la suya
-// manda esa: es la que va a cobrar la RPC de abonos, y mostrar otra en pantalla
-// haría que el cajero anunciara un número y el sistema cobrara otro.
-export function calculateFinancingStatus(sale: Sale, fallbackLateFeeRate: number = DEFAULT_LATE_FEE_RATE): FinancingStatus {
+// Los `fallback*` (los ajustes vigentes de la empresa) solo se usan para los
+// planes creados antes de que la mora se congelara en la venta. Cuando el plan
+// trae la suya manda esa: es la que va a cobrar la RPC de abonos, y mostrar otra
+// en pantalla haría que el cajero anunciara un número y el sistema cobrara otro.
+export function calculateFinancingStatus(
+    sale: Sale,
+    fallbackLateFeeRate: number = DEFAULT_LATE_FEE_RATE,
+    fallbackGraceDays: number = 0,
+): FinancingStatus {
     const installments = sale.installments ?? [];
-    const lateFeeRate = sale.financingDetails?.lateFeeRate ?? fallbackLateFeeRate;
-    const graceDays = sale.financingDetails?.lateFeeGraceDays ?? 0;
     const frequency = sale.financingDetails?.frequency ?? 'monthly';
+    const policy = resolveLateFeePolicy(
+        sale.financingDetails,
+        { rate: fallbackLateFeeRate, graceDays: fallbackGraceDays },
+        frequency,
+    );
 
     if (installments.length > 0) {
         const open = installments.filter(i => i.status !== 'paid');
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        // Los días de gracia corren igual que en la base (`due_date + grace < today`).
-        const overdue = open.filter(i => addDays(new Date(i.dueDate + 'T23:59:59'), graceDays) < today);
-        const lateFee = round2(overdue.reduce(
-            (acc, i) => acc + Math.max(round2(i.amount * lateFeeRate / 100) - i.lateFeePaid, 0), 0));
+        // Atrasada es una cuestión de fecha, no de monto: con la mora en 0% no
+        // se cobra nada, pero el cliente sigue debiendo tarde y los reportes
+        // tienen que decirlo. La gracia se descuenta igual que en la base.
+        const overdue = open.filter(i => overdueDays(i.dueDate, today, policy.graceDays) > 0);
+        const lateFee = totalLateFeeDue(open, policy, today);
 
         const next = open[0] ?? null;
         const pendingBalance = round2(open.reduce((acc, i) => acc + (i.amount - i.paidAmount), 0));
@@ -82,6 +100,7 @@ export function calculateFinancingStatus(sale: Sale, fallbackLateFeeRate: number
             lateFee,
             paymentDue: round2((next ? next.amount - next.paidAmount : 0) + lateFee),
             installmentAmount: sale.financingDetails?.installmentAmount ?? (next?.amount ?? 0),
+            lateFeePolicy: policy,
         };
     }
 
@@ -99,6 +118,7 @@ export function calculateFinancingStatus(sale: Sale, fallbackLateFeeRate: number
             lateFee: 0,
             paymentDue: pendingBalance,
             installmentAmount: 0,
+            lateFeePolicy: policy,
         };
     }
 
@@ -106,7 +126,20 @@ export function calculateFinancingStatus(sale: Sale, fallbackLateFeeRate: number
     const installmentsPaid = installmentAmount > 0 ? Math.floor(sale.amountPaid / installmentAmount) : 0;
     const nextDueDate = addPeriods(new Date(sale.createdAt), frequency, installmentsPaid + 1);
     const isOverdue = isPast(nextDueDate) && pendingBalance > 0;
-    const lateFee = isOverdue ? round2(installmentAmount * lateFeeRate / 100) : 0;
+    // Sin tabla de cuotas se estima sobre la próxima que tocaba. Es solo para
+    // pintar: sin cuotas en la base, la RPC de abonos no cobra mora ninguna.
+    const lateFee = isOverdue
+        ? lateFeeDue(
+            {
+                amount: installmentAmount,
+                paidAmount: 0,
+                lateFeePaid: 0,
+                dueDate: nextDueDate.toISOString().slice(0, 10),
+            },
+            policy,
+            new Date(),
+          )
+        : 0;
 
     return {
         installmentsPaid,
@@ -117,5 +150,6 @@ export function calculateFinancingStatus(sale: Sale, fallbackLateFeeRate: number
         lateFee,
         paymentDue: round2(installmentAmount + lateFee),
         installmentAmount,
+        lateFeePolicy: policy,
     };
 }

@@ -10,8 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { MessageCircle, Mail, Shield, CalendarClock } from 'lucide-react';
+import { MessageCircle, Mail, Shield, CalendarClock, FileText, BadgeDollarSign } from 'lucide-react';
+import { CuentasBancariasCard } from '@/components/admin/cuentas-bancarias-card';
+import { formatCedulaOrRnc } from '@/lib/format';
 import {
   waLink, supportMailto, parseDiasLista, formatDiasLista,
   DEFAULT_TRIAL_SETTINGS, type SupportContact, type TrialSettings,
@@ -22,6 +25,33 @@ import {
 // Postgres en vez de un mensaje entendible.
 const NUMBER_RE = /^[0-9]{8,15}$/;
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/** Emisor de las facturas de suscripción. La base copia estos datos en cada
+ *  factura al emitirla, así que editarlos no cambia las ya emitidas. */
+interface DatosFacturacion {
+  legalName: string;
+  /** Solo dígitos: 9 (RNC) u 11 (cédula). */
+  rnc: string;
+  address: string;
+  phone: string;
+  email: string;
+  notes: string;
+  itbisIncluded: boolean;
+}
+
+const FACTURACION_VACIA: DatosFacturacion = {
+  legalName: '', rnc: '', address: '', phone: '', email: '', notes: '', itbisIncluded: false,
+};
+
+/** Cómo se avisa y se cobra la cuota. */
+interface AjustesCobro {
+  /** Vacío: support_email. Le llegan los comprobantes y el resumen de la noche. */
+  notifyEmail: string;
+  /** Días de atraso para sugerir solo ventas (nunca bloquea sola). */
+  sugerirDias: number;
+  /** Recordatorios de cuota a las empresas. */
+  avisosActivos: boolean;
+}
 
 export default function PlatformSettingsPage() {
   const { appUser } = useAuth();
@@ -36,14 +66,31 @@ export default function PlatformSettingsPage() {
   const [trial, setTrial] = useState<TrialSettings>(DEFAULT_TRIAL_SETTINGS);
   const [avisosPruebaTexto, setAvisosPruebaTexto] = useState(formatDiasLista(DEFAULT_TRIAL_SETTINGS.trialReminderDays));
   const [avisosCobroTexto, setAvisosCobroTexto] = useState(formatDiasLista(DEFAULT_TRIAL_SETTINGS.paymentReminderDays));
+  // Lo mismo con los datos de facturación: solo los usa esta pantalla y la base.
+  const [facturacion, setFacturacion] = useState<DatosFacturacion>(FACTURACION_VACIA);
+  const [cobro, setCobro] = useState<AjustesCobro>({ notifyEmail: '', sugerirDias: 10, avisosActivos: false });
 
   useEffect(() => {
     supabase
       .from('platform_settings')
-      .select('trial_days, trial_reminder_days, payment_reminder_days')
+      .select('trial_days, trial_reminder_days, payment_reminder_days, invoice_legal_name, invoice_rnc, invoice_address, invoice_phone, invoice_email, invoice_notes, invoice_itbis_included, payment_notify_email, solo_ventas_sugerir_dias, avisos_cobro_activos')
       .maybeSingle()
       .then(({ data }) => {
         if (!data) return;
+        setFacturacion({
+          legalName: data.invoice_legal_name ?? '',
+          rnc: data.invoice_rnc ?? '',
+          address: data.invoice_address ?? '',
+          phone: data.invoice_phone ?? '',
+          email: data.invoice_email ?? '',
+          notes: data.invoice_notes ?? '',
+          itbisIncluded: data.invoice_itbis_included ?? false,
+        });
+        setCobro({
+          notifyEmail: data.payment_notify_email ?? '',
+          sugerirDias: data.solo_ventas_sugerir_dias ?? 10,
+          avisosActivos: data.avisos_cobro_activos ?? false,
+        });
         const t: TrialSettings = {
           trialDays: data.trial_days ?? DEFAULT_TRIAL_SETTINGS.trialDays,
           trialReminderDays: data.trial_reminder_days ?? DEFAULT_TRIAL_SETTINGS.trialReminderDays,
@@ -63,6 +110,11 @@ export default function PlatformSettingsPage() {
   const set = <K extends keyof SupportContact>(key: K, value: SupportContact[K]) => {
     setDirty(true);
     setForm((f) => ({ ...f, [key]: value }));
+  };
+
+  const setFactura = <K extends keyof DatosFacturacion>(key: K, value: DatosFacturacion[K]) => {
+    setDirty(true);
+    setFacturacion((f) => ({ ...f, [key]: value }));
   };
 
   if (!appUser?.isSuperAdmin) {
@@ -111,6 +163,29 @@ export default function PlatformSettingsPage() {
       return;
     }
 
+    const facturaEmail = facturacion.email.trim();
+    if (facturacion.rnc && facturacion.rnc.length !== 9 && facturacion.rnc.length !== 11) {
+      toast({
+        variant: 'destructive',
+        title: 'RNC o cédula incompleto',
+        description: 'El RNC lleva 9 dígitos y la cédula 11. Déjalo vacío si la factura no debe mostrarlo.',
+      });
+      return;
+    }
+    if (facturaEmail && !EMAIL_RE.test(facturaEmail)) {
+      toast({ variant: 'destructive', title: 'Correo de facturación inválido', description: 'Revisa la dirección.' });
+      return;
+    }
+    const notifyEmail = cobro.notifyEmail.trim();
+    if (notifyEmail && !EMAIL_RE.test(notifyEmail)) {
+      toast({ variant: 'destructive', title: 'Correo para avisos de pago inválido', description: 'Revisa la dirección o déjalo vacío.' });
+      return;
+    }
+    if (!Number.isInteger(cobro.sugerirDias) || cobro.sugerirDias < 1 || cobro.sugerirDias > 365) {
+      toast({ variant: 'destructive', title: 'Días para sugerir solo ventas inválidos', description: 'Debe ser entre 1 y 365.' });
+      return;
+    }
+
     setSaving(true);
     const { error } = await supabase
       .from('platform_settings')
@@ -124,6 +199,16 @@ export default function PlatformSettingsPage() {
         trial_days: trial.trialDays,
         trial_reminder_days: avisosPrueba,
         payment_reminder_days: avisosCobro,
+        invoice_legal_name: facturacion.legalName.trim() || null,
+        invoice_rnc: facturacion.rnc || null,
+        invoice_address: facturacion.address.trim() || null,
+        invoice_phone: facturacion.phone.trim() || null,
+        invoice_email: facturaEmail || null,
+        invoice_notes: facturacion.notes.trim() || null,
+        invoice_itbis_included: facturacion.itbisIncluded,
+        payment_notify_email: notifyEmail || null,
+        solo_ventas_sugerir_dias: cobro.sugerirDias,
+        avisos_cobro_activos: cobro.avisosActivos,
       })
       .eq('id', true);
     setSaving(false);
@@ -134,7 +219,7 @@ export default function PlatformSettingsPage() {
     }
     setDirty(false);
     await reload();
-    toast({ title: 'Configuración guardada', description: 'Los canales de contacto se actualizaron en toda la plataforma.' });
+    toast({ title: 'Configuración guardada', description: 'Los cambios se aplicaron en toda la plataforma.' });
   };
 
   // Vista previa de los enlaces que verán los clientes, con los valores del
@@ -303,13 +388,170 @@ export default function PlatformSettingsPage() {
                   onChange={(e) => { setDirty(true); setAvisosCobroTexto(e.target.value); }}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Cuenta desde la fecha de <strong>Pagado hasta</strong> de cada empresa.
+                  Cuenta desde la próxima cuota de cada empresa (la de Cobros). Solo sale si los
+                  recordatorios de cuota están encendidos, abajo.
                 </p>
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
               Números separados por comas. Se guardan de mayor a menor y sin repetidos.
             </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <BadgeDollarSign className="h-5 w-5 text-emerald-600" />
+              Cobros de suscripción
+            </CardTitle>
+            <CardDescription>
+              Los avisos cuando una empresa sube un comprobante, el resumen de cada noche y los recordatorios
+              de cuota a las empresas.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="cobro-email">Correo para avisos de pago</Label>
+              <Input
+                id="cobro-email"
+                type="email"
+                placeholder={form.email ? `Vacío: ${form.email}` : 'tu@correo.com'}
+                value={cobro.notifyEmail}
+                onChange={(e) => { setDirty(true); setCobro({ ...cobro, notifyEmail: e.target.value }); }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Te llega un correo cada vez que una empresa sube un comprobante, y a las 8:05 p.m. un resumen con los
+                comprobantes por confirmar, los atrasados y a quién le toca pagar pronto (solo si hay algo).
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="cobro-dias">Sugerir solo ventas a los días de atraso</Label>
+              <Input
+                id="cobro-dias"
+                type="number"
+                min={1}
+                max={365}
+                className="max-w-[140px]"
+                value={cobro.sugerirDias}
+                onChange={(e) => { setDirty(true); setCobro({ ...cobro, sugerirDias: parseInt(e.target.value) || 0 }); }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Solo lo sugiere en Cobros y en el resumen de la noche. Pasar una empresa a solo ventas lo haces tú, a mano.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="cobro-avisos">Recordatorios de cuota a las empresas</Label>
+                <p className="text-xs text-muted-foreground">
+                  Un correo a su administrador los días de antes que pusiste arriba, y otro el día que vence cada
+                  cuota, con las cuentas para transferir. No se manda si ya subieron un comprobante.
+                  Enciéndelo cuando tengas las cuentas cargadas.
+                </p>
+              </div>
+              <Switch
+                id="cobro-avisos"
+                checked={cobro.avisosActivos}
+                onCheckedChange={(v) => { setDirty(true); setCobro({ ...cobro, avisosActivos: v }); }}
+              />
+            </div>
+          </CardContent>
+        </Card>
+
+        <CuentasBancariasCard />
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              <FileText className="h-5 w-5 text-primary" />
+              Datos de facturación
+            </CardTitle>
+            <CardDescription>
+              Lo que sale como emisor en la factura de cada pago de suscripción. Cada factura
+              guarda una copia al emitirse: cambiar esto no altera las que ya se enviaron.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="inv-name">Nombre o razón social</Label>
+                <Input
+                  id="inv-name"
+                  placeholder="SellAlleS"
+                  value={facturacion.legalName}
+                  onChange={(e) => setFactura('legalName', e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="inv-rnc">RNC o cédula</Label>
+                <Input
+                  id="inv-rnc"
+                  inputMode="numeric"
+                  placeholder="Vacío: no se muestra"
+                  value={formatCedulaOrRnc(facturacion.rnc)}
+                  onChange={(e) => setFactura('rnc', e.target.value.replace(/\D/g, '').slice(0, 11))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="inv-address">Dirección</Label>
+              <Input
+                id="inv-address"
+                value={facturacion.address}
+                onChange={(e) => setFactura('address', e.target.value)}
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="inv-phone">Teléfono</Label>
+                <Input
+                  id="inv-phone"
+                  placeholder="Vacío: el WhatsApp de soporte"
+                  value={facturacion.phone}
+                  onChange={(e) => setFactura('phone', e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="inv-email">Correo</Label>
+                <Input
+                  id="inv-email"
+                  type="email"
+                  placeholder="Vacío: el correo de soporte"
+                  value={facturacion.email}
+                  onChange={(e) => setFactura('email', e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="inv-notes">Notas al pie</Label>
+              <Textarea
+                id="inv-notes"
+                rows={3}
+                placeholder="Ej: Gracias por su pago. Transferencias a Banco Popular, cuenta 000-000000-0."
+                value={facturacion.notes}
+                onChange={(e) => setFactura('notes', e.target.value)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="inv-itbis">El monto cobrado incluye ITBIS (18%)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Actívalo solo si SellAlleS está formalizado y cobra ITBIS: la factura desglosa
+                  subtotal e ITBIS sin cambiar el total.
+                </p>
+              </div>
+              <Switch
+                id="inv-itbis"
+                checked={facturacion.itbisIncluded}
+                onCheckedChange={(v) => setFactura('itbisIncluded', v)}
+              />
+            </div>
           </CardContent>
         </Card>
 

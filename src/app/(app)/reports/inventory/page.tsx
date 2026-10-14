@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -10,6 +10,7 @@ import { formatQty, formatQuantity } from '@/lib/units';
 import { useProducts } from '@/context/product-provider';
 import { useCategories } from '@/context/category-provider';
 import { ExportButton } from '@/components/reports/export-button';
+import { CategoryFilterSelect, matchesCategory, type CategoryFilterValue } from '@/components/products/category-filter';
 import { Package, Coins, TrendingUp, AlertTriangle } from 'lucide-react';
 
 const LOW_STOCK_THRESHOLD = 5;
@@ -20,12 +21,23 @@ export default function InventoryReportPage() {
   const { products } = useProducts();
   const { categories } = useCategories();
 
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilterValue>('all');
+
   const catName = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
+  // Si la categoría elegida se borra (o deja de compartirse), se vuelve a "Todas".
+  const activeFilter: CategoryFilterValue =
+    categoryFilter === 'all' || categoryFilter === 'none' || catName.has(categoryFilter)
+      ? categoryFilter
+      : 'all';
 
   // La valorización es de mercancía en almacén: los productos que no manejan
   // existencias (platos preparados, servicios) quedan fuera del reporte.
-  const rows = useMemo(() =>
-    products.filter((p) => p.tracksStock).map((p) => ({
+  const stocked = useMemo(() => products.filter((p) => p.tracksStock), [products]);
+
+  // Totales y exportación siguen al filtro de categoría.
+  const rows = useMemo(() => {
+    const knownIds = new Set(catName.keys());
+    return stocked.filter((p) => matchesCategory(p, activeFilter, knownIds)).map((p) => ({
       name: p.name,
       code: p.code,
       category: p.categoryId ? catName.get(p.categoryId) ?? '' : '',
@@ -36,8 +48,8 @@ export default function InventoryReportPage() {
       costValue: p.cost * p.stock,
       saleValue: p.price * p.stock,
       lowStock: p.stock <= LOW_STOCK_THRESHOLD,
-    })).sort((a, b) => b.costValue - a.costValue),
-  [products, catName]);
+    })).sort((a, b) => b.costValue - a.costValue);
+  }, [stocked, activeFilter, catName]);
 
   const totals = useMemo(() => ({
     costValue: rows.reduce((a, r) => a + r.costValue, 0),
@@ -51,20 +63,29 @@ export default function InventoryReportPage() {
   return (
     <div>
       <PageHeader title="Valorización de Inventario">
-        <ExportButton
-          filename="valorizacion_inventario"
-          rows={rows}
-          columns={[
-            { header: 'Código', value: (r) => r.code },
-            { header: 'Producto', value: (r) => r.name },
-            { header: 'Categoría', value: (r) => r.category },
-            { header: 'Existencias', value: (r) => r.stock },
-            { header: 'Costo unitario', value: (r) => r.cost },
-            { header: 'Precio venta', value: (r) => r.price },
-            { header: 'Valor a costo', value: (r) => r.costValue },
-            { header: 'Valor a venta', value: (r) => r.saleValue },
-          ]}
-        />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <CategoryFilterSelect
+            categories={categories}
+            products={stocked}
+            value={activeFilter}
+            onChange={setCategoryFilter}
+            className="w-[220px]"
+          />
+          <ExportButton
+            filename="valorizacion_inventario"
+            rows={rows}
+            columns={[
+              { header: 'Código', value: (r) => r.code },
+              { header: 'Producto', value: (r) => r.name },
+              { header: 'Categoría', value: (r) => r.category },
+              { header: 'Existencias', value: (r) => r.stock },
+              { header: 'Costo unitario', value: (r) => r.cost },
+              { header: 'Precio venta', value: (r) => r.price },
+              { header: 'Valor a costo', value: (r) => r.costValue },
+              { header: 'Valor a venta', value: (r) => r.saleValue },
+            ]}
+          />
+        </div>
       </PageHeader>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
@@ -137,7 +158,11 @@ export default function InventoryReportPage() {
                     <TableCell className="text-right">{formatCurrency(r.saleValue)}</TableCell>
                   </TableRow>
                 )) : (
-                  <TableRow><TableCell colSpan={5} className="h-24 text-center">No hay productos en el inventario.</TableCell></TableRow>
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-24 text-center">
+                      {activeFilter === 'all' ? 'No hay productos en el inventario.' : 'No hay productos en esta categoría.'}
+                    </TableCell>
+                  </TableRow>
                 )}
               </TableBody>
             </Table>

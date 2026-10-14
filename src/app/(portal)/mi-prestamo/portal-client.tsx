@@ -37,8 +37,12 @@ interface PortalBusiness {
   companyId: string;
   companyName: string;
   customerId: string;
+  // Fallback para los contratos sin política congelada; cada venta y cada
+  // préstamo traen la suya en su propio objeto.
   lateFeeRate: number;
+  lateFeeGraceDays?: number;
   loanLateFeeRate: number;
+  loanLateFeeGraceDays?: number;
   loans: Loan[];
   creditSales: Sale[];
 }
@@ -97,8 +101,8 @@ function InstallmentsTable({ installments }: { installments: DisplayInstallment[
   );
 }
 
-function LoanCard({ loan, lateFeeRate }: { loan: Loan; lateFeeRate: number }) {
-  const status = calculateLoanStatus(loan, lateFeeRate);
+function LoanCard({ loan, lateFeeRate, graceDays }: { loan: Loan; lateFeeRate: number; graceDays: number }) {
+  const status = calculateLoanStatus(loan, lateFeeRate, graceDays);
   return (
     <Card>
       <CardHeader>
@@ -151,8 +155,8 @@ function LoanCard({ loan, lateFeeRate }: { loan: Loan; lateFeeRate: number }) {
   );
 }
 
-function CreditSaleCard({ sale, lateFeeRate }: { sale: Sale; lateFeeRate: number }) {
-  const status = calculateFinancingStatus(sale, lateFeeRate);
+function CreditSaleCard({ sale, lateFeeRate, graceDays }: { sale: Sale; lateFeeRate: number; graceDays: number }) {
+  const status = calculateFinancingStatus(sale, lateFeeRate, graceDays);
   const isFinancing = sale.paymentStatus === 'in_financing';
   return (
     <Card>
@@ -217,10 +221,20 @@ function BusinessDashboard({ business }: { business: PortalBusiness }) {
       ) : (
         <>
           {business.loans.map((loan) => (
-            <LoanCard key={loan.id} loan={loan} lateFeeRate={business.loanLateFeeRate} />
+            <LoanCard
+              key={loan.id}
+              loan={loan}
+              lateFeeRate={business.loanLateFeeRate}
+              graceDays={business.loanLateFeeGraceDays ?? 0}
+            />
           ))}
           {business.creditSales.map((sale) => (
-            <CreditSaleCard key={sale.id} sale={sale} lateFeeRate={business.lateFeeRate} />
+            <CreditSaleCard
+              key={sale.id}
+              sale={sale}
+              lateFeeRate={business.lateFeeRate}
+              graceDays={business.lateFeeGraceDays ?? 0}
+            />
           ))}
         </>
       )}

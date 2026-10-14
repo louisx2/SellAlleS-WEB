@@ -15,7 +15,7 @@ export default function FinancingPage() {
   // lo de las sucursales con las que se comparta.
   const { financingSales } = useSales();
   const { profile } = useCompanyProfile();
-  const columns = useMemo(() => buildFinancingColumns(profile.lateFeeRate), [profile.lateFeeRate]);
+  const columns = useMemo(() => buildFinancingColumns(profile.lateFeeRate, profile.lateFeeGraceDays), [profile.lateFeeRate, profile.lateFeeGraceDays]);
 
   return (
     <div>

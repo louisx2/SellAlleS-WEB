@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { PaymentMethod, Loan } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency } from '@/lib/utils';
+import { lateFeeGrowthPerDay } from '@/lib/late-fee';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
@@ -41,7 +42,7 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [selectedBank, setSelectedBank] = useState('Banreservas');
 
-  const status = useMemo(() => calculateLoanStatus(loan, profile.loanLateFeeRate), [loan, profile.loanLateFeeRate]);
+  const status = useMemo(() => calculateLoanStatus(loan, profile.loanLateFeeRate, profile.loanLateFeeGraceDays), [loan, profile.loanLateFeeRate, profile.loanLateFeeGraceDays]);
 
   useEffect(() => {
     if (open) {
@@ -54,6 +55,11 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
   }, [open, status.paymentDue, cashBlocked]);
 
   const maxPayable = status.pendingBalance + status.lateFee;
+  // Solo en mora diaria: lo que le cuesta al cliente seguir esperando.
+  const crecimientoDiario =
+    status.lateFeePolicy.mode === 'daily'
+      ? lateFeeGrowthPerDay(loan.installments ?? [], status.lateFeePolicy, new Date())
+      : 0;
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -138,6 +144,9 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
                 <div>
                   <p className="font-semibold">Este préstamo está atrasado.</p>
                   <p className="text-sm">Mora por atraso: {formatCurrency(status.lateFee)} — se cobra primero.</p>
+                  {crecimientoDiario > 0 && (
+                    <p className="text-sm">Sube {formatCurrency(crecimientoDiario)} por cada día que pase.</p>
+                  )}
                 </div>
               </div>
             )}

@@ -29,7 +29,7 @@ export default function ReceivablesReportPage() {
     return financingSales
       .filter((s) => !s.cancelledAt)
       .map((s) => {
-        const st = calculateFinancingStatus(s, profile.lateFeeRate);
+        const st = calculateFinancingStatus(s, profile.lateFeeRate, profile.lateFeeGraceDays);
         // Días desde el vencimiento más viejo sin pagar: es el número por el
         // que se ordena una cartera, más que por el monto.
         const diasAtraso = st.isOverdue && st.nextDueDate

@@ -24,7 +24,7 @@ import { supabase } from '@/lib/supabase/client';
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { PlusCircle, Trash2, ShieldCheck, Shield, Link2, Unlink, MoreHorizontal, Mail } from 'lucide-react';
+import { PlusCircle, Trash2, ShieldCheck, Shield, Link2, Unlink, MoreHorizontal, Mail, Crown } from 'lucide-react';
 import { PasswordInput } from '@/components/ui/password-input';
 
 interface CompanyUser {
@@ -81,6 +81,9 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
   const [allRoles, setAllRoles] = useState<{ id: string; name: string; isSystem: boolean }[]>([]);
   const [loading, setLoading] = useState(true);
   const [rowBusy, setRowBusy] = useState<Record<string, boolean>>({});
+  // Dueños del negocio (profile_companies.es_dueno): ven el aviso de cuotas y
+  // les llegan los correos de cobro. Solo el super admin los cambia.
+  const [duenos, setDuenos] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<CompanyUser | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -115,7 +118,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       supabase.from('branches').select('id, name, max_users').eq('company_id', companyId).order('name'),
       supabase.from('roles').select('id, name').eq('company_id', companyId).eq('is_system', false).order('name'),
       // Usuarios con acceso a esta empresa cuya empresa principal es OTRA.
-      supabase.from('profile_companies').select('profiles(id, name, email, company_id, companies!profiles_company_id_fkey(name))').eq('company_id', companyId),
+      supabase.from('profile_companies').select('profile_id, es_dueno, profiles(id, name, email, company_id, companies!profiles_company_id_fkey(name))').eq('company_id', companyId),
       supabase.from('companies').select('max_users').eq('id', companyId).single(),
       // Asignaciones reales a sucursales: un usuario puede tener varias.
       supabase.from('profile_branches').select('profile_id, branch_id, role_id').eq('company_id', companyId),
@@ -159,6 +162,7 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       Object.fromEntries((bs ?? []).map((b: any) => [b.id, b.max_users != null ? String(b.max_users) : ''])),
     );
     setRoles((rls ?? []).map((r: any) => ({ id: r.id, name: r.name })));
+    setDuenos(new Set(((links ?? []) as any[]).filter((l) => l.es_dueno).map((l) => l.profile_id)));
     setLinkedUsers(
       (links ?? [])
         .map((l: any) => l.profiles)
@@ -349,11 +353,45 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
       const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', user.id);
       if (error) throw error;
       setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, role: newRole } : u)));
+      // Un cajero no puede ser dueño: la base se lo quita al bajarle el rol.
+      if (newRole === 'cashier') setDuenos((prev) => { const next = new Set(prev); next.delete(user.id); return next; });
       toast({ title: 'Rol actualizado' });
     } catch (err: any) {
       toast({ title: 'Error', description: err?.message ?? 'No se pudo cambiar el rol.', variant: 'destructive' });
     } finally {
       setBusy(user.id, false);
+    }
+  };
+
+  // Marcar o quitar como dueño. Solo un admin de la empresa puede serlo; la base
+  // (trg_proteger_es_dueno) ignora el cambio si no lo hace el super admin.
+  const handleDueno = async (profileId: string, nombre: string, valor: boolean) => {
+    if (!companyId) return;
+    setBusy(profileId, true);
+    try {
+      const { data, error } = await supabase
+        .from('profile_companies')
+        .update({ es_dueno: valor })
+        .eq('profile_id', profileId)
+        .eq('company_id', companyId)
+        .select('es_dueno');
+      if (error) throw error;
+      if (!data?.length || !!(data[0] as any).es_dueno !== valor) {
+        throw new Error(valor ? 'Solo un administrador de la empresa puede ser dueño.' : 'No se pudo quitar.');
+      }
+      setDuenos((prev) => {
+        const next = new Set(prev);
+        if (valor) next.add(profileId); else next.delete(profileId);
+        return next;
+      });
+      toast({
+        title: valor ? `${nombre} es dueño` : `${nombre} ya no es dueño`,
+        description: valor ? 'Verá el aviso de cuotas y le llegarán los correos de cobro.' : undefined,
+      });
+    } catch (err: any) {
+      toast({ title: 'Error', description: err?.message ?? 'No se pudo cambiar.', variant: 'destructive' });
+    } finally {
+      setBusy(profileId, false);
     }
   };
 
@@ -749,7 +787,14 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                   usuariosVisibles.map((u) => (
                     <TableRow key={u.id}>
                       <TableCell>
-                        <div className="font-medium text-sm">{u.name}</div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-medium text-sm">{u.name}</span>
+                          {duenos.has(u.id) && (
+                            <Badge variant="outline" className="gap-1 border-amber-300 bg-amber-50 px-1.5 py-0 text-[10px] text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                              <Crown className="h-3 w-3" /> Dueño
+                            </Badge>
+                          )}
+                        </div>
                         <div className="text-xs text-muted-foreground">{u.email}</div>
                       </TableCell>
                       <TableCell>
@@ -897,6 +942,12 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            {appUser?.isSuperAdmin && !u.isSuperAdmin && u.role === 'admin' && (
+                              <DropdownMenuItem onSelect={() => setTimeout(() => handleDueno(u.id, u.name, !duenos.has(u.id)), 0)}>
+                                <Crown className="mr-2 h-4 w-4 text-amber-600" />
+                                <span>{duenos.has(u.id) ? 'Quitar como dueño' : 'Marcar como dueño'}</span>
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onSelect={() => setTimeout(() => handleSendReset(u), 0)}>
                               <Mail className="mr-2 h-4 w-4" />
                               <span>Enviar restablecimiento</span>
@@ -936,9 +987,25 @@ export function ManageCompanyUsersDialog({ companyId, companyName, open, onOpenC
                 {linkedUsers.map((lu) => (
                   <div key={lu.id} className="flex items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="text-sm font-medium truncate">{lu.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-medium truncate">{lu.name}</span>
+                        {duenos.has(lu.id) && (
+                          <Badge variant="outline" className="gap-1 border-amber-300 bg-amber-50 px-1.5 py-0 text-[10px] text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                            <Crown className="h-3 w-3" /> Dueño
+                          </Badge>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground truncate">{lu.email} · Principal: {lu.primaryCompanyName}</div>
                     </div>
+                    {appUser?.isSuperAdmin && (
+                      <Button
+                        variant="ghost" size="sm" className="h-8 shrink-0 text-amber-700 hover:text-amber-800 dark:text-amber-400"
+                        onClick={() => handleDueno(lu.id, lu.name, !duenos.has(lu.id))}
+                        disabled={rowBusy[lu.id]}
+                      >
+                        <Crown className="mr-1.5 h-3.5 w-3.5" /> {duenos.has(lu.id) ? 'Quitar dueño' : 'Marcar dueño'}
+                      </Button>
+                    )}
                     <Button
                       variant="ghost" size="sm" className="h-8 text-destructive hover:text-destructive shrink-0"
                       onClick={() => handleUnlink(lu)}

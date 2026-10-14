@@ -15,13 +15,17 @@ const EMPTY: CompanyProfile = {
   isFormalized: false, ncfEnabled: false,
   socialMedia: { instagram: '', facebook: '' }, email: '', logoUrl: '', ticketLogoUrl: '', receiptFooter: '',
   ticketNameDisplay: 'company', headerNameDisplay: 'company', ticketSocialDisplay: 'company', linkSlug: '',
-  lateFeeRate: 5, defaultInterestRate: 3.5,
+  // Los mismos defaults que las columnas en la base: mora fija del 5% por cuota
+  // vencida, sin gracia y sin tope, que es como se ha cobrado siempre.
+  lateFeeRate: 5, lateFeeMode: 'once', lateFeeGraceDays: 0, lateFeeMaxRate: 0,
+  defaultInterestRate: 3.5,
   // Mismos defaults que las columnas en la base, para que el POS abra igual
   // mientras el perfil todavía no ha cargado.
   financingInterestMode: 'monthly_prorated',
   financingDefaultFrequency: 'monthly',
   financingDefaultInstallments: 12,
-  loanLateFeeRate: 5, defaultLoanInterestRate: 5,
+  loanLateFeeRate: 5, loanLateFeeMode: 'once', loanLateFeeGraceDays: 0, loanLateFeeMaxRate: 0,
+  defaultLoanInterestRate: 5,
   loyaltyEnabled: false, loyaltyPurchasesRequired: null, loyaltyRewardDescription: '', loyaltyCouponValidDays: 30,
 };
 

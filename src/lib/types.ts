@@ -1,7 +1,9 @@
 import type { UnitCode } from './units';
 import type { InterestMode, PaymentFrequency } from './frequency';
+import type { LateFeeMode } from './late-fee';
 
 export type { InterestMode, PaymentFrequency } from './frequency';
+export type { LateFeeMode } from './late-fee';
 
 export type Product = {
   id: string;
@@ -92,7 +94,15 @@ export type User = {
   companyDemoExpiresAt?: string; // empresa de prueba pública ("Probar Plataforma"); se banea al vencer
   companyTrialEndsAt?: string; // fin de la prueba de 14 días (null en empresas sin límite)
   companyPaidUntil?: string; // suscripción pagada hasta esta fecha (null = sin vencimiento)
-  isReadOnly?: boolean; // prueba/suscripción vencida: puede entrar y ver, pero no modificar
+  isReadOnly?: boolean; // prueba vencida: puede entrar y ver, pero no modificar
+  // El super admin pasó la empresa a "solo ventas" por atraso: vende, cobra y
+  // usa la caja; lo demás queda en consulta. Nunca se activa solo.
+  isSoloVentas?: boolean;
+  // Admin de la empresa activa (o super admin dentro de ella): el que ve el
+  // aviso de cuotas y reporta los pagos.
+  isCompanyAdmin?: boolean;
+  // Dueño del negocio (profile_companies.es_dueno): ve el aviso de cuotas.
+  isCompanyOwner?: boolean;
   impersonatedCompanyId?: string;
   impersonatedCompanyName?: string;
   isSuperAdmin?: boolean;
@@ -160,6 +170,9 @@ export type Branch = {
   // que abre el diálogo del POS; el cajero puede cambiarlos en cada venta.
   defaultInterestRate?: number;
   lateFeeRate?: number;
+  lateFeeMode?: LateFeeMode;
+  lateFeeGraceDays?: number;
+  lateFeeMaxRate?: number;
   financingInterestMode?: InterestMode;
   financingDefaultFrequency?: PaymentFrequency;
   financingDefaultInstallments?: number;
@@ -178,10 +191,15 @@ export type Company = {
   paid_until?: string | null;
   created_at: string;
   is_demo: boolean;
+  // Puesta a mano por el super admin (Cobros) por atraso: vende, cobra y usa
+  // la caja; lo demás queda en consulta.
+  solo_ventas?: boolean;
+  solo_ventas_desde?: string | null;
   business_type?: string | null;
   max_users?: number;
   // max_users por sucursal: null = sin límite (el tope de la empresa sigue aplicando aparte).
-  branches?: { id: string; name: string; location: string | null; is_active: boolean; max_users?: number | null }[];
+  // cuota_mensual: precio acordado de la sucursal (null = la tarifa del plan).
+  branches?: { id: string; name: string; location: string | null; is_active: boolean; max_users?: number | null; created_at?: string; cuota_mensual?: number | string | null }[];
 };
 
 export type PermissionAction = 'view' | 'create' | 'edit' | 'delete';
@@ -249,10 +267,17 @@ export type FinancingDetails = {
   installmentAmount: number;
   totalWithInterest: number;
   downPayment?: number;
+  // Primer pago elegido al vender (yyyy-mm-dd); las demás cuotas se cuentan
+  // desde él. Ausente = el de siempre, un período después de la venta.
+  firstDueDate?: string;
   // Congeladas al crear el plan: cambiar la mora de la sucursal no debe
-  // repreciar una deuda que ya está corriendo.
+  // repreciar una deuda que ya está corriendo. La ausencia de `lateFeeMode`
+  // marca un plan anterior a la mora configurable — se cobra como siempre se
+  // le cobró (multa fija). Ver src/lib/late-fee.ts.
   lateFeeRate?: number;
+  lateFeeMode?: LateFeeMode;
   lateFeeGraceDays?: number;
+  lateFeeMaxRate?: number;
 };
 
 // Cuota de un plan de financiamiento. La genera y actualiza la base
@@ -404,13 +429,21 @@ export type CompanyProfile = {
   // sellalles.com/<linkSlug>/c/7Kq2Wp. Vacío = se deriva del nombre.
   linkSlug: string;
   lateFeeRate: number;         // % de mora sobre la cuota vencida
+  lateFeeMode: LateFeeMode;    // cómo corre esa mora (ver src/lib/late-fee.ts)
+  lateFeeGraceDays: number;    // días después del vencimiento antes de cobrarla
+  lateFeeMaxRate: number;      // tope de mora como % de la base; 0 = sin tope
   defaultInterestRate: number; // % de interés mensual sugerido en el POS
   // Valores por defecto del financiamiento para toda la empresa. Cada sucursal
   // puede sobrescribirlos; ver Branch.
   financingInterestMode: InterestMode;
   financingDefaultFrequency: PaymentFrequency;
   financingDefaultInstallments: number;
-  loanLateFeeRate: number;         // % de mora de préstamos (independiente de lateFeeRate)
+  // Los de préstamos son independientes de los de financiamiento, tasa, modo,
+  // gracia y tope incluidos.
+  loanLateFeeRate: number;
+  loanLateFeeMode: LateFeeMode;
+  loanLateFeeGraceDays: number;
+  loanLateFeeMaxRate: number;
   defaultLoanInterestRate: number; // % de interés mensual sugerido para préstamos
   loyaltyEnabled: boolean;
   loyaltyPurchasesRequired: number | null; // null = sin configurar
@@ -515,6 +548,14 @@ export type Loan = {
   notes?: string;
   userName?: string;
   createdAt: Date;
+  // Política de mora congelada al desembolsar, igual que en financiamiento:
+  // subir la mora de la empresa no reprecia un préstamo que ya está corriendo.
+  // Ausente = préstamo anterior a la mora configurable (multa fija con los
+  // ajustes de la empresa, que es como se le ha venido cobrando).
+  lateFeeRate?: number;
+  lateFeeMode?: LateFeeMode;
+  lateFeeGraceDays?: number;
+  lateFeeMaxRate?: number;
   installments?: LoanInstallment[];
   payments?: LoanPayment[];
 };
@@ -595,6 +636,30 @@ export type SubscriptionPayment = {
   notes?: string;
   recordedByName?: string;
   createdAt: Date;
+  /** Número de la factura del pago. Lo asigna la base al registrarlo. */
+  invoiceNumber?: number;
+  /** Datos de SellAlleS y de la empresa tal como estaban al emitir la factura. */
+  invoiceIssuer?: SubscriptionInvoiceIssuer;
+  invoiceCustomer?: SubscriptionInvoiceCustomer;
+  /** ITBIS incluido en `amount`; 0 si la factura no lo desglosa. */
+  invoiceItbis: number;
+};
+
+export type SubscriptionInvoiceIssuer = {
+  legalName: string;
+  rnc?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
+  notes?: string;
+};
+
+export type SubscriptionInvoiceCustomer = {
+  name: string;
+  rnc?: string;
+  address?: string;
+  phone?: string;
+  email?: string;
 };
 
 export type Supplier = {

@@ -109,7 +109,7 @@ export default function FinancingProfitReportPage() {
       .filter((s) => !range || (new Date(s.createdAt) >= range.from && new Date(s.createdAt) <= range.to))
       .map((s) => {
         const e = economicsOf(s);
-        const st = calculateFinancingStatus(s, profile.lateFeeRate);
+        const st = calculateFinancingStatus(s, profile.lateFeeRate, profile.lateFeeGraceDays);
         const inst = s.installments ?? [];
         // Cobrado del plan (capital + interés). Los financiamientos anteriores a
         // la tabla de cuotas no tienen filas: se cae a lo pagado menos el inicial.

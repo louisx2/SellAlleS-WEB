@@ -10,19 +10,22 @@ import { supabase } from '@/lib/supabase/client';
 import { rowToCreditPayment, rowToFinancingAmendment } from '@/lib/supabase/mappers';
 import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
+import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
+import { formatQtyCompact } from '@/lib/units';
 import type { CreditPayment, FinancingAmendment, PaymentMethod } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+  Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { DialogTrigger } from '@/components/ui/dialog';
 import { AddFinancingPaymentDialog } from '@/components/financing/add-financing-payment-dialog';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
 import { AmendFinancingDialog } from '@/components/financing/amend-financing-dialog';
-import { ArrowLeft, DollarSign, Pencil, Printer, Undo2 } from 'lucide-react';
+import { RescheduleInstallmentsDialog } from '@/components/financing/reschedule-installments-dialog';
+import { ArrowLeft, CalendarClock, DollarSign, FileText, Pencil, Printer, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -49,8 +52,12 @@ export default function FinancingDetailClient() {
   const [isPlanOpen, setPlanOpen] = useState(false);
   const [isAmendOpen, setAmendOpen] = useState(false);
   const [voiding, setVoiding] = useState<CreditPayment | null>(null);
+  const [isRescheduleOpen, setRescheduleOpen] = useState(false);
 
   const sale = financingSales.find(s => s.id === saleId) ?? sales.find(s => s.id === saleId);
+  // La factura solo abre las ventas propias de la sucursal: una del pool
+  // compartido no está en `sales` y ahí daría "Venta no encontrada".
+  const hasInvoice = sales.some(s => s.id === saleId);
   const isAdmin = appUser?.role === 'admin';
 
   // Historial de abonos de esta venta; se refresca cuando el provider recarga
@@ -81,8 +88,8 @@ export default function FinancingDetailClient() {
   useEffect(() => { loadAmendments(); }, [loadAmendments, sales]);
 
   const status = useMemo(
-    () => (sale ? calculateFinancingStatus(sale, profile.lateFeeRate) : null),
-    [sale, profile.lateFeeRate]
+    () => (sale ? calculateFinancingStatus(sale, profile.lateFeeRate, profile.lateFeeGraceDays) : null),
+    [sale, profile.lateFeeRate, profile.lateFeeGraceDays]
   );
 
   if (!sale || !status) {
@@ -103,10 +110,13 @@ export default function FinancingDetailClient() {
   const fin = sale.financingDetails;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  // La mora del plan es la que va a cobrar la RPC de abonos: se congeló al
+  // La política del plan es la que va a cobrar la RPC de abonos: se congeló al
   // crearlo. Los planes viejos no la traen y siguen la de la empresa.
-  const lateFeeRate = fin?.lateFeeRate ?? profile.lateFeeRate;
+  const policy = status.lateFeePolicy;
   const frequency = fin?.frequency ?? 'monthly';
+  // Mismo criterio que la base: solo admin, venta viva y alguna cuota por pagar.
+  const canReschedule =
+    isAdmin && !sale.cancelledAt && !!sale.installments?.some((cuota) => cuota.status !== 'paid');
 
   return (
     <div className="space-y-6">
@@ -117,20 +127,28 @@ export default function FinancingDetailClient() {
             Volver
           </Link>
         </Button>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {hasInvoice && (
+            <Button asChild variant="outline">
+              <Link href={`/sales/detail?id=${sale.id}`}>
+                <FileText className="mr-2 h-4 w-4" />
+                Ver Factura
+              </Link>
+            </Button>
+          )}
           {fin && (
             <Button variant="outline" onClick={() => setPlanOpen(true)}>
               <Printer className="mr-2 h-4 w-4" />
               Imprimir Plan de Pagos
             </Button>
           )}
-          {fin && isAdmin && (
+          {fin && isAdmin && !sale.cancelledAt && (
             <Button variant="outline" onClick={() => setAmendOpen(true)}>
               <Pencil className="mr-2 h-4 w-4" />
               Corregir Plan
             </Button>
           )}
-          {status.pendingBalance > 0 && (
+          {status.pendingBalance > 0 && !sale.cancelledAt && (
             <AddFinancingPaymentDialog sale={sale}>
               <DialogTrigger asChild>
                 <Button>
@@ -147,7 +165,9 @@ export default function FinancingDetailClient() {
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-3">
             {sale.customer?.name ?? 'Consumidor Final'}
-            {status.pendingBalance <= 0 ? (
+            {sale.cancelledAt ? (
+              <Badge variant="destructive">Anulada</Badge>
+            ) : status.pendingBalance <= 0 ? (
               <Badge className="bg-green-600">Pagado</Badge>
             ) : status.isOverdue ? (
               <Badge variant="destructive">Atrasado</Badge>
@@ -204,13 +224,77 @@ export default function FinancingDetailClient() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Artículos Financiados</CardTitle>
+          <CardDescription>Lo que se llevó el cliente en esta venta, al precio que se le cobró.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {sale.items.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              Esta venta no tiene artículos registrados.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Artículo</TableHead>
+                    <TableHead className="text-right">Cantidad</TableHead>
+                    <TableHead className="text-right">Precio</TableHead>
+                    <TableHead className="text-right">Importe</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sale.items.map((item) => {
+                    const price = item.customPrice ?? item.product.price;
+                    return (
+                      <TableRow key={item.cartItemId}>
+                        <TableCell className="font-medium">{item.product.name}</TableCell>
+                        <TableCell className="text-right whitespace-nowrap">
+                          {formatQtyCompact(item.quantity, item.product.unit)}
+                        </TableCell>
+                        <TableCell className="text-right">{formatCurrency(price)}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(price * item.quantity)}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+                {/* Con ITBIS sumado encima, las líneas no llegan solas al total. */}
+                <TableFooter>
+                  {!sale.itbisIncluded && sale.itbisAmount > 0 && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right font-normal">ITBIS</TableCell>
+                      <TableCell className="text-right font-normal">{formatCurrency(sale.itbisAmount)}</TableCell>
+                    </TableRow>
+                  )}
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-right">Total de la venta</TableCell>
+                    <TableCell className="text-right">{formatCurrency(sale.total)}</TableCell>
+                  </TableRow>
+                </TableFooter>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {sale.installments && sale.installments.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle>Plan de Cuotas</CardTitle>
-            <CardDescription>
-              La mora ({lateFeeRate}% por cuota vencida) se cobra primero al registrar un abono.
-            </CardDescription>
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+            <div className="space-y-1.5">
+              <CardTitle>Plan de Cuotas</CardTitle>
+              <CardDescription>
+                {lateFeeModeHelp(policy.mode, policy.rate, frequency)} Se cobra antes que el capital
+                al registrar un abono.
+              </CardDescription>
+            </div>
+            {canReschedule && (
+              <Button variant="outline" size="sm" onClick={() => setRescheduleOpen(true)}>
+                <CalendarClock className="mr-2 h-4 w-4" />
+                Cambiar fechas
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             <Table>
@@ -227,10 +311,11 @@ export default function FinancingDetailClient() {
               <TableBody>
                 {sale.installments.map((cuota) => {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
-                  const isOverdue = cuota.status !== 'paid' && new Date(cuota.dueDate + 'T23:59:59') < today;
-                  const feeDue = isOverdue
-                    ? Math.round(cuota.amount * lateFeeRate / 100 * 100) / 100
-                    : 0;
+                  // Vencida = la que ya devenga mora, con la gracia del plan ya
+                  // descontada. Misma cuenta que hace la base al cobrar.
+                  const feeDue = cuota.status !== 'paid' ? lateFeeDue(cuota, policy, today) : 0;
+                  const isOverdue =
+                    cuota.status !== 'paid' && overdueDays(cuota.dueDate, today, policy.graceDays) > 0;
                   const st = INSTALLMENT_STATUS[cuota.status] ?? INSTALLMENT_STATUS.pending;
                   return (
                     <TableRow key={cuota.id} className={isOverdue ? 'bg-destructive/5' : undefined}>
@@ -245,9 +330,9 @@ export default function FinancingDetailClient() {
                         {isOverdue ? (
                           <div className="flex flex-col">
                             <Badge variant="destructive" className="w-fit">Vencida</Badge>
-                            {feeDue > cuota.lateFeePaid && (
+                            {feeDue > 0 && (
                               <span className="text-xs text-destructive mt-1">
-                                Mora: {formatCurrency(Math.max(feeDue - cuota.lateFeePaid, 0))}
+                                Mora: {formatCurrency(feeDue)}
                               </span>
                             )}
                           </div>
@@ -383,6 +468,15 @@ export default function FinancingDetailClient() {
         onOpenChange={setAmendOpen}
         onAmended={loadAmendments}
       />
+
+      {isRescheduleOpen && (
+        <RescheduleInstallmentsDialog
+          sale={sale}
+          open={isRescheduleOpen}
+          onOpenChange={setRescheduleOpen}
+          graceDays={policy.graceDays}
+        />
+      )}
 
       {voiding && (
         <VoidPaymentDialog

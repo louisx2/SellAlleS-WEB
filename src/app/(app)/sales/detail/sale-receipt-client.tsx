@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Printer, ArrowLeft, MessageSquare, Mail, Loader2, Send, Download, Copy, Link as LinkIcon } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
-import { ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from '@/components/pos/receipt-content';
+import { ReceiptBarcode, ReceiptContent, ReceiptHeader, ReceiptItems, ReceiptTotals } from '@/components/pos/receipt-content';
 import {
   shareSalePdfLinkViaWhatsApp,
   abrirPestanaParaWhatsApp,
@@ -356,6 +356,7 @@ export default function SaleReceiptClient() {
           <div className="border-t pt-3">
             <ReceiptTotals sale={sale} />
           </div>
+          <ReceiptBarcode sale={sale} className="mt-2" />
         </div>
       </div>
     </div>

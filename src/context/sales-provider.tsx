@@ -37,6 +37,11 @@ interface SalesContextType {
    * pagado una cuota. Deja el antes/después en la bitácora.
    */
   amendFinancing: (input: AmendFinancingInput) => Promise<AmendFinancingResult>;
+  /**
+   * Mueve la fecha de una cuota sin pagar y, con `shiftFollowing`, cuenta las
+   * siguientes desde ahí. Solo admin. Devuelve cuántas cuotas cambiaron.
+   */
+  rescheduleInstallments: (saleId: string, installmentNumber: number, newDate: string, shiftFollowing: boolean, reason?: string) => Promise<number>;
   reload: () => Promise<void>;
   loading: boolean;
 }
@@ -47,6 +52,8 @@ export type AnnulSaleResult = {
   ncfModified?: string;
   total: number;
   refundMethod: RefundMethod;
+  // Abono inicial anulado junto con una venta a crédito o financiada.
+  paymentsVoided: number;
 };
 
 export type AmendFinancingInput = {
@@ -120,6 +127,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       .select(SALE_SELECT)
       .in('branch_id', otras)
       .in('payment_status', ['credit', 'in_financing'])
+      .is('cancelled_at', null)
       .order('created_at', { ascending: false });
     if (!error && data) setSharedFinancing(data.map(rowToSale));
   }, [sharingLoading, otrasKey]);
@@ -134,8 +142,10 @@ export function SalesProvider({ children }: { children: ReactNode }) {
   // dashboard y en todo lo que lea de este provider.
   useRealtimeReload('sales', reloadAll);
 
+  // Una venta a crédito anulada ya no se cobra: fuera de Financiamientos y del
+  // estado de cuenta (sigue en Movimientos, tachada).
   const financingSales = [
-    ...sales.filter((s) => s.paymentStatus === 'credit' || s.paymentStatus === 'in_financing'),
+    ...sales.filter((s) => !s.cancelledAt && (s.paymentStatus === 'credit' || s.paymentStatus === 'in_financing')),
     ...sharedFinancing,
   ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
@@ -268,11 +278,13 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       ncfModified: data.ncf_modified ?? undefined,
       total: Number(data.total ?? 0),
       refundMethod: data.refund_method,
+      paymentsVoided: Number(data.payments_voided ?? 0),
     };
   };
 
   // Repreciar un plan toca la venta, sus cuotas, la bitácora y el balance del
-  // cliente: todo en la misma transacción de la base. Aquí solo se recarga.
+  // cliente: todo en la misma transacción de la base. Aquí solo se recarga, y
+  // todo, porque el financiamiento puede ser de otra sucursal del pool.
   const amendFinancing = async (input: AmendFinancingInput): Promise<AmendFinancingResult> => {
     const { data, error } = await supabase.rpc('amend_sale_financing', {
       p_sale_id: input.saleId,
@@ -283,7 +295,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       p_reason: input.reason,
     });
     if (error) throw error;
-    await load();
+    await reloadAll();
     return {
       saleId: data.sale_id,
       before: data.before,
@@ -294,8 +306,26 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  // La base valida (pagadas, orden, no antes de la venta) y deja el rastro en
+  // financing_schedule_changes. Se recarga todo porque el financiamiento puede
+  // ser de otra sucursal del pool.
+  const rescheduleInstallments = async (
+    saleId: string, installmentNumber: number, newDate: string, shiftFollowing: boolean, reason?: string,
+  ): Promise<number> => {
+    const { data, error } = await supabase.rpc('reschedule_financing_installments', {
+      p_sale_id: saleId,
+      p_installment_number: installmentNumber,
+      p_new_date: newDate,
+      p_shift_following: shiftFollowing,
+      p_reason: reason?.trim() || null,
+    });
+    if (error) throw error;
+    await reloadAll();
+    return Array.isArray(data?.changes) ? data.changes.length : 0;
+  };
+
   return (
-    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, amendFinancing, reload: reloadAll, loading }}>
+    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, amendFinancing, rescheduleInstallments, reload: reloadAll, loading }}>
       {children}
     </SalesContext.Provider>
   );

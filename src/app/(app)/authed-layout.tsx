@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -30,6 +30,9 @@ import { supabase } from '@/lib/supabase/client';
 import { ProfileModal } from '@/components/profile/profile-modal';
 import { SupportDialog } from '@/components/support/support-dialog';
 import { useActualizacionDisponible, aplicarActualizacion, VERSION } from '@/lib/pwa-update';
+import { AvisoDeCuota } from '@/components/subscription/aviso-de-cuota';
+import { useMiCuenta } from '@/hooks/use-mi-cuenta';
+import { useComprobantesPendientes } from '@/hooks/use-comprobantes-pendientes';
 
 interface NavItem {
   href: string;
@@ -76,6 +79,7 @@ const adminNavItems: NavItem[] = [
     { href: '/inventory', icon: Package, label: 'Inventario', permission: 'products' },
     { href: '/categories', icon: FolderOpen, label: 'Categorías', permission: 'products' },
     { href: '/locations', icon: MapPin, label: 'Ubicaciones', permission: 'products' },
+    { href: '/transferencias', icon: ArrowRightLeft, label: 'Transferencias', permission: 'products' },
     { href: '/customers', icon: UsersRound, label: 'Clientes', permission: 'customers' },
     { href: '/suppliers', icon: Truck, label: 'Proveedores', module: 'suppliers', permission: 'suppliers' },
     { href: '/company-profile', icon: Building, label: 'Perfil de Sucursal', permission: 'company-profile' },
@@ -109,6 +113,16 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSupportDialog, setShowSupportDialog] = useState(false);
+
+  // Aviso de cuotas: solo para el dueño del negocio en la empresa en la que
+  // opera (no para los demás admins, ni en el lobby de Mis Empresas, ni en las
+  // empresas demo). El super admin lo ve dentro de una empresa, para saber lo
+  // que ve el dueño; fuera de ellas ve cuántos comprobantes esperan revisión.
+  const multiEmpresaEnLobby = !!(appUser && !appUser.isSuperAdmin && (appUser.companies?.length ?? 0) > 1 && !appUser.impersonatedCompanyId);
+  const verAvisoDeCuota = !!(appUser?.isCompanyOwner || (appUser?.isSuperAdmin && appUser.impersonatedCompanyId))
+    && !appUser?.companyDemoExpiresAt && !multiEmpresaEnLobby;
+  const { cuenta: miCuenta } = useMiCuenta(verAvisoDeCuota, appUser?.impersonatedCompanyId || appUser?.companyId);
+  const comprobantesPendientes = useComprobantesPendientes(!!appUser?.isSuperAdmin && !appUser.impersonatedCompanyId);
   
   const { theme, setTheme } = useTheme();
   
@@ -330,10 +344,16 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
       {!isImpersonating && !isDemoCompany && isReadOnly && (
         <div className="fixed top-0 z-50 w-full bg-red-600 text-white px-4 py-1.5 text-xs flex items-center justify-center gap-3 font-medium shadow-md">
           <span>
-            {appUser.companyStatus === 'trial'
-              ? '⚠️ Tu prueba gratis de 14 días terminó. Puedes ver tus datos, pero no modificarlos hasta activar tu cuenta.'
-              : '⚠️ Tu suscripción venció. Puedes ver tus datos, pero no modificarlos hasta renovar tu pago.'}
+            ⚠️ Tu prueba gratis terminó. Puedes ver tus datos, pero no modificarlos hasta activar tu cuenta.
           </span>
+          {appUser.isCompanyAdmin && pathname !== '/suscripcion' && (
+            <Link
+              href="/suscripcion"
+              className="bg-white text-red-600 px-3 py-0.5 rounded-full hover:bg-red-50 transition-colors whitespace-nowrap"
+            >
+              Pagar y activar
+            </Link>
+          )}
           {activationWaLink && (
             <a
               href={activationWaLink}
@@ -523,6 +543,33 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                     <span className="group-data-[collapsible=icon]:hidden">
                       {isSuperAdmin ? "Empresas" : "Mis Empresas"}
                     </span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            )}
+            {isSuperAdmin && (
+              <SidebarMenuItem>
+                <Link href="/admin/cobros" passHref>
+                  <SidebarMenuButton
+                    isActive={pathname.startsWith('/admin/cobros')}
+                    tooltip={comprobantesPendientes > 0 ? `Cobros: ${comprobantesPendientes} por confirmar` : 'Cobros de suscripción'}
+                    className="relative"
+                  >
+                    {/* Con el menú colapsado se oculta todo lo que va después
+                        del ícono: ahí el aviso es un punto encima del ícono. */}
+                    {comprobantesPendientes > 0 && (
+                      <div className="pointer-events-none absolute left-6 top-1 hidden h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-card group-data-[collapsible=icon]:block" />
+                    )}
+                    <BadgeDollarSign />
+                    <span className="group-data-[collapsible=icon]:hidden">Cobros</span>
+                    {comprobantesPendientes > 0 && (
+                      <span
+                        className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-white"
+                        aria-label={`${comprobantesPendientes} comprobantes por confirmar`}
+                      >
+                        {comprobantesPendientes}
+                      </span>
+                    )}
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>
@@ -752,7 +799,10 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
               <Button variant="outline" onClick={() => router.push('/dashboard')}>Volver al Dashboard</Button>
             </div>
           ) : (
-            children
+            <>
+              {verAvisoDeCuota && !isPosPage && pathname !== '/suscripcion' && <AvisoDeCuota cuenta={miCuenta} />}
+              {children}
+            </>
           )}
         </main>
       </div>

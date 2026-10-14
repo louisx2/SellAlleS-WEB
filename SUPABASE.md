@@ -199,15 +199,15 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
 - **`trg_after_sale_credit`** (AFTER INSERT en `sales`): sube
   `customers.credit_balance` (deuda = principal + interés para financiamiento;
   total − inicial para crédito) y genera las cuotas en `financing_installments`
-  (vencimiento mensual desde la fecha de venta; la última cuota absorbe el
-  redondeo para que la suma sea exacta).
-- **`apply_payment_to_sale(sale_id, monto, tasa_mora, hoy, gracia)`** (interno,
-  sin EXECUTE para `authenticated`): el único motor que aplica dinero a una
-  venta. Cobra primero la **mora** (`companies.late_fee_rate`% por cuota
-  vencida, cargo único por cuota, exigible pasados
-  `companies.late_fee_grace_days`), luego capital FIFO a las cuotas, y sube
-  `sales.amount_paid` solo con el capital. Devuelve el detalle de la aplicación
-  para poder revertirla cuota por cuota.
+  (vencimiento según la frecuencia desde la fecha de venta, o desde el primer
+  pago elegido en el POS; la última cuota absorbe el redondeo para que la suma
+  sea exacta).
+- **`apply_payment_to_sale(sale_id, monto)`** (interno, sin EXECUTE para
+  `authenticated`): el único motor que aplica dinero a una venta. Cobra primero
+  la **mora** con la política congelada en el plan, luego capital FIFO a las
+  cuotas, y sube `sales.amount_paid` solo con el capital. Devuelve el detalle de
+  la aplicación para poder revertirla cuota por cuota. No recibe tasa ni fecha:
+  las resuelve de la venta, para que no haya dos maneras de decidir qué se cobra.
 - **RPC `register_sale_payment(sale_id, amount, method, branch_id, notes, reference)`**
   (SECURITY DEFINER): abono a una venta. Valida acceso con `can_collect_sale()`,
   que replica la policy de `sales`, y comprueba que la sucursal del cobro sea de
@@ -216,7 +216,8 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
 - **RPC `register_customer_payment(customer_id, amount, method, branch_id, notes, reference)`**
   (SECURITY DEFINER): abono a la deuda general. Se reparte entre **todas** las
   ventas abiertas del cliente — `credit` **y** `in_financing` — de la de
-  vencimiento más viejo a la más nueva, mora antes que capital.
+  vencimiento más viejo a la más nueva, mora antes que capital. El techo del
+  abono sale de `sale_late_fee_due(sale_id)`, no de una copia de la fórmula.
 - **RPC `void_credit_payment(payment_id, reason)`** (SECURITY DEFINER, solo
   admin de empresa): anula un abono por reverso. No lo borra: marca `voided_at`
   y devuelve capital y mora a las cuotas exactas que los recibieron, según
@@ -237,16 +238,98 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
   con `current_date`, a partir de las 8:00 PM en RD ya era "mañana", así que a
   quien pagaba el día del vencimiento se le cobraba mora y el plan de cuotas de
   una venta de noche arrancaba un día tarde.
-- `companies.late_fee_rate` (default 5), `companies.default_interest_rate`
-  (default 3.5) y `companies.late_fee_grace_days` (default 0 = la mora aplica
-  al día siguiente del vencimiento).
-- La mora exigible NO se materializa: se deriva al leer (cuota vencida ×
-  tasa − ya cobrada), igual en SQL y en `calculateFinancingStatus` del cliente.
+- La mora exigible NO se materializa: se deriva al leer, igual en SQL y en el
+  cliente. Lo único persistido es `late_fee_paid` por cuota.
+
+### La política de mora (migración `mora_configurable`)
+
+La mora dejó de ser un cargo único: es una política de cuatro campos que se
+**congela en cada venta y en cada préstamo** al crearlos.
+
+| modo | base | devengado por cuota |
+|---|---|---|
+| `once` | la cuota pactada | `base × tasa%`, una vez |
+| `daily` | saldo insoluto | `base × tasa% × días/30` |
+| `per_period` | saldo insoluto | `base × tasa% × ceil(días / días_del_período)` |
+
+`días = hoy − vencimiento − gracia`, con `hoy = company_today()`. El **tope**
+(`late_fee_max_rate`, % sobre la base, 0 = sin tope) corta el acumulado; sin él
+una cuota olvidada en modo `daily` crece sin techo.
+
+Las dos bases son distintas a propósito: `once` es una **multa** por incumplir,
+así que cae sobre la cuota pactada; `daily` y `per_period` son **intereses** por
+el dinero que sigue en la calle, así que abonar baja la mora que corre.
+
+- `public.late_fee_accrued(...)` es la única fuente de verdad del monto, y
+  `src/lib/late-fee.ts` su espejo exacto — verificado sobre 600 casos, mismo
+  centavo en los 600 (por eso `round2` del cliente corrige el error binario de
+  `Math.round`: en float 100.5 vive como 100.49999999999999 y redondeaba al revés
+  que `round(numeric, 2)`).
+- `late_fee_policy(financing_details, tasa_empresa, gracia_empresa)` resuelve la
+  política de una venta. **La ausencia de `lateFeeMode` marca un contrato
+  anterior**: resuelve a `once` con los ajustes de la empresa, que es exactamente
+  como se le venía cobrando. Por eso cambiar los ajustes nunca reprecia una deuda
+  viva.
+- Ajustes por empresa: `late_fee_rate` (default 5), `late_fee_mode`,
+  `late_fee_grace_days`, `late_fee_max_rate` para financiamiento, y
+  `loan_late_fee_*` para préstamos (independientes, gracia incluida).
+  `branches.late_fee_*` sobrescribe los de financiamiento; NULL = hereda.
+- `companies.default_interest_rate` (default 3.5) no es mora: es el interés
+  sugerido en el POS.
 - El interés es **add-on**: se calcula una vez sobre todo el plazo y se reparte
   en cuotas iguales, así que pagar antes no ahorra intereses. Falta un "saldar
   anticipado" con descuento de intereses no devengados.
 
-## Corregir un plan mal digitado (migración `corregir_plan_de_financiamiento`)
+### Anular una venta a crédito o financiada (migración `anular_ventas_a_credito`)
+
+`annul_sale` acepta ventas a crédito y financiadas, además de las pagadas.
+Igual que con una pagada, repone el inventario, emite la B04 si la venta llevó
+NCF y marca `cancelled_at`. Además:
+
+- Anula el abono inicial (`credit_payments.kind = 'down_payment'`) y baja
+  `amount_paid`. Un abono anulado no cuenta en `close_caja_session`, que es lo
+  correcto tanto si el dinero se le devuelve al cliente como si nunca entró.
+- La devolución sale por donde entró el abono inicial, o `none` si se pide a
+  propósito. Si el abono fue en efectivo en una sesión de caja que ya cerró y
+  se devuelve, la salida va a la caja abierta (mismo criterio que
+  `void_credit_payment`).
+- Recalcula `customers.credit_balance` (ya ignora las ventas anuladas).
+- Rechaza la venta si tiene abonos posteriores vigentes: los que la nombran,
+  los generales cuyo `allocation` la tocó, y los viejos sin reparto (se
+  detectan por `amount_paid` mayor que el abono inicial). Esos se anulan antes,
+  uno a uno, con `void_credit_payment`.
+
+Las cuotas (`financing_installments`) quedan como estaban: los recordatorios
+(`pending_due_reminders`) y los cobros ya ignoran las ventas anuladas.
+
+### Fechas de pago (migraciones `fechas_de_pago_1_calendario` a `fechas_de_pago_4_corregir_plan`)
+
+- **Primer pago al vender**: el POS puede mandar
+  `financing_details.firstDueDate` (yyyy-mm-dd). `before_sale_credit_checks`
+  lo acepta desde el día de la venta (hora del negocio) hasta 90 días después;
+  si coincide con el de siempre (un período después de la venta) no lo guarda.
+  Con él, la cuota 1 cae ese día y las demás cada período desde ahí
+  (`financing_schedule_due_date`); sin él, el calendario es el de antes. El
+  interés no cambia: lo deciden la cantidad de cuotas y la frecuencia.
+- **RPC `reschedule_financing_installments(sale_id, installment_number,
+  new_date, shift_following, reason)`** (SECURITY DEFINER, solo admin de
+  empresa): mueve una cuota sin pagar y, con `shift_following`, cuenta las
+  siguientes sin pagar desde la fecha nueva con la frecuencia del plan. Las
+  pagadas no se tocan, las fechas tienen que quedar en orden y ninguna antes
+  de la venta, y una venta anulada no se toca. Limpia `reminder_sent_at` de
+  las cuotas movidas para que el recordatorio salga para la fecha nueva.
+- **La mora se mueve con la fecha**, porque se deriva al leer: una cuota
+  vencida que pasa a una fecha futura deja de devengar mora. Lo ya cobrado
+  (`late_fee_paid`) no cambia.
+- **`financing_schedule_changes`**: cada cambio con sus cuotas (antes y
+  después), quién y el motivo (opcional). Legible solo por admins, la escribe
+  solo la RPC.
+- **`amend_sale_financing`** ya no pisa las fechas: con la misma cantidad de
+  cuotas y la misma frecuencia, cada cuota se queda en su fecha (una prórroga
+  sobrevive a la corrección de la tasa); si cambian, el plan corregido arranca
+  en el primer pago de antes cuando no era el de siempre.
+
+## Corregir un plan mal digitado (migraciones `corregir_plan_de_financiamiento`, `corregir_plan_de_financiamiento_sin_execute_para_anon` y `financing_helpers_search_path_fijo`)
 
 Una venta financiada con la tasa equivocada (8% donde iba 7%) no tenía arreglo
 desde la app: `financing_details` es jsonb en `sales`, las cuotas no son
@@ -265,9 +348,11 @@ que existir por delante.
   crédito contra el balance *sin* esta venta, para no contar dos veces la deuda
   vieja.
 - **Qué NO toca**: el abono inicial, la mora congelada, los días de gracia y las
-  fechas de vencimiento. El calendario se regenera desde la fecha de la **venta**,
-  no la de hoy: corregir la tasa no debe correrle los vencimientos al cliente.
-  Para cambiar el abono inicial hay que anular la venta.
+  fechas de vencimiento. Con la misma cantidad de cuotas y la misma frecuencia,
+  cada cuota se queda en su fecha (también las movidas con "Cambiar fechas");
+  si cambian, el calendario se rearma desde el primer pago de antes, no desde
+  hoy (ver `fechas_de_pago_4_corregir_plan`). Para cambiar el abono inicial hay
+  que anular la venta.
 - **`financing_amendments`**: el antes y el después de `financing_details`, con
   quién y por qué. Solo la escribe la RPC; la policy la deja leer únicamente a
   admins de la empresa. Sin ese rastro no hay forma de explicarle al cliente por
@@ -372,6 +457,37 @@ Ojo: si algún día se añade otra columna que apunte al bucket, hay que
 registrarla en la lista `fuentes` del script o borrará archivos en uso. Hoy son
 exactamente cinco: `products.image`, y `logo_url`/`ticket_logo_url` en
 `companies` y `branches`.
+
+## Facturas de suscripción (migración `facturas_de_suscripcion`)
+
+Cada fila de `subscription_payments` es también su factura. El trigger
+`subscription_payments_emitir_factura` (BEFORE INSERT) le pone el número y
+congela en la fila lo que la factura imprime:
+
+- `invoice_number`: consecutivo, único y sin huecos. Sale de
+  `subscription_invoice_counter`, una fila que solo sube (bloqueada hasta el
+  commit y revertida con la transacción). No se usa `max()+1` porque
+  `delete_company_cascade` borra los pagos de la empresa y el siguiente número
+  podría repetir uno ya entregado; ni una secuencia, que deja huecos. Un número
+  mandado por el cliente se ignora.
+- `invoice_issuer`: emisor tomado de `platform_settings.invoice_*` (se editan en
+  Administrar > Configuración de la Plataforma). Sin teléfono o correo propios,
+  usa los canales de soporte encendidos.
+- `invoice_customer`: nombre, RNC, dirección, teléfono y correo de la empresa.
+- `invoice_itbis`: ITBIS incluido en `amount` (18% hacia adentro) si
+  `invoice_itbis_included`; si no, 0.
+
+El consecutivo no sale en la factura ni en nada que vea la empresa: con una
+tarifa fija, número × tarifa diría cuánto factura SellAlleS. La factura muestra
+el código del pago (los 8 primeros caracteres del id, como el ticket del punto
+de venta); el consecutivo queda para el panel del super admin.
+
+El PDF no se guarda: `src/lib/subscription-invoice.ts` lo dibuja con jsPDF a
+partir de la fila, y por eso reimprimir una factura vieja da la misma factura.
+Al registrar el pago, el panel lo adjunta al correo `recibo-suscripcion` de
+`send-lifecycle-email`; la empresa lo descarga desde Mi Suscripción.
+
+La factura lleva numeración interna, no NCF.
 
 ## Próximos pasos
 

@@ -228,17 +228,48 @@ export function PlatformUserDialog({ user, companies, branches, open, onOpenChan
         await supabase.from('profile_companies').delete().eq('profile_id', user.id);
       }
 
-      // Reemplazar las sucursales de CADA empresa marcada con su propio
-      // checklist (las de empresas que quedaron desmarcadas ya se limpiaron
-      // arriba por el cascade de profile_companies.delete).
+      // Sucursales de CADA empresa marcada según su checklist (las de empresas
+      // desmarcadas ya se limpiaron arriba por el cascade de profile_companies).
+      // Se aplica la diferencia y no "borrar todo y reinsertar": si una sucursal
+      // nueva estaba llena (branches.max_users) el insert rebotaba y la persona
+      // se quedaba sin NINGUNA sucursal; además, reinsertar le reseteaba el rol
+      // que tenía en cada una. Las que se mantienen no se tocan.
+      const fallos: string[] = [];
       for (const compId of selectedCompanyIds) {
-        const compBranchIds = branchesByCompany[compId] ?? [];
-        await supabase.from('profile_branches').delete().eq('profile_id', user.id).eq('company_id', compId);
-        if (compBranchIds.length > 0) {
-          await supabase.from('profile_branches').insert(
-            compBranchIds.map((bId) => ({ profile_id: user.id, branch_id: bId, company_id: compId }))
-          );
+        const deseadas = new Set(branchesByCompany[compId] ?? []);
+        const { data: actuales, error: actError } = await supabase
+          .from('profile_branches')
+          .select('branch_id')
+          .eq('profile_id', user.id)
+          .eq('company_id', compId);
+        if (actError) throw actError;
+        const tiene = new Set((actuales ?? []).map((pb) => pb.branch_id as string));
+
+        const quitar = [...tiene].filter((id) => !deseadas.has(id));
+        if (quitar.length > 0) {
+          const { error: delError } = await supabase
+            .from('profile_branches')
+            .delete()
+            .eq('profile_id', user.id)
+            .eq('company_id', compId)
+            .in('branch_id', quitar);
+          if (delError) throw delError;
         }
+
+        // Una a una: una sucursal llena no se lleva por delante a las demás.
+        for (const bId of [...deseadas].filter((id) => !tiene.has(id))) {
+          const { error: insError } = await supabase
+            .from('profile_branches')
+            .insert({ profile_id: user.id, branch_id: bId, company_id: compId });
+          if (insError) fallos.push(insError.message);
+        }
+      }
+
+      if (fallos.length > 0) {
+        // Lo demás sí se guardó: refrescar la lista y avisar de lo que no.
+        toast({ title: 'Guardado con avisos', description: fallos.join(' '), variant: 'destructive' });
+        await onSaved();
+        return;
       }
 
       toast({ title: 'Usuario actualizado', description: `${user.name} se actualizó correctamente.` });

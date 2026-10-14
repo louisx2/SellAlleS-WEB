@@ -26,10 +26,10 @@ export function SalesActions({ sale }: SalesActionsProps) {
   const { appUser } = useAuth();
   const [annulOpen, setAnnulOpen] = useState(false);
 
-  // Solo se anulan ventas pagadas y vigentes; las de crédito/financiamiento
-  // se gestionan desde Cuentas por Cobrar.
-  const canAnnul =
-    canDelete && !appUser?.isReadOnly && !sale.cancelledAt && sale.paymentStatus === 'paid';
+  // Cualquier venta vigente se puede anular (la base exige administrador). Una
+  // a crédito o financiada con abonos posteriores la rechaza la base hasta que
+  // se anulen esos abonos.
+  const canAnnul = canDelete && !appUser?.isReadOnly && !sale.cancelledAt;
 
   return (
     <>

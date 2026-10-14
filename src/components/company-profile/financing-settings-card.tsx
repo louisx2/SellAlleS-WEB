@@ -14,6 +14,8 @@ import {
   type InterestMode,
   type PaymentFrequency,
 } from '@/lib/frequency';
+import { LateFeeFields, lateFeeSummary, parseLateFeeForm } from '@/components/credit/late-fee-fields';
+import type { LateFeeMode } from '@/lib/late-fee';
 import { Loader2 } from 'lucide-react';
 
 // Tasas y valores por defecto del financiamiento de la empresa. Guardado propio
@@ -27,6 +29,9 @@ export function FinancingSettingsCard() {
   const { toast } = useToast();
   const [companyId, setCompanyId] = useState<string | null>(null);
   const [lateFeeRate, setLateFeeRate] = useState('');
+  const [lateFeeMode, setLateFeeMode] = useState<LateFeeMode>('once');
+  const [lateFeeGraceDays, setLateFeeGraceDays] = useState('0');
+  const [lateFeeMaxRate, setLateFeeMaxRate] = useState('0');
   const [defaultInterestRate, setDefaultInterestRate] = useState('');
   const [interestMode, setInterestMode] = useState<InterestMode>('monthly_prorated');
   const [frequency, setFrequency] = useState<PaymentFrequency>('monthly');
@@ -36,12 +41,15 @@ export function FinancingSettingsCard() {
   const load = useCallback(async () => {
     const { data } = await supabase
       .from('companies')
-      .select('id, late_fee_rate, default_interest_rate, financing_interest_mode, financing_default_frequency, financing_default_installments')
+      .select('id, late_fee_rate, late_fee_mode, late_fee_grace_days, late_fee_max_rate, default_interest_rate, financing_interest_mode, financing_default_frequency, financing_default_installments')
       .limit(1)
       .maybeSingle();
     if (data) {
       setCompanyId(data.id);
       setLateFeeRate(String(data.late_fee_rate ?? 5));
+      setLateFeeMode((data.late_fee_mode ?? 'once') as LateFeeMode);
+      setLateFeeGraceDays(String(data.late_fee_grace_days ?? 0));
+      setLateFeeMaxRate(String(data.late_fee_max_rate ?? 0));
       setDefaultInterestRate(String(data.default_interest_rate ?? 3.5));
       setInterestMode((data.financing_interest_mode ?? 'monthly_prorated') as InterestMode);
       setFrequency((data.financing_default_frequency ?? 'monthly') as PaymentFrequency);
@@ -52,15 +60,19 @@ export function FinancingSettingsCard() {
   useEffect(() => { load(); }, [load]);
 
   const handleSave = async () => {
-    const fee = Number(lateFeeRate);
     const rate = Number(defaultInterestRate);
     const n = Number(installments);
-    if (!companyId || isNaN(fee) || fee < 0 || fee > 100 || isNaN(rate) || rate < 0 || rate > 100) {
+    const mora = parseLateFeeForm(lateFeeRate, lateFeeMode, lateFeeGraceDays, lateFeeMaxRate);
+    if (!companyId || isNaN(rate) || rate < 0 || rate > 100) {
       toast({
         title: 'Valores inválidos',
         description: 'Las tasas deben ser porcentajes entre 0 y 100.',
         variant: 'destructive',
       });
+      return;
+    }
+    if (!mora.ok) {
+      toast({ title: 'Mora inválida', description: mora.error, variant: 'destructive' });
       return;
     }
     if (!Number.isInteger(n) || n < 1 || n > 60) {
@@ -75,7 +87,10 @@ export function FinancingSettingsCard() {
     const { error } = await supabase
       .from('companies')
       .update({
-        late_fee_rate: fee,
+        late_fee_rate: mora.rate,
+        late_fee_mode: mora.mode,
+        late_fee_grace_days: mora.graceDays,
+        late_fee_max_rate: mora.maxRate,
         default_interest_rate: rate,
         financing_interest_mode: interestMode,
         financing_default_frequency: frequency,
@@ -89,7 +104,7 @@ export function FinancingSettingsCard() {
     }
     toast({
       title: 'Financiamiento actualizado',
-      description: `Mora ${fee}% por cuota vencida · ${n} cuotas al ${rate}% (${FREQUENCY_LABEL[frequency]}).`,
+      description: `${lateFeeSummary(mora.rate, mora.mode, mora.graceDays, mora.maxRate)} · ${n} cuotas al ${rate}% (${FREQUENCY_LABEL[frequency]}).`,
     });
   };
 
@@ -111,25 +126,27 @@ export function FinancingSettingsCard() {
       <CardHeader>
         <CardTitle>Crédito y Financiamiento</CardTitle>
         <CardDescription>
-          La mora se aplica una vez por cada cuota vencida y se cobra antes que el capital.
-          Lo demás son los valores con los que abre el POS al financiar una venta: el cajero
-          puede cambiarlos, y cada sucursal puede tener los suyos.
+          La mora se cobra antes que el capital y queda congelada en cada venta: cambiarla aquí
+          solo afecta a lo que se financie de ahora en adelante, nunca a una deuda que ya está
+          corriendo. Lo demás son los valores con los que abre el POS al financiar una venta: el
+          cajero puede cambiarlos, y cada sucursal puede tener los suyos.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <LateFeeFields
+          idPrefix="company-late-fee"
+          rate={lateFeeRate}
+          onRateChange={setLateFeeRate}
+          mode={lateFeeMode}
+          onModeChange={(m) => setLateFeeMode(m as LateFeeMode)}
+          graceDays={lateFeeGraceDays}
+          onGraceDaysChange={setLateFeeGraceDays}
+          maxRate={lateFeeMaxRate}
+          onMaxRateChange={setLateFeeMaxRate}
+          frequency={frequency}
+        />
+
         <div className="grid sm:grid-cols-2 gap-4">
-          <div className="space-y-1">
-            <Label htmlFor="late-fee-rate">Mora por cuota vencida (%)</Label>
-            <Input
-              id="late-fee-rate"
-              type="number"
-              min="0"
-              max="100"
-              step="0.1"
-              value={lateFeeRate}
-              onChange={(e) => setLateFeeRate(e.target.value)}
-            />
-          </div>
           <div className="space-y-1">
             <Label htmlFor="default-interest-rate">Interés sugerido (%)</Label>
             <Input

@@ -55,7 +55,7 @@ export function FinancingDataTable<TData, TValue>({
     <div className="rounded-md border bg-card">
       <div className="flex items-center p-4">
         <Input
-          placeholder="Filtrar por cliente..."
+          placeholder="Buscar por cliente o artículo..."
           value={(table.getColumn('customer_name')?.getFilterValue() as string) ?? ''}
           onChange={(event) =>
             table.getColumn('customer_name')?.setFilterValue(event.target.value)

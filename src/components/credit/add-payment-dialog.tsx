@@ -65,7 +65,7 @@ export function AddPaymentDialog({ customer, children }: AddPaymentDialogProps) 
   const lateFeeDue = useMemo(
     () => financingSales
       .filter((s) => s.customerId === customer.id && !s.cancelledAt)
-      .reduce((acc, s) => acc + calculateFinancingStatus(s, profile.lateFeeRate).lateFee, 0),
+      .reduce((acc, s) => acc + calculateFinancingStatus(s, profile.lateFeeRate, profile.lateFeeGraceDays).lateFee, 0),
     [financingSales, customer.id, profile.lateFeeRate]
   );
   const maxPayable = Math.round((customer.creditBalance + lateFeeDue) * 100) / 100;

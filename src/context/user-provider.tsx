@@ -221,25 +221,64 @@ export function UserProvider({ children }: { children: ReactNode }) {
 
     // Update profile branches if provided
     if (updated.branches) {
-      // Borrar sucursales anteriores SOLO de la empresa activa (las de sus
-      // otras empresas no se tocan)
-      await supabase.from('profile_branches').delete().eq('profile_id', updated.id).eq('company_id', activeCompanyId);
+      // Se aplica la diferencia, no "borrar todo y reinsertar": si una sucursal
+      // nueva está llena (branches.max_users) el insert rebota, y con el borrado
+      // previo la persona se quedaba sin NINGUNA sucursal. Así, si algo falla,
+      // conserva las que ya tenía. Solo se tocan las de la empresa activa.
+      // Se lee de la base y no del estado: el trigger de profiles.branch_id ya
+      // pudo haber asignado la sucursal por defecto en el update de arriba.
+      const { data: actuales, error: actError } = await supabase
+        .from('profile_branches')
+        .select('branch_id, role_id')
+        .eq('profile_id', updated.id)
+        .eq('company_id', activeCompanyId);
+      if (actError) throw new Error(actError.message);
 
-      // Insertar nuevas
-      if (updated.branches.length > 0) {
-        const insertData = updated.branches.map(b => ({
+      const rolActual = new Map((actuales ?? []).map(pb => [pb.branch_id, pb.role_id]));
+      const nuevas = new Set(updated.branches.map(b => b.id));
+      const quitar = [...rolActual.keys()].filter(id => !nuevas.has(id));
+      const agregar = updated.branches.filter(b => !rolActual.has(b.id));
+      const mantener = updated.branches.filter(b => rolActual.has(b.id));
+
+      if (quitar.length > 0) {
+        const { error } = await supabase
+          .from('profile_branches')
+          .delete()
+          .eq('profile_id', updated.id)
+          .eq('company_id', activeCompanyId)
+          .in('branch_id', quitar);
+        if (error) throw new Error(error.message);
+      }
+
+      for (const b of mantener) {
+        const rol = updated.branchRoles?.[b.id];
+        if (!rol || rol === rolActual.get(b.id)) continue;
+        const { error } = await supabase
+          .from('profile_branches')
+          .update({ role_id: rol })
+          .eq('profile_id', updated.id)
+          .eq('branch_id', b.id);
+        if (error) throw new Error(error.message);
+      }
+
+      // Una a una: una sucursal llena no se lleva por delante a las demás, y el
+      // mensaje del trigger dice cuál fue.
+      const fallos: string[] = [];
+      for (const b of agregar) {
+        const { error } = await supabase.from('profile_branches').insert({
           profile_id: updated.id,
           branch_id: b.id,
           company_id: activeCompanyId,
           // Sin rol explícito el trigger pone Cajero, así que nadie se queda sin
           // permisos por no haberlo elegido.
           role_id: updated.branchRoles?.[b.id] ?? null,
-        }));
-        // El error se ignoraba, así que las sucursales se quedaban sin asignar
-        // en silencio. Ahora importa de verdad: si una sucursal llegó a su tope
-        // (branches.max_users) el insert rebota y hay que decirlo.
-        const { error: pbError } = await supabase.from('profile_branches').insert(insertData);
-        if (pbError) throw new Error(pbError.message);
+        });
+        if (error) fallos.push(error.message);
+      }
+      if (fallos.length > 0) {
+        // Lo demás sí se guardó: refrescar para que la lista lo refleje.
+        await load();
+        throw new Error(fallos.join(' '));
       }
     }
 

@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { PaymentMethod, Sale } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
+import { lateFeeGrowthPerDay } from '@/lib/late-fee';
 import { useSales } from '@/context/sales-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useCaja } from '@/context/caja-provider';
@@ -46,9 +47,16 @@ export function AddFinancingPaymentDialog({ sale, children }: AddFinancingPaymen
   const [selectedBank, setSelectedBank] = useState('Banreservas');
 
   const status = useMemo(
-    () => calculateFinancingStatus(sale, profile.lateFeeRate),
-    [sale, profile.lateFeeRate]
+    () => calculateFinancingStatus(sale, profile.lateFeeRate, profile.lateFeeGraceDays),
+    [sale, profile.lateFeeRate, profile.lateFeeGraceDays]
   );
+
+  // Solo en mora diaria: lo que le cuesta al cliente seguir esperando. En los
+  // otros modos la mora no se mueve de un día para otro.
+  const crecimientoDiario =
+    status.lateFeePolicy.mode === 'daily'
+      ? lateFeeGrowthPerDay(sale.installments ?? [], status.lateFeePolicy, new Date())
+      : 0;
 
   useEffect(() => {
     if (open) {
@@ -146,6 +154,9 @@ export function AddFinancingPaymentDialog({ sale, children }: AddFinancingPaymen
                             <div>
                                 <p className="font-semibold">Este financiamiento está atrasado.</p>
                                 <p className="text-sm">Mora por atraso: {formatCurrency(status.lateFee)} — se cobra primero.</p>
+                                {crecimientoDiario > 0 && (
+                                  <p className="text-sm">Sube {formatCurrency(crecimientoDiario)} por cada día que pase.</p>
+                                )}
                             </div>
                         </div>
                     )}

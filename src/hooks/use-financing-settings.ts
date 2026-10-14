@@ -4,6 +4,7 @@ import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import type { InterestMode, PaymentFrequency } from '@/lib/frequency';
+import type { LateFeeMode } from '@/lib/late-fee';
 
 // Ajustes de financiamiento que aplican de verdad en una sucursal: lo que la
 // sucursal tenga cargado gana, y lo que no, se hereda de la empresa. Mismo
@@ -19,6 +20,9 @@ export interface FinancingSettings {
   installments: number;
   /** Solo para mostrar la mora estimada; la del plan queda congelada al crearlo. */
   lateFeeRate: number;
+  lateFeeMode: LateFeeMode;
+  lateFeeGraceDays: number;
+  lateFeeMaxRate: number;
   /** Si esta sucursal ofrece financiamiento. */
   financingEnabled: boolean;
 }
@@ -39,6 +43,9 @@ export function useFinancingSettings(branchRef?: string | null): FinancingSettin
     frequency: branch?.financingDefaultFrequency ?? profile.financingDefaultFrequency,
     installments: branch?.financingDefaultInstallments ?? profile.financingDefaultInstallments,
     lateFeeRate: branch?.lateFeeRate ?? profile.lateFeeRate,
+    lateFeeMode: branch?.lateFeeMode ?? profile.lateFeeMode,
+    lateFeeGraceDays: branch?.lateFeeGraceDays ?? profile.lateFeeGraceDays,
+    lateFeeMaxRate: branch?.lateFeeMaxRate ?? profile.lateFeeMaxRate,
     // Si no se encuentra la sucursal se financia: es como funcionaba antes de
     // que existiera el interruptor, y el trigger de la base rechaza igual una
     // venta financiada en una sucursal apagada.
