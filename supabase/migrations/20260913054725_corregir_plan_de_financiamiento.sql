@@ -38,7 +38,6 @@ create or replace function public.financing_months(p_freq text, p_n int, p_mode 
 returns numeric
 language sql
 immutable
-set search_path to 'public'
 as $function$
   select case
     when p_mode = 'per_installment' then p_n::numeric
@@ -59,7 +58,6 @@ create or replace function public.financing_plan(
 ) returns jsonb
 language sql
 immutable
-set search_path to 'public'
 as $function$
   with base as (
     select round(p_principal, 2) as principal,
@@ -84,7 +82,6 @@ create or replace function public.financing_due_date(p_start date, p_freq text, 
 returns date
 language sql
 immutable
-set search_path to 'public'
 as $function$
   select case p_freq
     when 'weekly'   then p_start + (p_k * 7)
@@ -100,7 +97,6 @@ create or replace function public.validate_financing_params(
   p_rate numeric, p_n int, p_freq text, p_mode text
 ) returns void
 language plpgsql
-set search_path to 'public'
 as $function$
 begin
   if p_n is null or p_n < 1 or p_n > 60 then
@@ -118,14 +114,10 @@ begin
 end;
 $function$;
 
--- Ojo con el `revoke ... from public`: las default privileges de Supabase le
--- dan EXECUTE a `anon` a toda función NUEVA con un grant directo, que un
--- revoke a PUBLIC no toca (ver `cobros_sin_execute_para_anon`). Hay que
--- nombrar a `anon` explícitamente o la función queda llamable sin sesión.
-revoke all on function public.financing_months(text, int, text) from public, anon;
-revoke all on function public.financing_plan(numeric, numeric, int, text, text) from public, anon;
-revoke all on function public.financing_due_date(date, text, int) from public, anon;
-revoke all on function public.validate_financing_params(numeric, int, text, text) from public, anon;
+revoke all on function public.financing_months(text, int, text) from public;
+revoke all on function public.financing_plan(numeric, numeric, int, text, text) from public;
+revoke all on function public.financing_due_date(date, text, int) from public;
+revoke all on function public.validate_financing_params(numeric, int, text, text) from public;
 grant execute on function public.financing_months(text, int, text) to authenticated, service_role;
 grant execute on function public.financing_plan(numeric, numeric, int, text, text) to authenticated, service_role;
 grant execute on function public.financing_due_date(date, text, int) to authenticated, service_role;
@@ -528,10 +520,7 @@ $function$;
 comment on function public.amend_sale_financing(uuid, numeric, int, text, text, text) is
   'Corrige el plan de un financiamiento ya vendido (tasa, cuotas, frecuencia, modo de interés): recalcula con la misma fórmula de la venta, regenera las cuotas desde la fecha original y deja el antes/después en financing_amendments. Solo administradores y solo si ninguna cuota tiene dinero aplicado.';
 
--- `anon` explícito por lo mismo de arriba: se defiende sola (sin sesión
--- `is_company_admin()` es false), pero repreciar una deuda no tiene por qué
--- estar al alcance de una llamada sin autenticar.
-revoke all on function public.amend_sale_financing(uuid, numeric, int, text, text, text) from public, anon;
+revoke all on function public.amend_sale_financing(uuid, numeric, int, text, text, text) from public;
 grant execute on function public.amend_sale_financing(uuid, numeric, int, text, text, text) to authenticated, service_role;
 
 -- Las funciones de trigger las invoca Postgres, no la app: con EXECUTE para
