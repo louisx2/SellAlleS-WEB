@@ -30,6 +30,11 @@ interface SalesContextType {
   /** Anula una venta pagada: emite nota de crédito B04 (si llevó NCF), repone
    *  inventario y registra la salida de caja si se devuelve efectivo. */
   annulSale: (saleId: string, reason?: string, refundMethod?: RefundMethod) => Promise<AnnulSaleResult>;
+  /**
+   * Mueve la fecha de una cuota sin pagar y, con `shiftFollowing`, cuenta las
+   * siguientes desde ahí. Solo admin. Devuelve cuántas cuotas cambiaron.
+   */
+  rescheduleInstallments: (saleId: string, installmentNumber: number, newDate: string, shiftFollowing: boolean, reason?: string) => Promise<number>;
   reload: () => Promise<void>;
   loading: boolean;
 }
@@ -251,8 +256,26 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  // La base valida (pagadas, orden, no antes de la venta) y deja el rastro en
+  // financing_schedule_changes. Se recarga todo porque el financiamiento puede
+  // ser de otra sucursal del pool.
+  const rescheduleInstallments = async (
+    saleId: string, installmentNumber: number, newDate: string, shiftFollowing: boolean, reason?: string,
+  ): Promise<number> => {
+    const { data, error } = await supabase.rpc('reschedule_financing_installments', {
+      p_sale_id: saleId,
+      p_installment_number: installmentNumber,
+      p_new_date: newDate,
+      p_shift_following: shiftFollowing,
+      p_reason: reason?.trim() || null,
+    });
+    if (error) throw error;
+    await reloadAll();
+    return Array.isArray(data?.changes) ? data.changes.length : 0;
+  };
+
   return (
-    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, reload: reloadAll, loading }}>
+    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, rescheduleInstallments, reload: reloadAll, loading }}>
       {children}
     </SalesContext.Provider>
   );
