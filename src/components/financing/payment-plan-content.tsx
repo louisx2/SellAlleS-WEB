@@ -3,7 +3,8 @@
 import { Separator } from '@/components/ui/separator';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
-import { FREQUENCY_LABEL, addPeriods } from '@/lib/frequency';
+import { FREQUENCY_LABEL } from '@/lib/frequency';
+import { parseYmd, scheduleDueDate } from '@/lib/financing-schedule';
 import { formatQtyCompact } from '@/lib/units';
 import type { Sale } from '@/lib/types';
 
@@ -30,7 +31,8 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
       }))
     : Array.from({ length: fin?.installments ?? 0 }, (_, k) => ({
         number: k + 1,
-        dueDate: addPeriods(new Date(sale.createdAt), frequency, k + 1),
+        dueDate: scheduleDueDate(new Date(sale.createdAt), frequency, k + 1,
+          fin?.firstDueDate ? parseYmd(fin.firstDueDate) : null),
         amount: fin?.installmentAmount ?? 0,
         paidAmount: 0,
         status: 'pending' as const,

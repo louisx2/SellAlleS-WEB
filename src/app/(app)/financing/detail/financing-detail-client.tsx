@@ -23,7 +23,8 @@ import { DialogTrigger } from '@/components/ui/dialog';
 import { AddFinancingPaymentDialog } from '@/components/financing/add-financing-payment-dialog';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
-import { ArrowLeft, DollarSign, FileText, Printer, Undo2 } from 'lucide-react';
+import { RescheduleInstallmentsDialog } from '@/components/financing/reschedule-installments-dialog';
+import { ArrowLeft, CalendarClock, DollarSign, FileText, Printer, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -48,6 +49,7 @@ export default function FinancingDetailClient() {
   const [payments, setPayments] = useState<CreditPayment[]>([]);
   const [isPlanOpen, setPlanOpen] = useState(false);
   const [voiding, setVoiding] = useState<CreditPayment | null>(null);
+  const [isRescheduleOpen, setRescheduleOpen] = useState(false);
 
   const sale = financingSales.find(s => s.id === saleId) ?? sales.find(s => s.id === saleId);
   // La factura solo abre las ventas propias de la sucursal: una del pool
@@ -96,6 +98,9 @@ export default function FinancingDetailClient() {
   // crearlo. Los planes viejos no la traen y siguen la de la empresa.
   const policy = status.lateFeePolicy;
   const frequency = fin?.frequency ?? 'monthly';
+  // Mismo criterio que la base: solo admin, venta viva y alguna cuota por pagar.
+  const canReschedule =
+    canVoid && !sale.cancelledAt && !!sale.installments?.some((cuota) => cuota.status !== 'paid');
 
   return (
     <div className="space-y-6">
@@ -254,12 +259,20 @@ export default function FinancingDetailClient() {
 
       {sale.installments && sale.installments.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle>Plan de Cuotas</CardTitle>
-            <CardDescription>
-              {lateFeeModeHelp(policy.mode, policy.rate, frequency)} Se cobra antes que el capital
-              al registrar un abono.
-            </CardDescription>
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+            <div className="space-y-1.5">
+              <CardTitle>Plan de Cuotas</CardTitle>
+              <CardDescription>
+                {lateFeeModeHelp(policy.mode, policy.rate, frequency)} Se cobra antes que el capital
+                al registrar un abono.
+              </CardDescription>
+            </div>
+            {canReschedule && (
+              <Button variant="outline" size="sm" onClick={() => setRescheduleOpen(true)}>
+                <CalendarClock className="mr-2 h-4 w-4" />
+                Cambiar fechas
+              </Button>
+            )}
           </CardHeader>
           <CardContent>
             <Table>
@@ -389,6 +402,15 @@ export default function FinancingDetailClient() {
       </Card>
 
       <PaymentPlanDialog sale={sale} isOpen={isPlanOpen} onOpenChange={setPlanOpen} />
+
+      {isRescheduleOpen && (
+        <RescheduleInstallmentsDialog
+          sale={sale}
+          open={isRescheduleOpen}
+          onOpenChange={setRescheduleOpen}
+          graceDays={policy.graceDays}
+        />
+      )}
 
       {voiding && (
         <VoidPaymentDialog

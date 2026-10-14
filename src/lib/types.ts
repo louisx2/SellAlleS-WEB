@@ -267,6 +267,9 @@ export type FinancingDetails = {
   installmentAmount: number;
   totalWithInterest: number;
   downPayment?: number;
+  // Primer pago elegido al vender (yyyy-mm-dd); las demás cuotas se cuentan
+  // desde él. Ausente = el de siempre, un período después de la venta.
+  firstDueDate?: string;
   // Congeladas al crear el plan: cambiar la mora de la sucursal no debe
   // repreciar una deuda que ya está corriendo. La ausencia de `lateFeeMode`
   // marca un plan anterior a la mora configurable — se cobra como siempre se

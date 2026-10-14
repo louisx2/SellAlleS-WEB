@@ -28,6 +28,7 @@ import {
   type InterestMode,
   type PaymentFrequency,
 } from '@/lib/frequency';
+import { MAX_FIRST_DUE_DAYS, firstDueBounds, parseYmd, scheduleDueDate, toYmd } from '@/lib/financing-schedule';
 import type { FinancingDetails } from '@/lib/types';
 import { Separator } from '../ui/separator';
 
@@ -61,6 +62,9 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
   const [interestMode, setInterestMode] = useState<InterestMode>(settings.interestMode);
   const [downPaymentMethod, setDownPaymentMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
   const [downPaymentReference, setDownPaymentReference] = useState('');
+  // Vacío = el de siempre (un período después de hoy). El campo muestra esa
+  // fecha y la sigue si cambia la frecuencia, hasta que se elija otra.
+  const [firstDueDate, setFirstDueDate] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -71,8 +75,18 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
         setInterestMode(settings.interestMode);
         setDownPaymentMethod(cashBlocked ? 'card' : 'cash');
         setDownPaymentReference('');
+        setFirstDueDate('');
     }
   }, [isOpen, settings.interestRate, settings.installments, settings.frequency, settings.interestMode, cashBlocked]);
+
+  const todayYmd = toYmd(new Date());
+  const defaultFirstDue = toYmd(addPeriods(parseYmd(todayYmd), frequency, 1));
+  // Igual que en la base: si coincide con el de siempre no es un primer pago
+  // elegido, y el plan se sigue contando desde la venta.
+  const customFirstDue = firstDueDate && firstDueDate !== defaultFirstDue ? firstDueDate : null;
+  const firstDueRange = firstDueBounds(parseYmd(todayYmd));
+  const isFirstDueInvalid =
+    !!customFirstDue && (customFirstDue < firstDueRange.min || customFirstDue > firstDueRange.max);
 
   const nInstallments = Number(installments) || 0;
   const isInstallmentsInvalid =
@@ -105,15 +119,16 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
   }, [totalAmount, downPayment, interestRate, nInstallments, frequency, interestMode]);
 
   // Cronograma estimado; las fechas definitivas las calcula el servidor desde
-  // el día de la venta en hora del país.
+  // el día de la venta en hora del país (o desde el primer pago elegido).
   const schedule = useMemo(() => {
     if (installmentAmount <= 0) return [];
+    const firstDue = customFirstDue ? parseYmd(customFirstDue) : null;
     return Array.from({ length: nInstallments }, (_, i) => ({
       number: i + 1,
-      dueDate: addPeriods(new Date(), frequency, i + 1),
+      dueDate: scheduleDueDate(parseYmd(todayYmd), frequency, i + 1, firstDue),
       amount: installmentAmount,
     }));
-  }, [nInstallments, installmentAmount, frequency]);
+  }, [nInstallments, installmentAmount, frequency, customFirstDue, todayYmd]);
 
   const handleAmountChange = (setter: React.Dispatch<React.SetStateAction<string | number>>) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -132,6 +147,7 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
       installmentAmount: installmentAmount,
       totalWithInterest: totalWithInterest,
       downPayment: Number(downPayment) || 0,
+      ...(customFirstDue ? { firstDueDate: customFirstDue } : {}),
     };
 
     onFinancingComplete({
@@ -244,6 +260,23 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
                 </div>
             </div>
 
+            <div className="space-y-2">
+                <Label htmlFor="first-due-date">Fecha del Primer Pago</Label>
+                <Input
+                    id="first-due-date"
+                    type="date"
+                    value={firstDueDate || defaultFirstDue}
+                    min={firstDueRange.min}
+                    max={firstDueRange.max}
+                    onChange={(e) => setFirstDueDate(e.target.value)}
+                />
+                {isFirstDueInvalid ? (
+                  <p className="text-xs text-destructive">Desde hoy y hasta {MAX_FIRST_DUE_DAYS} días después.</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Las demás cuotas se cuentan desde esta fecha.</p>
+                )}
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                     <Label htmlFor="interestRate">{rateLabel(interestMode)}</Label>
@@ -321,7 +354,7 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
           <Button
             type="button"
             onClick={handleConfirm}
-            disabled={isDownPaymentInvalid || isRateInvalid || isInstallmentsInvalid || isOverCreditLimit || installmentAmount <= 0 || isDownPaymentCashBlocked || isDownPaymentRefInvalid}
+            disabled={isDownPaymentInvalid || isRateInvalid || isInstallmentsInvalid || isFirstDueInvalid || isOverCreditLimit || installmentAmount <= 0 || isDownPaymentCashBlocked || isDownPaymentRefInvalid}
           >
             Confirmar Plan
           </Button>

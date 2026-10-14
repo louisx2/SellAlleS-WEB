@@ -199,8 +199,9 @@ parámetros (tasa y cantidad de cuotas) y muestra estados.
 - **`trg_after_sale_credit`** (AFTER INSERT en `sales`): sube
   `customers.credit_balance` (deuda = principal + interés para financiamiento;
   total − inicial para crédito) y genera las cuotas en `financing_installments`
-  (vencimiento mensual desde la fecha de venta; la última cuota absorbe el
-  redondeo para que la suma sea exacta).
+  (vencimiento según la frecuencia desde la fecha de venta, o desde el primer
+  pago elegido en el POS; la última cuota absorbe el redondeo para que la suma
+  sea exacta).
 - **`apply_payment_to_sale(sale_id, monto)`** (interno, sin EXECUTE para
   `authenticated`): el único motor que aplica dinero a una venta. Cobra primero
   la **mora** con la política congelada en el plan, luego capital FIFO a las
@@ -300,6 +301,32 @@ NCF y marca `cancelled_at`. Además:
 
 Las cuotas (`financing_installments`) quedan como estaban: los recordatorios
 (`pending_due_reminders`) y los cobros ya ignoran las ventas anuladas.
+
+### Fechas de pago (migración `fechas_de_pago_de_financiamientos`)
+
+- **Primer pago al vender**: el POS puede mandar
+  `financing_details.firstDueDate` (yyyy-mm-dd). `before_sale_credit_checks`
+  lo acepta desde el día de la venta (hora del negocio) hasta 90 días después;
+  si coincide con el de siempre (un período después de la venta) no lo guarda.
+  Con él, la cuota 1 cae ese día y las demás cada período desde ahí
+  (`financing_schedule_due_date`); sin él, el calendario es el de antes. El
+  interés no cambia: lo deciden la cantidad de cuotas y la frecuencia.
+- **RPC `reschedule_financing_installments(sale_id, installment_number,
+  new_date, shift_following, reason)`** (SECURITY DEFINER, solo admin de
+  empresa): mueve una cuota sin pagar y, con `shift_following`, cuenta las
+  siguientes sin pagar desde la fecha nueva con la frecuencia del plan. Las
+  pagadas no se tocan, las fechas tienen que quedar en orden y ninguna antes
+  de la venta, y una venta anulada no se toca. Limpia `reminder_sent_at` de
+  las cuotas movidas para que el recordatorio salga para la fecha nueva.
+- **La mora se mueve con la fecha**, porque se deriva al leer: una cuota
+  vencida que pasa a una fecha futura deja de devengar mora. Lo ya cobrado
+  (`late_fee_paid`) no cambia.
+- **`financing_schedule_changes`**: cada cambio con sus cuotas (antes y
+  después), quién y el motivo (opcional). Legible solo por admins, la escribe
+  solo la RPC.
+- **`amend_sale_financing`** ya no pisa un primer pago distinto del de
+  siempre (elegido al vender o reprogramado): el plan corregido arranca en esa
+  fecha.
 
 ## Reportes de crédito y financiamiento
 
