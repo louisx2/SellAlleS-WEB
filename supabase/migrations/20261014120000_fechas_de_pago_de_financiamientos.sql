@@ -26,9 +26,10 @@
 --    Mover un vencimiento le quita mora al cliente, y eso tiene que poder
 --    explicarse después.
 --
--- 4. `amend_sale_financing` deja de pisar las fechas: si el primer pago no es
---    el de siempre (se eligió al vender o se reprogramó), el plan corregido
---    arranca en esa misma fecha.
+-- 4. `amend_sale_financing` deja de pisar las fechas: con la misma cantidad de
+--    cuotas y la misma frecuencia, cada cuota se queda en su fecha; si cambian,
+--    el plan corregido arranca en el primer pago de antes cuando no era el de
+--    siempre (se eligió al vender o se reprogramó).
 
 
 -- ---------------------------------------------------------------------------
@@ -72,14 +73,11 @@ revoke all on function public.financing_schedule_due_date(date, date, text, int)
 grant execute on function public.sale_local_date(uuid, timestamptz) to service_role;
 grant execute on function public.financing_schedule_due_date(date, date, text, int) to authenticated, service_role;
 
--- Cambia la firma (el primer pago), así que no alcanza con `create or replace`:
--- con las dos versiones vivas, una llamada de 7 argumentos sería ambigua. Las
--- dos funciones que la llaman se redefinen abajo en esta misma migración.
-drop function if exists public.build_financing_schedule(uuid, uuid, date, text, int, numeric, numeric);
-
+-- Versión con el primer pago. `p_first_due` va sin default a propósito: con
+-- default, una llamada de 7 argumentos sería ambigua entre esta y la vieja.
 create or replace function public.build_financing_schedule(
   p_company_id uuid, p_sale_id uuid, p_start date, p_freq text,
-  p_n int, p_installment numeric, p_debt numeric, p_first_due date default null
+  p_n int, p_installment numeric, p_debt numeric, p_first_due date
 ) returns void
 language plpgsql
 security definer
@@ -103,6 +101,24 @@ $function$;
 revoke all on function public.build_financing_schedule(uuid, uuid, date, text, int, numeric, numeric, date) from public;
 revoke all on function public.build_financing_schedule(uuid, uuid, date, text, int, numeric, numeric, date) from anon, authenticated;
 grant execute on function public.build_financing_schedule(uuid, uuid, date, text, int, numeric, numeric, date) to service_role;
+
+-- La de 7 argumentos se queda como atajo sin primer pago en vez de borrarla:
+-- quien la llame (una migración vieja que se vuelva a correr, por ejemplo)
+-- sigue armando el calendario de siempre en lugar de romper las ventas.
+-- `create or replace` conserva sus permisos (solo service_role).
+create or replace function public.build_financing_schedule(
+  p_company_id uuid, p_sale_id uuid, p_start date, p_freq text,
+  p_n int, p_installment numeric, p_debt numeric
+) returns void
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+begin
+  perform build_financing_schedule(p_company_id, p_sale_id, p_start, p_freq,
+                                   p_n, p_installment, p_debt, null::date);
+end;
+$function$;
 
 
 -- ---------------------------------------------------------------------------
@@ -334,11 +350,17 @@ alter table public.financing_schedule_changes enable row level security;
 
 -- Mismo criterio que `financing_amendments`: solo la lee quien puede hacer el
 -- cambio, y solo la escribe la RPC, que es SECURITY DEFINER.
-drop policy if exists financing_schedule_changes_select on public.financing_schedule_changes;
-create policy financing_schedule_changes_select on public.financing_schedule_changes
-  for select using (
-    (company_id = current_company_id() and is_company_admin()) or is_super_admin()
-  );
+do $$
+begin
+  if not exists (select 1 from pg_policies
+                  where schemaname = 'public' and tablename = 'financing_schedule_changes'
+                    and policyname = 'financing_schedule_changes_select') then
+    create policy financing_schedule_changes_select on public.financing_schedule_changes
+      for select using (
+        (company_id = current_company_id() and is_company_admin()) or is_super_admin()
+      );
+  end if;
+end $$;
 
 revoke all on table public.financing_schedule_changes from anon, authenticated;
 grant select on table public.financing_schedule_changes to authenticated;
@@ -495,6 +517,7 @@ declare
   v_n         int;
   v_start     date;
   v_first     date;
+  v_old_dates date[];
   v_paid      numeric;
   v_other     numeric;
   v_balance   numeric;
@@ -596,6 +619,9 @@ begin
     v_first := null;
   end if;
 
+  select array_agg(due_date order by installment_number) into v_old_dates
+    from financing_installments where sale_id = p_sale_id;
+
   -- Las cuotas se regeneran completas porque la cantidad puede cambiar. Es
   -- seguro justo por el chequeo de arriba: ninguna trae dinero aplicado.
   delete from financing_installments where sale_id = p_sale_id;
@@ -604,6 +630,17 @@ begin
     v_sale.company_id, v_sale.id, v_start, v_freq, v_n,
     (v_plan->>'installment')::numeric, (v_plan->>'debt')::numeric, v_first
   );
+
+  -- Con la misma cantidad de cuotas y la misma frecuencia, cada cuota vuelve a
+  -- su fecha de antes: corregir la tasa no deshace una prórroga dada a una
+  -- cuota suelta. Si cambia la cantidad o la frecuencia, el calendario se
+  -- rearma desde el primer pago, que es lo único que se puede conservar.
+  if v_n = cardinality(v_old_dates)
+     and v_freq = coalesce(nullif(v_before->>'frequency', ''), 'monthly') then
+    update financing_installments fi
+       set due_date = v_old_dates[fi.installment_number]
+     where fi.sale_id = p_sale_id;
+  end if;
 
   select name into v_user_name from profiles where id = auth.uid();
 

@@ -324,9 +324,10 @@ Las cuotas (`financing_installments`) quedan como estaban: los recordatorios
 - **`financing_schedule_changes`**: cada cambio con sus cuotas (antes y
   después), quién y el motivo (opcional). Legible solo por admins, la escribe
   solo la RPC.
-- **`amend_sale_financing`** ya no pisa un primer pago distinto del de
-  siempre (elegido al vender o reprogramado): el plan corregido arranca en esa
-  fecha.
+- **`amend_sale_financing`** ya no pisa las fechas: con la misma cantidad de
+  cuotas y la misma frecuencia, cada cuota se queda en su fecha (una prórroga
+  sobrevive a la corrección de la tasa); si cambian, el plan corregido arranca
+  en el primer pago de antes cuando no era el de siempre.
 
 ## Reportes de crédito y financiamiento
 
