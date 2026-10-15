@@ -32,8 +32,10 @@ interface AmendFinancingDialogProps {
 const MAX_INSTALLMENTS = 60;
 
 // Corregir un plan mal digitado (la tasa que iba 7 y se tecleó 8). No es
-// renegociar: el abono inicial, la mora y las fechas de vencimiento no se
-// tocan — solo se recalcula lo que depende de los parámetros del plan. Si el
+// renegociar: el abono inicial y la mora no se tocan, y las fechas tampoco
+// mientras no cambien la cantidad de cuotas ni la frecuencia (si cambian, la
+// base rearma el calendario) — solo se recalcula lo que depende de los
+// parámetros del plan. Si el
 // cliente ya abonó a una cuota, la base lo rechaza: hay que anular esos abonos
 // primero, porque repreciar mueve el monto de todas las cuotas y no habría
 // forma de cuadrar lo ya pagado.
@@ -148,6 +150,9 @@ export function AmendFinancingDialog({ sale, open, onOpenChange, onAmended }: Am
 
   const blocked = paidToPlan > 0;
   const interestDiff = preview.interest - preview.oldInterest;
+  // Mismo criterio que `amend_sale_financing`: con la misma cantidad de cuotas
+  // y la misma frecuencia, cada cuota se queda en su fecha.
+  const keepsDates = n === (sale.installments?.length ?? fin.installments) && frequency === (fin.frequency ?? 'monthly');
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -173,8 +178,11 @@ export function AmendFinancingDialog({ sale, open, onOpenChange, onAmended }: Am
           <>
             <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
               Esto corrige un error de digitación, no renegocia la venta. El abono inicial
-              ({formatCurrency(fin.downPayment ?? 0)}), la mora del plan y las fechas de
-              vencimiento se quedan como están; se recalculan el interés y las cuotas.
+              ({formatCurrency(fin.downPayment ?? 0)}) y la mora del plan se quedan como están;
+              se recalculan el interés y las cuotas.{' '}
+              {keepsDates
+                ? 'Las fechas de vencimiento tampoco cambian.'
+                : 'Como cambia la cantidad de cuotas o la frecuencia, las fechas de vencimiento se vuelven a calcular.'}
             </div>
 
             <div className="grid gap-4">
