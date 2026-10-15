@@ -320,7 +320,13 @@ begin
   r := refinance_financing('00000000-0000-0000-0000-00000000cf3c', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x');
   assert (r->>'new_principal')::numeric = 6000, r::text;
 
+  -- Los perfiles quedan como estaban, para que otras secciones no hereden
+  -- el cajero ni la empresa activa.
   perform set_config('request.jwt.claims', '{"sub":"92381752-13b2-4f43-8b09-612647754599","role":"authenticated"}', true);
+  delete from profile_companies
+   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = aa;
+  update profiles set company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+   where id in ('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566', '8a7c952b-a951-4478-b82f-ae7c9ddc8ba3');
 end $$;
 
 -- == Task 4: préstamos ==
@@ -415,6 +421,10 @@ begin
   perform set_config('request.jwt.claims', '{"sub":"cc56c633-4b6c-4a8e-a7e8-6ee3a1934566","role":"authenticated"}', true);
   perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf45', 'capital', null, 0, 5, 12, 'monthly', null, 'x')$q$, '%administrador%');
   perform set_config('request.jwt.claims', '{"sub":"92381752-13b2-4f43-8b09-612647754599","role":"authenticated"}', true);
+  delete from profile_companies
+   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = aa;
+  update profiles set company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+   where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
 end $$;
 
 select 'ok' as resultado;
