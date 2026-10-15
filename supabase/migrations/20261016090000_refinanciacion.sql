@@ -126,6 +126,92 @@ begin
 end;
 $function$;
 
+-- trg_before_loan_checks: la definición viva más dos chequeos sobre las
+-- columnas nuevas, porque `loans` se inserta desde el navegador.
+--  * El enlace a otro préstamo, lo arrastrado y el estado 'refinanced' los pone
+--    solo refinance_loan, que lo avisa con app.refinance_loan dentro de su
+--    transacción. Un préstamo con enlace inventado o "refinanciado" de
+--    nacimiento no se podría cobrar ni explicar.
+--  * La primera cuota elegida, igual que al vender a plazos: después de hoy y a
+--    no más de 90 días. Una fecha pasada haría nacer el préstamo con mora.
+create or replace function public.trg_before_loan_checks()
+ returns trigger
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  v_customer  customers%rowtype;
+  v_months    numeric;
+  v_interest  numeric;
+  v_late_rate numeric;
+  v_late_mode text;
+  v_grace     int;
+  v_max_rate  numeric;
+begin
+  if coalesce(current_setting('app.refinance_loan', true), '') <> 'on'
+     and (new.status = 'refinanced' or new.refinanced_from_id is not null
+          or coalesce(new.carried_over_amount, 0) <> 0) then
+    raise exception 'El enlace a otro préstamo solo lo pone una refinanciación.';
+  end if;
+
+  select * into v_customer
+    from customers
+   where id = new.customer_id and company_id = new.company_id
+   for update;
+  if not found then
+    raise exception 'Cliente no encontrado.';
+  end if;
+
+  if new.principal is null or new.principal <= 0 then
+    raise exception 'El monto del préstamo debe ser mayor que cero.';
+  end if;
+  if new.installments_count < 1 or new.installments_count > 60 then
+    raise exception 'La cantidad de cuotas debe estar entre 1 y 60.';
+  end if;
+  if new.interest_rate < 0 or new.interest_rate > 100 then
+    raise exception 'La tasa de interés no es válida.';
+  end if;
+  if new.payment_frequency not in ('weekly','biweekly','monthly') then
+    raise exception 'Frecuencia de pago no válida.';
+  end if;
+  if new.first_due_date is not null
+     and (new.first_due_date <= company_today(new.company_id)
+          or new.first_due_date > company_today(new.company_id) + 90) then
+    raise exception 'La primera cuota tiene que caer después de hoy y a no más de 90 días.';
+  end if;
+
+  v_months := case new.payment_frequency
+    when 'weekly'   then new.installments_count / 4.0
+    when 'biweekly' then new.installments_count / 2.0
+    else new.installments_count::numeric
+  end;
+
+  v_interest := round(new.principal * new.interest_rate / 100 * v_months, 2);
+  new.total_with_interest := new.principal + v_interest;
+  new.amount_paid := 0;
+
+  -- La mora se congela igual que en financiamiento: subir el ajuste de la
+  -- empresa no puede repreciar un préstamo que ya está corriendo. Lo que mande
+  -- el navegador se ignora — esto lo decide el servidor.
+  select coalesce(loan_late_fee_rate, 5),
+         coalesce(loan_late_fee_mode, 'once'),
+         coalesce(loan_late_fee_grace_days, 0),
+         coalesce(loan_late_fee_max_rate, 0)
+    into v_late_rate, v_late_mode, v_grace, v_max_rate
+    from companies where id = new.company_id;
+
+  perform validate_late_fee_params(v_late_rate, v_late_mode, v_grace, v_max_rate);
+
+  new.late_fee_rate       := v_late_rate;
+  new.late_fee_mode       := v_late_mode;
+  new.late_fee_grace_days := v_grace;
+  new.late_fee_max_rate   := v_max_rate;
+
+  return new;
+end;
+$function$;
+
 -- ---------------------------------------------------------------------------
 -- 3. Cotización: lo que se debe hoy, separado en capital, interés futuro y mora
 -- ---------------------------------------------------------------------------
@@ -369,10 +455,16 @@ revoke execute on function public.build_financing_schedule(uuid, uuid, date, tex
 -- (tasa, cuotas, principal, firstInstallment) y totalWithInterest sigue siendo
 -- el de toda la vida de la venta, así que el balance del cliente y el reporte
 -- de ganancia cuadran sin tocarlos.
+--
+-- p_expected_balance / p_expected_late_fee: lo que vio el admin en la
+-- cotización. Si la deuda cambió desde entonces (otro admin ya refinanció, entró
+-- un abono, o pasó la medianoche y apareció mora), se rechaza en vez de
+-- refinanciar un plan que nadie vio.
 create or replace function public.refinance_financing(
   p_sale_id uuid, p_base_mode text, p_late_fee_action text,
   p_interest_rate numeric, p_installments integer, p_frequency text, p_interest_mode text,
-  p_first_due date, p_reason text)
+  p_first_due date, p_reason text,
+  p_expected_balance numeric default null, p_expected_late_fee numeric default null)
  returns jsonb
  language plpgsql
  security definer
@@ -417,6 +509,12 @@ begin
   if (v_q->>'pending_balance')::numeric <= 0 then
     raise exception 'Este financiamiento no tiene saldo pendiente.';
   end if;
+  if (p_expected_balance is not null
+      and abs((v_q->>'pending_balance')::numeric - p_expected_balance) > 0.005)
+     or (p_expected_late_fee is not null
+      and abs((v_q->>'late_fee_due')::numeric - p_expected_late_fee) > 0.005) then
+    raise exception 'La deuda cambió desde que abriste la refinanciación: vuelve a abrirla para ver los montos de ahora.';
+  end if;
 
   v_late := (v_q->>'late_fee_due')::numeric;
   if v_late > 0 then
@@ -431,6 +529,9 @@ begin
                    else (v_q->>'pending_balance')::numeric
                  end
                  + case when v_action = 'capitalize' then v_late else 0 end;
+  if v_principal <= 0 then
+    raise exception 'El capital del plan nuevo tiene que ser mayor que cero.';
+  end if;
 
   v_plan := financing_plan(v_principal, p_interest_rate, p_installments, p_frequency, p_interest_mode);
 
@@ -508,9 +609,9 @@ begin
 end;
 $function$;
 
-revoke all on function public.refinance_financing(uuid, text, text, numeric, integer, text, text, date, text) from public;
-revoke execute on function public.refinance_financing(uuid, text, text, numeric, integer, text, text, date, text) from anon;
-grant execute on function public.refinance_financing(uuid, text, text, numeric, integer, text, text, date, text) to authenticated;
+revoke all on function public.refinance_financing(uuid, text, text, numeric, integer, text, text, date, text, numeric, numeric) from public;
+revoke execute on function public.refinance_financing(uuid, text, text, numeric, integer, text, text, date, text, numeric, numeric) from anon;
+grant execute on function public.refinance_financing(uuid, text, text, numeric, integer, text, text, date, text, numeric, numeric) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 5. Lo que una refinanciación cierra
@@ -726,6 +827,14 @@ begin
     raise exception 'Este abono es anterior al registro de aplicación por cuota, así que no se puede revertir automáticamente. Corrígelo desde la base con respaldo.';
   end if;
 
+  -- Las ventas del abono se bloquean ANTES de mirar si se refinanciaron: una
+  -- refinanciación que corra a la vez tiene que terminar primero, o este
+  -- chequeo leería el plan viejo y la anulación reabriría cuotas ya cerradas.
+  perform 1 from sales
+   where id in (select (se->>'sale_id')::uuid from jsonb_array_elements(v_p.allocation->'sales') se)
+   order by id
+   for update;
+
   if exists (
     select 1
       from jsonb_array_elements(v_p.allocation->'sales') se
@@ -940,10 +1049,15 @@ $function$;
 -- mora vigente. carried_over_amount es lo que viene del viejo (base + mora
 -- sumada); principal − carried_over_amount es el dinero nuevo entregado, que
 -- no pasa por caja, igual que un desembolso normal.
+--
+-- p_expected_balance / p_expected_late_fee: igual que en refinance_financing,
+-- lo que vio el admin; si la deuda cambió (entró un abono, apareció mora), se
+-- rechaza.
 create or replace function public.refinance_loan(
   p_loan_id uuid, p_base_mode text, p_late_fee_action text, p_additional numeric,
   p_interest_rate numeric, p_installments integer, p_frequency text,
-  p_first_due date, p_reason text)
+  p_first_due date, p_reason text,
+  p_expected_balance numeric default null, p_expected_late_fee numeric default null)
  returns jsonb
  language plpgsql
  security definer
@@ -993,6 +1107,12 @@ begin
   if (v_q->>'pending_balance')::numeric <= 0 then
     raise exception 'Este préstamo no tiene saldo pendiente.';
   end if;
+  if (p_expected_balance is not null
+      and abs((v_q->>'pending_balance')::numeric - p_expected_balance) > 0.005)
+     or (p_expected_late_fee is not null
+      and abs((v_q->>'late_fee_due')::numeric - p_expected_late_fee) > 0.005) then
+    raise exception 'La deuda cambió desde que abriste la refinanciación: vuelve a abrirla para ver los montos de ahora.';
+  end if;
 
   v_late := (v_q->>'late_fee_due')::numeric;
   if v_late > 0 then
@@ -1027,6 +1147,9 @@ begin
 
   select name into v_user_name from profiles where id = auth.uid();
 
+  -- trg_before_loan_checks solo acepta el enlace y lo arrastrado con esta
+  -- marca, que vive lo que dura la transacción y se apaga en cuanto se usa.
+  perform set_config('app.refinance_loan', 'on', true);
   insert into loans
     (company_id, branch_id, customer_id, principal, interest_rate, installments_count,
      payment_frequency, notes, created_by, user_name, refinanced_from_id, carried_over_amount,
@@ -1038,6 +1161,7 @@ begin
      auth.uid(), v_user_name, v_loan.id, v_carried,
      coalesce(p_first_due, financing_due_date(v_today, p_frequency, 1)))
   returning * into v_new;
+  perform set_config('app.refinance_loan', 'off', true);
 
   insert into refinancings
     (company_id, customer_id, kind, loan_id, new_loan_id, base_mode, pending_balance, pending_capital,
@@ -1067,9 +1191,9 @@ begin
 end;
 $function$;
 
-revoke all on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text) from public;
-revoke execute on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text) from anon;
-grant execute on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text) to authenticated;
+revoke all on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text, numeric, numeric) from public;
+revoke execute on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text, numeric, numeric) from anon;
+grant execute on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text, numeric, numeric) to authenticated;
 
 -- register_loan_payment: la definición viva más el rechazo de un préstamo
 -- refinanciado (antes solo rechazaba los pagados).

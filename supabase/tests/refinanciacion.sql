@@ -98,6 +98,29 @@ begin
   assert has_table_privilege('authenticated', 'public.refinancings', 'SELECT'), 'authenticated sin SELECT';
   assert not has_table_privilege('authenticated', 'public.refinancings', 'INSERT'), 'authenticated con INSERT';
   assert not has_table_privilege('anon', 'public.refinancings', 'SELECT'), 'anon con SELECT';
+
+  -- `loans` se inserta desde el navegador: el enlace, lo arrastrado y el estado
+  -- refinanciado solo los pone refinance_loan, y la primera cuota tiene límites.
+  perform pg_temp.debe_fallar(format(
+    $q$insert into loans (company_id, branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency, refinanced_from_id)
+       values ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000cf01', 1000, 5, 3, 'weekly', %L)$q$,
+    '00000000-0000-0000-0000-00000000cf10'), '%solo lo pone una refinanciación%');
+  perform pg_temp.debe_fallar(
+    $q$insert into loans (company_id, branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency, carried_over_amount)
+       values ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000cf01', 1000, 5, 3, 'weekly', 500)$q$,
+    '%solo lo pone una refinanciación%');
+  perform pg_temp.debe_fallar(
+    $q$insert into loans (company_id, branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency, status)
+       values ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000cf01', 1000, 5, 3, 'weekly', 'refinanced')$q$,
+    '%solo lo pone una refinanciación%');
+  perform pg_temp.debe_fallar(
+    $q$insert into loans (company_id, branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency, first_due_date)
+       values ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000cf01', 1000, 5, 3, 'weekly', company_today('00000000-0000-0000-0000-0000000000aa'))$q$,
+    '%primera cuota%');
+  perform pg_temp.debe_fallar(
+    $q$insert into loans (company_id, branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency, first_due_date)
+       values ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000cf01', 1000, 5, 3, 'weekly', company_today('00000000-0000-0000-0000-0000000000aa') + 91)$q$,
+    '%primera cuota%');
 end $$;
 
 -- == Task 2: cotización de financiamiento ==
@@ -284,7 +307,28 @@ begin
   perform pg_temp.venta_financiada('00000000-0000-0000-0000-00000000cf3b', '00000000-0000-0000-0000-00000000cf0f', 15000);
   perform pg_temp.debe_fallar($q$select refinance_financing('00000000-0000-0000-0000-00000000cf3b', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x')$q$, '%no tiene un financiamiento%');
 
-  assert not has_function_privilege('anon', 'public.refinance_financing(uuid,text,text,numeric,integer,text,text,date,text)', 'EXECUTE'), 'anon puede refinanciar';
+  -- Capital nuevo de 0: 10,000 al 100% en 10 cuotas (110,000) con 109,999.98
+  -- pagados (con 0.01 la base ya la da por saldada). Quedan 0.02, cuyo capital
+  -- redondea a 0.00.
+  insert into sales (id, company_id, branch_id, customer_id, subtotal, itbis_amount, total,
+                     payment_method, payment_status, amount_paid, financing_details)
+  values ('00000000-0000-0000-0000-00000000cf3d', aa, '00000000-0000-0000-0000-0000000000b1',
+          '00000000-0000-0000-0000-00000000cf0f', 10000, 0, 10000, 'financing', 'in_financing', 0,
+          '{"interestRate":100,"installments":10,"frequency":"monthly","interestMode":"monthly_prorated"}');
+  perform register_sale_payment('00000000-0000-0000-0000-00000000cf3d', 109999.98, 'transfer', '00000000-0000-0000-0000-0000000000b1', null, null);
+  perform pg_temp.debe_fallar($q$select refinance_financing('00000000-0000-0000-0000-00000000cf3d', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x')$q$, '%mayor que cero%');
+
+  -- Deuda esperada: si cambió desde la cotización (otro admin ya refinanció,
+  -- entró un abono, apareció mora), se rechaza; si coincide, pasa.
+  perform pg_temp.venta_financiada('00000000-0000-0000-0000-00000000cf3e', '00000000-0000-0000-0000-00000000cf0f', 6000);
+  perform pg_temp.debe_fallar($q$select refinance_financing('00000000-0000-0000-0000-00000000cf3e', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x', 9500, 0)$q$, '%deuda cambió%');
+  perform pg_temp.debe_fallar($q$select refinance_financing('00000000-0000-0000-0000-00000000cf3e', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x', 9000, 75)$q$, '%deuda cambió%');
+  r := refinance_financing('00000000-0000-0000-0000-00000000cf3e', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x', 9000, 0);
+  assert (r->>'new_principal')::numeric = 6000, r::text;
+  -- La segunda pestaña que cotizó el mismo saldo ya no pasa: ahora se deben 9,600.
+  perform pg_temp.debe_fallar($q$select refinance_financing('00000000-0000-0000-0000-00000000cf3e', 'balance', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x', 9000, 0)$q$, '%deuda cambió%');
+
+  assert not has_function_privilege('anon', 'public.refinance_financing(uuid,text,text,numeric,integer,text,text,date,text,numeric,numeric)', 'EXECUTE'), 'anon puede refinanciar';
   assert not has_function_privilege('authenticated', 'public.build_financing_schedule(uuid,uuid,date,text,integer,numeric,numeric,date,integer)', 'EXECUTE'), 'schedule expuesto';
 
   -- Permisos (al final: cambian de usuario). El usuario de prueba es super
@@ -408,7 +452,20 @@ begin
   perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf45', 'capital', null, 0, 5, 12, 'monthly', null, '')$q$, '%motivo%');
   perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf46', '00000000-0000-0000-0000-00000000cf05', 15000);
   perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf46', 'capital', null, 0, 5, 12, 'monthly', null, 'x')$q$, '%no está activo%');
-  assert not has_function_privilege('anon', 'public.refinance_loan(uuid,text,text,numeric,numeric,integer,text,date,text)', 'EXECUTE'), 'anon puede refinanciar préstamos';
+  -- Deuda esperada en préstamos: un abono entre la cotización y el envío.
+  perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf47', '00000000-0000-0000-0000-00000000cf05', 6000);
+  perform register_loan_payment('00000000-0000-0000-0000-00000000cf47', 1500, 'transfer', null, null, null);
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf47', 'capital', null, 0, 5, 12, 'monthly', null, 'x', 9000, 0)$q$, '%deuda cambió%');
+  r := refinance_loan('00000000-0000-0000-0000-00000000cf47', 'capital', null, 0, 5, 12, 'monthly', null, 'x', 7500, 0);
+  assert (r->>'new_principal')::numeric = 5000, r::text;
+  -- La marca de refinance_loan no queda prendida: un insert directo después
+  -- en la misma transacción sigue sin poder inventar un enlace.
+  perform pg_temp.debe_fallar(format(
+    $q$insert into loans (company_id, branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency, refinanced_from_id)
+       values ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000cf05', 1000, 5, 3, 'weekly', %L)$q$,
+    '00000000-0000-0000-0000-00000000cf47'), '%solo lo pone una refinanciación%');
+
+  assert not has_function_privilege('anon', 'public.refinance_loan(uuid,text,text,numeric,numeric,integer,text,date,text,numeric,numeric)', 'EXECUTE'), 'anon puede refinanciar préstamos';
 
   -- Permisos: otra empresa no lo ve; un cajero de la empresa no puede.
   perform set_config('request.jwt.claims', '{"sub":"cc56c633-4b6c-4a8e-a7e8-6ee3a1934566","role":"authenticated"}', true);
