@@ -278,6 +278,14 @@ export type FinancingDetails = {
   lateFeeMode?: LateFeeMode;
   lateFeeGraceDays?: number;
   lateFeeMaxRate?: number;
+  // Solo en un plan refinanciado (los escribe `refinance_financing`): el
+  // capital del plan vigente, el número de su primera cuota (las anteriores
+  // son del plan viejo, cerradas con lo pagado) y cuándo se refinanció. Los
+  // demás campos describen el plan vigente; totalWithInterest sigue siendo el
+  // de toda la vida de la venta.
+  principal?: number;
+  firstInstallment?: number;
+  refinancedAt?: string;
 };
 
 // Cuota de un plan de financiamiento. La genera y actualiza la base
@@ -305,6 +313,57 @@ export type FinancingAmendment = {
   before: FinancingDetails;
   after: FinancingDetails;
   changedByName?: string;
+  createdAt: Date;
+};
+
+// ---------- Refinanciación (préstamos y financiamientos) ----------
+// Sobre qué monto se arma el plan nuevo: solo el capital pendiente (el interés
+// que aún no se ganó se cancela) o el saldo completo.
+export type RefinanceBaseMode = 'capital' | 'balance';
+// Qué se hace con la mora pendiente: sumarla al capital nuevo o perdonarla.
+export type RefinanceLateFeeAction = 'capitalize' | 'forgive';
+
+// Lo que devuelve `refinance_quote`: lo que se debe hoy, partido como lo
+// cobra la base, y los términos vigentes para precargar el formulario.
+export type RefinanceQuote = {
+  kind: 'loan' | 'financing';
+  id: string;
+  customerId: string;
+  pendingBalance: number;
+  pendingCapital: number;
+  unearnedInterest: number;
+  lateFeeDue: number;
+  planPrincipal: number;
+  planDebt: number;
+  firstInstallment: number | null;
+  today: string; // yyyy-mm-dd, en la zona de la empresa
+  terms: {
+    interestRate: number;
+    installments: number;
+    frequency: PaymentFrequency;
+    interestMode: InterestMode;
+  };
+  // La mora que tendrá el plan nuevo (los ajustes vigentes).
+  newLateFee: { rate: number; mode: LateFeeMode; graceDays: number; maxRate: number };
+};
+
+// Una refinanciación ya hecha (tabla `refinancings`), para la bitácora.
+export type Refinancing = {
+  id: string;
+  kind: 'loan' | 'financing';
+  loanId?: string;
+  newLoanId?: string;
+  saleId?: string;
+  baseMode: RefinanceBaseMode;
+  pendingBalance: number;
+  pendingCapital: number;
+  unearnedInterest: number;
+  lateFeeAmount: number;
+  lateFeeAction?: RefinanceLateFeeAction;
+  additionalAmount: number;
+  newPrincipal: number;
+  reason: string;
+  createdByName?: string;
   createdAt: Date;
 };
 
@@ -549,7 +608,15 @@ export type Loan = {
   paymentFrequency: LoanFrequency;
   totalWithInterest: number;
   amountPaid: number;
-  status: 'active' | 'paid' | 'cancelled';
+  // 'refinanced': cerrado por una refinanciación; su saldo pasó al préstamo
+  // que lo tiene en `refinancedFromId` (y total = pagado, así que debe 0).
+  status: 'active' | 'paid' | 'cancelled' | 'refinanced';
+  // En un préstamo que refinancia a otro: cuál, y cuánto del capital viene de
+  // él (saldo + mora sumada). principal − carriedOverAmount = dinero entregado.
+  refinancedFromId?: string;
+  carriedOverAmount: number;
+  // Primera cuota elegida (yyyy-mm-dd); ausente = un período tras el desembolso.
+  firstDueDate?: string;
   notes?: string;
   userName?: string;
   createdAt: Date;

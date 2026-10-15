@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Loan, LoanFrequency, LoanPaymentResult, PaymentMethod, VoidLoanPaymentResult } from '@/lib/types';
+import type { Loan, LoanFrequency, LoanPaymentResult, PaymentMethod, RefinanceBaseMode, RefinanceLateFeeAction, VoidLoanPaymentResult } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToLoan, loanToRow, rowToLoanPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
@@ -22,9 +22,39 @@ interface LoanContextType {
   addLoan: (loan: NewLoanInput) => Promise<Loan>;
   payLoan: (loanId: string, amount: number, method: PaymentMethod, branchId?: string, notes?: string, reference?: string) => Promise<LoanPaymentResult>;
   voidLoanPayment: (paymentId: string, reason: string) => Promise<VoidLoanPaymentResult>;
+  /**
+   * Cierra el préstamo como refinanciado y abre uno nuevo enlazado con lo que
+   * se debe (y el dinero adicional, si hay). Solo admin.
+   */
+  refinanceLoan: (input: RefinanceLoanInput) => Promise<RefinanceLoanResult>;
   reload: () => Promise<void>;
   loading: boolean;
 }
+
+export type RefinanceLoanInput = {
+  loanId: string;
+  baseMode: RefinanceBaseMode;
+  /** null cuando no hay mora pendiente. */
+  lateFeeAction: RefinanceLateFeeAction | null;
+  /** Dinero nuevo que se le entrega al cliente (no pasa por caja). */
+  additional: number;
+  interestRate: number;
+  installments: number;
+  frequency: LoanFrequency;
+  /** yyyy-mm-dd; ausente = un período después de hoy. */
+  firstDueDate?: string;
+  reason: string;
+};
+
+export type RefinanceLoanResult = {
+  oldLoanId: string;
+  newLoanId: string;
+  refinancingId: string;
+  newPrincipal: number;
+  carriedOverAmount: number;
+  totalWithInterest: number;
+  installmentAmount: number;
+};
 
 const LoanContext = createContext<LoanContextType | undefined>(undefined);
 
@@ -118,8 +148,35 @@ export function LoanProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  // El préstamo nuevo lo crea la base (con sus cuotas y la mora vigente); aquí
+  // solo se recarga para que aparezca en la lista.
+  const refinanceLoan = async (input: RefinanceLoanInput): Promise<RefinanceLoanResult> => {
+    const { data, error } = await supabase.rpc('refinance_loan', {
+      p_loan_id: input.loanId,
+      p_base_mode: input.baseMode,
+      p_late_fee_action: input.lateFeeAction,
+      p_additional: input.additional,
+      p_interest_rate: input.interestRate,
+      p_installments: input.installments,
+      p_frequency: input.frequency,
+      p_first_due: input.firstDueDate || null,
+      p_reason: input.reason,
+    });
+    if (error) throw error;
+    await load();
+    return {
+      oldLoanId: data.old_loan_id,
+      newLoanId: data.new_loan_id,
+      refinancingId: data.refinancing_id,
+      newPrincipal: Number(data.new_principal),
+      carriedOverAmount: Number(data.carried_over_amount),
+      totalWithInterest: Number(data.total_with_interest),
+      installmentAmount: Number(data.installment_amount),
+    };
+  };
+
   return (
-    <LoanContext.Provider value={{ loans, addLoan, payLoan, voidLoanPayment, reload: load, loading }}>
+    <LoanContext.Provider value={{ loans, addLoan, payLoan, voidLoanPayment, refinanceLoan, reload: load, loading }}>
       {children}
     </LoanContext.Provider>
   );

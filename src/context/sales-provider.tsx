@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Sale, PaymentMethod, PaymentResult, RefundMethod, FinancingDetails } from '@/lib/types';
+import type { Sale, PaymentMethod, PaymentResult, RefundMethod, FinancingDetails, RefinanceBaseMode, RefinanceLateFeeAction } from '@/lib/types';
 import type { InterestMode, PaymentFrequency } from '@/lib/frequency';
 import { supabase } from '@/lib/supabase/client';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
@@ -42,9 +42,40 @@ interface SalesContextType {
    * siguientes desde ahí. Solo admin. Devuelve cuántas cuotas cambiaron.
    */
   rescheduleInstallments: (saleId: string, installmentNumber: number, newDate: string, shiftFollowing: boolean, reason?: string) => Promise<number>;
+  /**
+   * Pasa lo que se debe a un plan nuevo dentro de la misma venta: lo pagado se
+   * queda, lo pendiente se rehace. Solo admin. Deja el rastro en `refinancings`.
+   */
+  refinanceFinancing: (input: RefinanceFinancingInput) => Promise<RefinanceFinancingResult>;
   reload: () => Promise<void>;
   loading: boolean;
 }
+
+export type RefinanceFinancingInput = {
+  saleId: string;
+  baseMode: RefinanceBaseMode;
+  /** null cuando no hay mora pendiente. */
+  lateFeeAction: RefinanceLateFeeAction | null;
+  interestRate: number;
+  installments: number;
+  frequency: PaymentFrequency;
+  interestMode: InterestMode;
+  /** yyyy-mm-dd; ausente = un período después de hoy. */
+  firstDueDate?: string;
+  reason: string;
+};
+
+export type RefinanceFinancingResult = {
+  saleId: string;
+  refinancingId: string;
+  newPrincipal: number;
+  interest: number;
+  totalWithInterest: number;
+  installmentAmount: number;
+  /** Número de la primera cuota del plan nuevo (las anteriores son del viejo). */
+  firstInstallment: number;
+  customerBalance: number | null;
+};
 
 export type AnnulSaleResult = {
   creditNoteId: string;
@@ -324,8 +355,36 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     return Array.isArray(data?.changes) ? data.changes.length : 0;
   };
 
+  // La base cierra el plan viejo, arma el nuevo, recalcula el balance y deja
+  // el rastro, todo en una transacción. Aquí solo se recarga.
+  const refinanceFinancing = async (input: RefinanceFinancingInput): Promise<RefinanceFinancingResult> => {
+    const { data, error } = await supabase.rpc('refinance_financing', {
+      p_sale_id: input.saleId,
+      p_base_mode: input.baseMode,
+      p_late_fee_action: input.lateFeeAction,
+      p_interest_rate: input.interestRate,
+      p_installments: input.installments,
+      p_frequency: input.frequency,
+      p_interest_mode: input.interestMode,
+      p_first_due: input.firstDueDate || null,
+      p_reason: input.reason,
+    });
+    if (error) throw error;
+    await reloadAll();
+    return {
+      saleId: data.sale_id,
+      refinancingId: data.refinancing_id,
+      newPrincipal: Number(data.new_principal),
+      interest: Number(data.interest),
+      totalWithInterest: Number(data.total_with_interest),
+      installmentAmount: Number(data.installment_amount),
+      firstInstallment: Number(data.first_installment),
+      customerBalance: data.customer_balance != null ? Number(data.customer_balance) : null,
+    };
+  };
+
   return (
-    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, amendFinancing, rescheduleInstallments, reload: reloadAll, loading }}>
+    <SalesContext.Provider value={{ sales, financingSales, addSale, paySale, payCustomerDebt, voidPayment, annulSale, amendFinancing, rescheduleInstallments, refinanceFinancing, reload: reloadAll, loading }}>
       {children}
     </SalesContext.Provider>
   );

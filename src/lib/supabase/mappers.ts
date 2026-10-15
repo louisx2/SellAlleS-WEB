@@ -1,4 +1,4 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf } from '@/lib/types';
+import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
 
@@ -365,6 +365,53 @@ export const rowToFinancingAmendment = (r: any): FinancingAmendment => ({
   createdAt: new Date(r.created_at),
 });
 
+// Respuesta de `refinance_quote` (jsonb). Los numeric pueden llegar como
+// número o como texto: se normalizan todos.
+export const rowToRefinanceQuote = (r: any): RefinanceQuote => ({
+  kind: r.kind,
+  id: r.id,
+  customerId: r.customer_id,
+  pendingBalance: Number(r.pending_balance),
+  pendingCapital: Number(r.pending_capital),
+  unearnedInterest: Number(r.unearned_interest),
+  lateFeeDue: Number(r.late_fee_due),
+  planPrincipal: Number(r.plan_principal),
+  planDebt: Number(r.plan_debt),
+  firstInstallment: r.first_installment != null ? Number(r.first_installment) : null,
+  today: r.today,
+  terms: {
+    interestRate: Number(r.terms?.interestRate ?? 0),
+    installments: Number(r.terms?.installments ?? 1),
+    frequency: r.terms?.frequency ?? 'monthly',
+    interestMode: r.terms?.interestMode ?? 'monthly_prorated',
+  },
+  newLateFee: {
+    rate: Number(r.new_late_fee?.rate ?? 0),
+    mode: r.new_late_fee?.mode ?? 'once',
+    graceDays: Number(r.new_late_fee?.graceDays ?? 0),
+    maxRate: Number(r.new_late_fee?.maxRate ?? 0),
+  },
+});
+
+export const rowToRefinancing = (r: any): Refinancing => ({
+  id: r.id,
+  kind: r.kind,
+  loanId: r.loan_id ?? undefined,
+  newLoanId: r.new_loan_id ?? undefined,
+  saleId: r.sale_id ?? undefined,
+  baseMode: r.base_mode,
+  pendingBalance: Number(r.pending_balance),
+  pendingCapital: Number(r.pending_capital),
+  unearnedInterest: Number(r.unearned_interest),
+  lateFeeAmount: Number(r.late_fee_amount ?? 0),
+  lateFeeAction: r.late_fee_action ?? undefined,
+  additionalAmount: Number(r.additional_amount ?? 0),
+  newPrincipal: Number(r.new_principal),
+  reason: r.reason,
+  createdByName: r.created_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
+});
+
 export const rowToCreditPayment = (r: any): CreditPayment => ({
   id: r.id,
   saleId: r.sale_id ?? undefined,
@@ -651,6 +698,9 @@ export const rowToLoan = (r: any): Loan => ({
   totalWithInterest: Number(r.total_with_interest),
   amountPaid: Number(r.amount_paid),
   status: r.status,
+  refinancedFromId: r.refinanced_from_id ?? undefined,
+  carriedOverAmount: Number(r.carried_over_amount ?? 0),
+  firstDueDate: r.first_due_date ?? undefined,
   notes: r.notes ?? undefined,
   userName: r.user_name ?? undefined,
   createdAt: new Date(r.created_at),
