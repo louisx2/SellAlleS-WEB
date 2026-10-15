@@ -51,6 +51,19 @@ function TicketBody({ loan }: { loan: Loan }) {
           <span>Monto Prestado:</span>
           <span>{formatCurrency(loan.principal)}</span>
         </div>
+        {/* Refinanciación: el capital no es todo dinero nuevo. */}
+        {loan.refinancedFromId && (
+          <>
+            <div className="flex justify-between text-xs">
+              <span>Saldo anterior:</span>
+              <span>{formatCurrency(loan.carriedOverAmount)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span>Entregado:</span>
+              <span>{formatCurrency(loan.principal - loan.carriedOverAmount)}</span>
+            </div>
+          </>
+        )}
         <div className="flex justify-between text-xs">
           <span>Interés ({loan.interestRate}% mensual):</span>
           <span>{formatCurrency(interest)}</span>

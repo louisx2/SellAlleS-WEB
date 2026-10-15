@@ -108,7 +108,10 @@ function LoanCard({ loan, lateFeeRate, graceDays }: { loan: Loan; lateFeeRate: n
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
           Préstamo
-          {status.pendingBalance <= 0 ? (
+          {loan.status === 'refinanced' ? (
+            // Su saldo pasó a un préstamo nuevo: no está pagado, está cerrado.
+            <Badge variant="secondary">Refinanciado</Badge>
+          ) : status.pendingBalance <= 0 ? (
             <Badge className="bg-green-600">Pagado</Badge>
           ) : status.isOverdue ? (
             <Badge variant="destructive">Atrasado</Badge>

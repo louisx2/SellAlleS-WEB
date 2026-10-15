@@ -43,6 +43,7 @@ export const buildLoanColumns = (loanLateFeeRate: number, graceDays = 0): Column
     header: 'Próximo Pago',
     cell: ({ row }) => {
       const status = calculateLoanStatus(row.original, loanLateFeeRate, graceDays);
+      if (row.original.status === 'refinanced') return '—';
       if (status.pendingBalance <= 0) return <Badge variant="secondary">Completado</Badge>;
       return status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—';
     },
@@ -60,6 +61,8 @@ export const buildLoanColumns = (loanLateFeeRate: number, graceDays = 0): Column
     header: 'Estado',
     cell: ({ row }) => {
       const status = calculateLoanStatus(row.original, loanLateFeeRate, graceDays);
+      // Saldo 0 porque pasó al préstamo nuevo, no porque se pagó.
+      if (row.original.status === 'refinanced') return <Badge variant="secondary">Refinanciado</Badge>;
       if (status.pendingBalance <= 0) return <Badge variant="default" className="bg-green-600">Pagado</Badge>;
       if (status.isOverdue) {
         return (
