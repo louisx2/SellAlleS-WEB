@@ -7,9 +7,11 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { Undo2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import type { SupplierInvoice } from '@/lib/types';
-import { formatCurrency } from '@/lib/utils';
+import type { SupplierInvoice, SupplierPayment } from '@/lib/types';
+import { cn, formatCurrency } from '@/lib/utils';
 import { formatQty } from '@/lib/units';
 import { EXPENSE_TYPES_606, ISR_RETENTION_TYPES_606, PAYMENT_FORMS_606 } from '@/lib/dgii-606';
 
@@ -17,6 +19,8 @@ interface PayableDetailDialogProps {
   invoice: SupplierInvoice;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Solo para administradores: sin esto no se ofrece anular. */
+  onVoidPayment?: (payment: SupplierPayment) => void;
 }
 
 const formatDateStr = (iso?: string) => {
@@ -35,7 +39,7 @@ const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
   </div>
 );
 
-export function PayableDetailDialog({ invoice, open, onOpenChange }: PayableDetailDialogProps) {
+export function PayableDetailDialog({ invoice, open, onOpenChange, onVoidPayment }: PayableDetailDialogProps) {
   const retenciones = invoice.itbisRetenido + invoice.isrRetentionAmount;
   const hasFiscal = !!invoice.ncf || invoice.itbisFacturado > 0 || retenciones > 0;
 
@@ -120,13 +124,28 @@ export function PayableDetailDialog({ invoice, open, onOpenChange }: PayableDeta
             <Separator />
             <div className="space-y-1.5">
               <p className="text-sm font-semibold">Abonos</p>
+              {/* Los anulados se quedan a la vista, tachados y con su motivo:
+                  nunca fueron dinero y ya no suman al abonado. */}
               {invoice.payments.map((p) => (
-                <div key={p.id} className="flex justify-between gap-4 text-sm">
+                <div key={p.id} className={cn('flex items-center justify-between gap-4 text-sm', p.voidedAt && 'opacity-60')}>
                   <span className="text-muted-foreground">
                     {p.date.toLocaleDateString('es-DO')} · {p.method === 'cash' ? 'Efectivo' : p.method === 'card' ? 'Tarjeta' : 'Transferencia'}
                     {p.userName ? ` · ${p.userName}` : ''}
+                    {p.voidedAt && (
+                      <span className="block text-destructive">
+                        Anulado{p.voidedByName ? ` por ${p.voidedByName}` : ''}: {p.voidReason}
+                      </span>
+                    )}
                   </span>
-                  <span className="font-medium">{formatCurrency(p.amount)}</span>
+                  <span className="flex items-center gap-1">
+                    <span className={cn('font-medium', p.voidedAt && 'line-through')}>{formatCurrency(p.amount)}</span>
+                    {onVoidPayment && !p.voidedAt && (
+                      <Button variant="ghost" size="sm" className="h-7 px-2" onClick={() => onVoidPayment(p)}>
+                        <Undo2 className="mr-1 h-3.5 w-3.5" />
+                        Anular
+                      </Button>
+                    )}
+                  </span>
                 </div>
               ))}
             </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { PaymentMethod, SupplierInvoice, SupplierPaymentResult } from '@/lib/types';
+import type { PaymentMethod, SupplierInvoice, SupplierPaymentResult, VoidSupplierPaymentResult } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToSupplierInvoice, rowToSupplierPaymentResult } from '@/lib/supabase/mappers';
 import { resolveBranchId } from '@/context/sales-provider';
@@ -52,6 +52,8 @@ interface PayablesContextType {
   addInvoice: (invoice: NewSupplierInvoice) => Promise<void>;
   /** Abono a una factura de suplidor (RPC atómica en la base). */
   payInvoice: (invoiceId: string, amount: number, method: PaymentMethod, branchName: string, notes?: string, reference?: string) => Promise<SupplierPaymentResult>;
+  /** Anula un abono por reverso (RPC void_supplier_payment). Solo administradores. */
+  voidPayment: (paymentId: string, reason: string) => Promise<VoidSupplierPaymentResult>;
   /** Solo facturas sin abonos (la RLS también lo bloquea en la base). */
   deleteInvoice: (id: string) => Promise<void>;
   reload: () => Promise<void>;
@@ -140,6 +142,18 @@ export function PayablesProvider({ children }: { children: ReactNode }) {
     return rowToSupplierPaymentResult(data);
   };
 
+  // El pago no se borra: la RPC lo marca anulado, devuelve el monto al balance
+  // de la factura y, si fue en efectivo, lo regresa a la caja abierta.
+  const voidPayment = async (paymentId: string, reason: string): Promise<VoidSupplierPaymentResult> => {
+    const { data, error } = await supabase.rpc('void_supplier_payment', {
+      p_payment_id: paymentId,
+      p_reason: reason,
+    });
+    if (error) throw error;
+    await load();
+    return { ...rowToSupplierPaymentResult(data), cashReturned: !!data.cash_returned };
+  };
+
   const deleteInvoice = async (id: string) => {
     // La RLS filtra facturas con abonos: el delete "funciona" pero borra 0
     // filas. Se pide el id de vuelta para poder avisar al usuario.
@@ -150,7 +164,7 @@ export function PayablesProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <PayablesContext.Provider value={{ invoices, addInvoice, payInvoice, deleteInvoice, reload: load, loading }}>
+    <PayablesContext.Provider value={{ invoices, addInvoice, payInvoice, voidPayment, deleteInvoice, reload: load, loading }}>
       {children}
     </PayablesContext.Provider>
   );

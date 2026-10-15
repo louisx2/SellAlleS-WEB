@@ -11,11 +11,13 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { SupplierInvoice } from '@/lib/types';
+import type { SupplierInvoice, SupplierPayment } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
 import { usePayables } from '@/context/payables-provider';
 import { PayableDetailDialog } from './payable-detail-dialog';
 import { PayablePaymentDialog } from './payable-payment-dialog';
+import { VoidSupplierPaymentDialog } from './void-supplier-payment-dialog';
 
 interface PayableActionsProps {
   invoice: SupplierInvoice;
@@ -23,10 +25,15 @@ interface PayableActionsProps {
 
 export function PayableActions({ invoice }: PayableActionsProps) {
   const { toast } = useToast();
+  const { appUser } = useAuth();
   const { deleteInvoice } = usePayables();
   const [detailOpen, setDetailOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [voiding, setVoiding] = useState<SupplierPayment | null>(null);
 
+  // Anular un pago es cosa de administradores: la RPC lo exige igual.
+  const isAdmin = appUser?.role === 'admin';
+  // Un pago anulado sigue en el historial y lo referencia: la factura ya no se borra.
   const canDelete = invoice.amountPaid === 0 && invoice.payments.length === 0;
   const supplierName = invoice.supplier?.name ?? 'el suplidor';
 
@@ -77,8 +84,22 @@ export function PayableActions({ invoice }: PayableActionsProps) {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <PayableDetailDialog invoice={invoice} open={detailOpen} onOpenChange={setDetailOpen} />
+      <PayableDetailDialog
+        invoice={invoice}
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        // Se cierra el detalle para no apilar dos diálogos modales.
+        onVoidPayment={isAdmin ? (p) => { setDetailOpen(false); setVoiding(p); } : undefined}
+      />
       <PayablePaymentDialog invoice={invoice} open={payOpen} onOpenChange={setPayOpen} />
+      {voiding && (
+        <VoidSupplierPaymentDialog
+          payment={voiding}
+          supplierName={invoice.supplier?.name}
+          open={!!voiding}
+          onOpenChange={(o) => !o && setVoiding(null)}
+        />
+      )}
     </>
   );
 }

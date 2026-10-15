@@ -202,6 +202,9 @@ export const rowToSupplierPayment = (r: any): SupplierPayment => ({
   userName: r.user_name ?? undefined,
   date: new Date(r.date),
   branchId: r.branches?.name ?? '',
+  voidedAt: r.voided_at ? new Date(r.voided_at) : undefined,
+  voidedByName: r.voided_by_name ?? undefined,
+  voidReason: r.void_reason ?? undefined,
 });
 
 export const rowToSupplierInvoice = (r: any): SupplierInvoice => ({
@@ -630,6 +633,9 @@ export const rowToLoanPayment = (r: any): LoanPayment => ({
   userName: r.user_name ?? undefined,
   date: new Date(r.date),
   branchId: r.branch_id ?? undefined,
+  voidedAt: r.voided_at ? new Date(r.voided_at) : undefined,
+  voidedByName: r.voided_by_name ?? undefined,
+  voidReason: r.void_reason ?? undefined,
 });
 
 export const rowToLoan = (r: any): Loan => ({
