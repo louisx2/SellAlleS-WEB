@@ -1,18 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useSales } from '@/context/sales-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
-import { rowToCreditPayment, rowToFinancingAmendment } from '@/lib/supabase/mappers';
+import { rowToCreditPayment, rowToFinancingAmendment, rowToRefinancing } from '@/lib/supabase/mappers';
 import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
 import { formatQtyCompact } from '@/lib/units';
-import type { CreditPayment, FinancingAmendment, PaymentMethod } from '@/lib/types';
+import type { CreditPayment, FinancingAmendment, PaymentMethod, Refinancing } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -25,7 +25,8 @@ import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
 import { AmendFinancingDialog } from '@/components/financing/amend-financing-dialog';
 import { RescheduleInstallmentsDialog } from '@/components/financing/reschedule-installments-dialog';
-import { ArrowLeft, CalendarClock, DollarSign, FileText, Pencil, Printer, Undo2 } from 'lucide-react';
+import { RefinanceFinancingDialog } from '@/components/financing/refinance-financing-dialog';
+import { ArrowLeft, CalendarClock, DollarSign, FileText, Pencil, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -53,6 +54,8 @@ export default function FinancingDetailClient() {
   const [isAmendOpen, setAmendOpen] = useState(false);
   const [voiding, setVoiding] = useState<CreditPayment | null>(null);
   const [isRescheduleOpen, setRescheduleOpen] = useState(false);
+  const [refinancings, setRefinancings] = useState<Refinancing[]>([]);
+  const [isRefinanceOpen, setRefinanceOpen] = useState(false);
 
   const sale = financingSales.find(s => s.id === saleId) ?? sales.find(s => s.id === saleId);
   // La factura solo abre las ventas propias de la sucursal: una del pool
@@ -84,8 +87,21 @@ export default function FinancingDetailClient() {
     if (data) setAmendments(data.map(rowToFinancingAmendment));
   }, [saleId, isAdmin]);
 
+  // Refinanciaciones de esta venta: misma regla de visibilidad que las
+  // correcciones (la policy de `refinancings` es solo para admins).
+  const loadRefinancings = useCallback(async () => {
+    if (!saleId || !isAdmin) return;
+    const { data } = await supabase
+      .from('refinancings')
+      .select('*')
+      .eq('sale_id', saleId)
+      .order('created_at', { ascending: false });
+    if (data) setRefinancings(data.map(rowToRefinancing));
+  }, [saleId, isAdmin]);
+
   useEffect(() => { loadPayments(); }, [loadPayments, sales]);
   useEffect(() => { loadAmendments(); }, [loadAmendments, sales]);
+  useEffect(() => { loadRefinancings(); }, [loadRefinancings, sales]);
 
   const status = useMemo(
     () => (sale ? calculateFinancingStatus(sale, profile.lateFeeRate, profile.lateFeeGraceDays) : null),
@@ -117,6 +133,12 @@ export default function FinancingDetailClient() {
   // Mismo criterio que la base: solo admin, venta viva y alguna cuota por pagar.
   const canReschedule =
     isAdmin && !sale.cancelledAt && !!sale.installments?.some((cuota) => cuota.status !== 'paid');
+  // Refinanciado: las cuotas con número menor a firstInstallment son del plan
+  // viejo, cerradas con lo pagado. Corregir el plan ya no aplica (la base lo
+  // rechaza: rearmaría el calendario desde la venta).
+  const refinancedAt = fin?.refinancedAt ? new Date(fin.refinancedAt) : null;
+  const firstInstallment = fin?.firstInstallment ?? 1;
+  const canRefinance = !!fin && isAdmin && !sale.cancelledAt && status.pendingBalance > 0;
 
   return (
     <div className="space-y-6">
@@ -142,10 +164,16 @@ export default function FinancingDetailClient() {
               Imprimir Plan de Pagos
             </Button>
           )}
-          {fin && isAdmin && !sale.cancelledAt && (
+          {fin && isAdmin && !sale.cancelledAt && !refinancedAt && (
             <Button variant="outline" onClick={() => setAmendOpen(true)}>
               <Pencil className="mr-2 h-4 w-4" />
               Corregir Plan
+            </Button>
+          )}
+          {canRefinance && (
+            <Button variant="outline" onClick={() => setRefinanceOpen(true)}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refinanciar
             </Button>
           )}
           {status.pendingBalance > 0 && !sale.cancelledAt && (
@@ -174,10 +202,12 @@ export default function FinancingDetailClient() {
             ) : (
               <Badge variant="outline">Al día</Badge>
             )}
+            {refinancedAt && <Badge variant="secondary">Refinanciado</Badge>}
           </CardTitle>
           <CardDescription>
             Venta del {new Date(sale.createdAt).toLocaleDateString('es-DO')} · Sucursal {sale.branchId}
             {sale.ncf && <> · NCF {sale.ncf}</>}
+            {refinancedAt && <> · Refinanciado el {refinancedAt.toLocaleDateString('es-DO')}</>}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -317,8 +347,18 @@ export default function FinancingDetailClient() {
                   const isOverdue =
                     cuota.status !== 'paid' && overdueDays(cuota.dueDate, today, policy.graceDays) > 0;
                   const st = INSTALLMENT_STATUS[cuota.status] ?? INSTALLMENT_STATUS.pending;
+                  // Donde arranca el plan nuevo, una línea que lo separa del viejo.
+                  const startsNewPlan = refinancedAt && cuota.number === firstInstallment && firstInstallment > 1;
                   return (
-                    <TableRow key={cuota.id} className={isOverdue ? 'bg-destructive/5' : undefined}>
+                    <Fragment key={cuota.id}>
+                    {startsNewPlan && (
+                      <TableRow className="bg-muted/50 hover:bg-muted/50">
+                        <TableCell colSpan={6} className="text-xs font-medium text-muted-foreground">
+                          Plan refinanciado el {refinancedAt.toLocaleDateString('es-DO')}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    <TableRow className={isOverdue ? 'bg-destructive/5' : undefined}>
                       <TableCell>{cuota.number}</TableCell>
                       <TableCell className={isOverdue ? 'text-destructive font-medium' : undefined}>
                         {dueDate.toLocaleDateString('es-DO')}
@@ -343,6 +383,7 @@ export default function FinancingDetailClient() {
                         )}
                       </TableCell>
                     </TableRow>
+                    </Fragment>
                   );
                 })}
               </TableBody>
@@ -423,6 +464,55 @@ export default function FinancingDetailClient() {
         </CardContent>
       </Card>
 
+      {refinancings.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Refinanciaciones</CardTitle>
+            <CardDescription>
+              Cada vez que lo que se debía pasó a un plan nuevo: sobre qué monto, qué se hizo con la mora
+              y por qué.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {refinancings.map((r) => (
+              <div key={r.id} className="rounded-lg border p-3 text-sm">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-medium">{r.createdAt.toLocaleString('es-DO')}</span>
+                  <span className="text-muted-foreground">{r.createdByName ?? 'Usuario desconocido'}</span>
+                </div>
+                <p className="mt-1 text-muted-foreground">{r.reason}</p>
+                <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Se debía</p>
+                    <p className="font-medium">{formatCurrency(r.pendingBalance)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Base</p>
+                    <p className="font-medium">
+                      {r.baseMode === 'capital'
+                        ? `Solo capital (${formatCurrency(r.pendingCapital)})`
+                        : 'Saldo completo'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Mora</p>
+                    <p className="font-medium">
+                      {r.lateFeeAmount <= 0
+                        ? '—'
+                        : `${formatCurrency(r.lateFeeAmount)} ${r.lateFeeAction === 'forgive' ? 'perdonada' : 'sumada'}`}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Capital nuevo</p>
+                    <p className="font-medium text-primary">{formatCurrency(r.newPrincipal)}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {amendments.length > 0 && (
         <Card>
           <CardHeader>
@@ -468,6 +558,15 @@ export default function FinancingDetailClient() {
         onOpenChange={setAmendOpen}
         onAmended={loadAmendments}
       />
+
+      {canRefinance && (
+        <RefinanceFinancingDialog
+          sale={sale}
+          open={isRefinanceOpen}
+          onOpenChange={setRefinanceOpen}
+          onRefinanced={loadRefinancings}
+        />
+      )}
 
       {isRescheduleOpen && (
         <RescheduleInstallmentsDialog
