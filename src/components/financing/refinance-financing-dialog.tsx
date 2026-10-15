@@ -114,6 +114,8 @@ export function RefinanceFinancingDialog({ sale, open, onOpenChange, onRefinance
         interestMode,
         firstDueDate: firstDue || undefined,
         reason: reason.trim(),
+        expectedBalance: quote.pendingBalance,
+        expectedLateFee: quote.lateFeeDue,
       });
       await reloadCustomers();
       toast({

@@ -10,6 +10,7 @@ import { LoanDialog } from '@/components/loans/loan-dialog';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency } from '@/lib/utils';
+import { loanInterestEarned } from '@/lib/loan-utils';
 import { PlusCircle, HandCoins, Wallet, TrendingUp } from 'lucide-react';
 
 export default function PrestamosPage() {
@@ -23,7 +24,8 @@ export default function PrestamosPage() {
     const active = loans.filter((l) => l.status === 'active');
     const prestado = active.reduce((acc, l) => acc + l.principal, 0);
     const porCobrar = active.reduce((acc, l) => acc + Math.max(l.totalWithInterest - l.amountPaid, 0), 0);
-    const ganancia = loans.reduce((acc, l) => acc + (l.totalWithInterest - l.principal), 0);
+    // Con refinanciaciones no basta total − capital: ver loanInterestEarned.
+    const ganancia = loans.reduce((acc, l) => acc + loanInterestEarned(l), 0);
     return { prestado, porCobrar, ganancia, activos: active.length };
   }, [loans]);
 

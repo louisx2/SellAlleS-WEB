@@ -27,6 +27,16 @@ export interface LoanStatus {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
+ * Interés que deja un préstamo: lo cobrado o por cobrar menos el dinero que de
+ * verdad salió. En un préstamo normal es total − capital. Con refinanciación,
+ * el nuevo no "sacó" la parte arrastrada (salió con el préstamo viejo), y el
+ * viejo cierra con total = pagado; sumados dan el interés real de los dos.
+ */
+export function loanInterestEarned(loan: Pick<Loan, 'totalWithInterest' | 'principal' | 'carriedOverAmount'>): number {
+  return loan.totalWithInterest - (loan.principal - (loan.carriedOverAmount ?? 0));
+}
+
+/**
  * `fallbackLateFeeRate` y `fallbackGraceDays` (los ajustes vigentes de la
  * empresa) solo aplican a los préstamos anteriores a la mora configurable, que
  * no traen política congelada. Cuando el préstamo trae la suya manda esa: es la

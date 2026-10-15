@@ -110,6 +110,8 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
         frequency,
         firstDueDate: firstDue || undefined,
         reason: reason.trim(),
+        expectedBalance: quote.pendingBalance,
+        expectedLateFee: quote.lateFeeDue,
       });
       toast({
         title: 'Préstamo refinanciado',

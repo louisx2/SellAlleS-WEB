@@ -447,6 +447,11 @@ export default function FinancingDetailClient() {
                             <span className="text-xs text-muted-foreground" title="Es parte de la venta: se revierte anulando la venta completa.">
                               Inicial
                             </span>
+                          ) : refinancedAt && p.date < refinancedAt ? (
+                            // Pagó cuotas del plan que la refinanciación cerró: la base no deja anularlo.
+                            <span className="text-xs text-muted-foreground" title="Es anterior a la refinanciación: ya no se puede anular.">
+                              Cerrado
+                            </span>
                           ) : (
                             <Button variant="ghost" size="sm" onClick={() => setVoiding(p)}>
                               <Undo2 className="mr-1 h-3.5 w-3.5" />

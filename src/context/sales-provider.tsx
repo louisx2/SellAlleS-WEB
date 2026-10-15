@@ -63,6 +63,9 @@ export type RefinanceFinancingInput = {
   /** yyyy-mm-dd; ausente = un período después de hoy. */
   firstDueDate?: string;
   reason: string;
+  /** Lo que mostró la cotización: si la deuda cambió desde entonces, la base rechaza. */
+  expectedBalance: number;
+  expectedLateFee: number;
 };
 
 export type RefinanceFinancingResult = {
@@ -368,6 +371,8 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       p_interest_mode: input.interestMode,
       p_first_due: input.firstDueDate || null,
       p_reason: input.reason,
+      p_expected_balance: input.expectedBalance,
+      p_expected_late_fee: input.expectedLateFee,
     });
     if (error) throw error;
     await reloadAll();

@@ -203,7 +203,11 @@ function CreditSaleCard({ sale, lateFeeRate, graceDays }: { sale: Sale; lateFeeR
             <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
           </div>
         </div>
-        <InstallmentsTable installments={sale.installments} />
+        {/* Refinanciado: solo las cuotas del plan vigente. Las anteriores ya
+            están cerradas con lo pagado y mezclarlas confunde al cliente. */}
+        <InstallmentsTable
+          installments={sale.installments?.filter((i) => i.number >= (sale.financingDetails?.firstInstallment ?? 1))}
+        />
       </CardContent>
     </Card>
   );
