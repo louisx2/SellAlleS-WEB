@@ -160,8 +160,8 @@ export default function CobrosReportPage() {
           branch: r.branches?.name ?? '—',
           user: r.user_name ?? '—',
           notes: r.notes ?? undefined,
-          voided: false,
-          voidReason: undefined,
+          voided: !!r.voided_at,
+          voidReason: r.void_reason ?? undefined,
         };
       });
 

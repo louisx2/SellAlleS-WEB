@@ -526,6 +526,11 @@ export type LoanPayment = {
   userName?: string;
   date: Date;
   branchId?: string;
+  // Igual que en crédito: no se borra, se anula por reverso (RPC
+  // void_loan_payment). Todo lo que sume dinero descarta los anulados.
+  voidedAt?: Date;
+  voidedByName?: string;
+  voidReason?: string;
 };
 
 // Alias histórico: los préstamos ya usaban este nombre. El calendario y las
@@ -569,6 +574,14 @@ export type LoanPaymentResult = {
   remainingBalance: number;
   installmentsPaid: number;
   installmentsTotal: number;
+};
+
+// Resultado de la RPC void_loan_payment.
+export type VoidLoanPaymentResult = {
+  paymentId: string;
+  amount: number;
+  cashReturned: boolean;
+  remainingBalance: number;
 };
 
 // ---------- Caja (control de efectivo por sucursal) ----------
@@ -714,6 +727,11 @@ export type SupplierPayment = {
   userName?: string;
   date: Date;
   branchId: string;     // nombre de sucursal a nivel de app (join branches(name))
+  // Se anula por reverso (RPC void_supplier_payment): el monto vuelve al
+  // balance de la factura y el pago queda en el historial con su motivo.
+  voidedAt?: Date;
+  voidedByName?: string;
+  voidReason?: string;
 };
 
 // Los códigos de los campos fiscales ('01'..'11', etc.) y sus etiquetas viven
@@ -762,6 +780,11 @@ export type SupplierPaymentResult = {
   amount: number;
   remainingBalance: number;
   status: SupplierInvoiceStatus;
+};
+
+// Resultado de la RPC void_supplier_payment.
+export type VoidSupplierPaymentResult = SupplierPaymentResult & {
+  cashReturned: boolean;
 };
 
 export type ServiceType = {
