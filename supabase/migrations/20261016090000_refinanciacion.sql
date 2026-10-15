@@ -7,6 +7,18 @@
 -- El admin elige la base (solo capital pendiente o saldo completo) y si la mora
 -- se suma o se perdona. Todo queda en `refinancings`.
 
+-- Requisito: el arreglo de abonos de préstamo (allocation y void_loan_payment).
+-- Esta migración redefine void_loan_payment y register_loan_payment sobre esa
+-- base; sin ella, ningún abono de préstamo funciona.
+do $$
+begin
+  if not exists (select 1 from pg_attribute
+                  where attrelid = 'public.loan_payments'::regclass
+                    and attname = 'allocation' and not attisdropped) then
+    raise exception 'Falta aplicar 20261015150000_abonos_de_prestamo_allocation_y_anulacion.sql antes de esta migración.';
+  end if;
+end $$;
+
 -- ---------------------------------------------------------------------------
 -- 1. Historial
 -- ---------------------------------------------------------------------------
@@ -142,6 +154,12 @@ declare
   v_capital   numeric;
   v_late      numeric;
   v_new_fee   jsonb;
+  v_loan      loans%rowtype;
+  v_rate      numeric;
+  v_mode      text;
+  v_grace     int;
+  v_max_rate  numeric;
+  v_today     date;
 begin
   if p_kind = 'financing' then
     select * into v_sale from sales where id = p_id for update;
@@ -208,6 +226,66 @@ begin
         'installments', coalesce((v_fd->>'installments')::int, 1),
         'frequency',    coalesce(nullif(v_fd->>'frequency', ''), 'monthly'),
         'interestMode', coalesce(nullif(v_fd->>'interestMode', ''), 'monthly_prorated')),
+      'new_late_fee', v_new_fee
+    );
+  end if;
+
+  if p_kind = 'loan' then
+    select * into v_loan from loans where id = p_id for update;
+    if not found or v_loan.status <> 'active' then
+      raise exception 'Este préstamo no está activo.';
+    end if;
+
+    perform 1 from loan_installments where loan_id = p_id for update;
+
+    -- La mora como la cobra register_loan_payment: la política congelada del
+    -- préstamo, con la de la empresa para los anteriores a la mora
+    -- configurable. La del préstamo nuevo: los ajustes vigentes, igual que
+    -- trg_before_loan_checks al desembolsar.
+    select coalesce(v_loan.late_fee_rate, c.loan_late_fee_rate, 5),
+           coalesce(nullif(v_loan.late_fee_mode, ''), 'once'),
+           coalesce(v_loan.late_fee_grace_days, c.loan_late_fee_grace_days, 0),
+           coalesce(v_loan.late_fee_max_rate, 0),
+           jsonb_build_object(
+             'rate',      coalesce(c.loan_late_fee_rate, 5),
+             'mode',      coalesce(c.loan_late_fee_mode, 'once'),
+             'graceDays', coalesce(c.loan_late_fee_grace_days, 0),
+             'maxRate',   coalesce(c.loan_late_fee_max_rate, 0))
+      into v_rate, v_mode, v_grace, v_max_rate, v_new_fee
+      from companies c where c.id = v_loan.company_id;
+
+    v_today := company_today(v_loan.company_id);
+
+    select coalesce(sum(late_fee_due(amount, paid_amount, late_fee_paid, due_date, v_today,
+                                     v_rate, v_mode, v_grace, v_max_rate,
+                                     late_fee_period_days(v_loan.payment_frequency))), 0)
+      into v_late
+      from loan_installments
+     where loan_id = p_id and status <> 'paid';
+
+    v_principal := v_loan.principal;
+    v_debt      := v_loan.total_with_interest;
+    v_balance   := round(v_loan.total_with_interest - v_loan.amount_paid, 2);
+    v_capital   := case when v_debt > 0 then round(v_principal * v_balance / v_debt, 2) else 0 end;
+
+    return jsonb_build_object(
+      'kind',              'loan',
+      'id',                v_loan.id,
+      'company_id',        v_loan.company_id,
+      'customer_id',       v_loan.customer_id,
+      'pending_balance',   v_balance,
+      'pending_capital',   v_capital,
+      'unearned_interest', v_balance - v_capital,
+      'late_fee_due',      v_late,
+      'plan_principal',    v_principal,
+      'plan_debt',         v_debt,
+      'first_installment', null,
+      'today',             v_today,
+      'terms', jsonb_build_object(
+        'interestRate', v_loan.interest_rate,
+        'installments', v_loan.installments_count,
+        'frequency',    v_loan.payment_frequency,
+        'interestMode', 'monthly_prorated'),
       'new_late_fee', v_new_fee
     );
   end if;
@@ -852,3 +930,430 @@ begin
   return jsonb_build_object('sale_id', v_sale.id, 'changes', v_changes);
 end;
 $function$;
+
+-- ---------------------------------------------------------------------------
+-- 6. Refinanciar un préstamo (cierra el viejo, abre uno nuevo enlazado)
+-- ---------------------------------------------------------------------------
+-- El viejo queda 'refinanced' con total_with_interest = amount_paid, así que
+-- su saldo da 0 con las cuentas de siempre. El nuevo entra por el insert
+-- normal: los triggers calculan el interés, arman las cuotas y congelan la
+-- mora vigente. carried_over_amount es lo que viene del viejo (base + mora
+-- sumada); principal − carried_over_amount es el dinero nuevo entregado, que
+-- no pasa por caja, igual que un desembolso normal.
+create or replace function public.refinance_loan(
+  p_loan_id uuid, p_base_mode text, p_late_fee_action text, p_additional numeric,
+  p_interest_rate numeric, p_installments integer, p_frequency text,
+  p_first_due date, p_reason text)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  v_loan      loans%rowtype;
+  v_new       loans%rowtype;
+  v_q         jsonb;
+  v_today     date;
+  v_late      numeric;
+  v_action    text;
+  v_carried   numeric;
+  v_principal numeric;
+  v_before    jsonb;
+  v_user_name text;
+  v_ref_id    uuid;
+begin
+  select * into v_loan from loans where id = p_loan_id for update;
+  if not found or (v_loan.company_id <> current_company_id() and not is_super_admin()) then
+    raise exception 'Préstamo no encontrado.';
+  end if;
+  if not (is_company_admin() or is_super_admin()) then
+    raise exception 'Solo un administrador puede refinanciar.';
+  end if;
+  if v_loan.status = 'refinanced' then
+    raise exception 'Este préstamo ya fue refinanciado: refinancia el préstamo nuevo.';
+  end if;
+  if nullif(btrim(coalesce(p_reason, '')), '') is null then
+    raise exception 'Indica el motivo de la refinanciación.';
+  end if;
+  if p_base_mode is null or p_base_mode not in ('capital', 'balance') then
+    raise exception 'La base de la refinanciación no es válida.';
+  end if;
+  if p_additional is null or p_additional < 0 then
+    raise exception 'El dinero adicional no puede ser negativo.';
+  end if;
+  -- Los préstamos no tienen modo de interés: siempre prorrateado por mes.
+  perform validate_financing_params(p_interest_rate, p_installments, p_frequency, 'monthly_prorated');
+
+  v_q     := refinance_quote_data('loan', p_loan_id);
+  v_today := (v_q->>'today')::date;
+
+  if p_first_due is not null and p_first_due <= v_today then
+    raise exception 'La primera cuota tiene que caer después de hoy.';
+  end if;
+  if (v_q->>'pending_balance')::numeric <= 0 then
+    raise exception 'Este préstamo no tiene saldo pendiente.';
+  end if;
+
+  v_late := (v_q->>'late_fee_due')::numeric;
+  if v_late > 0 then
+    if p_late_fee_action is null or p_late_fee_action not in ('capitalize', 'forgive') then
+      raise exception 'Hay mora pendiente: indica si se suma al capital o se perdona.';
+    end if;
+    v_action := p_late_fee_action;
+  end if;
+
+  v_carried := case p_base_mode
+                 when 'capital' then (v_q->>'pending_capital')::numeric
+                 else (v_q->>'pending_balance')::numeric
+               end
+               + case when v_action = 'capitalize' then v_late else 0 end;
+  v_principal := v_carried + p_additional;
+
+  v_before := jsonb_build_object(
+    'loan', to_jsonb(v_loan),
+    'installments', (select coalesce(jsonb_agg(to_jsonb(li) order by li.installment_number), '[]'::jsonb)
+                       from loan_installments li where li.loan_id = p_loan_id));
+
+  -- Cierre del préstamo viejo, con la misma regla que un financiamiento.
+  update loan_installments
+     set amount = paid_amount, status = 'paid', paid_at = coalesce(paid_at, now())
+   where loan_id = p_loan_id and status <> 'paid' and (paid_amount > 0 or late_fee_paid > 0);
+  delete from loan_installments
+   where loan_id = p_loan_id and status <> 'paid';
+
+  update loans
+     set status = 'refinanced', total_with_interest = amount_paid
+   where id = p_loan_id;
+
+  select name into v_user_name from profiles where id = auth.uid();
+
+  insert into loans
+    (company_id, branch_id, customer_id, principal, interest_rate, installments_count,
+     payment_frequency, notes, created_by, user_name, refinanced_from_id, carried_over_amount,
+     first_due_date)
+  values
+    (v_loan.company_id, v_loan.branch_id, v_loan.customer_id, v_principal, p_interest_rate, p_installments,
+     p_frequency,
+     'Refinancia el préstamo del ' || to_char(sale_local_date(v_loan.company_id, v_loan.created_at), 'DD/MM/YYYY'),
+     auth.uid(), v_user_name, v_loan.id, v_carried,
+     coalesce(p_first_due, financing_due_date(v_today, p_frequency, 1)))
+  returning * into v_new;
+
+  insert into refinancings
+    (company_id, customer_id, kind, loan_id, new_loan_id, base_mode, pending_balance, pending_capital,
+     unearned_interest, late_fee_amount, late_fee_action, additional_amount, new_principal,
+     plan_before, plan_after, reason, created_by, created_by_name)
+  values
+    (v_loan.company_id, v_loan.customer_id, 'loan', v_loan.id, v_new.id, p_base_mode,
+     (v_q->>'pending_balance')::numeric, (v_q->>'pending_capital')::numeric,
+     (v_q->>'unearned_interest')::numeric, v_late, v_action, p_additional, v_principal,
+     v_before,
+     jsonb_build_object(
+       'loan', to_jsonb(v_new),
+       'installments', (select coalesce(jsonb_agg(to_jsonb(li) order by li.installment_number), '[]'::jsonb)
+                          from loan_installments li where li.loan_id = v_new.id)),
+     btrim(p_reason), auth.uid(), v_user_name)
+  returning id into v_ref_id;
+
+  return jsonb_build_object(
+    'old_loan_id',         v_loan.id,
+    'new_loan_id',         v_new.id,
+    'refinancing_id',      v_ref_id,
+    'new_principal',       v_principal,
+    'carried_over_amount', v_carried,
+    'total_with_interest', v_new.total_with_interest,
+    'installment_amount',  (select amount from loan_installments where loan_id = v_new.id and installment_number = 1)
+  );
+end;
+$function$;
+
+revoke all on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text) from public;
+revoke execute on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text) from anon;
+grant execute on function public.refinance_loan(uuid, text, text, numeric, numeric, integer, text, date, text) to authenticated;
+
+-- register_loan_payment: la definición viva más el rechazo de un préstamo
+-- refinanciado (antes solo rechazaba los pagados).
+create or replace function public.register_loan_payment(p_loan_id uuid, p_amount numeric, p_method text, p_branch_id uuid default null::uuid, p_notes text default null::text, p_reference text default null::text)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  v_loan          public.loans%rowtype;
+  v_late_rate     numeric;
+  v_late_mode     text;
+  v_grace         int;
+  v_max_rate      numeric;
+  v_period_days   int;
+  v_today         date;
+  v_total_due     numeric;
+  v_late_due      numeric := 0;
+  v_late_collect  numeric := 0;
+  v_capital       numeric := 0;
+  v_remaining     numeric;
+  v_inst          record;
+  v_apply         numeric;
+  v_fee_due       numeric;
+  v_payment_id    uuid;
+  v_user_name     text;
+  v_paid_count    int := 0;
+  v_total_count   int := 0;
+  v_insts         jsonb := '[]'::jsonb;
+begin
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'El monto del abono debe ser mayor que cero.';
+  end if;
+  if p_method not in ('cash','card','transfer') then
+    raise exception 'Método de pago no válido.';
+  end if;
+
+  select * into v_loan from public.loans where id = p_loan_id for update;
+  if not found then
+    raise exception 'Préstamo no encontrado.';
+  end if;
+  if not (is_super_admin() or (v_loan.company_id = current_company_id()
+          and (is_company_admin()
+               or v_loan.branch_id in (select user_branch_ids())
+               or branch_shares_with_me('prestamos', v_loan.branch_id)))) then
+    raise exception 'No tienes acceso a este préstamo.';
+  end if;
+  if v_loan.status = 'paid' then
+    raise exception 'Este préstamo ya está saldado.';
+  end if;
+  if v_loan.status = 'refinanced' then
+    raise exception 'Este préstamo fue refinanciado: cobra el préstamo nuevo.';
+  end if;
+
+  if p_branch_id is not null then
+    perform 1 from branches where id = p_branch_id and company_id = v_loan.company_id;
+    if not found then
+      raise exception 'Sucursal no válida para este préstamo.';
+    end if;
+  end if;
+
+  if p_method = 'cash' and caja_blocks_cash(v_loan.company_id, p_branch_id) then
+    raise exception 'No hay una caja abierta en esta sucursal. Abre caja antes de cobrar en efectivo.';
+  end if;
+
+  -- La política congelada del préstamo manda. Los préstamos anteriores a la
+  -- mora configurable no traen ninguna y caen a la de la empresa en modo once:
+  -- exactamente como se les venía cobrando.
+  select coalesce(v_loan.late_fee_rate, c.loan_late_fee_rate, 5),
+         coalesce(nullif(v_loan.late_fee_mode, ''), 'once'),
+         coalesce(v_loan.late_fee_grace_days, c.loan_late_fee_grace_days, 0),
+         coalesce(v_loan.late_fee_max_rate, 0)
+    into v_late_rate, v_late_mode, v_grace, v_max_rate
+    from public.companies c where c.id = v_loan.company_id;
+
+  v_period_days := late_fee_period_days(v_loan.payment_frequency);
+  v_today       := company_today(v_loan.company_id);
+
+  v_total_due := v_loan.total_with_interest - v_loan.amount_paid;
+
+  perform 1 from public.loan_installments where loan_id = p_loan_id for update;
+
+  select coalesce(sum(late_fee_due(amount, paid_amount, late_fee_paid, due_date, v_today,
+                                   v_late_rate, v_late_mode, v_grace, v_max_rate, v_period_days)), 0)
+    into v_late_due
+    from public.loan_installments
+   where loan_id = p_loan_id and status <> 'paid';
+
+  if p_amount > v_total_due + v_late_due + 0.01 then
+    raise exception 'El abono (RD$%) excede la deuda pendiente (RD$%).',
+      to_char(p_amount, 'FM999,999,990.00'), to_char(v_total_due + v_late_due, 'FM999,999,990.00');
+  end if;
+
+  v_remaining := p_amount;
+
+  -- 1) La mora primero.
+  for v_inst in
+    select * from public.loan_installments
+     where loan_id = p_loan_id and status <> 'paid' and due_date + v_grace < v_today
+     order by installment_number
+  loop
+    exit when v_remaining <= 0;
+    v_fee_due := late_fee_due(v_inst.amount, v_inst.paid_amount, v_inst.late_fee_paid,
+                              v_inst.due_date, v_today,
+                              v_late_rate, v_late_mode, v_grace, v_max_rate, v_period_days);
+    if v_fee_due > 0 then
+      v_apply := least(v_remaining, v_fee_due);
+      update public.loan_installments set late_fee_paid = late_fee_paid + v_apply where id = v_inst.id;
+      v_late_collect := v_late_collect + v_apply;
+      v_remaining := v_remaining - v_apply;
+      v_insts := v_insts || jsonb_build_object(
+        'id', v_inst.id, 'number', v_inst.installment_number, 'principal', 0, 'late_fee', v_apply);
+    end if;
+  end loop;
+
+  -- 2) Capital FIFO, sin pasarse de la deuda.
+  v_remaining := least(v_remaining, greatest(round(v_total_due, 2), 0));
+
+  for v_inst in
+    select * from public.loan_installments
+     where loan_id = p_loan_id and status <> 'paid'
+     order by installment_number
+  loop
+    exit when v_remaining <= 0;
+    v_apply := least(v_remaining, v_inst.amount - v_inst.paid_amount);
+    if v_apply > 0 then
+      update public.loan_installments
+         set paid_amount = paid_amount + v_apply,
+             status  = case when paid_amount + v_apply >= amount - 0.005 then 'paid' else 'partial' end,
+             paid_at = case when paid_amount + v_apply >= amount - 0.005 then now() else paid_at end
+       where id = v_inst.id;
+      v_remaining := v_remaining - v_apply;
+      v_capital   := v_capital + v_apply;
+      v_insts := v_insts || jsonb_build_object(
+        'id', v_inst.id, 'number', v_inst.installment_number, 'principal', v_apply, 'late_fee', 0);
+    end if;
+  end loop;
+
+  select name into v_user_name from public.profiles where id = auth.uid();
+
+  insert into public.loan_payments
+    (company_id, loan_id, customer_id, branch_id, amount, late_fee_paid, method,
+     reference, notes, user_id, user_name, date, allocation)
+  values
+    (v_loan.company_id, v_loan.id, v_loan.customer_id, p_branch_id, p_amount, v_late_collect,
+     p_method, p_reference, p_notes, auth.uid(), v_user_name, now(),
+     jsonb_build_object('installments', v_insts, 'principal', v_capital, 'late_fee', v_late_collect))
+  returning id into v_payment_id;
+
+  update public.loans
+     set amount_paid = amount_paid + v_capital,
+         status = case when amount_paid + v_capital >= total_with_interest - 0.01 then 'paid' else status end
+   where id = p_loan_id;
+
+  select count(*) filter (where status = 'paid'), count(*)
+    into v_paid_count, v_total_count
+    from public.loan_installments where loan_id = p_loan_id;
+
+  return jsonb_build_object(
+    'payment_id', v_payment_id,
+    'amount', p_amount,
+    'late_fee_paid', v_late_collect,
+    'principal_paid', v_capital,
+    'remaining_balance', greatest(round(v_total_due - v_capital, 2), 0),
+    'installments_paid', v_paid_count,
+    'installments_total', v_total_count
+  );
+end;
+$function$;
+
+-- void_loan_payment: la de 20261015150000 más el bloqueo. Los abonos de un
+-- préstamo refinanciado pagaron cuotas que quedaron cerradas con lo pagado, y
+-- el préstamo nuevo arrastra ese saldo: revertirlos descuadraría los dos.
+create or replace function public.void_loan_payment(
+  p_payment_id uuid,
+  p_reason text
+) returns jsonb
+language plpgsql
+security definer
+set search_path to 'public'
+as $function$
+declare
+  v_p         public.loan_payments%rowtype;
+  v_loan      public.loans%rowtype;
+  v_inst_ent  jsonb;
+  v_principal numeric;
+  v_user_name text;
+  v_session   caja_sessions%rowtype;
+  v_cash_out  boolean := false;
+  v_new_paid  numeric;
+begin
+  select * into v_p from public.loan_payments where id = p_payment_id for update;
+  if not found or (v_p.company_id <> current_company_id() and not is_super_admin()) then
+    raise exception 'Abono no encontrado.';
+  end if;
+  if not (is_company_admin() or is_super_admin()) then
+    raise exception 'Solo un administrador puede anular un abono.';
+  end if;
+  if v_p.voided_at is not null then
+    raise exception 'Este abono ya fue anulado.';
+  end if;
+  if nullif(btrim(coalesce(p_reason, '')), '') is null then
+    raise exception 'Indica el motivo de la anulación.';
+  end if;
+  if v_p.allocation is null then
+    raise exception 'Este abono es anterior al registro de aplicación por cuota, así que no se puede revertir automáticamente. Corrígelo desde la base con respaldo.';
+  end if;
+
+  select * into v_loan from public.loans where id = v_p.loan_id for update;
+  if not found then
+    raise exception 'Préstamo no encontrado.';
+  end if;
+  if v_loan.status = 'refinanced' then
+    raise exception 'Este abono es anterior a una refinanciación: no se puede anular.';
+  end if;
+
+  select name into v_user_name from public.profiles where id = auth.uid();
+
+  -- Mismo criterio que en los abonos de venta: si el cobro cae dentro de la
+  -- sesión que sigue abierta basta con excluirlo del cierre; si venía de una
+  -- sesión ya cerrada, esa contó el dinero y hay que sacarlo ahora.
+  if v_p.method = 'cash'
+     and is_module_enabled(v_p.company_id, 'caja', false)
+     and v_p.branch_id is not null
+     and branch_uses_caja(v_p.branch_id) then
+    select * into v_session from caja_sessions
+     where branch_id = v_p.branch_id and status = 'open' for update;
+    if not found then
+      raise exception 'Abre la caja de esta sucursal antes de anular un abono cobrado en efectivo.';
+    end if;
+    v_cash_out := (v_session.opened_at > v_p.date);
+  end if;
+
+  for v_inst_ent in select * from jsonb_array_elements(v_p.allocation->'installments')
+  loop
+    update public.loan_installments li
+       set paid_amount   = greatest(round(li.paid_amount - coalesce((v_inst_ent->>'principal')::numeric, 0), 2), 0),
+           late_fee_paid = greatest(round(li.late_fee_paid - coalesce((v_inst_ent->>'late_fee')::numeric, 0), 2), 0),
+           status = case
+             when greatest(li.paid_amount - coalesce((v_inst_ent->>'principal')::numeric, 0), 0) >= li.amount - 0.005 then 'paid'
+             when greatest(li.paid_amount - coalesce((v_inst_ent->>'principal')::numeric, 0), 0) <= 0.005 then 'pending'
+             else 'partial' end,
+           paid_at = case
+             when greatest(li.paid_amount - coalesce((v_inst_ent->>'principal')::numeric, 0), 0) >= li.amount - 0.005 then li.paid_at
+             else null end
+     where li.id = (v_inst_ent->>'id')::uuid;
+  end loop;
+
+  v_principal := coalesce((v_p.allocation->>'principal')::numeric, 0);
+  v_new_paid  := greatest(round(v_loan.amount_paid - v_principal, 2), 0);
+
+  -- Un préstamo cancelado sigue cancelado: anular un abono no lo revive.
+  update public.loans
+     set amount_paid = v_new_paid,
+         status = case
+           when v_new_paid >= total_with_interest - 0.01 then 'paid'
+           when status = 'paid' then 'active'
+           else status end
+   where id = v_loan.id;
+
+  update public.loan_payments
+     set voided_at = now(), voided_by = auth.uid(),
+         voided_by_name = v_user_name, void_reason = btrim(p_reason)
+   where id = p_payment_id;
+
+  if v_cash_out then
+    insert into caja_movements
+      (session_id, company_id, branch_id, type, amount, reason, created_by, created_by_name)
+    values
+      (v_session.id, v_p.company_id, v_p.branch_id, 'out', v_p.amount,
+       'Anulación de abono de préstamo del ' || to_char(v_p.date, 'DD/MM/YYYY') || ': ' || btrim(p_reason),
+       auth.uid(), v_user_name);
+  end if;
+
+  return jsonb_build_object(
+    'payment_id',        v_p.id,
+    'amount',            v_p.amount,
+    'cash_returned',     v_cash_out,
+    'loan_amount_paid',  v_new_paid,
+    'remaining_balance', greatest(round(v_loan.total_with_interest - v_new_paid, 2), 0)
+  );
+end;
+$function$;
+
+revoke all on function public.void_loan_payment(uuid, text) from public, anon;
+grant execute on function public.void_loan_payment(uuid, text) to authenticated, service_role;

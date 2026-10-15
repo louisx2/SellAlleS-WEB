@@ -45,6 +45,24 @@ begin
   end if;
 end $$;
 
+-- Préstamo de 10,000 al 5% mensual en 10 cuotas (15,000; cuota 1,500), con
+-- mora congelada de 5% una vez, y lo abonado.
+create function pg_temp.prestamo(p_loan uuid, p_customer uuid, p_paid numeric) returns void
+language plpgsql as $$
+begin
+  insert into customers (id, company_id, name)
+  values (p_customer, '00000000-0000-0000-0000-0000000000aa', 'Prueba refinanciación ' || right(p_customer::text, 4))
+  on conflict (id) do nothing;
+  insert into loans (id, company_id, branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency)
+  values (p_loan, '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', p_customer,
+          10000, 5, 10, 'monthly');
+  update loans set late_fee_rate = 5, late_fee_mode = 'once', late_fee_grace_days = 0, late_fee_max_rate = 0
+   where id = p_loan;
+  if p_paid > 0 then
+    perform register_loan_payment(p_loan, p_paid, 'transfer', '00000000-0000-0000-0000-0000000000b1', null, null);
+  end if;
+end $$;
+
 -- == Task 1: esquema ==
 insert into customers (id, company_id, name)
 values ('00000000-0000-0000-0000-00000000cf01', '00000000-0000-0000-0000-0000000000aa', 'Prueba refinanciación 1');
@@ -302,6 +320,100 @@ begin
   r := refinance_financing('00000000-0000-0000-0000-00000000cf3c', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x');
   assert (r->>'new_principal')::numeric = 6000, r::text;
 
+  perform set_config('request.jwt.claims', '{"sub":"92381752-13b2-4f43-8b09-612647754599","role":"authenticated"}', true);
+end $$;
+
+-- == Task 4: préstamos ==
+do $$
+declare
+  aa  constant uuid := '00000000-0000-0000-0000-0000000000aa';
+  q   jsonb;
+  r   jsonb;
+  v_new uuid;
+  v_id  uuid;
+  rf  refinancings%rowtype;
+begin
+  perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf40', '00000000-0000-0000-0000-00000000cf05', 6000);
+  q := refinance_quote('loan', '00000000-0000-0000-0000-00000000cf40');
+  assert (q->>'pending_balance')::numeric = 9000 and (q->>'pending_capital')::numeric = 6000
+     and (q->>'unearned_interest')::numeric = 3000 and (q->>'late_fee_due')::numeric = 0, q::text;
+  assert q->'first_installment' = 'null'::jsonb and q->'terms'->>'interestMode' = 'monthly_prorated'
+     and (q->'terms'->>'installments')::int = 10 and q->'terms'->>'frequency' = 'monthly', q::text;
+
+  -- Renovación: base capital + 2,000, 12 al 5% → principal 8,000, arrastrado 6,000, total 12,800.
+  r := refinance_loan('00000000-0000-0000-0000-00000000cf40', 'capital', null, 2000, 5, 12, 'monthly', null, 'renovación');
+  v_new := (r->>'new_loan_id')::uuid;
+  assert (r->>'new_principal')::numeric = 8000 and (r->>'carried_over_amount')::numeric = 6000
+     and (r->>'total_with_interest')::numeric = 12800 and (r->>'installment_amount')::numeric = 1066.67, r::text;
+  assert (select status from loans where id = '00000000-0000-0000-0000-00000000cf40') = 'refinanced';
+  assert (select total_with_interest - amount_paid from loans where id = '00000000-0000-0000-0000-00000000cf40') = 0;
+  assert (select count(*) from loan_installments where loan_id = '00000000-0000-0000-0000-00000000cf40') = 4;
+  assert (select refinanced_from_id = '00000000-0000-0000-0000-00000000cf40' and carried_over_amount = 6000
+                 and status = 'active' and customer_id = '00000000-0000-0000-0000-00000000cf05'
+                 and branch_id = '00000000-0000-0000-0000-0000000000b1' and created_by = auth.uid()
+            from loans where id = v_new);
+  assert (select due_date from loan_installments where loan_id = v_new and installment_number = 1)
+       = financing_due_date(company_today(aa), 'monthly', 1);
+  select * into rf from refinancings where loan_id = '00000000-0000-0000-0000-00000000cf40';
+  assert rf.kind = 'loan' and rf.new_loan_id = v_new and rf.additional_amount = 2000 and rf.new_principal = 8000
+     and rf.pending_capital = 6000 and jsonb_array_length(rf.plan_before->'installments') = 10, row_to_json(rf)::text;
+
+  -- El viejo queda cerrado.
+  perform pg_temp.debe_fallar($q$select register_loan_payment('00000000-0000-0000-0000-00000000cf40', 100, 'transfer', null, null, null)$q$, '%refinanciado%');
+  select id into v_id from loan_payments where loan_id = '00000000-0000-0000-0000-00000000cf40';
+  perform pg_temp.debe_fallar(format('select void_loan_payment(%L, %L)', v_id, 'x'), '%refinanci%');
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf40', 'capital', null, 0, 5, 12, 'monthly', null, 'x')$q$, '%ya fue refinanciado%');
+  -- El nuevo cobra y anula normal.
+  perform register_loan_payment(v_new, 1066.67, 'transfer', null, null, null);
+  select id into v_id from loan_payments where loan_id = v_new;
+  perform void_loan_payment(v_id, 'abono equivocado');
+
+  -- Base saldo: 9,000.
+  perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf41', '00000000-0000-0000-0000-00000000cf05', 6000);
+  r := refinance_loan('00000000-0000-0000-0000-00000000cf41', 'balance', null, 0, 5, 12, 'monthly', null, 'x');
+  assert (r->>'new_principal')::numeric = 9000 and (r->>'carried_over_amount')::numeric = 9000, r::text;
+
+  -- Mora sumada (cuota 5 vencida hace 10 días: 75) y perdonada.
+  perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf42', '00000000-0000-0000-0000-00000000cf05', 6000);
+  update loan_installments set due_date = company_today(aa) - 10
+   where loan_id = '00000000-0000-0000-0000-00000000cf42' and installment_number = 5;
+  q := refinance_quote('loan', '00000000-0000-0000-0000-00000000cf42');
+  assert (q->>'late_fee_due')::numeric = 75, q::text;
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf42', 'capital', null, 0, 5, 12, 'monthly', null, 'x')$q$, '%mora%');
+  r := refinance_loan('00000000-0000-0000-0000-00000000cf42', 'capital', 'capitalize', 500, 5, 12, 'monthly', null, 'x');
+  assert (r->>'new_principal')::numeric = 6575 and (r->>'carried_over_amount')::numeric = 6075, r::text;
+  perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf43', '00000000-0000-0000-0000-00000000cf05', 6000);
+  update loan_installments set due_date = company_today(aa) - 10
+   where loan_id = '00000000-0000-0000-0000-00000000cf43' and installment_number = 5;
+  r := refinance_loan('00000000-0000-0000-0000-00000000cf43', 'capital', 'forgive', 0, 5, 12, 'monthly', null, 'x');
+  assert (r->>'new_principal')::numeric = 6000, r::text;
+  assert (select late_fee_amount = 75 and late_fee_action = 'forgive' from refinancings where loan_id = '00000000-0000-0000-0000-00000000cf43');
+
+  -- Primera cuota elegida.
+  perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf44', '00000000-0000-0000-0000-00000000cf05', 6000);
+  r := refinance_loan('00000000-0000-0000-0000-00000000cf44', 'capital', null, 0, 5, 3, 'weekly', company_today(aa) + 3, 'x');
+  assert (select array_agg(due_date order by installment_number) from loan_installments where loan_id = (r->>'new_loan_id')::uuid)
+       = array[company_today(aa) + 3, company_today(aa) + 10, company_today(aa) + 17], r::text;
+
+  -- Rechazos.
+  perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf45', '00000000-0000-0000-0000-00000000cf05', 6000);
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf45', 'capital', null, -1, 5, 12, 'monthly', null, 'x')$q$, '%adicional%');
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf45', 'capital', null, 0, 5, 12, 'monthly', current_date, 'x')$q$, '%primera cuota%');
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf45', 'capital', null, 0, 5, 12, 'monthly', null, '')$q$, '%motivo%');
+  perform pg_temp.prestamo('00000000-0000-0000-0000-00000000cf46', '00000000-0000-0000-0000-00000000cf05', 15000);
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf46', 'capital', null, 0, 5, 12, 'monthly', null, 'x')$q$, '%no está activo%');
+  assert not has_function_privilege('anon', 'public.refinance_loan(uuid,text,text,numeric,numeric,integer,text,date,text)', 'EXECUTE'), 'anon puede refinanciar préstamos';
+
+  -- Permisos: otra empresa no lo ve; un cajero de la empresa no puede.
+  perform set_config('request.jwt.claims', '{"sub":"cc56c633-4b6c-4a8e-a7e8-6ee3a1934566","role":"authenticated"}', true);
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf45', 'capital', null, 0, 5, 12, 'monthly', null, 'x')$q$, '%no encontrado%');
+  perform set_config('request.jwt.claims', '{"sub":"92381752-13b2-4f43-8b09-612647754599","role":"authenticated"}', true);
+  insert into profile_companies (profile_id, company_id, role)
+  values ('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566', aa, 'cashier')
+  on conflict do nothing;
+  update profiles set company_id = aa where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
+  perform set_config('request.jwt.claims', '{"sub":"cc56c633-4b6c-4a8e-a7e8-6ee3a1934566","role":"authenticated"}', true);
+  perform pg_temp.debe_fallar($q$select refinance_loan('00000000-0000-0000-0000-00000000cf45', 'capital', null, 0, 5, 12, 'monthly', null, 'x')$q$, '%administrador%');
   perform set_config('request.jwt.claims', '{"sub":"92381752-13b2-4f43-8b09-612647754599","role":"authenticated"}', true);
 end $$;
 
