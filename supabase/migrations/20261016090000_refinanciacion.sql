@@ -113,3 +113,143 @@ begin
   return new;
 end;
 $function$;
+
+-- ---------------------------------------------------------------------------
+-- 3. Cotización: lo que se debe hoy, separado en capital, interés futuro y mora
+-- ---------------------------------------------------------------------------
+-- El interés es add-on: cada cuota lleva capital e interés en la misma
+-- proporción, así que el capital pendiente es capital_del_plan × saldo ÷
+-- deuda_del_plan. "Plan" es el vigente: en un financiamiento ya refinanciado,
+-- las cuotas desde firstInstallment y el capital guardado en principal.
+--
+-- Interna: no revisa permisos. La usan refinance_quote (que sí los revisa) y
+-- las dos RPC de refinanciar, dentro de su misma transacción y con las filas
+-- ya bloqueadas.
+create or replace function public.refinance_quote_data(p_kind text, p_id uuid)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  v_sale      sales%rowtype;
+  v_fd        jsonb;
+  v_first     int;
+  v_all_debt  numeric;
+  v_principal numeric;
+  v_debt      numeric;
+  v_balance   numeric;
+  v_capital   numeric;
+  v_late      numeric;
+  v_new_fee   jsonb;
+begin
+  if p_kind = 'financing' then
+    select * into v_sale from sales where id = p_id for update;
+    if not found
+       or v_sale.cancelled_at is not null
+       or v_sale.payment_status::text <> 'in_financing'
+       or not sale_is_financed(v_sale.financing_details) then
+      raise exception 'Esta venta no tiene un financiamiento que refinanciar.';
+    end if;
+
+    v_fd    := v_sale.financing_details;
+    v_first := coalesce((v_fd->>'firstInstallment')::int, 1);
+
+    perform 1 from financing_installments where sale_id = p_id for update;
+
+    -- Capital del plan vigente. Un plan original no trae `principal`: es lo
+    -- que quedó debiendo después del abono inicial. Todas las ventas abiertas
+    -- traen downPayment (comprobado 2026-10-15); la otra vía es un respaldo.
+    select coalesce(sum(amount), 0) into v_all_debt
+      from financing_installments where sale_id = p_id;
+    v_principal := coalesce(
+      (v_fd->>'principal')::numeric,
+      v_sale.total - coalesce((v_fd->>'downPayment')::numeric,
+                              (v_fd->>'totalWithInterest')::numeric - v_all_debt));
+
+    select coalesce(sum(amount), 0), coalesce(sum(amount - paid_amount), 0)
+      into v_debt, v_balance
+      from financing_installments
+     where sale_id = p_id and installment_number >= v_first;
+
+    v_balance := round(v_balance, 2);
+    v_capital := case when v_debt > 0 then round(v_principal * v_balance / v_debt, 2) else 0 end;
+
+    -- La misma suma que cobra apply_payment_to_sale.
+    v_late := sale_late_fee_due(p_id);
+
+    -- La mora del plan nuevo: los ajustes vigentes, sucursal antes que
+    -- empresa, igual que before_sale_credit_checks al vender.
+    select jsonb_build_object(
+             'rate',      coalesce(b.late_fee_rate, c.late_fee_rate, 5),
+             'mode',      coalesce(b.late_fee_mode, c.late_fee_mode, 'once'),
+             'graceDays', coalesce(b.late_fee_grace_days, c.late_fee_grace_days, 0),
+             'maxRate',   coalesce(b.late_fee_max_rate, c.late_fee_max_rate, 0))
+      into v_new_fee
+      from companies c
+      left join branches b on b.id = v_sale.branch_id and b.company_id = c.id
+     where c.id = v_sale.company_id;
+
+    return jsonb_build_object(
+      'kind',              'financing',
+      'id',                v_sale.id,
+      'company_id',        v_sale.company_id,
+      'customer_id',       v_sale.customer_id,
+      'pending_balance',   v_balance,
+      'pending_capital',   v_capital,
+      'unearned_interest', v_balance - v_capital,
+      'late_fee_due',      v_late,
+      'plan_principal',    v_principal,
+      'plan_debt',         v_debt,
+      'first_installment', v_first,
+      'today',             company_today(v_sale.company_id),
+      'terms', jsonb_build_object(
+        'interestRate', coalesce((v_fd->>'interestRate')::numeric, 0),
+        'installments', coalesce((v_fd->>'installments')::int, 1),
+        'frequency',    coalesce(nullif(v_fd->>'frequency', ''), 'monthly'),
+        'interestMode', coalesce(nullif(v_fd->>'interestMode', ''), 'monthly_prorated')),
+      'new_late_fee', v_new_fee
+    );
+  end if;
+
+  raise exception 'Tipo no soportado.';
+end;
+$function$;
+
+revoke all on function public.refinance_quote_data(text, uuid) from public;
+revoke execute on function public.refinance_quote_data(text, uuid) from anon, authenticated;
+
+create or replace function public.refinance_quote(p_kind text, p_id uuid)
+ returns jsonb
+ language plpgsql
+ security definer
+ set search_path to 'public'
+as $function$
+declare
+  v_company uuid;
+begin
+  if not (is_company_admin() or is_super_admin()) then
+    raise exception 'Solo un administrador puede refinanciar.';
+  end if;
+
+  if p_kind = 'financing' then
+    select company_id into v_company from sales where id = p_id;
+    if v_company is null or (v_company <> current_company_id() and not is_super_admin()) then
+      raise exception 'Venta no encontrada.';
+    end if;
+  elsif p_kind = 'loan' then
+    select company_id into v_company from loans where id = p_id;
+    if v_company is null or (v_company <> current_company_id() and not is_super_admin()) then
+      raise exception 'Préstamo no encontrado.';
+    end if;
+  else
+    raise exception 'Tipo no soportado.';
+  end if;
+
+  return refinance_quote_data(p_kind, p_id);
+end;
+$function$;
+
+revoke all on function public.refinance_quote(text, uuid) from public;
+revoke execute on function public.refinance_quote(text, uuid) from anon;
+grant execute on function public.refinance_quote(text, uuid) to authenticated;
