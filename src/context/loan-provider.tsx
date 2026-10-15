@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Loan, LoanFrequency, LoanPaymentResult, PaymentMethod } from '@/lib/types';
+import type { Loan, LoanFrequency, LoanPaymentResult, PaymentMethod, VoidLoanPaymentResult } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToLoan, loanToRow, rowToLoanPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
@@ -21,6 +21,7 @@ interface LoanContextType {
   loans: Loan[];
   addLoan: (loan: NewLoanInput) => Promise<Loan>;
   payLoan: (loanId: string, amount: number, method: PaymentMethod, branchId?: string, notes?: string, reference?: string) => Promise<LoanPaymentResult>;
+  voidLoanPayment: (paymentId: string, reason: string) => Promise<VoidLoanPaymentResult>;
   reload: () => Promise<void>;
   loading: boolean;
 }
@@ -100,8 +101,25 @@ export function LoanProvider({ children }: { children: ReactNode }) {
     return result;
   };
 
+  // El abono no se borra: la RPC lo marca anulado y devuelve capital y mora a
+  // las cuotas exactas que los recibieron (guardadas en loan_payments.allocation).
+  const voidLoanPayment = async (paymentId: string, reason: string): Promise<VoidLoanPaymentResult> => {
+    const { data, error } = await supabase.rpc('void_loan_payment', {
+      p_payment_id: paymentId,
+      p_reason: reason,
+    });
+    if (error) throw error;
+    await load();
+    return {
+      paymentId: data.payment_id,
+      amount: Number(data.amount),
+      cashReturned: !!data.cash_returned,
+      remainingBalance: Number(data.remaining_balance ?? 0),
+    };
+  };
+
   return (
-    <LoanContext.Provider value={{ loans, addLoan, payLoan, reload: load, loading }}>
+    <LoanContext.Provider value={{ loans, addLoan, payLoan, voidLoanPayment, reload: load, loading }}>
       {children}
     </LoanContext.Provider>
   );
