@@ -484,4 +484,46 @@ begin
    where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
 end $$;
 
+-- == Pulido (20261016140000): recibo, tope de la primera cuota y cuotas descuadradas ==
+-- El recibo de un abono cuenta las cuotas del plan vigente, no las que cerró la
+-- refinanciación: 6,000 pagados cierran 4 cuotas, el plan nuevo de 12 empieza
+-- en la 5 y su primer abono de 800 es la cuota 1 de 12.
+do $$
+declare r jsonb;
+begin
+  perform pg_temp.venta_financiada('00000000-0000-0000-0000-00000000cf50', '00000000-0000-0000-0000-00000000cf5c', 6000);
+  perform refinance_financing('00000000-0000-0000-0000-00000000cf50', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x');
+  r := register_sale_payment('00000000-0000-0000-0000-00000000cf50', 800, 'transfer', '00000000-0000-0000-0000-0000000000b1', null, null);
+  assert (r->>'installments_paid')::int = 1 and (r->>'installments_total')::int = 12, r::text;
+
+  -- Sin refinanciar, igual que siempre: 7,500 pagan 5 de 10.
+  perform pg_temp.venta_financiada('00000000-0000-0000-0000-00000000cf51', '00000000-0000-0000-0000-00000000cf5c', 6000);
+  r := register_sale_payment('00000000-0000-0000-0000-00000000cf51', 1500, 'transfer', '00000000-0000-0000-0000-0000000000b1', null, null);
+  assert (r->>'installments_paid')::int = 5 and (r->>'installments_total')::int = 10, r::text;
+end $$;
+
+-- La primera cuota del plan nuevo, igual que al vender a plazos y que en
+-- préstamos: después de hoy y a no más de 90 días.
+do $$
+declare
+  aa constant uuid := '00000000-0000-0000-0000-0000000000aa';
+begin
+  perform pg_temp.venta_financiada('00000000-0000-0000-0000-00000000cf52', '00000000-0000-0000-0000-00000000cf5c', 6000);
+  perform pg_temp.debe_fallar($q$select refinance_financing('00000000-0000-0000-0000-00000000cf52', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', company_today('00000000-0000-0000-0000-0000000000aa') + 91, 'x')$q$, '%no más de 90 días%');
+  perform refinance_financing('00000000-0000-0000-0000-00000000cf52', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', company_today(aa) + 90, 'x');
+  assert (select due_date from financing_installments
+           where sale_id = '00000000-0000-0000-0000-00000000cf52' and installment_number = 5) = company_today(aa) + 90;
+end $$;
+
+-- Si las cuotas del plan vigente no suman lo que la venta dice que se debe, no
+-- se cotiza ni se refinancia sobre esos números.
+do $$
+begin
+  perform pg_temp.venta_financiada('00000000-0000-0000-0000-00000000cf53', '00000000-0000-0000-0000-00000000cf5c', 6000);
+  update financing_installments set amount = amount + 100
+   where sale_id = '00000000-0000-0000-0000-00000000cf53' and installment_number = 10;
+  perform pg_temp.debe_fallar($q$select refinance_quote('financing', '00000000-0000-0000-0000-00000000cf53')$q$, '%no cuadran%');
+  perform pg_temp.debe_fallar($q$select refinance_financing('00000000-0000-0000-0000-00000000cf53', 'capital', null, 5, 12, 'monthly', 'monthly_prorated', null, 'x')$q$, '%no cuadran%');
+end $$;
+
 select 'ok' as resultado;

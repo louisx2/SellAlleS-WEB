@@ -19,7 +19,7 @@ import { formatCurrency } from '@/lib/utils';
 import {
   FREQUENCY_LABEL, INTEREST_MODE_LABEL, rateLabel, type InterestMode, type PaymentFrequency,
 } from '@/lib/frequency';
-import { parseYmd, toYmd } from '@/lib/financing-schedule';
+import { MAX_FIRST_DUE_DAYS, parseYmd, toYmd } from '@/lib/financing-schedule';
 import { fetchRefinanceQuote, previewRefinancePlan, refinanceBase } from '@/lib/refinance';
 import { RefinanceQuoteSummary } from '@/components/refinance/refinance-quote-summary';
 import { RefinanceOptions } from '@/components/refinance/refinance-options';
@@ -85,9 +85,11 @@ export function RefinanceFinancingDialog({ sale, open, onOpenChange, onRefinance
   const numericRate = Number(rate);
   const isRateInvalid = rate === '' || Number.isNaN(numericRate) || numericRate < 0 || numericRate > 100;
   const isInstallmentsInvalid = installments === '' || !Number.isInteger(n) || n < 1 || n > MAX_INSTALLMENTS;
-  // La primera cuota, si se elige, tiene que caer después de hoy (hoy de la empresa).
+  // La primera cuota, si se elige, tiene que caer después de hoy (hoy de la
+  // empresa) y a no más de 90 días, igual que al vender a plazos.
   const minFirstDue = quote ? toYmd(addDays(parseYmd(quote.today), 1)) : '';
-  const isFirstDueInvalid = !!firstDue && !!minFirstDue && firstDue < minFirstDue;
+  const maxFirstDue = quote ? toYmd(addDays(parseYmd(quote.today), MAX_FIRST_DUE_DAYS)) : '';
+  const isFirstDueInvalid = !!firstDue && !!minFirstDue && (firstDue < minFirstDue || firstDue > maxFirstDue);
 
   const amounts = quote ? refinanceBase(quote, base, lateFee) : null;
   const plan = amounts && !isRateInvalid && !isInstallmentsInvalid
@@ -237,6 +239,7 @@ export function RefinanceFinancingDialog({ sale, open, onOpenChange, onRefinance
                   id="refi-first-due"
                   type="date"
                   min={minFirstDue}
+                  max={maxFirstDue}
                   value={firstDue}
                   onChange={(e) => setFirstDue(e.target.value)}
                 />
@@ -244,7 +247,9 @@ export function RefinanceFinancingDialog({ sale, open, onOpenChange, onRefinance
                   Vacío = un período después de hoy; las demás siguen la frecuencia.
                 </p>
                 {isFirstDueInvalid && (
-                  <p className="text-xs text-destructive">La primera cuota tiene que caer después de hoy.</p>
+                  <p className="text-xs text-destructive">
+                    La primera cuota tiene que caer después de hoy y a no más de {MAX_FIRST_DUE_DAYS} días.
+                  </p>
                 )}
               </div>
 

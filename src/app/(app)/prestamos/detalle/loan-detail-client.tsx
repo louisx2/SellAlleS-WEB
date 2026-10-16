@@ -6,12 +6,12 @@ import { useLoans } from '@/context/loan-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
-import { rowToLoanPayment } from '@/lib/supabase/mappers';
+import { rowToLoanPayment, rowToRefinancing } from '@/lib/supabase/mappers';
 import { cn, formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
-import type { LoanPayment, PaymentMethod } from '@/lib/types';
+import type { LoanPayment, PaymentMethod, Refinancing } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -35,6 +35,18 @@ const INSTALLMENT_STATUS: Record<string, { label: string; variant: 'default' | '
   pending: { label: 'Pendiente', variant: 'outline' },
 };
 
+// Por qué se refinanció, quién y cuándo, y qué se hizo con la mora: va al pie
+// de los avisos que enlazan el préstamo viejo con el nuevo.
+function RefinancingNote({ refinancing: r }: { refinancing: Refinancing }) {
+  return (
+    <p className="basis-full text-muted-foreground">
+      Motivo: {r.reason} · {r.createdByName ?? 'Usuario desconocido'}, {r.createdAt.toLocaleString('es-DO')}
+      {r.lateFeeAmount > 0 && (
+        <> · mora de {formatCurrency(r.lateFeeAmount)} {r.lateFeeAction === 'forgive' ? 'perdonada' : 'sumada al capital'}</>
+      )}
+    </p>
+  );
+}
 
 export default function LoanDetailClient() {
   // Ruta estática con query param (?id=): más robusta que una ruta dinámica en
@@ -53,6 +65,7 @@ export default function LoanDetailClient() {
   const [ticketOpen, setTicketOpen] = useState(false);
   const [voiding, setVoiding] = useState<LoanPayment | null>(null);
   const [isRefinanceOpen, setRefinanceOpen] = useState(false);
+  const [refinancings, setRefinancings] = useState<Refinancing[]>([]);
 
   const loan = loans.find((l) => l.id === loanId);
   // Anular un abono o refinanciar es cosa de administradores: las RPC lo exigen igual.
@@ -84,6 +97,24 @@ export default function LoanDetailClient() {
   }, [loanId]);
 
   useEffect(() => { loadPayments(); }, [loadPayments, loans]);
+
+  // Las refinanciaciones que tocan este préstamo: la que lo cerró (loan_id) y
+  // la que lo creó (new_loan_id). La policy de `refinancings` es solo para
+  // admins, igual que en el detalle del financiamiento.
+  const loadRefinancings = useCallback(async () => {
+    if (!loanId || !isAdmin) return;
+    const { data } = await supabase
+      .from('refinancings')
+      .select('*')
+      .or(`loan_id.eq.${loanId},new_loan_id.eq.${loanId}`);
+    if (data) setRefinancings(data.map(rowToRefinancing));
+  }, [loanId, isAdmin]);
+
+  useEffect(() => { loadRefinancings(); }, [loadRefinancings, loans]);
+
+  // Se busca por el id actual: una respuesta tardía de otro préstamo no encaja.
+  const refinancingOut = refinancings.find((r) => r.loanId === loanId);
+  const refinancingIn = refinancings.find((r) => r.newLoanId === loanId);
 
   // Recién creado (?nuevo=1): abrir el ticket automáticamente una vez que el
   // préstamo (con su cronograma) ya cargó en el provider. Se lee la URL en el
@@ -189,6 +220,7 @@ export default function LoanDetailClient() {
                   Ver préstamo nuevo
                 </Button>
               )}
+              {refinancingOut && <RefinancingNote refinancing={refinancingOut} />}
             </div>
           )}
           {loan.refinancedFromId && (
@@ -205,6 +237,7 @@ export default function LoanDetailClient() {
                   Ver préstamo anterior
                 </Button>
               )}
+              {refinancingIn && <RefinancingNote refinancing={refinancingIn} />}
             </div>
           )}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
