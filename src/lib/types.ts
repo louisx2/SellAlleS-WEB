@@ -244,6 +244,8 @@ export type CartItem = {
   // del producto. Es lo que permite que el margen histórico no cambie cuando
   // se le edita el costo al producto.
   cost?: number;
+  // Línea de venta rápida: artículo fuera de inventario, con producto sintético (id vacío).
+  isQuick?: boolean;
 };
 
 export type Cart = {
