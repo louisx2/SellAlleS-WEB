@@ -69,12 +69,14 @@ export default function QuotesPage() {
   const loadIntoCart = (quote: Quote) => {
     const items: CartItem[] = [];
     const missing: string[] = [];
+    let quickBlocked = false;
 
     for (const it of quote.items) {
       // Un artículo rápido no está en el catálogo: se reconstruye desde la línea
       // cotizada. Sin módulo o sin permiso no se carga, para no fallar al cobrar.
       if (it.isQuick) {
         if (!canQuickSell) {
+          quickBlocked = true;
           missing.push(`${it.product.name} (venta rápida desactivada)`);
           continue;
         }
@@ -108,7 +110,11 @@ export default function QuotesPage() {
     if (items.length === 0) {
       toast({
         title: 'No se pudo cargar',
-        description: 'Ninguno de los productos cotizados existe ya en el inventario.',
+        // Con líneas rápidas bloqueadas el motivo no es el inventario: se listan
+        // para que el cajero sepa qué quedó fuera y por qué.
+        description: quickBlocked
+          ? `No se cargaron: ${missing.join(', ')}.`
+          : 'Ninguno de los productos cotizados existe ya en el inventario.',
         variant: 'destructive',
       });
       return;

@@ -428,8 +428,6 @@ export const useCart = () => {
   const totalLines = activeCart?.items.length ?? 0;
 
   const totalDiscount = activeCart?.items.reduce((acc, item) => {
-    // Un artículo rápido no tiene precio de lista contra el cual descontar.
-    if (item.isQuick) return acc;
     const price = getEffectiveUnitPrice(item, selectedCustomer);
     if (price < item.product.price) {
       return acc + (item.product.price - price) * item.quantity;
