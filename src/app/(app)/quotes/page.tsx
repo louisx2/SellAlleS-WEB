@@ -19,6 +19,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useQuotes } from '@/context/quotes-provider';
 import { useProducts } from '@/context/product-provider';
 import { openQuoteCart } from '@/context/cart-provider';
+import { useCanQuickSell } from '@/hooks/use-can-quick-sell';
+import { buildQuickCartItem } from '@/lib/quick-sales';
 import { formatCurrency } from '@/lib/utils';
 import { formatQtyCompact } from '@/lib/units';
 import type { Quote, QuoteStatus, CartItem } from '@/lib/types';
@@ -47,6 +49,7 @@ export default function QuotesPage() {
   const { toast } = useToast();
   const { quotes, updateQuoteStatus, reload, loading } = useQuotes();
   const { products } = useProducts();
+  const canQuickSell = useCanQuickSell();
   const [detail, setDetail] = useState<Quote | null>(null);
 
   // Refrescar al entrar (una conversión pudo ocurrir desde el POS).
@@ -68,6 +71,25 @@ export default function QuotesPage() {
     const missing: string[] = [];
 
     for (const it of quote.items) {
+      // Un artículo rápido no está en el catálogo: se reconstruye desde la línea
+      // cotizada. Sin módulo o sin permiso no se carga, para no fallar al cobrar.
+      if (it.isQuick) {
+        if (!canQuickSell) {
+          missing.push(`${it.product.name} (venta rápida desactivada)`);
+          continue;
+        }
+        items.push(buildQuickCartItem(
+          {
+            name: it.product.name,
+            price: it.customPrice ?? it.product.price,
+            quantity: it.quantity,
+            itbis: it.product.itbis,
+            cost: it.cost,
+          },
+          `item-${Date.now()}-${Math.random()}`,
+        ));
+        continue;
+      }
       const product = products.find((p) => p.id === it.product.id);
       if (!product) {
         missing.push(it.product.name);

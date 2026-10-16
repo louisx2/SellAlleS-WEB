@@ -4,6 +4,7 @@ import { createContext, useEffect, ReactNode, useContext } from 'react';
 import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart, Coupon, NcfType } from '@/lib/types';
 import { ITBIS_RATE, GENERIC_CUSTOMER, round2 } from '@/lib/utils';
 import { roundQty, normalizeQty, formatQuantity, unitAllowsDecimals } from '@/lib/units';
+import { buildQuickCartItem, quickUnitPrice, type QuickItemInput } from '@/lib/quick-sales';
 import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
 import { create, useStore } from 'zustand';
@@ -20,6 +21,7 @@ interface CartState {
 
 interface CartActions {
   addItem: (product: Product) => void;
+  addQuickItem: (input: QuickItemInput) => void;
   removeItem: (cartItemId: string) => void;
   updateQuantity: (cartItemId: string, quantity: number) => void;
   setCustomPrice: (cartItemId: string, price: number | undefined) => void;
@@ -40,6 +42,9 @@ export const getGenericCustomer = (): Customer => GENERIC_CUSTOMER;
 // Precio unitario efectivo: el override manual del cajero siempre gana; si no
 // hay override, se aplica el % de descuento del cliente seleccionado.
 export const getEffectiveUnitPrice = (item: CartItem, customer?: Customer): number => {
+  // Artículo rápido: el precio tecleado es el final, sin precio por mayor ni
+  // descuento del cliente (no hay producto del catálogo del que partir).
+  if (item.isQuick) return quickUnitPrice(item);
   if (item.customPrice !== undefined) return item.customPrice;
   
   // 1. Determinar precio base (por mayor si cumple la cantidad mínima, si no, al detalle)
@@ -135,6 +140,16 @@ const cartStore = create<CartStore>()(
         });
         return { carts: newCarts };
       }),
+
+      // Siempre línea nueva: `addItem` fusiona por `product.id`, y los artículos
+      // rápidos comparten el id vacío, así que dos distintos se juntarían.
+      addQuickItem: (input) => set(state => ({
+        carts: state.carts.map(cart =>
+          cart.id === state.activeCartId
+            ? { ...cart, items: [...cart.items, buildQuickCartItem(input, `item-${Date.now()}-${Math.random()}`)] }
+            : cart
+        ),
+      })),
 
       removeItem: (cartItemId) => set(state => ({
         carts: state.carts.map(cart =>
@@ -413,6 +428,8 @@ export const useCart = () => {
   const totalLines = activeCart?.items.length ?? 0;
 
   const totalDiscount = activeCart?.items.reduce((acc, item) => {
+    // Un artículo rápido no tiene precio de lista contra el cual descontar.
+    if (item.isQuick) return acc;
     const price = getEffectiveUnitPrice(item, selectedCustomer);
     if (price < item.product.price) {
       return acc + (item.product.price - price) * item.quantity;

@@ -202,6 +202,10 @@ export function SalesProvider({ children }: { children: ReactNode }) {
         custom_price: item.customPrice ?? null,
         itbis: item.product.itbis,
         unit: item.product.unit,
+        // Línea rápida: la base la valida (sin producto, descripción, precio) y
+        // toma el costo de aquí, porque no hay producto del cual leerlo.
+        is_quick: !!item.isQuick,
+        cost: item.isQuick ? item.cost ?? null : null,
       })),
     });
     if (error) throw error;

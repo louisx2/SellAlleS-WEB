@@ -335,11 +335,15 @@ const rowToCartItem = (i: any): CartItem => ({
   // Costo real de esta venta. null (ventas viejas, anteriores a la columna) se
   // deja en undefined para distinguirlo de un costo que de verdad era 0.
   cost: i.cost != null ? Number(i.cost) : undefined,
+  // Marca de la base: `product_id` nulo no basta (el legacy trae miles de líneas
+  // sin producto emparejar que no son ventas rápidas).
+  isQuick: !!i.is_quick,
   product: {
     id: i.product_id ?? '', name: i.product_name, price: Number(i.price), cost: 0,
     itbis: !!i.itbis, image: '', stock: 0, code: '', unit: normalizeUnitCode(i.unit),
-    // Línea ya vendida: el inventario no se recalcula desde aquí.
-    tracksStock: true,
+    // Línea ya vendida: el inventario no se recalcula desde aquí. Un artículo
+    // rápido nunca lo controló.
+    tracksStock: !i.is_quick,
   },
 });
 
@@ -535,11 +539,15 @@ const rowToQuoteItem = (i: any): CartItem => ({
   cartItemId: i.id,
   quantity: Number(i.quantity),
   customPrice: i.custom_price != null ? Number(i.custom_price) : undefined,
+  // Costo cotizado de un artículo rápido; nulo (sin costo) se deja en undefined.
+  cost: i.cost != null ? Number(i.cost) : undefined,
+  isQuick: !!i.is_quick,
   product: {
     id: i.product_id ?? '', name: i.product_name, price: Number(i.price), cost: 0,
     itbis: !!i.itbis, image: '', stock: 0, code: '', unit: normalizeUnitCode(i.unit),
-    // Línea ya vendida: el inventario no se recalcula desde aquí.
-    tracksStock: true,
+    // Línea ya vendida: el inventario no se recalcula desde aquí. Un artículo
+    // rápido nunca lo controló.
+    tracksStock: !i.is_quick,
   },
 });
 
@@ -572,6 +580,10 @@ export const quoteItemToRow = (item: CartItem, quoteId: string) => ({
   quantity: item.quantity, price: item.product.price,
   custom_price: item.customPrice ?? null, itbis: item.product.itbis,
   unit: item.product.unit ?? DEFAULT_UNIT_CODE,
+  // Mismo criterio que `addSale`: el costo solo se guarda en líneas rápidas, para
+  // que al convertir la cotización en venta no se pierda.
+  is_quick: !!item.isQuick,
+  cost: item.isQuick ? item.cost ?? null : null,
 });
 
 export const saleItemToRow = (item: CartItem, saleId: string) => ({
