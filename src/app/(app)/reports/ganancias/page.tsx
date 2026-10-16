@@ -4,8 +4,8 @@ import * as React from 'react';
 import { format, subDays } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { DateRange } from 'react-day-picker';
-import { Calendar as CalendarIcon, DollarSign, TrendingUp, ArrowDownRight, ArrowUpRight, Percent, Store, FileText } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import { Calendar as CalendarIcon, DollarSign, TrendingUp, ArrowDownRight, ArrowUpRight, Percent, Store, FileText, FileWarning } from 'lucide-react';
+import { cn, ITBIS_RATE } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -16,6 +16,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { formatCurrency } from '@/lib/utils';
 import { formatQty } from '@/lib/units';
 import type { CartItem } from '@/lib/types';
+import { isUncostedQuick, lineBase, quickUnitPrice, topProductKey } from '@/lib/quick-sales';
 import { useSales } from '@/context/sales-provider';
 import { useExpenses } from '@/context/expense-provider';
 import { useProducts } from '@/context/product-provider';
@@ -124,10 +125,21 @@ export default function GananciasReportPage() {
   const totals = React.useMemo(() => {
     let subtotalRevenue = 0; // Excluimos ITBIS de los ingresos para la ganancia pura
     let totalCogs = 0; // Cost of Goods Sold (Costo de Compra de lo vendido)
+    // Ventas rápidas sin costo: no hay con qué calcular su ganancia, así que salen
+    // del ingreso (su base sin ITBIS) y no suman costo. Contarlas como ingreso con
+    // costo 0 inflaría la ganancia y el margen. Se acumulan aparte para el aviso.
+    let uncostedQuickCount = 0;
+    let uncostedQuickAmount = 0;
 
     filteredSales.forEach((sale) => {
       subtotalRevenue += sale.subtotal;
       (sale.items ?? []).forEach((item) => {
+        if (isUncostedQuick(item)) {
+          subtotalRevenue -= lineBase(item, !!sale.itbisIncluded, ITBIS_RATE);
+          uncostedQuickCount += 1;
+          uncostedQuickAmount += item.quantity * quickUnitPrice(item);
+          return;
+        }
         totalCogs += item.quantity * costoDeLinea(item);
       });
     });
@@ -144,6 +156,8 @@ export default function GananciasReportPage() {
       expenses: totalExpensesSum,
       netProfit,
       margin: netMarginPercent,
+      uncostedQuickCount,
+      uncostedQuickAmount,
     };
   }, [filteredSales, filteredExpenses, costoDeLinea]);
 
@@ -156,14 +170,21 @@ export default function GananciasReportPage() {
       if (!dailyData[day]) {
         dailyData[day] = { name: day, Ventas: 0, Gastos: 0, Ganancia: 0 };
       }
-      dailyData[day].Ventas += sale.subtotal;
-      
+
+      // Misma regla que en los totales: las rápidas sin costo no cuentan como
+      // ingreso ni como costo.
+      let saleRevenue = sale.subtotal;
       let saleCogs = 0;
       (sale.items ?? []).forEach((item) => {
+        if (isUncostedQuick(item)) {
+          saleRevenue -= lineBase(item, !!sale.itbisIncluded, ITBIS_RATE);
+          return;
+        }
         saleCogs += item.quantity * costoDeLinea(item);
       });
+      dailyData[day].Ventas += saleRevenue;
       // Ganancia bruta diaria estimada
-      dailyData[day].Ganancia += (sale.subtotal - saleCogs);
+      dailyData[day].Ganancia += (saleRevenue - saleCogs);
     });
 
     // Añadir gastos a cada día correspondiente
@@ -193,9 +214,13 @@ export default function GananciasReportPage() {
 
     filteredSales.forEach((sale) => {
       (sale.items ?? []).forEach((item) => {
+        // Sin costo no hay rentabilidad que mostrar: van en el aviso de arriba.
+        if (isUncostedQuick(item)) return;
         // Las líneas de productos ya borrados no tienen product_id: se agrupan
-        // por nombre para que no caigan todas juntas bajo una sola fila.
-        const pId = item.product.id || `sin-id:${item.product.name}`;
+        // por nombre para que no caigan todas juntas bajo una sola fila. Las
+        // rápidas con costo se agrupan por su descripción normalizada, como en
+        // Más vendidos, para que "Cable" y "cable " sean una sola fila.
+        const pId = item.isQuick ? topProductKey(item) : item.product.id || `sin-id:${item.product.name}`;
         const pName = item.product.name;
         const pCost = costoDeLinea(item);
         const itemPrice = item.customPrice ?? item.product.price;
@@ -297,6 +322,15 @@ export default function GananciasReportPage() {
           </Popover>
         </div>
       </div>
+
+      {totals.uncostedQuickCount > 0 && (
+        <div className="rounded-md border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-4">
+          <div className="flex items-center gap-2 font-medium text-amber-800 dark:text-amber-300">
+            <FileWarning className="h-4 w-4" />
+            Ventas rápidas sin costo: {totals.uncostedQuickCount} línea{totals.uncostedQuickCount === 1 ? '' : 's'} por {formatCurrency(totals.uncostedQuickAmount)}, fuera del cálculo de ganancia
+          </div>
+        </div>
+      )}
 
       {/* --- KPIs en fila --- */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">

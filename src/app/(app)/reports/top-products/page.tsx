@@ -6,8 +6,10 @@ import { useSales } from '@/context/sales-provider';
 import { useProducts } from '@/context/product-provider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
 import { formatQuantity, roundQty } from '@/lib/units';
+import { topProductKey } from '@/lib/quick-sales';
 import { BarChart } from 'lucide-react';
 import { ExportButton } from '@/components/reports/export-button';
 import { SalesChart } from '@/components/reports/sales-chart';
@@ -23,13 +25,28 @@ export default function TopProductsReportPage() {
     // y no un "12.5" suelto. Ojo: el ranking suma cantidades de unidades
     // distintas, así que compara libras con cajas; ordenar por ingreso sería lo
     // correcto, mostrar la unidad al menos lo hace evidente.
-    const productSales = new Map<string, { quantity: number; revenue: number; unit?: string }>();
+    //
+    // `name` es el de la primera línea que se vio: las rápidas no tienen producto
+    // de catálogo y el reporte las nombra por lo que se escribió al venderlas.
+    const productSales = new Map<string, { name: string; isQuick: boolean; quantity: number; revenue: number; unit?: string }>();
 
     sales.forEach(sale => {
       sale.items.forEach(item => {
-        const currentSales = productSales.get(item.product.id) || { quantity: 0, revenue: 0, unit: item.product.unit };
+        // Una rápida se agrupa por su descripción normalizada (`rapido:cable usb`).
+        // Las líneas sin producto emparejado (importadas del legacy) también
+        // llegan sin id: se agrupan por nombre para que no se mezclen todas en
+        // una sola fila con el nombre de la primera.
+        const key = topProductKey(item) || `sin-id:${item.product.name}`;
+        const currentSales = productSales.get(key) || {
+          name: item.product.name,
+          isQuick: !!item.isQuick,
+          quantity: 0,
+          revenue: 0,
+          unit: item.product.unit,
+        };
         const price = item.customPrice ?? item.product.price;
-        productSales.set(item.product.id, {
+        productSales.set(key, {
+          ...currentSales,
           quantity: roundQty(currentSales.quantity + item.quantity),
           revenue: currentSales.revenue + (price * item.quantity),
           unit: currentSales.unit ?? item.product.unit,
@@ -38,10 +55,13 @@ export default function TopProductsReportPage() {
     });
     
     return Array.from(productSales.entries())
-      .map(([productId, data]) => {
-        const product = products.find(p => p.id === productId);
+      .map(([key, { name, ...data }]) => {
+        // El nombre del catálogo manda si el producto existe (puede haberse
+        // renombrado desde la venta); si no, el que quedó en la línea.
+        const product = products.find(p => p.id === key);
         return {
-          productName: product?.name || 'Producto Desconocido',
+          key,
+          productName: product?.name || name,
           ...data,
         };
       })
@@ -97,9 +117,12 @@ export default function TopProductsReportPage() {
             <TableBody>
               {topProducts.length > 0 ? (
                 topProducts.map((p, index) => (
-                  <TableRow key={p.productName}>
+                  <TableRow key={p.key}>
                     <TableCell className="font-medium">{index + 1}</TableCell>
-                    <TableCell>{p.productName}</TableCell>
+                    <TableCell>
+                      {p.productName}
+                      {p.isQuick && <Badge variant="outline" className="ml-2 text-xs">Rápida</Badge>}
+                    </TableCell>
                     <TableCell className="text-right font-bold">{formatQuantity(p.quantity, p.unit)}</TableCell>
                     <TableCell className="text-right">{formatCurrency(p.revenue)}</TableCell>
                   </TableRow>

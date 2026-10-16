@@ -79,6 +79,7 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'compras-606', label: 'Compras (Formato 606)' },
   { slug: 'ventas-607', label: 'Ventas (Formato 607)' },
   { slug: 'anulados-608', label: 'NCF Anulados (Formato 608)' },
+  { slug: 'ventas-rapidas', label: 'Ventas Rápidas' },
 ];
 
 // Red de seguridad: si por algún motivo no aparece la fila del rol de

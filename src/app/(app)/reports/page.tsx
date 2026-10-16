@@ -12,8 +12,10 @@ import { useBranches } from '@/context/branch-provider';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatQty } from '@/lib/units';
+import { isReportVisible, unionPermissions } from '@/lib/permissions';
+import { isUncostedQuick, lineBase } from '@/lib/quick-sales';
 import { 
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Legend 
 } from 'recharts';
@@ -46,6 +48,18 @@ export default function ReportsDashboardPage() {
   const hasFinancing = isModuleEnabled('financing');
   const hasPrestamos = isModuleEnabled('prestamos');
 
+  // El reporte de Ventas Rápidas se muestra con el módulo encendido y solo a quien
+  // su rol deja verlo. Los permisos se unen igual que en el menú lateral
+  // (authed-layout): el rol de la sucursal más los roles adicionales.
+  const effectivePermissions = React.useMemo(
+    () => unionPermissions([
+      { permissions: appUser?.baseRolePermissions },
+      ...(appUser?.customRoles ?? []),
+    ]),
+    [appUser?.baseRolePermissions, appUser?.customRoles],
+  );
+  const showQuickSalesReport = isModuleEnabled('quick-sales') && isReportVisible(effectivePermissions, 'ventas-rapidas');
+
   // --- Filtrado por Sucursal (las ventas anuladas no cuentan como ingreso) ---
   const filteredSales = React.useMemo(() => {
     const active = allSales.filter((s) => !s.cancelledAt);
@@ -77,8 +91,15 @@ export default function ReportsDashboardPage() {
 
     // 2. Costo de venta y Ganancia Estimada
     let totalCogs = 0;
+    // Base (sin ITBIS) de las ventas rápidas sin costo: no se puede calcular su
+    // ganancia, así que salen del ingreso en vez de contarse como ganancia pura.
+    let uncostedQuickBase = 0;
     filteredSales.forEach((sale) => {
       (sale.items ?? []).forEach((item) => {
+        if (isUncostedQuick(item)) {
+          uncostedQuickBase += lineBase(item, !!sale.itbisIncluded, ITBIS_RATE);
+          return;
+        }
         // Manda el costo congelado en la venta; solo si la línea no lo trae se
         // usa el del catálogo, que además solo tiene los productos activos (un
         // producto archivado o borrado caería en 0 y regalaría margen).
@@ -87,7 +108,7 @@ export default function ReportsDashboardPage() {
       });
     });
     const subtotalRevenue = filteredSales.reduce((sum, s) => sum + s.subtotal, 0);
-    const grossProfit = subtotalRevenue - totalCogs;
+    const grossProfit = subtotalRevenue - uncostedQuickBase - totalCogs;
 
     // 3. Gastos
     const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -389,6 +410,20 @@ export default function ReportsDashboardPage() {
               </CardHeader>
             </Card>
           </Link>
+
+          {showQuickSalesReport && (
+            <Link href="/reports/ventas-rapidas">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold">Ventas Rápidas</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Artículos fuera del inventario y su costo</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
           {hasSales && (
             <Link href="/reports/anulados">
