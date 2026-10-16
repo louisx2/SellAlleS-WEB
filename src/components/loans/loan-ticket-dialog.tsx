@@ -51,14 +51,44 @@ function TicketBody({ loan }: { loan: Loan }) {
           <span>Monto Prestado:</span>
           <span>{formatCurrency(loan.principal)}</span>
         </div>
-        <div className="flex justify-between text-xs">
-          <span>Interés ({loan.interestRate}% mensual):</span>
-          <span>{formatCurrency(interest)}</span>
-        </div>
-        <div className="flex justify-between text-xs font-semibold">
-          <span>Total a pagar:</span>
-          <span>{formatCurrency(loan.totalWithInterest)}</span>
-        </div>
+        {/* Refinanciación: el capital no es todo dinero nuevo. */}
+        {loan.refinancedFromId && (
+          <>
+            <div className="flex justify-between text-xs">
+              <span>Saldo anterior:</span>
+              <span>{formatCurrency(loan.carriedOverAmount)}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span>Entregado:</span>
+              <span>{formatCurrency(loan.principal - loan.carriedOverAmount)}</span>
+            </div>
+          </>
+        )}
+        {loan.status === 'refinanced' ? (
+          // Cerrado con total = pagado: el "interés" saldría negativo. Lo que
+          // vale aquí es que se cerró y cuánto se llegó a pagar.
+          <>
+            <div className="flex justify-between text-xs font-semibold uppercase">
+              <span>Refinanciado:</span>
+              <span>su saldo pasó a un préstamo nuevo</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span>Pagado:</span>
+              <span>{formatCurrency(loan.amountPaid)}</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex justify-between text-xs">
+              <span>Interés ({loan.interestRate}% mensual):</span>
+              <span>{formatCurrency(interest)}</span>
+            </div>
+            <div className="flex justify-between text-xs font-semibold">
+              <span>Total a pagar:</span>
+              <span>{formatCurrency(loan.totalWithInterest)}</span>
+            </div>
+          </>
+        )}
         <div className="flex justify-between text-xs">
           <span>Plan:</span>
           <span>{loan.installmentsCount} cuotas · {FREQUENCY_LABEL[loan.paymentFrequency]}</span>

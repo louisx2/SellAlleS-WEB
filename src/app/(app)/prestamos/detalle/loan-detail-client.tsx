@@ -6,12 +6,12 @@ import { useLoans } from '@/context/loan-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
-import { rowToLoanPayment } from '@/lib/supabase/mappers';
+import { rowToLoanPayment, rowToRefinancing } from '@/lib/supabase/mappers';
 import { cn, formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
-import type { LoanPayment, PaymentMethod } from '@/lib/types';
+import type { LoanPayment, PaymentMethod, Refinancing } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,7 +20,8 @@ import { DialogTrigger } from '@/components/ui/dialog';
 import { RegisterLoanPaymentDialog } from '@/components/loans/register-loan-payment-dialog';
 import { LoanTicketDialog } from '@/components/loans/loan-ticket-dialog';
 import { VoidLoanPaymentDialog } from '@/components/loans/void-loan-payment-dialog';
-import { ArrowLeft, DollarSign, Printer, Undo2 } from 'lucide-react';
+import { RefinanceLoanDialog } from '@/components/loans/refinance-loan-dialog';
+import { ArrowLeft, DollarSign, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -34,6 +35,18 @@ const INSTALLMENT_STATUS: Record<string, { label: string; variant: 'default' | '
   pending: { label: 'Pendiente', variant: 'outline' },
 };
 
+// Por qué se refinanció, quién y cuándo, y qué se hizo con la mora: va al pie
+// de los avisos que enlazan el préstamo viejo con el nuevo.
+function RefinancingNote({ refinancing: r }: { refinancing: Refinancing }) {
+  return (
+    <p className="basis-full text-muted-foreground">
+      Motivo: {r.reason} · {r.createdByName ?? 'Usuario desconocido'}, {r.createdAt.toLocaleString('es-DO')}
+      {r.lateFeeAmount > 0 && (
+        <> · mora de {formatCurrency(r.lateFeeAmount)} {r.lateFeeAction === 'forgive' ? 'perdonada' : 'sumada al capital'}</>
+      )}
+    </p>
+  );
+}
 
 export default function LoanDetailClient() {
   // Ruta estática con query param (?id=): más robusta que una ruta dinámica en
@@ -51,10 +64,25 @@ export default function LoanDetailClient() {
   const [payments, setPayments] = useState<LoanPayment[]>([]);
   const [ticketOpen, setTicketOpen] = useState(false);
   const [voiding, setVoiding] = useState<LoanPayment | null>(null);
+  const [isRefinanceOpen, setRefinanceOpen] = useState(false);
+  const [refinancings, setRefinancings] = useState<Refinancing[]>([]);
 
   const loan = loans.find((l) => l.id === loanId);
-  // Anular un abono es cosa de administradores: la RPC lo exige igual.
+  // Anular un abono o refinanciar es cosa de administradores: las RPC lo exigen igual.
   const isAdmin = appUser?.role === 'admin';
+  // Una refinanciación enlaza dos préstamos: el viejo queda cerrado y el nuevo
+  // apunta a él con refinancedFromId.
+  const refinancedTo = loan ? loans.find((l) => l.refinancedFromId === loan.id) : undefined;
+  const refinancedFrom = loan?.refinancedFromId ? loans.find((l) => l.id === loan.refinancedFromId) : undefined;
+
+  // El id se lee de la URL solo al montar, así que pasar a otro préstamo de
+  // esta misma ruta (el nuevo tras refinanciar, o el viejo desde el nuevo) se
+  // hace aquí: con un Link la pantalla seguiría mostrando el anterior.
+  const goToLoan = (id: string, openTicket = false) => {
+    window.history.replaceState(null, '', `/prestamos/detalle?id=${id}`);
+    setLoanId(id);
+    setTicketOpen(openTicket);
+  };
 
   // Historial completo, anulados incluidos: se muestran tachados con su motivo.
   // Se refresca cuando el provider recarga los préstamos (tras abonar o anular).
@@ -69,6 +97,24 @@ export default function LoanDetailClient() {
   }, [loanId]);
 
   useEffect(() => { loadPayments(); }, [loadPayments, loans]);
+
+  // Las refinanciaciones que tocan este préstamo: la que lo cerró (loan_id) y
+  // la que lo creó (new_loan_id). La policy de `refinancings` es solo para
+  // admins, igual que en el detalle del financiamiento.
+  const loadRefinancings = useCallback(async () => {
+    if (!loanId || !isAdmin) return;
+    const { data } = await supabase
+      .from('refinancings')
+      .select('*')
+      .or(`loan_id.eq.${loanId},new_loan_id.eq.${loanId}`);
+    if (data) setRefinancings(data.map(rowToRefinancing));
+  }, [loanId, isAdmin]);
+
+  useEffect(() => { loadRefinancings(); }, [loadRefinancings, loans]);
+
+  // Se busca por el id actual: una respuesta tardía de otro préstamo no encaja.
+  const refinancingOut = refinancings.find((r) => r.loanId === loanId);
+  const refinancingIn = refinancings.find((r) => r.newLoanId === loanId);
 
   // Recién creado (?nuevo=1): abrir el ticket automáticamente una vez que el
   // préstamo (con su cronograma) ya cargó en el provider. Se lee la URL en el
@@ -108,6 +154,8 @@ export default function LoanDetailClient() {
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  const isRefinanced = loan.status === 'refinanced';
+  const canRefinance = isAdmin && loan.status === 'active' && status.pendingBalance > 0;
 
   return (
     <div className="space-y-6">
@@ -123,6 +171,12 @@ export default function LoanDetailClient() {
           <Printer className="mr-2 h-4 w-4" />
           Imprimir comprobante
         </Button>
+        {canRefinance && (
+          <Button variant="outline" onClick={() => setRefinanceOpen(true)}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refinanciar
+          </Button>
+        )}
         {status.pendingBalance > 0 && (
           <RegisterLoanPaymentDialog loan={loan}>
             <DialogTrigger asChild>
@@ -140,7 +194,9 @@ export default function LoanDetailClient() {
         <CardHeader>
           <CardTitle className="flex flex-wrap items-center gap-3">
             {loan.customer?.name ?? 'Cliente'}
-            {status.pendingBalance <= 0 ? (
+            {isRefinanced ? (
+              <Badge variant="secondary">Refinanciado</Badge>
+            ) : status.pendingBalance <= 0 ? (
               <Badge className="bg-green-600">Pagado</Badge>
             ) : status.isOverdue ? (
               <Badge variant="destructive">Atrasado</Badge>
@@ -153,6 +209,37 @@ export default function LoanDetailClient() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {isRefinanced && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/50 p-3 text-sm">
+              <span>
+                Refinanciado{refinancedTo && <> el {refinancedTo.createdAt.toLocaleDateString('es-DO')}</>}: su saldo
+                pasó a un préstamo nuevo y este ya no recibe abonos.
+              </span>
+              {refinancedTo && (
+                <Button variant="link" className="h-auto p-0" onClick={() => goToLoan(refinancedTo.id)}>
+                  Ver préstamo nuevo
+                </Button>
+              )}
+              {refinancingOut && <RefinancingNote refinancing={refinancingOut} />}
+            </div>
+          )}
+          {loan.refinancedFromId && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/50 p-3 text-sm">
+              <span>
+                Refinancia el préstamo{refinancedFrom && <> del {refinancedFrom.createdAt.toLocaleDateString('es-DO')}</>}:
+                {' '}saldo anterior {formatCurrency(loan.carriedOverAmount)}
+                {loan.principal - loan.carriedOverAmount > 0 && (
+                  <> + entregado {formatCurrency(loan.principal - loan.carriedOverAmount)}</>
+                )}.
+              </span>
+              {refinancedFrom && (
+                <Button variant="link" className="h-auto p-0" onClick={() => goToLoan(refinancedFrom.id)}>
+                  Ver préstamo anterior
+                </Button>
+              )}
+              {refinancingIn && <RefinancingNote refinancing={refinancingIn} />}
+            </div>
+          )}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div>
               <p className="text-muted-foreground">Monto prestado</p>
@@ -162,10 +249,19 @@ export default function LoanDetailClient() {
               <p className="text-muted-foreground">Tasa mensual / Cuotas</p>
               <p className="font-semibold">{loan.interestRate}% · {loan.installmentsCount} cuotas ({FREQUENCY_LABEL[loan.paymentFrequency]})</p>
             </div>
-            <div>
-              <p className="text-muted-foreground">Ganancia (interés)</p>
-              <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(loan.totalWithInterest - loan.principal)}</p>
-            </div>
+            {isRefinanced ? (
+              // Cerrado con total = pagado: "ganancia" saldría negativa. Lo que
+              // importa aquí es cuánto se fue al préstamo nuevo.
+              <div>
+                <p className="text-muted-foreground">Pasó al préstamo nuevo</p>
+                <p className="font-semibold">{refinancedTo ? formatCurrency(refinancedTo.carriedOverAmount) : '—'}</p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-muted-foreground">Ganancia (interés)</p>
+                <p className="font-semibold text-emerald-600 dark:text-emerald-400">{formatCurrency(loan.totalWithInterest - loan.principal)}</p>
+              </div>
+            )}
             <div>
               <p className="text-muted-foreground">Total a cobrar</p>
               <p className="font-semibold">{formatCurrency(loan.totalWithInterest)}</p>
@@ -303,6 +399,11 @@ export default function LoanDetailClient() {
                           <Badge variant="destructive" title={p.voidedByName ? `Anulado por ${p.voidedByName}` : undefined}>
                             Anulado
                           </Badge>
+                        ) : isRefinanced ? (
+                          // La base no deja anular abonos de un préstamo refinanciado.
+                          <span className="text-xs text-muted-foreground" title="El préstamo se refinanció: sus abonos ya no se pueden anular.">
+                            Cerrado
+                          </span>
                         ) : (
                           <Button variant="ghost" size="sm" onClick={() => setVoiding(p)}>
                             <Undo2 className="mr-1 h-3.5 w-3.5" />
@@ -320,6 +421,15 @@ export default function LoanDetailClient() {
       </Card>
 
       <LoanTicketDialog loan={loan} isOpen={ticketOpen} onOpenChange={setTicketOpen} />
+
+      {canRefinance && (
+        <RefinanceLoanDialog
+          loan={loan}
+          open={isRefinanceOpen}
+          onOpenChange={setRefinanceOpen}
+          onRefinanced={(newLoanId) => goToLoan(newLoanId, true)}
+        />
+      )}
 
       {voiding && (
         <VoidLoanPaymentDialog

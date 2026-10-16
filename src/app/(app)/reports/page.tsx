@@ -114,14 +114,10 @@ export default function ReportsDashboardPage() {
     const activeLoans = filteredLoans.filter(l => l.status === 'active');
     activeLoans.forEach((l) => {
       loansPrincipalIssued += l.principal;
-      // Saldo pendiente: capital original + interés - lo pagado
-      const totalToPay = l.principal + (l.principal * (l.interestRate / 100));
-      // Cálculo aproximado en base a cuotas restantes
-      const paid = (l.installments ?? [])
-        .filter((inst) => inst.status === 'paid')
-        .reduce((sum, inst) => sum + inst.amount, 0);
-      const remaining = totalToPay - paid;
-      if (remaining > 0) loansOutstandingBalance += remaining;
+      // Saldo pendiente: el total que calculó la base (interés de TODOS los
+      // meses del plan) menos lo cobrado, abonos parciales incluidos. Antes se
+      // usaba capital × (1 + tasa), que contaba un solo mes de interés.
+      loansOutstandingBalance += Math.max(l.totalWithInterest - l.amountPaid, 0);
     });
 
     return {

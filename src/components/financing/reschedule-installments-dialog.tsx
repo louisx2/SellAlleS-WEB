@@ -39,7 +39,14 @@ const listCuotas = (nums: number[]) => `Las cuotas ${nums.slice(0, -1).join(', '
 export function RescheduleInstallmentsDialog({ sale, open, onOpenChange, graceDays }: RescheduleInstallmentsDialogProps) {
   const { rescheduleInstallments } = useSales();
   const { toast } = useToast();
-  const installments = useMemo(() => sale.installments ?? [], [sale.installments]);
+  // Solo el plan vigente, como la base: en un plan refinanciado las cuotas
+  // viejas ya están pagadas y, si se pagaron por adelantado, vencen después
+  // que las nuevas — compararlas haría imposible mover ninguna.
+  const firstInstallment = sale.financingDetails?.firstInstallment ?? 1;
+  const installments = useMemo(
+    () => (sale.installments ?? []).filter((i) => i.number >= firstInstallment),
+    [sale.installments, firstInstallment],
+  );
   const unpaid = installments.filter((i) => i.status !== 'paid');
   const frequency = sale.financingDetails?.frequency ?? 'monthly';
   const saleDay = toYmd(new Date(sale.createdAt));

@@ -20,9 +20,17 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
   const fin = sale.financingDetails;
   // Los planes anteriores a la frecuencia son todos mensuales.
   const frequency = fin?.frequency ?? 'monthly';
+  // Plan refinanciado: se imprimen solo las cuotas del plan vigente; lo que se
+  // pagó del anterior va resumido en una línea.
+  const refinancedAt = fin?.refinancedAt ? new Date(fin.refinancedAt) : null;
+  const firstInstallment = fin?.firstInstallment ?? 1;
+  const previousPlanPaid = (sale.installments ?? [])
+    .filter((i) => i.number < firstInstallment)
+    .reduce((acc, i) => acc + i.amount, 0);
+  const planInstallments = (sale.installments ?? []).filter((i) => i.number >= firstInstallment);
 
-  const rows = (sale.installments && sale.installments.length > 0)
-    ? sale.installments.map((i) => ({
+  const rows = planInstallments.length > 0
+    ? planInstallments.map((i) => ({
         number: i.number,
         dueDate: new Date(i.dueDate + 'T00:00:00'),
         amount: i.amount,
@@ -57,6 +65,9 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
         <p className="font-semibold uppercase">Plan de Pagos — Financiamiento</p>
         <p className="uppercase">Venta: {sale.id}</p>
         <p className="uppercase">Fecha: {new Date(sale.createdAt).toLocaleDateString('es-DO')}</p>
+        {refinancedAt && (
+          <p className="font-semibold uppercase">Refinanciado el {refinancedAt.toLocaleDateString('es-DO')}</p>
+        )}
         <p className="uppercase">Sucursal: {sale.branchId || 'Principal'}</p>
         <p className="font-semibold uppercase">Cliente: {sale.customer?.name ?? 'Consumidor Final'}</p>
       </div>
@@ -94,6 +105,18 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
           <span>Abono inicial:</span>
           <span>{formatCurrency(fin?.downPayment ?? 0)}</span>
         </div>
+        {refinancedAt && (
+          <>
+            <div className="flex justify-between">
+              <span>Plan anterior: pagado</span>
+              <span>{formatCurrency(previousPlanPaid)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Capital del plan nuevo:</span>
+              <span>{formatCurrency(fin?.principal ?? 0)}</span>
+            </div>
+          </>
+        )}
         <div className="flex justify-between">
           <span>{fin?.interestMode === 'per_installment' ? 'Tasa de interés por cuota:' : 'Tasa de interés mensual:'}</span>
           <span>{fin?.interestRate ?? 0}%</span>

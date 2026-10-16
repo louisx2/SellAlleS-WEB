@@ -108,7 +108,10 @@ function LoanCard({ loan, lateFeeRate, graceDays }: { loan: Loan; lateFeeRate: n
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-base">
           Préstamo
-          {status.pendingBalance <= 0 ? (
+          {loan.status === 'refinanced' ? (
+            // Su saldo pasó a un préstamo nuevo: no está pagado, está cerrado.
+            <Badge variant="secondary">Refinanciado</Badge>
+          ) : status.pendingBalance <= 0 ? (
             <Badge className="bg-green-600">Pagado</Badge>
           ) : status.isOverdue ? (
             <Badge variant="destructive">Atrasado</Badge>
@@ -200,7 +203,11 @@ function CreditSaleCard({ sale, lateFeeRate, graceDays }: { sale: Sale; lateFeeR
             <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
           </div>
         </div>
-        <InstallmentsTable installments={sale.installments} />
+        {/* Refinanciado: solo las cuotas del plan vigente. Las anteriores ya
+            están cerradas con lo pagado y mezclarlas confunde al cliente. */}
+        <InstallmentsTable
+          installments={sale.installments?.filter((i) => i.number >= (sale.financingDetails?.firstInstallment ?? 1))}
+        />
       </CardContent>
     </Card>
   );

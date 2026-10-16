@@ -90,10 +90,15 @@ export function calculateFinancingStatus(
 
         const next = open[0] ?? null;
         const pendingBalance = round2(open.reduce((acc, i) => acc + (i.amount - i.paidAmount), 0));
+        // En un plan refinanciado, "X de N" cuenta solo las cuotas del plan
+        // vigente: las anteriores son del plan viejo, cerradas con lo pagado.
+        const firstInstallment = sale.financingDetails?.firstInstallment ?? 1;
+        const planInstallments = installments.filter(i => i.number >= firstInstallment);
+        const planOpen = planInstallments.filter(i => i.status !== 'paid');
 
         return {
-            installmentsPaid: installments.length - open.length,
-            totalInstallments: installments.length,
+            installmentsPaid: planInstallments.length - planOpen.length,
+            totalInstallments: planInstallments.length,
             nextDueDate: next ? new Date(next.dueDate + 'T00:00:00') : null,
             pendingBalance,
             isOverdue: overdue.length > 0,
