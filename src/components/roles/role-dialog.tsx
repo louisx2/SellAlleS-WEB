@@ -16,7 +16,7 @@ import { supabase } from '@/lib/supabase/client';
 import { roleToRow } from '@/lib/supabase/mappers';
 import {
   PERMISSION_ACTIONS, PERMISSION_RESOURCES, RESOURCE_MODULE, REPORT_ITEMS,
-  isMinimumPermission, withSystemRoleMinimums,
+  actionsFor, isMinimumPermission, withSystemRoleMinimums,
 } from '@/lib/permissions';
 import type { ModuleKey } from '@/lib/modules';
 import type { PermissionAction, PermissionResource, Role, RolePermissions } from '@/lib/types';
@@ -96,6 +96,8 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
     setPermissions((prev) => {
       const newPerms = { ...prev };
       visibleResources.forEach((r) => {
+        // Un recurso que no admite esta acción (p. ej. Ventas rápidas, solo Crear) no se toca.
+        if (!actionsFor(r.key).includes(action)) return;
         if (isMinimumPermission(isSystem, r.key, action)) return;
         const current = new Set(newPerms[r.key] ?? []);
         if (checked) current.add(action); else current.delete(action);
@@ -110,7 +112,7 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
       const newPerms = { ...prev };
       visibleResources.forEach((r) => {
         newPerms[r.key] = checked
-          ? ['view', 'create', 'edit', 'delete']
+          ? actionsFor(r.key)
           : PERMISSION_ACTIONS.filter((a) => isMinimumPermission(isSystem, r.key, a.key)).map((a) => a.key);
       });
       return newPerms;
@@ -244,7 +246,7 @@ export function RoleDialog({ role, companyId, open, onOpenChange, onSaved, isMod
 function PermissionsGrid({
   resources, permissions, isSystemRole, toggle, onToggleColumn, onToggleAll,
 }: {
-  resources: { key: PermissionResource; label: string }[];
+  resources: { key: PermissionResource; label: string; actions?: PermissionAction[] }[];
   permissions: RolePermissions;
   /** Administrador/Cajero: sus mínimos van marcados y no se pueden desmarcar. */
   isSystemRole: boolean;
@@ -255,12 +257,16 @@ function PermissionsGrid({
   const isChecked = (resource: PermissionResource, action: PermissionAction) =>
     !!permissions[resource]?.includes(action) || isMinimumPermission(isSystemRole, resource, action);
 
+  // Cada fila solo cuenta con las acciones que su recurso admite: Ventas
+  // rápidas solo tiene Crear y no debe impedir que "Ver" quede marcada.
   const isAllChecked = resources.length > 0 && resources.every(
-    (r) => PERMISSION_ACTIONS.every((a) => isChecked(r.key, a.key))
+    (r) => actionsFor(r.key).every((a) => isChecked(r.key, a))
   );
 
-  const isColumnChecked = (action: PermissionAction) =>
-    resources.length > 0 && resources.every((r) => isChecked(r.key, action));
+  const isColumnChecked = (action: PermissionAction) => {
+    const rows = resources.filter((r) => actionsFor(r.key).includes(action));
+    return rows.length > 0 && rows.every((r) => isChecked(r.key, action));
+  };
 
   return (
     <div className="rounded-lg border overflow-x-auto">
@@ -299,11 +305,13 @@ function PermissionsGrid({
               <td className="p-2 font-medium">{r.label}</td>
               {PERMISSION_ACTIONS.map((a) => (
                 <td key={a.key} className="text-center p-2">
-                  <Checkbox
-                    checked={isChecked(r.key, a.key)}
-                    disabled={isMinimumPermission(isSystemRole, r.key, a.key)}
-                    onCheckedChange={(c) => toggle(r.key, a.key, !!c)}
-                  />
+                  {actionsFor(r.key).includes(a.key) && (
+                    <Checkbox
+                      checked={isChecked(r.key, a.key)}
+                      disabled={isMinimumPermission(isSystemRole, r.key, a.key)}
+                      onCheckedChange={(c) => toggle(r.key, a.key, !!c)}
+                    />
+                  )}
                 </td>
               ))}
             </tr>

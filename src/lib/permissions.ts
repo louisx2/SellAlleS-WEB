@@ -9,7 +9,10 @@ export const PERMISSION_ACTIONS: { key: PermissionAction; label: string }[] = [
 ];
 
 // Un recurso por cada sección del menú gateada a admin (authed-layout.tsx).
-export const PERMISSION_RESOURCES: { key: PermissionResource; label: string }[] = [
+// `actions` es opcional: un recurso que solo admite algunas acciones las lista
+// aquí (la grilla de Roles solo pinta esas casillas); sin `actions` admite las
+// cuatro. Para saber qué admite un recurso, usar actionsFor().
+export const PERMISSION_RESOURCES: { key: PermissionResource; label: string; actions?: PermissionAction[] }[] = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'pos', label: 'Carrito (POS)' },
   { key: 'sales', label: 'Movimientos (Ventas)' },
@@ -31,7 +34,16 @@ export const PERMISSION_RESOURCES: { key: PermissionResource; label: string }[] 
   { key: 'roles', label: 'Roles' },
   { key: 'suscripcion', label: 'Mi Suscripción' },
   { key: 'service-types', label: 'Tipos de Servicio' },
+  { key: 'quick-sales', label: 'Ventas rápidas (fuera de inventario)', actions: ['create'] },
 ];
+
+/** Acciones que admite un recurso: las suyas (`actions`) o las cuatro. */
+export function actionsFor(resource: PermissionResource): PermissionAction[] {
+  return (
+    PERMISSION_RESOURCES.find((r) => r.key === resource)?.actions
+    ?? PERMISSION_ACTIONS.map((a) => a.key)
+  );
+}
 
 // Recurso → módulo que lo gobierna (mismo criterio que ROUTE_MODULE en
 // src/lib/modules.ts). Los recursos que no aparecen aquí son núcleo y
@@ -50,6 +62,7 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
   reports: 'reports',
   suppliers: 'suppliers',
   'service-types': 'services',
+  'quick-sales': 'quick-sales',
 };
 
 // Los reportes individuales (src/app/(app)/reports/*), controlables por
@@ -73,7 +86,7 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
 // vez de dejarlo sin acceso. Debe reflejar exactamente lo que siembra
 // seed_system_roles() en Supabase.
 export const DEFAULT_ADMIN_PERMISSIONS: RolePermissions = Object.fromEntries(
-  PERMISSION_RESOURCES.map((r) => [r.key, ['view', 'create', 'edit', 'delete']])
+  PERMISSION_RESOURCES.map((r) => [r.key, actionsFor(r.key)])
 ) as RolePermissions;
 
 export const DEFAULT_CASHIER_PERMISSIONS: RolePermissions = {
@@ -82,6 +95,7 @@ export const DEFAULT_CASHIER_PERMISSIONS: RolePermissions = {
   quotes: ['view', 'create'],
   services: ['view', 'create'],
   caja: ['view', 'create'],
+  'quick-sales': ['create'],
 };
 
 // Mínimo intocable de los roles de SISTEMA (Administrador/Cajero). El admin de
