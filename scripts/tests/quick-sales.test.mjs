@@ -239,3 +239,14 @@ test('summarizeQuickLines: costo 0 cuenta como costeado', () => {
   );
   assert.deepEqual(result, { total: 30, totalWithCost: 30, profit: 30, uncostedCount: 0, uncostedAmount: 0 });
 });
+
+// Una línea en el punto de equilibrio con ruido de coma flotante (3 × 0.1 =
+// 0.30000000000000004) da una ganancia de -5.5e-17. Redondeada a centavos
+// salía -0, y el reporte lo mostraba como "-0.00".
+test('summarizeQuickLines: una ganancia que redondea a cero no sale como -0', () => {
+  const result = summarizeQuickLines(
+    [{ quantity: 3, price: 0.1, customPrice: null, cost: 0.1, itbis: false, itbisIncluded: false }],
+    RATE,
+  );
+  assert.ok(Object.is(result.profit, 0), `profit debería ser +0 y es ${Object.is(result.profit, -0) ? '-0' : result.profit}`);
+});

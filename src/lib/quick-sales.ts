@@ -38,7 +38,9 @@ export type QuickReportLine = {
 
 const QUICK_UNIT: UnitCode = 'und';
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+// El `|| 0` descarta el -0: Math.round(-0.4) da -0 y el reporte lo mostraría
+// como "-0.00" en una línea en el punto de equilibrio con ruido de coma flotante.
+const round2 = (n: number) => Math.round(n * 100) / 100 || 0;
 
 // Igual que la columna normalizada de la base:
 // lower(regexp_replace(btrim(name), '\s+', ' ', 'g')).
