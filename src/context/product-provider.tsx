@@ -22,7 +22,8 @@ export interface BulkImportResult {
 interface ProductContextType {
   products: Product[];
   updateStock: (productId: string, quantitySold: number) => Promise<void>;
-  addProduct: (product: Omit<Product, 'id'>) => Promise<void>;
+  /** Devuelve el producto ya guardado (con su id) para poder usarlo enseguida. */
+  addProduct: (product: Omit<Product, 'id'>) => Promise<Product>;
   updateProduct: (product: Product) => Promise<void>;
   /** Borra el artículo; si ya tiene historial lo archiva y devuelve 'archivado'. */
   deleteProduct: (id: string) => Promise<'eliminado' | 'archivado'>;
@@ -63,12 +64,15 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   // existencias que ya no estaban.
   useRealtimeReload('products', load);
 
-  const addProduct = async (productData: Omit<Product, 'id'>) => {
+  const addProduct = async (productData: Omit<Product, 'id'>): Promise<Product> => {
     if (!activeBranchId) throw new Error('No hay sucursal activa');
     const row = productToRow({ ...productData, branchId: activeBranchId });
     const { data, error } = await supabase.from('products').insert(row).select().single();
     if (error) throw error;
-    if (data) setProducts((prev) => [...prev, rowToProduct(data)]);
+    // `.single()` ya falla si no vuelve la fila, así que `data` siempre existe.
+    const created = rowToProduct(data);
+    setProducts((prev) => [...prev, created]);
+    return created;
   };
 
   const updateProduct = async (updated: Product) => {

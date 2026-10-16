@@ -96,7 +96,7 @@ const WRITE_METHODS = new Set(['insert', 'update', 'delete', 'upsert']);
 /** RPC que solo leen: no se bloquean en ningún modo. */
 const RPC_DE_LECTURA = new Set([
   'mi_cuenta_de_suscripcion', 'get_my_admin_companies', 'get_consolidated_dashboard',
-  'buscar_en_otras_sucursales', 'company_branch_user_counts',
+  'buscar_en_otras_sucursales', 'company_branch_user_counts', 'articulos_rapidos_recientes',
 ]);
 
 /** Pagar la suscripción siempre se puede. */

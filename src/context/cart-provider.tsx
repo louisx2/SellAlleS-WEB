@@ -20,7 +20,9 @@ interface CartState {
 }
 
 interface CartActions {
-  addItem: (product: Product) => void;
+  // `quantity` es para quien agrega varias unidades de una vez (alta desde Venta
+  // rápida); sin él se suma 1, como siempre.
+  addItem: (product: Product, quantity?: number) => void;
   addQuickItem: (input: QuickItemInput) => void;
   removeItem: (cartItemId: string) => void;
   updateQuantity: (cartItemId: string, quantity: number) => void;
@@ -96,7 +98,7 @@ const cartStore = create<CartStore>()(
       },
 
       // Actions
-      addItem: (product) => set(state => {
+      addItem: (product, quantity = 1) => set(state => {
         const newCarts = state.carts.map(cart => {
           if (cart.id === state.activeCartId) {
             const quantityInCart = cart.items
@@ -115,8 +117,9 @@ const cartStore = create<CartStore>()(
               setTimeout(() => set({ toast: null }), 3000);
               return cart;
             }
-            // En unidades contables el stock es entero, así que esto es siempre 1.
-            const toAdd = normalizeQty(Math.min(1, remaining), product.unit);
+            // Con `quantity` por defecto (1) y unidades contables el stock es
+            // entero, así que esto sigue siendo 1; nunca pasa de lo que queda.
+            const toAdd = normalizeQty(Math.min(quantity, remaining), product.unit);
             // Find an item with the same product ID and no custom price
             const existingItem = cart.items.find(item => item.product.id === product.id && item.customPrice === undefined);
             if (existingItem) {
