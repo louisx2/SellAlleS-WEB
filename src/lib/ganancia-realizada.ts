@@ -19,10 +19,13 @@ export type AbonoCobrado = {
   kind: string;
   amount: number;
   lateFeePaid: number;
-  /** Reparto que guardó la base: cuánto capital fue a cada venta. */
-  allocation?: { sales?: { sale_id: string; principal: number }[] } | null;
+  /** Reparto que guardó la base: cuánto capital y cuánta mora fue a cada venta. */
+  allocation?: { sales?: { sale_id: string; principal: number; late_fee?: number }[] } | null;
   date: Date;
 };
+
+/** Lo que un abono le dio a una venta: capital (sin mora) y mora. */
+export type ParteDeAbono = { saleId: string; capital: number; mora: number; inicial: boolean };
 
 /** Parte de una venta que se cobró en `date`, como fracción de su total. */
 export type Realizacion = { sale: Sale; date: Date; fraction: number };
@@ -37,6 +40,28 @@ export const rowToAbonoCobrado = (r: any): AbonoCobrado => ({
   allocation: r.allocation ?? null,
   date: new Date(r.date),
 });
+
+/**
+ * Reparte un abono entre las ventas que cubrió: por el reparto que guardó la
+ * base (abono general) o entero a su venta. En un financiamiento, `capital`
+ * trae el interés de la cuota adentro; el inicial (`inicial`) no lleva interés.
+ */
+export function repartoDeAbono(a: AbonoCobrado): ParteDeAbono[] {
+  const inicial = a.kind === 'down_payment';
+  const reparto = a.allocation?.sales;
+  if (reparto && reparto.length > 0) {
+    return reparto.map((r) => ({
+      saleId: r.sale_id,
+      capital: Number(r.principal) || 0,
+      mora: Number(r.late_fee) || 0,
+      inicial,
+    }));
+  }
+  if (a.saleId) return [{ saleId: a.saleId, capital: a.amount - a.lateFeePaid, mora: a.lateFeePaid, inicial }];
+  // Un abono general sin reparto guardado (los de antes del 2026-08-31) no
+  // dice a qué venta fue.
+  return [];
+}
 
 export const esVentaAPlazo = (s: Sale) =>
   s.paymentMethod === 'credit' || s.paymentMethod === 'financing' ||
@@ -83,15 +108,10 @@ export function realizaciones(sales: Sale[], abonos: AbonoCobrado[]): Realizacio
     lista.push({ date, capital, inicial });
     porVenta.set(saleId, lista);
   };
+  // Lo que cubrió un abono general sin reparto guardado entra abajo como
+  // cobrado sin fecha.
   for (const a of abonos) {
-    const reparto = a.allocation?.sales;
-    if (reparto && reparto.length > 0) {
-      for (const r of reparto) anotar(r.sale_id, a.date, Number(r.principal), a.kind === 'down_payment');
-    } else if (a.saleId) {
-      anotar(a.saleId, a.date, a.amount - a.lateFeePaid, a.kind === 'down_payment');
-    }
-    // Un abono general sin reparto guardado (los de antes del 2026-08-31) no
-    // dice a qué venta fue: lo que cubrió entra como cobrado sin fecha.
+    for (const p of repartoDeAbono(a)) anotar(p.saleId, a.date, p.capital, p.inicial);
   }
 
   const out: Realizacion[] = [];
