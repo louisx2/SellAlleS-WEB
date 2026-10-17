@@ -265,7 +265,10 @@ export function CartDisplay() {
                                     />
                                   </div>
                                   <div className="flex-grow space-y-2">
-                                    <p className="font-medium text-sm leading-tight">{item.product.name}</p>
+                                    <div className="flex items-center gap-2">
+                                      <p className="font-medium text-sm leading-tight">{item.product.name}</p>
+                                      {item.isQuick && <Badge variant="secondary">Rápida</Badge>}
+                                    </div>
                                     <div className="flex items-center gap-1.5">
                                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.cartItemId, roundQty(item.quantity - 1))}>
                                         <MinusCircle className="h-4 w-4" />

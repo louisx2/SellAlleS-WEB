@@ -209,7 +209,7 @@ export type PermissionResource =
   | 'dashboard' | 'pos' | 'sales' | 'quotes' | 'services' | 'credit' | 'financing'
   | 'prestamos' | 'caja' | 'expenses' | 'payables' | 'reports' | 'products' | 'customers'
   | 'suppliers' | 'company-profile' | 'users' | 'branches' | 'roles' | 'suscripcion'
-  | 'service-types';
+  | 'service-types' | 'quick-sales';
 
 // reports_visible: slugs de src/lib/permissions.ts#REPORT_ITEMS que este rol
 // puede ver dentro de "Reportes"; ausente = todos visibles.
@@ -244,6 +244,8 @@ export type CartItem = {
   // del producto. Es lo que permite que el margen histórico no cambie cuando
   // se le edita el costo al producto.
   cost?: number;
+  // Línea de venta rápida: artículo fuera de inventario, con producto sintético (id vacío).
+  isQuick?: boolean;
 };
 
 export type Cart = {

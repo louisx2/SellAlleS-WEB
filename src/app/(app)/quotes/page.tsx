@@ -19,6 +19,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useQuotes } from '@/context/quotes-provider';
 import { useProducts } from '@/context/product-provider';
 import { openQuoteCart } from '@/context/cart-provider';
+import { useCanQuickSell } from '@/hooks/use-can-quick-sell';
+import { buildQuickCartItem } from '@/lib/quick-sales';
 import { formatCurrency } from '@/lib/utils';
 import { formatQtyCompact } from '@/lib/units';
 import type { Quote, QuoteStatus, CartItem } from '@/lib/types';
@@ -47,6 +49,7 @@ export default function QuotesPage() {
   const { toast } = useToast();
   const { quotes, updateQuoteStatus, reload, loading } = useQuotes();
   const { products } = useProducts();
+  const canQuickSell = useCanQuickSell();
   const [detail, setDetail] = useState<Quote | null>(null);
 
   // Refrescar al entrar (una conversión pudo ocurrir desde el POS).
@@ -66,8 +69,29 @@ export default function QuotesPage() {
   const loadIntoCart = (quote: Quote) => {
     const items: CartItem[] = [];
     const missing: string[] = [];
+    let quickBlocked = false;
 
     for (const it of quote.items) {
+      // Un artículo rápido no está en el catálogo: se reconstruye desde la línea
+      // cotizada. Sin módulo o sin permiso no se carga, para no fallar al cobrar.
+      if (it.isQuick) {
+        if (!canQuickSell) {
+          quickBlocked = true;
+          missing.push(`${it.product.name} (venta rápida desactivada)`);
+          continue;
+        }
+        items.push(buildQuickCartItem(
+          {
+            name: it.product.name,
+            price: it.customPrice ?? it.product.price,
+            quantity: it.quantity,
+            itbis: it.product.itbis,
+            cost: it.cost,
+          },
+          `item-${Date.now()}-${Math.random()}`,
+        ));
+        continue;
+      }
       const product = products.find((p) => p.id === it.product.id);
       if (!product) {
         missing.push(it.product.name);
@@ -86,7 +110,11 @@ export default function QuotesPage() {
     if (items.length === 0) {
       toast({
         title: 'No se pudo cargar',
-        description: 'Ninguno de los productos cotizados existe ya en el inventario.',
+        // Con líneas rápidas bloqueadas el motivo no es el inventario: se listan
+        // para que el cajero sepa qué quedó fuera y por qué.
+        description: quickBlocked
+          ? `No se cargaron: ${missing.join(', ')}.`
+          : 'Ninguno de los productos cotizados existe ya en el inventario.',
         variant: 'destructive',
       });
       return;
@@ -104,7 +132,7 @@ export default function QuotesPage() {
 
     if (missing.length > 0) {
       toast({
-        title: 'Algunos productos ya no existen',
+        title: 'Algunas líneas no se cargaron',
         description: `No se cargaron: ${missing.join(', ')}.`,
       });
     }

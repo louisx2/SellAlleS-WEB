@@ -8,13 +8,15 @@ import { useCart } from '@/context/cart-provider';
 import { useToast } from '@/hooks/use-toast';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
-import { Search, SlidersHorizontal, List, LayoutGrid, Camera } from 'lucide-react';
+import { Search, SlidersHorizontal, List, LayoutGrid, Camera, Zap } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-provider';
+import { useCanQuickSell } from '@/hooks/use-can-quick-sell';
+import { QuickSaleDialog } from './quick-sale-dialog';
 import {
   BarcodeScannerDialog,
   puedeEscanearConCamara,
@@ -37,6 +39,9 @@ export function ProductSearch() {
   const inventoryView = appUser?.inventoryView ?? 'grid';
   const prevSaleCompletionCount = useRef(saleCompletionCount);
   const [escanerAbierto, setEscanerAbierto] = useState(false);
+  // Módulo encendido y permiso en el rol de esta sucursal: sin ambos no hay botón.
+  const puedeVentaRapida = useCanQuickSell();
+  const [ventaRapidaAbierta, setVentaRapidaAbierta] = useState(false);
   // Se resuelve en el cliente: el HTML es estático y en el servidor no hay
   // cámara ni `matchMedia` que valgan.
   const [puedeEscanear, setPuedeEscanear] = useState(false);
@@ -158,6 +163,24 @@ export function ProductSearch() {
                 <span className="sr-only">Escanear con la cámara</span>
             </Button>
         )}
+        {puedeVentaRapida && (
+            <TooltipProvider>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            variant="outline"
+                            size="icon"
+                            className="h-12 w-12 shrink-0"
+                            onClick={() => setVentaRapidaAbierta(true)}
+                        >
+                            <Zap className="h-5 w-5" />
+                            <span className="sr-only">Venta rápida</span>
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Venta rápida</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        )}
         <Popover>
             <PopoverTrigger asChild>
                 <Button variant="outline" size="icon" className="h-12 w-12 shrink-0">
@@ -235,6 +258,10 @@ export function ProductSearch() {
       <div className="flex-grow overflow-y-auto">
         <ProductGrid products={filteredProducts} view={inventoryView} />
       </div>
+
+      {puedeVentaRapida && (
+        <QuickSaleDialog open={ventaRapidaAbierta} onOpenChange={setVentaRapidaAbierta} />
+      )}
 
       {puedeEscanear && (
         <BarcodeScannerDialog

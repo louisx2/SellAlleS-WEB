@@ -4,6 +4,7 @@ import { createContext, useEffect, ReactNode, useContext } from 'react';
 import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart, Coupon, NcfType } from '@/lib/types';
 import { ITBIS_RATE, GENERIC_CUSTOMER, round2 } from '@/lib/utils';
 import { roundQty, normalizeQty, formatQuantity, unitAllowsDecimals } from '@/lib/units';
+import { buildQuickCartItem, quickUnitPrice, type QuickItemInput } from '@/lib/quick-sales';
 import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
 import { create, useStore } from 'zustand';
@@ -19,7 +20,10 @@ interface CartState {
 }
 
 interface CartActions {
-  addItem: (product: Product) => void;
+  // `quantity` es para quien agrega varias unidades de una vez (alta desde Venta
+  // rápida); sin él se suma 1, como siempre.
+  addItem: (product: Product, quantity?: number) => void;
+  addQuickItem: (input: QuickItemInput) => void;
   removeItem: (cartItemId: string) => void;
   updateQuantity: (cartItemId: string, quantity: number) => void;
   setCustomPrice: (cartItemId: string, price: number | undefined) => void;
@@ -40,6 +44,9 @@ export const getGenericCustomer = (): Customer => GENERIC_CUSTOMER;
 // Precio unitario efectivo: el override manual del cajero siempre gana; si no
 // hay override, se aplica el % de descuento del cliente seleccionado.
 export const getEffectiveUnitPrice = (item: CartItem, customer?: Customer): number => {
+  // Artículo rápido: el precio tecleado es el final, sin precio por mayor ni
+  // descuento del cliente (no hay producto del catálogo del que partir).
+  if (item.isQuick) return quickUnitPrice(item);
   if (item.customPrice !== undefined) return item.customPrice;
   
   // 1. Determinar precio base (por mayor si cumple la cantidad mínima, si no, al detalle)
@@ -91,7 +98,7 @@ const cartStore = create<CartStore>()(
       },
 
       // Actions
-      addItem: (product) => set(state => {
+      addItem: (product, quantity = 1) => set(state => {
         const newCarts = state.carts.map(cart => {
           if (cart.id === state.activeCartId) {
             const quantityInCart = cart.items
@@ -110,8 +117,9 @@ const cartStore = create<CartStore>()(
               setTimeout(() => set({ toast: null }), 3000);
               return cart;
             }
-            // En unidades contables el stock es entero, así que esto es siempre 1.
-            const toAdd = normalizeQty(Math.min(1, remaining), product.unit);
+            // Con `quantity` por defecto (1) y unidades contables el stock es
+            // entero, así que esto sigue siendo 1; nunca pasa de lo que queda.
+            const toAdd = normalizeQty(Math.min(quantity, remaining), product.unit);
             // Find an item with the same product ID and no custom price
             const existingItem = cart.items.find(item => item.product.id === product.id && item.customPrice === undefined);
             if (existingItem) {
@@ -135,6 +143,16 @@ const cartStore = create<CartStore>()(
         });
         return { carts: newCarts };
       }),
+
+      // Siempre línea nueva: `addItem` fusiona por `product.id`, y los artículos
+      // rápidos comparten el id vacío, así que dos distintos se juntarían.
+      addQuickItem: (input) => set(state => ({
+        carts: state.carts.map(cart =>
+          cart.id === state.activeCartId
+            ? { ...cart, items: [...cart.items, buildQuickCartItem(input, `item-${Date.now()}-${Math.random()}`)] }
+            : cart
+        ),
+      })),
 
       removeItem: (cartItemId) => set(state => ({
         carts: state.carts.map(cart =>

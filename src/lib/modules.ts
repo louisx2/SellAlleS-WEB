@@ -19,7 +19,8 @@ export type ModuleKey =
   | 'prestamos'
   | 'loyalty'
   | 'customer-portal'
-  | 'caja';
+  | 'caja'
+  | 'quick-sales';
 
 export interface AppModule {
   key: ModuleKey;
@@ -47,6 +48,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'loyalty',    label: 'Programa de Fidelidad', description: 'Cupones automáticos al alcanzar cierta cantidad de compras/servicios.', defaultEnabled: false },
   { key: 'customer-portal', label: 'Portal de Clientes ("Mi Estado de Cuenta")', description: 'Permite a los clientes de esta empresa consultar sus préstamos y compras a crédito en /mi-prestamo con cédula y PIN.', defaultEnabled: false },
   { key: 'caja',       label: 'Caja',               description: 'Control de efectivo por sucursal: apertura, cierre y movimientos. Al activarlo, no se puede cobrar en efectivo sin una caja abierta.', defaultEnabled: false },
+  { key: 'quick-sales', label: 'Ventas Rápidas',    description: 'Vender en el POS artículos que no están en el inventario, con descripción o como monto libre.', defaultEnabled: true },
 ];
 
 /** Ruta → módulo que la gobierna. Las rutas que no aparecen aquí son núcleo
