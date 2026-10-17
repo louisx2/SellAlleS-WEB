@@ -8,6 +8,11 @@
 -- solo `begin; <este archivo> rollback;` para ver las pruebas en rojo. Cada
 -- sección deja explícito el estado que necesita (rol, claims), usa UUID fijos
 -- (…d1XX) en la empresa demo y no depende de las demás.
+--
+-- OJO: las comprobaciones "no hay líneas is_quick" y "ningún rol que vende sin
+-- quick-sales" (Task 1) dependen del estado de producción y solo valen ANTES de
+-- salir en vivo: fallarán cuando existan ventas rápidas reales o cuando un admin
+-- vacíe ese permiso en un rol.
 
 select set_config('request.jwt.claims', '{"sub":"92381752-13b2-4f43-8b09-612647754599","role":"authenticated"}', true);
 
@@ -292,6 +297,41 @@ do $t$ begin
   assert (select not prosecdef and provolatile = 's' from pg_proc
            where oid = 'public.articulos_rapidos_recientes(uuid,integer)'::regprocedure),
          'caso 11: articulos_rapidos_recientes debía ser security invoker y stable';
+end $t$;
+
+-- Caso 12: desempate de los recientes. Cambiar el precio de una línea rápida con
+-- cantidad > 1 la parte en dos líneas con la misma descripción y el mismo
+-- created_at (el de la venta). Debe ganar siempre la que NO tiene custom_price,
+-- sea cual sea el orden en que se guardaron: se prueba con las dos órdenes.
+-- Los id de las ventas y de sus líneas los genera la base; los nombres propios del
+-- caso ("Combo desempate A/B") lo aíslan de los demás.
+do $t$
+declare
+  v_a uuid; v_b uuid; v_row record;
+begin
+  -- A: primero la línea con custom_price, después la normal.
+  v_a := pg_temp.vender('[{"product_name":"Combo desempate A","quantity":1,"price":100,"custom_price":130,"is_quick":true,"cost":70},{"product_name":" combo  desempate a ","quantity":1,"price":100,"is_quick":true,"cost":50}]');
+  -- B: primero la línea normal, después la que lleva custom_price.
+  v_b := pg_temp.vender('[{"product_name":"Combo desempate B","quantity":1,"price":100,"is_quick":true,"cost":50},{"product_name":" combo  desempate b ","quantity":1,"price":100,"custom_price":130,"is_quick":true,"cost":70}]');
+
+  assert (select count(*) from sale_items where sale_id in (v_a, v_b) and is_quick) = 4,
+         'caso 12: las dos ventas debían tener dos líneas rápidas cada una';
+  assert (select count(distinct s.created_at) from sales s where s.id in (v_a, v_b)) = 1
+     and (select count(*) from sale_items where sale_id = v_a and custom_price is not null) = 1
+     and (select count(*) from sale_items where sale_id = v_b and custom_price is not null) = 1,
+         'caso 12: el escenario debía tener un empate en created_at y una sola línea con custom_price por venta';
+
+  select * into v_row from articulos_rapidos_recientes('00000000-0000-0000-0000-0000000000b1') r
+   where lower(regexp_replace(r.name, '\s+', ' ', 'g')) = 'combo desempate a';
+  assert v_row.price = 100 and v_row.cost = 50,
+         'caso 12 (A): debía ganar la línea sin custom_price (precio 100, costo 50); salió '
+         || coalesce(v_row.price::text, 'nada') || ' / ' || coalesce(v_row.cost::text, 'nulo');
+
+  select * into v_row from articulos_rapidos_recientes('00000000-0000-0000-0000-0000000000b1') r
+   where lower(regexp_replace(r.name, '\s+', ' ', 'g')) = 'combo desempate b';
+  assert v_row.price = 100 and v_row.cost = 50,
+         'caso 12 (B): debía ganar la línea sin custom_price (precio 100, costo 50); salió '
+         || coalesce(v_row.price::text, 'nada') || ' / ' || coalesce(v_row.cost::text, 'nulo');
 end $t$;
 
 select 'ok' as resultado;

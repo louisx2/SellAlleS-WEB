@@ -252,8 +252,14 @@ as $$
          and s.branch_id = p_branch_id
          and s.cancelled_at is null
          and s.created_at >= now() - interval '90 days'
+       -- Desempate fijo: dos líneas con la misma descripción en la misma venta
+       -- (cambiar el precio de una línea con cantidad > 1 la parte en dos) tienen
+       -- el mismo created_at; gana la que no lleva custom_price y, si aún empatan,
+       -- el id, para que la sugerencia sea siempre la misma fila.
        order by lower(regexp_replace(btrim(si.product_name), '\s+', ' ', 'g')),
-                s.created_at desc
+                s.created_at desc,
+                (si.custom_price is not null),
+                si.id
     ) r
    order by r.last_sold_at desc, r.name
    limit least(greatest(coalesce(p_limit, 20), 1), 50);
