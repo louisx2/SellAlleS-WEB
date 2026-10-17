@@ -19,8 +19,9 @@ import { ExportButton } from '@/components/reports/export-button';
 import { useSales } from '@/context/sales-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
-import { rowToCreditPayment } from '@/lib/supabase/mappers';
-import type { CreditPayment, Sale } from '@/lib/types';
+import { fetchAllRows } from '@/lib/supabase/paginate';
+import { ABONO_COBRADO_SELECT, rowToAbonoCobrado, repartoDeAbono, type AbonoCobrado } from '@/lib/ganancia-realizada';
+import type { Sale } from '@/lib/types';
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -40,7 +41,7 @@ export default function FinancingProfitReportPage() {
     to: new Date(),
   });
   const [selectedBranch, setSelectedBranch] = React.useState('all');
-  const [payments, setPayments] = React.useState<CreditPayment[]>([]);
+  const [payments, setPayments] = React.useState<AbonoCobrado[]>([]);
 
   const range = React.useMemo(() => {
     if (!date?.from) return null;
@@ -85,20 +86,30 @@ export default function FinancingProfitReportPage() {
     };
   }, []);
 
-  // Abonos del rango. Se traen por fecha y se cruzan en el cliente contra los
-  // financiamientos visibles: así el filtro de sucursal (y el de empresa) sale
-  // de la misma lista que ya acota el provider.
+  // Abonos vigentes del rango (un abono anulado nunca fue ganancia). Se traen
+  // por fecha y se cruzan en el cliente contra los financiamientos visibles:
+  // así el filtro de sucursal (y el de empresa) sale de la misma lista que ya
+  // acota el provider.
   React.useEffect(() => {
     if (!range) { setPayments([]); return; }
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from('credit_payments')
-        .select('*, branches(name)')
-        .gte('date', range.from.toISOString())
-        .lte('date', range.to.toISOString())
-        .order('date', { ascending: true });
-      if (!cancelled) setPayments(data ? data.map(rowToCreditPayment) : []);
+      try {
+        const filas = await fetchAllRows((desde, hasta) =>
+          supabase
+            .from('credit_payments')
+            .select(ABONO_COBRADO_SELECT)
+            .is('voided_at', null)
+            .gte('date', range.from.toISOString())
+            .lte('date', range.to.toISOString())
+            .order('date', { ascending: true })
+            .order('id', { ascending: true })
+            .range(desde, hasta)
+        );
+        if (!cancelled) setPayments(filas.map(rowToAbonoCobrado));
+      } catch {
+        if (!cancelled) setPayments([]);
+      }
     })();
     return () => { cancelled = true; };
   }, [range, sales]);
@@ -158,22 +169,24 @@ export default function FinancingProfitReportPage() {
     let mora = 0;
     let cobrado = 0;
 
+    // Un abono general a la deuda del cliente se reparte entre varias ventas:
+    // cuenta solo la parte que fue a cada financiamiento.
     payments.forEach((p) => {
-      if (p.voidedAt) return;           // abono anulado: nunca fue ganancia
-      if (!p.saleId) return;            // abono general a la deuda del cliente, no a un financiamiento
-      const e = byId.get(p.saleId);
-      if (!e) return;                   // venta a crédito simple, otra sucursal u otra empresa
-      const fee = p.lateFeePaid;
-      const int = round2((p.amount - fee) * e.interestShare);
-      interes += int;
-      mora += fee;
-      cobrado += p.amount;
+      repartoDeAbono(p).forEach((parte) => {
+        const e = byId.get(parte.saleId);
+        if (!e) return;                 // venta a crédito simple, otra sucursal u otra empresa
+        // El inicial es parte del precio, no del plan: no lleva interés.
+        const int = parte.inicial ? 0 : round2(parte.capital * e.interestShare);
+        interes += int;
+        mora += parte.mora;
+        cobrado += parte.capital + parte.mora;
 
-      const key = format(p.date, 'yyyy-MM-dd');
-      const bucket = daily.get(key) ?? { key, name: format(p.date, 'dd MMM', { locale: es }), interes: 0, mora: 0 };
-      bucket.interes = round2(bucket.interes + int);
-      bucket.mora = round2(bucket.mora + fee);
-      daily.set(key, bucket);
+        const key = format(p.date, 'yyyy-MM-dd');
+        const bucket = daily.get(key) ?? { key, name: format(p.date, 'dd MMM', { locale: es }), interes: 0, mora: 0 };
+        bucket.interes = round2(bucket.interes + int);
+        bucket.mora = round2(bucket.mora + parte.mora);
+        daily.set(key, bucket);
+      });
     });
 
     return {
