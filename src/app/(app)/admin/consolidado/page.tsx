@@ -239,6 +239,7 @@ export default function ConsolidatedDashboardPage() {
                     <div className="text-xl font-bold text-emerald-600">{formatCurrency(stats.netProfit)}</div>
                     <p className="text-3xs text-muted-foreground mt-1">
                       {externalEntries.length > 0 ? 'Incluye entradas manuales' : 'Empresas seleccionadas'}
+                      {' · '}lo vendido a plazos, según se cobra
                     </p>
                   </CardContent>
                 </Card>
