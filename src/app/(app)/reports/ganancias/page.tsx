@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/utils';
 import { formatQty } from '@/lib/units';
-import type { CartItem } from '@/lib/types';
+import type { CartItem, Sale } from '@/lib/types';
 import { isUncostedQuick, lineBase, quickUnitPrice, topProductKey } from '@/lib/quick-sales';
 import { useSales } from '@/context/sales-provider';
 import { useExpenses } from '@/context/expense-provider';
@@ -23,6 +23,11 @@ import { useProducts } from '@/context/product-provider';
 import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { ExportButton } from '@/components/reports/export-button';
+import { supabase } from '@/lib/supabase/client';
+import { fetchAllRows } from '@/lib/supabase/paginate';
+import {
+  ABONO_COBRADO_SELECT, rowToAbonoCobrado, realizaciones, fraccionCobrada, type AbonoCobrado,
+} from '@/lib/ganancia-realizada';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
 export default function GananciasReportPage() {
@@ -65,33 +70,96 @@ export default function GananciasReportPage() {
     [productCostMap]
   );
 
-  // Filtrado de Ventas por Sucursal y Fecha
-  const filteredSales = React.useMemo(() => {
-    let sales = allSales;
-    
-    // Filtrar por sucursal
-    if (appUser?.role !== 'admin') {
-      sales = sales.filter((s) => s.branchId === appUser?.branch);
-    } else if (selectedBranch !== 'all') {
-      sales = sales.filter((s) => s.branchId === selectedBranch);
-    }
+  // Ingreso y costo de una venta entera, para la ganancia. Las ventas rápidas sin
+  // costo no hay con qué calcularlas: salen del ingreso (su base sin ITBIS) y no
+  // suman costo. Contarlas como ingreso con costo 0 inflaría la ganancia.
+  const ingresoDeVenta = React.useCallback(
+    (sale: Sale) => (sale.items ?? []).reduce(
+      (a, item) => (isUncostedQuick(item) ? a - lineBase(item, !!sale.itbisIncluded, ITBIS_RATE) : a),
+      sale.subtotal
+    ),
+    []
+  );
+  const costoDeVenta = React.useCallback(
+    (sale: Sale) => (sale.items ?? []).reduce(
+      (a, item) => (isUncostedQuick(item) ? a : a + item.quantity * costoDeLinea(item)),
+      0
+    ),
+    [costoDeLinea]
+  );
 
-    // Filtrar por fecha
-    if (date?.from) {
+  // Abonos vigentes: dicen cuándo se cobró cada pedazo de las ventas a crédito
+  // y financiadas. Se recargan con las ventas, porque cobrar o anular un abono
+  // también cambia la venta.
+  const [abonos, setAbonos] = React.useState<AbonoCobrado[]>([]);
+  React.useEffect(() => {
+    let cancelado = false;
+    (async () => {
+      try {
+        const filas = await fetchAllRows((desde, hasta) =>
+          supabase
+            .from('credit_payments')
+            .select(ABONO_COBRADO_SELECT)
+            .is('voided_at', null)
+            .order('id', { ascending: true })
+            .range(desde, hasta)
+        );
+        if (!cancelado) setAbonos(filas.map(rowToAbonoCobrado));
+      } catch {
+        // Sin abonos, lo cobrado de cada venta a plazos cae el día de la venta:
+        // se pierde la fecha del cobro, no el monto.
+        if (!cancelado) setAbonos([]);
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [allSalesRaw]);
+
+  const enRango = React.useCallback(
+    (d: Date) => {
+      if (!date?.from) return true;
       const fromDate = new Date(date.from);
       fromDate.setHours(0, 0, 0, 0);
-
       const toDate = date.to ? new Date(date.to) : new Date(date.from);
       toDate.setHours(23, 59, 59, 999);
+      return d >= fromDate && d <= toDate;
+    },
+    [date]
+  );
 
-      sales = sales.filter((s) => {
-        const sDate = new Date(s.createdAt);
-        return sDate >= fromDate && sDate <= toDate;
-      });
-    }
+  // Ventas de la sucursal, de cualquier fecha: el abono de hoy puede ser de una
+  // venta de hace meses.
+  const branchSales = React.useMemo(() => {
+    if (appUser?.role !== 'admin') return allSales.filter((s) => s.branchId === appUser?.branch);
+    return selectedBranch === 'all' ? allSales : allSales.filter((s) => s.branchId === selectedBranch);
+  }, [allSales, selectedBranch, appUser]);
 
-    return sales;
-  }, [allSales, selectedBranch, date, appUser]);
+  // Ventas hechas en el rango: para la cantidad vendida y el aviso de rápidas sin costo.
+  const filteredSales = React.useMemo(
+    () => branchSales.filter((s) => enRango(new Date(s.createdAt))),
+    [branchSales, enRango]
+  );
+
+  // Lo cobrado en el rango. Las de contado, enteras el día de la venta. Las de
+  // crédito y financiadas, la parte que cubre cada abono, el día del abono: no
+  // se gana el artículo hasta que el cliente lo paga.
+  const cobradas = React.useMemo(
+    () => realizaciones(branchSales, abonos).filter((r) => enRango(new Date(r.date))),
+    [branchSales, abonos, enRango]
+  );
+
+  // Margen de las ventas a plazos que falta por cobrar, a hoy: irá entrando al
+  // reporte con cada abono.
+  const porCobrar = React.useMemo(() => {
+    let margen = 0;
+    let ventas = 0;
+    branchSales.forEach((sale) => {
+      const pendiente = 1 - fraccionCobrada(sale);
+      if (pendiente < 0.0001) return;
+      ventas += 1;
+      margen += (ingresoDeVenta(sale) - costoDeVenta(sale)) * pendiente;
+    });
+    return { margen, ventas };
+  }, [branchSales, ingresoDeVenta, costoDeVenta]);
 
   // Filtrado de Gastos por Sucursal y Fecha
   const filteredExpenses = React.useMemo(() => {
@@ -125,22 +193,21 @@ export default function GananciasReportPage() {
   const totals = React.useMemo(() => {
     let subtotalRevenue = 0; // Excluimos ITBIS de los ingresos para la ganancia pura
     let totalCogs = 0; // Cost of Goods Sold (Costo de Compra de lo vendido)
-    // Ventas rápidas sin costo: no hay con qué calcular su ganancia, así que salen
-    // del ingreso (su base sin ITBIS) y no suman costo. Contarlas como ingreso con
-    // costo 0 inflaría la ganancia y el margen. Se acumulan aparte para el aviso.
+    // Ventas rápidas sin costo vendidas en el rango: ya quedan fuera del ingreso
+    // y del costo (ingresoDeVenta/costoDeVenta); se cuentan aparte para el aviso.
     let uncostedQuickCount = 0;
     let uncostedQuickAmount = 0;
 
+    cobradas.forEach(({ sale, fraction }) => {
+      subtotalRevenue += ingresoDeVenta(sale) * fraction;
+      totalCogs += costoDeVenta(sale) * fraction;
+    });
+
     filteredSales.forEach((sale) => {
-      subtotalRevenue += sale.subtotal;
       (sale.items ?? []).forEach((item) => {
-        if (isUncostedQuick(item)) {
-          subtotalRevenue -= lineBase(item, !!sale.itbisIncluded, ITBIS_RATE);
-          uncostedQuickCount += 1;
-          uncostedQuickAmount += item.quantity * quickUnitPrice(item);
-          return;
-        }
-        totalCogs += item.quantity * costoDeLinea(item);
+        if (!isUncostedQuick(item)) return;
+        uncostedQuickCount += 1;
+        uncostedQuickAmount += item.quantity * quickUnitPrice(item);
       });
     });
 
@@ -159,47 +226,38 @@ export default function GananciasReportPage() {
       uncostedQuickCount,
       uncostedQuickAmount,
     };
-  }, [filteredSales, filteredExpenses, costoDeLinea]);
+  }, [cobradas, filteredSales, filteredExpenses, ingresoDeVenta, costoDeVenta]);
 
   // --- Agrupación para el Gráfico ---
   const chartData = React.useMemo(() => {
-    const dailyData: Record<string, { name: string; Ventas: number; Gastos: number; Ganancia: number }> = {};
-
-    filteredSales.forEach((sale) => {
-      const day = format(new Date(sale.createdAt), 'dd MMM', { locale: es });
-      if (!dailyData[day]) {
-        dailyData[day] = { name: day, Ventas: 0, Gastos: 0, Ganancia: 0 };
+    const dailyData: Record<string, { key: string; name: string; Ventas: number; Gastos: number; Ganancia: number }> = {};
+    const dia = (d: Date) => {
+      const key = format(d, 'yyyy-MM-dd');
+      if (!dailyData[key]) {
+        dailyData[key] = { key, name: format(d, 'dd MMM', { locale: es }), Ventas: 0, Gastos: 0, Ganancia: 0 };
       }
+      return dailyData[key];
+    };
 
-      // Misma regla que en los totales: las rápidas sin costo no cuentan como
-      // ingreso ni como costo.
-      let saleRevenue = sale.subtotal;
-      let saleCogs = 0;
-      (sale.items ?? []).forEach((item) => {
-        if (isUncostedQuick(item)) {
-          saleRevenue -= lineBase(item, !!sale.itbisIncluded, ITBIS_RATE);
-          return;
-        }
-        saleCogs += item.quantity * costoDeLinea(item);
-      });
-      dailyData[day].Ventas += saleRevenue;
+    // Misma regla que en los totales: lo cobrado ese día, sin las rápidas sin costo.
+    cobradas.forEach(({ sale, date: cobro, fraction }) => {
+      const d = dia(new Date(cobro));
+      const ingreso = ingresoDeVenta(sale);
+      d.Ventas += ingreso * fraction;
       // Ganancia bruta diaria estimada
-      dailyData[day].Ganancia += (saleRevenue - saleCogs);
+      d.Ganancia += (ingreso - costoDeVenta(sale)) * fraction;
     });
 
     // Añadir gastos a cada día correspondiente
     filteredExpenses.forEach((exp) => {
-      const day = format(new Date(exp.date), 'dd MMM', { locale: es });
-      if (!dailyData[day]) {
-        dailyData[day] = { name: day, Ventas: 0, Gastos: 0, Ganancia: 0 };
-      }
-      dailyData[day].Gastos += exp.amount;
-      dailyData[day].Ganancia -= exp.amount;
+      const d = dia(new Date(exp.date));
+      d.Gastos += exp.amount;
+      d.Ganancia -= exp.amount;
     });
 
-    // Retornamos ordenado por fecha aproximada
-    return Object.values(dailyData);
-  }, [filteredSales, filteredExpenses, costoDeLinea]);
+    // Los abonos de ventas viejas llegan fuera de orden: se ordena por día.
+    return Object.values(dailyData).sort((a, b) => a.key.localeCompare(b.key));
+  }, [cobradas, filteredExpenses, ingresoDeVenta, costoDeVenta]);
 
   // --- Rentabilidad por Producto ---
   const productProfitability = React.useMemo(() => {
@@ -212,43 +270,49 @@ export default function GananciasReportPage() {
       margin: number;
     }> = {};
 
+    // Las líneas de productos ya borrados no tienen product_id: se agrupan
+    // por nombre para que no caigan todas juntas bajo una sola fila. Las
+    // rápidas con costo se agrupan por su descripción normalizada, como en
+    // Más vendidos, para que "Cable" y "cable " sean una sola fila.
+    const filaDe = (item: CartItem) => {
+      const pId = item.isQuick ? topProductKey(item) : item.product.id || `sin-id:${item.product.name}`;
+      if (!productStats[pId]) {
+        productStats[pId] = {
+          name: item.product.name,
+          qty: 0,
+          revenue: 0,
+          cost: 0,
+          profit: 0,
+          margin: 0
+        };
+      }
+      return productStats[pId];
+    };
+
+    // La cantidad es lo que salió en el rango. Venta, costo y ganancia son lo
+    // cobrado en el rango: en una venta a plazos, la parte que ya se pagó.
+    // Las rápidas sin costo no tienen rentabilidad que mostrar: van en el aviso.
     filteredSales.forEach((sale) => {
       (sale.items ?? []).forEach((item) => {
-        // Sin costo no hay rentabilidad que mostrar: van en el aviso de arriba.
         if (isUncostedQuick(item)) return;
-        // Las líneas de productos ya borrados no tienen product_id: se agrupan
-        // por nombre para que no caigan todas juntas bajo una sola fila. Las
-        // rápidas con costo se agrupan por su descripción normalizada, como en
-        // Más vendidos, para que "Cable" y "cable " sean una sola fila.
-        const pId = item.isQuick ? topProductKey(item) : item.product.id || `sin-id:${item.product.name}`;
-        const pName = item.product.name;
-        const pCost = costoDeLinea(item);
+        filaDe(item).qty += item.quantity;
+      });
+    });
+
+    cobradas.forEach(({ sale, fraction }) => {
+      (sale.items ?? []).forEach((item) => {
+        if (isUncostedQuick(item)) return;
         const itemPrice = item.customPrice ?? item.product.price;
-        const itemRevenue = item.quantity * itemPrice;
-        const itemCostTotal = item.quantity * pCost;
-
-        if (!productStats[pId]) {
-          productStats[pId] = {
-            name: pName,
-            qty: 0,
-            revenue: 0,
-            cost: 0,
-            profit: 0,
-            margin: 0
-          };
-        }
-
-        const stats = productStats[pId];
-        stats.qty += item.quantity;
-        stats.revenue += itemRevenue;
-        stats.cost += itemCostTotal;
+        const stats = filaDe(item);
+        stats.revenue += item.quantity * itemPrice * fraction;
+        stats.cost += item.quantity * costoDeLinea(item) * fraction;
         stats.profit = stats.revenue - stats.cost;
         stats.margin = stats.revenue > 0 ? (stats.profit / stats.revenue) * 100 : 0;
       });
     });
 
     return Object.values(productStats).sort((a, b) => b.profit - a.profit);
-  }, [filteredSales, costoDeLinea]);
+  }, [filteredSales, cobradas, costoDeLinea]);
 
   return (
     <div className="space-y-6">
@@ -341,7 +405,7 @@ export default function GananciasReportPage() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold">{formatCurrency(totals.revenue)}</div>
-            <p className="text-2xs text-muted-foreground mt-1">Ingresos brutos sin impuestos</p>
+            <p className="text-2xs text-muted-foreground mt-1">Cobrado sin impuestos</p>
           </CardContent>
         </Card>
 
@@ -390,6 +454,17 @@ export default function GananciasReportPage() {
         </Card>
       </div>
 
+      <p className="text-xs text-muted-foreground -mt-2">
+        Las ventas a crédito y financiadas suman su ganancia a medida que el cliente paga, en la fecha de cada abono.
+        {porCobrar.ventas > 0 && (
+          <>
+            {' '}Quedan <span className="font-semibold text-foreground">{formatCurrency(porCobrar.margen)}</span> de
+            ganancia por cobrar en {porCobrar.ventas} {porCobrar.ventas === 1 ? 'venta' : 'ventas'}.
+          </>
+        )}
+        {' '}El interés y la mora están en Ganancias de Financiamiento.
+      </p>
+
       {/* --- Gráfico --- */}
       <Card className="bg-card/40 backdrop-blur-sm border-muted/50">
         <CardHeader>
@@ -422,6 +497,9 @@ export default function GananciasReportPage() {
       <Card className="bg-card/40 backdrop-blur-sm border-muted/50">
         <CardHeader>
           <CardTitle className="text-base font-semibold">Tabla de Rentabilidad por Producto</CardTitle>
+          <p className="text-2xs text-muted-foreground">
+            La cantidad es lo vendido en el rango; venta, costo y ganancia son lo cobrado en el rango.
+          </p>
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">

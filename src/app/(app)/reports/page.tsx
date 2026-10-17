@@ -16,6 +16,7 @@ import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatQty } from '@/lib/units';
 import { isReportVisible, unionPermissions } from '@/lib/permissions';
 import { isUncostedQuick, lineBase } from '@/lib/quick-sales';
+import { fraccionCobrada } from '@/lib/ganancia-realizada';
 import { 
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Legend 
 } from 'recharts';
@@ -89,12 +90,14 @@ export default function ReportsDashboardPage() {
     const salesRevenue = filteredSales.reduce((sum, s) => sum + s.total, 0);
     const salesCount = filteredSales.length;
 
-    // 2. Costo de venta y Ganancia Estimada
-    let totalCogs = 0;
-    // Base (sin ITBIS) de las ventas rápidas sin costo: no se puede calcular su
-    // ganancia, así que salen del ingreso en vez de contarse como ganancia pura.
-    let uncostedQuickBase = 0;
+    // 2. Costo de venta y Ganancia Estimada. Una venta a crédito o financiada
+    // solo aporta la parte que el cliente ya pagó (ver lib/ganancia-realizada).
+    let grossProfit = 0;
     filteredSales.forEach((sale) => {
+      let saleCogs = 0;
+      // Base (sin ITBIS) de las ventas rápidas sin costo: no se puede calcular su
+      // ganancia, así que salen del ingreso en vez de contarse como ganancia pura.
+      let uncostedQuickBase = 0;
       (sale.items ?? []).forEach((item) => {
         if (isUncostedQuick(item)) {
           uncostedQuickBase += lineBase(item, !!sale.itbisIncluded, ITBIS_RATE);
@@ -104,11 +107,10 @@ export default function ReportsDashboardPage() {
         // usa el del catálogo, que además solo tiene los productos activos (un
         // producto archivado o borrado caería en 0 y regalaría margen).
         const costo = item.cost ?? allProducts.find((p) => p.id === item.product.id)?.cost ?? 0;
-        totalCogs += item.quantity * costo;
+        saleCogs += item.quantity * costo;
       });
+      grossProfit += (sale.subtotal - uncostedQuickBase - saleCogs) * fraccionCobrada(sale);
     });
-    const subtotalRevenue = filteredSales.reduce((sum, s) => sum + s.subtotal, 0);
-    const grossProfit = subtotalRevenue - uncostedQuickBase - totalCogs;
 
     // 3. Gastos
     const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -273,7 +275,7 @@ export default function ReportsDashboardPage() {
         <Card className="md:col-span-3 bg-card/40 backdrop-blur-sm border-muted/50 bg-gradient-to-br from-emerald-500/5 to-transparent">
           <CardHeader>
             <CardTitle className="text-base font-semibold">Ganancia Neta Estimada</CardTitle>
-            <CardDescription className="text-xs">Utilidad calculada (Ingresos POS - Costos - Gastos)</CardDescription>
+            <CardDescription className="text-xs">Utilidad calculada (Ingresos POS - Costos - Gastos). Lo vendido a plazos cuenta según se cobra.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="text-3xl font-extrabold text-emerald-500">
