@@ -38,9 +38,11 @@ export type QuickReportLine = {
 
 const QUICK_UNIT: UnitCode = 'und';
 
-// El `|| 0` descarta el -0: Math.round(-0.4) da -0 y el reporte lo mostraría
-// como "-0.00" en una línea en el punto de equilibrio con ruido de coma flotante.
-const round2 = (n: number) => Math.round(n * 100) / 100 || 0;
+// El `+ 0` descarta el -0 (-0 + 0 es +0): Math.round(-0.4) da -0 y el reporte lo
+// mostraría como "-0.00" en una línea en el punto de equilibrio con ruido de coma
+// flotante. A diferencia de `|| 0`, deja pasar el NaN en vez de volverlo 0, para
+// que un dato inválido no se disfrace de importe cero.
+const round2 = (n: number) => Math.round(n * 100) / 100 + 0;
 
 // Igual que la columna normalizada de la base:
 // lower(regexp_replace(btrim(name), '\s+', ' ', 'g')).
@@ -128,8 +130,11 @@ export function topProductKey(item: CartItem): string {
   return item.isQuick ? `rapido:${normalizeQuickName(item.product.name)}` : item.product.id;
 }
 
-// Totales del reporte de Ventas Rápidas. `total` y `uncostedAmount` son brutos
-// (lo cobrado); `profit` es base sin ITBIS menos costo, solo de las líneas con costo.
+// Totales del reporte de Ventas Rápidas. `total` y `uncostedAmount` son el importe
+// de las líneas (cantidad × precio) antes de sumar el ITBIS que la venta cobra
+// aparte: si el ITBIS va incluido en el precio, ya está dentro; si se cobra
+// aparte, no está. `profit` es base sin ITBIS menos costo, solo de las líneas con
+// costo.
 export function summarizeQuickLines(
   lines: QuickReportLine[],
   itbisRate: number,

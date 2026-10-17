@@ -132,7 +132,7 @@ export default function QuotesPage() {
 
     if (missing.length > 0) {
       toast({
-        title: 'Algunos productos ya no existen',
+        title: 'Algunas líneas no se cargaron',
         description: `No se cargaron: ${missing.join(', ')}.`,
       });
     }

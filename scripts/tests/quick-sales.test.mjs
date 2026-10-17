@@ -196,6 +196,13 @@ test('lineBase redondea a 2 decimales', () => {
   assert.equal(lineBase(line({ quantity: 1, product: product({ price: 100, itbis: true }) }), true, RATE), 84.75);
 });
 
+// round2 no debe volver 0 un dato inválido: un precio NaN tiene que seguir siendo
+// NaN para que el error se vea y no se cuele como una línea de importe cero.
+test('lineBase: un precio NaN sigue siendo NaN', () => {
+  assert.ok(Number.isNaN(lineBase(line({ quantity: 1, product: product({ price: NaN, itbis: false }) }), false, RATE)));
+  assert.ok(Number.isNaN(lineBase(line({ quantity: 1, product: product({ price: NaN, itbis: true }) }), true, RATE)));
+});
+
 test('topProductKey', () => {
   assert.equal(
     topProductKey(line({ isQuick: true, product: product({ id: '', name: ' Cable USB' }) })),

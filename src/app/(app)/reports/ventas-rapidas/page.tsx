@@ -159,6 +159,12 @@ export default function VentasRapidasPage() {
 
   const mostrarSucursal = esAdmin && sucursalId === 'all';
 
+  // Mientras carga, o si la consulta falló, no hay cifras que mostrar: las tarjetas
+  // dirían RD$0.00 / "0 líneas" (error) o los números del período anterior
+  // (recarga), y el CSV exportaría esas mismas filas viejas o vacías.
+  const datosListos = !loading && !fallo;
+  const cifra = (valor: string) => (datosListos ? valor : '—');
+
   const columnasCsv = React.useMemo(
     () => [
       { header: 'Fecha', value: (f: FilaRapida) => new Date(f.sales.created_at).toLocaleString('es-DO') },
@@ -238,7 +244,7 @@ export default function VentasRapidasPage() {
             </PopoverContent>
           </Popover>
 
-          <ExportButton filename="ventas_rapidas" columns={columnasCsv} rows={visibles} />
+          <ExportButton filename="ventas_rapidas" columns={columnasCsv} rows={datosListos ? visibles : []} />
         </div>
       </PageHeader>
 
@@ -250,10 +256,12 @@ export default function VentasRapidasPage() {
           <CardContent>
             <div className="text-2xl font-bold flex items-center gap-2">
               <DollarSign className="h-5 w-5 text-emerald-500" />
-              {formatCurrency(resumen.total)}
+              {cifra(formatCurrency(resumen.total))}
             </div>
             <CardDescription className="mt-1">
-              {visibles.length} línea{visibles.length === 1 ? '' : 's'}, con y sin costo
+              {datosListos
+                ? `${visibles.length} línea${visibles.length === 1 ? '' : 's'}, con y sin costo`
+                : 'Líneas, con y sin costo'}
             </CardDescription>
           </CardContent>
         </Card>
@@ -265,7 +273,7 @@ export default function VentasRapidasPage() {
           <CardContent>
             <div className="text-2xl font-bold flex items-center gap-2">
               <Receipt className="h-5 w-5 text-blue-500" />
-              {formatCurrency(resumen.totalWithCost)}
+              {cifra(formatCurrency(resumen.totalWithCost))}
             </div>
             <CardDescription className="mt-1">Solo las líneas que traen costo</CardDescription>
           </CardContent>
@@ -278,7 +286,7 @@ export default function VentasRapidasPage() {
           <CardContent>
             <div className="text-2xl font-bold flex items-center gap-2">
               <TrendingUp className="h-5 w-5 text-emerald-500" />
-              {formatCurrency(resumen.profit)}
+              {cifra(formatCurrency(resumen.profit))}
             </div>
             <CardDescription className="mt-1">De las líneas con costo, sin ITBIS</CardDescription>
           </CardContent>
@@ -291,10 +299,12 @@ export default function VentasRapidasPage() {
           <CardContent>
             <div className="text-2xl font-bold flex items-center gap-2">
               <AlertTriangle className="h-5 w-5 text-amber-500" />
-              {formatCurrency(resumen.uncostedAmount)}
+              {cifra(formatCurrency(resumen.uncostedAmount))}
             </div>
             <CardDescription className="mt-1">
-              {resumen.uncostedCount} línea{resumen.uncostedCount === 1 ? '' : 's'}, sin ganancia calculable
+              {datosListos
+                ? `${resumen.uncostedCount} línea${resumen.uncostedCount === 1 ? '' : 's'}, sin ganancia calculable`
+                : 'Líneas sin ganancia calculable'}
             </CardDescription>
           </CardContent>
         </Card>
