@@ -84,6 +84,28 @@ function fmtMoneda(v: unknown): string {
   return `RD$ ${n.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** Cómo estaba la cuenta al subir el comprobante, en palabras: "debía RD$ X (N cuotas)", "estaba al día" o
+ *  "tenía RD$ X a favor" (el saldo negativo es lo pagado por adelantado; un "debía RD$ -2,300" confunde). */
+function estadoDeLaCuenta(saldoV: unknown, cuotasV: unknown): { texto: string; html: string } {
+  const saldo = Number(saldoV);
+  const cuotas = Number(cuotasV ?? 0);
+  if (!Number.isFinite(saldo)) return { texto: '', html: '' };
+  if (saldo > 0.005) {
+    const extra = cuotas > 0 ? ` (${cuotas} ${cuotas === 1 ? 'cuota' : 'cuotas'})` : '';
+    return {
+      texto: `Según su cuenta debía ${fmtMoneda(saldo)}${extra}.`,
+      html: `Según su cuenta debía <strong>${esc(fmtMoneda(saldo))}</strong>${esc(extra)}.`,
+    };
+  }
+  if (saldo < -0.005) {
+    return {
+      texto: `Según su cuenta tenía ${fmtMoneda(-saldo)} a favor.`,
+      html: `Según su cuenta tenía <strong>${esc(fmtMoneda(-saldo))}</strong> a favor.`,
+    };
+  }
+  return { texto: 'Según su cuenta estaba al día.', html: 'Según su cuenta estaba <strong>al día</strong>.' };
+}
+
 /** Bloque de contacto, siempre desde platform_settings: si el super admin
  *  cambia el número o apaga un canal, los correos lo reflejan sin redesplegar. */
 function bloqueContacto(c: Contacto): string {
@@ -252,10 +274,11 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto, 
           ${boton('/suscripcion', 'Ir a Mi Suscripción')}`, c),
       };
 
-    case 'comprobante-recibido':
+    case 'comprobante-recibido': {
+      const cuenta = estadoDeLaCuenta(vars.saldo, vars.cuotasPendientes);
       return {
         subject: `Comprobante por confirmar: ${String(vars.companyName ?? '')} — ${fmtMoneda(vars.amount)}`,
-        text: `${vars.companyName ?? 'Una empresa'} subió un comprobante de ${fmtMoneda(vars.amount)}${vars.paidAt ? ` del ${fmtFecha(vars.paidAt)}` : ''}${vars.bank ? ` a ${vars.bank}` : ''}${vars.reference ? ` (ref. ${vars.reference})` : ''}.\nLo subió: ${vars.reportedBy ?? '—'}.\nSegún su cuenta debía ${fmtMoneda(vars.saldo)}.\n\nVerifica en tu banco y confírmalo en Cobros.`,
+        text: `${vars.companyName ?? 'Una empresa'} subió un comprobante de ${fmtMoneda(vars.amount)}${vars.paidAt ? ` del ${fmtFecha(vars.paidAt)}` : ''}${vars.bank ? ` a ${vars.bank}` : ''}${vars.reference ? ` (ref. ${vars.reference})` : ''}.\nLo subió: ${vars.reportedBy ?? '—'}.\n${cuenta.texto}\n\nVerifica en tu banco y confírmalo en Cobros.`,
         html: envolver('Comprobante por confirmar', `
           <p><strong>${empresa}</strong> subió un comprobante de pago.</p>
           <div style="background:#FFFBEB;border:1px solid #FDE68A;padding:15px;border-radius:5px;margin:16px 0;">
@@ -266,10 +289,11 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto, 
             ${vars.notes ? `<p style="margin:0 0 8px 0;"><strong>Nota:</strong> ${esc(vars.notes)}</p>` : ''}
             <p style="margin:0;"><strong>Lo subió:</strong> ${esc(vars.reportedBy ?? '—')}</p>
           </div>
-          <p>Según su cuenta debía <strong>${esc(fmtMoneda(vars.saldo))}</strong>${Number(vars.cuotasPendientes ?? 0) > 0 ? ` (${esc(vars.cuotasPendientes)} cuotas)` : ''}.</p>
+          ${cuenta.html ? `<p>${cuenta.html}</p>` : ''}
           <p><strong>Verifica en tu banco</strong> que el dinero llegó y confírmalo en <strong>Cobros → Por confirmar</strong>. La factura se crea al confirmar.</p>
           ${boton('/admin/cobros', 'Abrir Cobros')}`, c),
       };
+    }
 
     case 'resumen-cobros': {
       type Pendiente = { companyName?: string; amount?: number; paidAt?: string; bank?: string; reference?: string };

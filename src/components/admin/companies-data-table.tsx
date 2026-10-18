@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   Building2, Store, Pencil, Boxes, LogIn, ChevronDown, ChevronRight, Search, Filter,
-  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt, Shield,
+  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt, Shield, KeyRound,
 } from 'lucide-react';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, type BusinessType } from '@/lib/business-types';
@@ -40,6 +40,7 @@ interface CompaniesDataTableProps {
   onAddBranch?: (c: Company) => void;
   onManageUsers?: (c: Company) => void;
   onManagePayments?: (c: Company) => void;
+  onClaveCobro?: (c: Company) => void;
   onManageRoles?: (c: Company) => void;
   onToggleBranchStatus?: (b: { id: string; name: string; isActive: boolean }) => void;
   getPlanName: (companyId: string) => string;
@@ -97,6 +98,7 @@ export function CompaniesDataTable({
   onAddBranch,
   onManageUsers,
   onManagePayments,
+  onClaveCobro,
   onManageRoles,
   onToggleBranchStatus,
   getPlanName,
@@ -399,6 +401,11 @@ export function CompaniesDataTable({
                             {onManagePayments && (
                               <DropdownMenuItem onClick={() => onManagePayments(c)}>
                                 <Receipt className="mr-2 h-4 w-4" /> Pagos de suscripción
+                              </DropdownMenuItem>
+                            )}
+                            {onClaveCobro && (
+                              <DropdownMenuItem onClick={() => onClaveCobro(c)}>
+                                <KeyRound className="mr-2 h-4 w-4" /> Clave de conexión
                               </DropdownMenuItem>
                             )}
                             {onManageRoles && (

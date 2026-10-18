@@ -25,6 +25,7 @@ import {
   type CuentaBancaria, type ReportePago,
 } from '@/lib/payment-reports';
 import { useMiCuenta, avisarCambioDeMiCuenta } from '@/hooks/use-mi-cuenta';
+import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { ReportarPagoDialog } from '@/components/subscription/reportar-pago-dialog';
 import { ComprobanteVista } from '@/components/subscription/comprobante-vista';
 import {
@@ -148,7 +149,7 @@ export default function SuscripcionPage() {
 
   const load = useCallback(async () => {
     if (!activeCompanyId) { setPayments([]); setLoading(false); return; }
-    const [{ data, error }, { data: reps }] = await Promise.all([
+    const [{ data, error }, { data: reps, error: errorReps }] = await Promise.all([
       supabase
         .from('subscription_payments')
         .select('*')
@@ -161,10 +162,11 @@ export default function SuscripcionPage() {
             .eq('company_id', activeCompanyId)
             .order('created_at', { ascending: false })
             .limit(50)
-        : Promise.resolve({ data: [] as any[] }),
+        : Promise.resolve({ data: [] as any[], error: null }),
     ]);
     if (!error && data) setPayments(data.map(rowToSubscriptionPayment));
-    setReportes(((reps ?? []) as any[]).map(rowToReportePago));
+    // si falla (la red al volver a la pestaña), se dejan los comprobantes que había
+    if (!errorReps) setReportes(((reps ?? []) as any[]).map(rowToReportePago));
     setLoading(false);
   }, [activeCompanyId, esAdmin]);
 
@@ -179,6 +181,11 @@ export default function SuscripcionPage() {
     recargarCuenta();
     avisarCambioDeMiCuenta();
   };
+
+  // En tiempo real: cuando SellAlleS confirma o rechaza un comprobante, o
+  // registra un pago, las listas de esta página se ponen al día sin recargar
+  // (la cuenta y el aviso de arriba ya lo hacen en useMiCuenta).
+  useRealtimeReload(['subscription_payment_reports', 'subscription_payments'], load, esAdmin && !!activeCompanyId);
 
   const confirmarRetiro = async () => {
     if (!retirar) return;
