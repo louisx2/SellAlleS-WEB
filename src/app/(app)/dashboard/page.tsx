@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { formatCurrency } from '@/lib/utils';
 import { DollarSign, Hash, CreditCard, ClipboardList, Settings2, HandCoins } from 'lucide-react';
 import { RecentSales } from '@/components/reports/recent-sales';
+import { ReceiptDialog } from '@/components/pos/receipt-dialog';
 import { FlexChart } from '@/components/dashboard/flex-chart';
 import { DashboardConfigDialog } from '@/components/dashboard/dashboard-config-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -18,6 +19,7 @@ import { fetchAllRows } from '@/lib/supabase/paginate';
 import {
   loadDashboardConfig, saveDashboardConfig, defaultDashboardConfig, type DashboardConfig,
 } from '@/lib/dashboard-config';
+import type { Sale } from '@/lib/types';
 
 function KpiCard({ title, value, subtitle, icon: Icon, accentClass }: {
   title: string; value: string; subtitle: string; icon: React.ElementType; accentClass?: string;
@@ -47,6 +49,8 @@ export default function DashboardPage() {
   const [selectedBranch, setSelectedBranch] = useState('all');
   const [config, setConfig] = useState<DashboardConfig>(defaultDashboardConfig());
   const [configOpen, setConfigOpen] = useState(false);
+  // Venta abierta desde "Últimas Ventas de Hoy": se ve su ticket con el detalle.
+  const [ventaVista, setVentaVista] = useState<Sale | null>(null);
   // Abonos a deudas viejas: no son ventas de hoy, así que no salen de `sales`.
   const [collectedToday, setCollectedToday] = useState<{ branchName: string; amount: number }[]>([]);
 
@@ -240,7 +244,7 @@ export default function DashboardPage() {
             <CardHeader><CardTitle>Últimas Ventas de Hoy</CardTitle></CardHeader>
             <CardContent>
               {filteredSales.length > 0 ? (
-                <RecentSales sales={filteredSales.slice(0, 5)} />
+                <RecentSales sales={filteredSales.slice(0, 5)} onSelect={setVentaVista} />
               ) : (
                 <p className="text-sm text-muted-foreground text-center pt-8">No hay ventas para mostrar hoy.</p>
               )}
@@ -256,6 +260,12 @@ export default function DashboardPage() {
           </Card>
         )}
       </div>
+
+      <ReceiptDialog
+        sale={ventaVista}
+        isOpen={!!ventaVista}
+        onOpenChange={(abierto) => { if (!abierto) setVentaVista(null); }}
+      />
 
       <DashboardConfigDialog
         open={configOpen}
