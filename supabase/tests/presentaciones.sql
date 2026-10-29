@@ -277,6 +277,11 @@ begin
     $j$select pg_temp.guardar(pg_temp.prod(101), true,
          '[{"name":"Paquete","units":12,"price":160,"code":"X-1"},{"name":"Caja","units":288,"price":3600,"code":"x-1"}]')$j$,
     'El código «x-1» ya lo usa «Galletas Prueba» en esta sucursal.');
+  -- Ni siquiera el código del propio producto (e101 tiene "E101"): el escaneo
+  -- busca primero entre los códigos de producto y la presentación no saldría.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.guardar(pg_temp.prod(101), true, '[{"name":"Paquete","units":12,"price":160,"code":"e101"}]')$j$,
+    'El código «e101» ya lo usa «Galletas Prueba» en esta sucursal.');
   -- Si no se vende suelto, hace falta al menos una presentación.
   perform pg_temp.debe_fallar(
     $j$select pg_temp.guardar(pg_temp.prod(101), false, '[]')$j$,

@@ -128,16 +128,16 @@ begin
     raise exception 'Ya hay una presentación llamada «%» en este producto.', new.name;
   end if;
 
-  -- Un código no puede repetirse en la sucursal: ni con otro producto activo
-  -- (los archivados no cuentan) ni con otra presentación, sin distinguir
-  -- mayúsculas. En otra sucursal sí puede repetirse. El dueño que se nombra en
-  -- el mensaje es el producto que ya lo usa.
+  -- Un código no puede repetirse en la sucursal: ni con un producto activo (los
+  -- archivados no cuentan; tampoco el del propio producto: el escaneo busca
+  -- primero entre los códigos de producto y la presentación nunca saldría) ni
+  -- con otra presentación, sin distinguir mayúsculas. En otra sucursal sí puede
+  -- repetirse. El dueño que se nombra en el mensaje es el producto que ya lo usa.
   if new.code is not null then
     select p.name into v_owner
       from public.products p
      where p.branch_id = v_product.branch_id
        and p.is_active
-       and p.id <> v_product.id
        and p.code is not null
        and lower(btrim(p.code)) = lower(new.code)
      limit 1;
