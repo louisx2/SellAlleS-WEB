@@ -479,4 +479,214 @@ begin
          'cascada: borrar el producto debía borrar sus presentaciones';
 end $t$;
 
+-- == Task 2: venta y anulación por presentación ==
+-- Estado explícito de la sección: super admin de la demo; sin filas de
+-- company_modules para quick-sales (el módulo cuenta como activo por omisión).
+-- Fixtures en la sucursal Principal (b1): e111 "Galletas Venta" (und, stock 30,
+-- costo 10) con el Paquete e112 (12 u, RD$160); e113 sin presentaciones (stock
+-- 10, costo 7); e114 sin control de existencias (stock 50, costo 4) con una
+-- Bolsa de 6 u; e115 "Otro Venta" con la Caja e116 (presentación ajena a e111).
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+delete from company_modules
+ where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'quick-sales';
+
+-- Venta pagada con tarjeta (así la caja no interviene).
+create function pg_temp.vender(p_items text) returns uuid
+language plpgsql as $$
+begin
+  return (create_sale_with_items(jsonb_build_object(
+    'branch_id', '00000000-0000-0000-0000-0000000000b1', 'subtotal', 100, 'itbis_amount', 0,
+    'total', 100, 'payment_method', 'card', 'payment_status', 'paid',
+    'amount_paid', 100, 'ncf_type', 'consumer'), p_items::jsonb)).id;
+end $$;
+
+insert into products (id, company_id, branch_id, name, code, unit, stock, cost, price, tracks_stock) values
+  (pg_temp.prod(111), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Galletas Venta', null, 'und', 30, 10, 15, true),
+  (pg_temp.prod(113), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Sin Presentaciones Venta', null, 'und', 10, 7, 8, true),
+  (pg_temp.prod(114), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Bolsas Sin Control Venta', null, 'und', 50, 4, 6, false),
+  (pg_temp.prod(115), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Otro Venta', null, 'und', 5, 3, 5, true);
+insert into product_presentations (id, product_id, name, units, price) values
+  (pg_temp.prod(112), pg_temp.prod(111), 'Paquete', 12, 160),
+  (pg_temp.prod(116), pg_temp.prod(115), 'Caja', 6, 90);
+insert into product_presentations (product_id, name, units, price) values
+  (pg_temp.prod(114), 'Bolsa', 6, 30);
+
+-- 2 paquetes + 3 sueltas = 27 unidades base; anular las devuelve. Lo que el
+-- navegador mande en `units_per` / `presentation_name` / `cost` se ignora: los
+-- pone el servidor desde la presentación.
+do $t$
+declare v_sale uuid;
+begin
+  v_sale := pg_temp.vender('[
+    {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112",
+     "quantity":2,"price":160,"units_per":1,"presentation_name":"X","cost":0},
+    {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","quantity":3,"price":15}]');
+  assert (select stock from products where id = pg_temp.prod(111)) = 3,
+         'venta: 2 paquetes + 3 sueltas debían dejar el stock en 3 (30 − 27); quedó en '
+         || (select stock from products where id = pg_temp.prod(111));
+  assert (select count(*) from sale_items where sale_id = v_sale) = 2, 'venta: debían guardarse dos líneas';
+  assert (select units_per = 12 and presentation_name = 'Paquete' and cost = 120 and quantity = 2
+            from sale_items where sale_id = v_sale and presentation_id = pg_temp.prod(112)),
+         'venta: la línea del paquete debía quedar con units_per 12, nombre Paquete y costo 120 (10 × 12), sin hacer caso al payload';
+  assert (select units_per = 1 and cost = 10 and presentation_name is null and quantity = 3
+            from sale_items where sale_id = v_sale and presentation_id is null),
+         'venta: la línea suelta debía quedar con units_per 1, sin nombre de presentación y costo 10';
+
+  perform annul_sale(v_sale, 'prueba', 'card');
+  assert (select cancelled_at is not null from sales where id = v_sale), 'anular: la venta no quedó anulada';
+  assert (select stock from products where id = pg_temp.prod(111)) = 30,
+         'anular: debía reponer 27 unidades base (quantity × units_per); el stock quedó en '
+         || (select stock from products where id = pg_temp.prod(111));
+end $t$;
+
+-- Justo en el límite: 2 paquetes + 6 sueltas = 30 deja el stock en 0.
+do $t$
+declare v_sale uuid;
+begin
+  v_sale := pg_temp.vender('[
+    {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112","quantity":2,"price":160},
+    {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","quantity":6,"price":15}]');
+  assert (select stock from products where id = pg_temp.prod(111)) = 0,
+         'límite: 24 + 6 = 30 debía dejar el stock en 0';
+  perform annul_sale(v_sale, 'prueba', 'card');
+  assert (select stock from products where id = pg_temp.prod(111)) = 30, 'límite: anular debía devolver las 30';
+end $t$;
+
+-- Rechazos. Cada uno revierte lo que hiciera antes de fallar.
+do $t$
+begin
+  -- El stock se compara contra la suma de las líneas en unidades base:
+  -- 24 + 7 = 31 > 30 aunque cada línea por separado alcance.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[
+        {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112","quantity":2,"price":160},
+        {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","quantity":7,"price":15}]')$j$,
+    'Stock insuficiente para completar la venta.');
+  -- Una sola línea: 3 paquetes son 36 unidades base, no 3.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112","quantity":3,"price":160}]')$j$,
+    'Stock insuficiente para completar la venta.');
+  -- La presentación de otro producto no vale.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e116","quantity":1,"price":90}]')$j$,
+    'La presentación no corresponde a este producto.');
+  -- Ni una que no existe.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e1ff","quantity":1,"price":160}]')$j$,
+    'La presentación no corresponde a este producto.');
+  -- Ni una línea sin producto.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[{"product_name":"Paquete suelto","presentation_id":"00000000-0000-0000-0000-00000000e112","quantity":1,"price":160}]')$j$,
+    'La presentación no corresponde a este producto.');
+  -- Las presentaciones van enteras.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112","quantity":1.5,"price":160}]')$j$,
+    'Las presentaciones van enteras: la cantidad tiene que ser un número entero.');
+  -- Un artículo rápido no lleva presentación.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[{"product_name":"Cable USB","quantity":1,"price":150,"is_quick":true,"presentation_id":"00000000-0000-0000-0000-00000000e112"}]')$j$,
+    'Un artículo rápido no puede llevar presentación.');
+
+  assert (select stock from products where id = pg_temp.prod(111)) = 30, 'rechazos: una venta fallida movió el stock';
+end $t$;
+
+-- Sin vender suelto: la línea suelta se rechaza con el nombre del producto y la
+-- que trae presentación sigue pasando.
+do $t$
+declare v_sale uuid; v_keep text;
+begin
+  v_keep := jsonb_build_array(jsonb_build_object('id', pg_temp.prod(112), 'name', 'Paquete', 'units', 12, 'price', 160))::text;
+  perform pg_temp.guardar(pg_temp.prod(111), false, v_keep);
+  assert not (select sold_loose from products where id = pg_temp.prod(111)),
+         'suelto: save(e111, false, [Paquete]) debía apagar sold_loose';
+  assert exists (select 1 from product_presentations where id = pg_temp.prod(112)),
+         'suelto: el Paquete debía conservarse por su id';
+
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","quantity":1,"price":15}]')$j$,
+    '«Galletas Venta» no se vende suelto.');
+  -- Basta una línea suelta para rechazar toda la venta.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[
+        {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112","quantity":1,"price":160},
+        {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","quantity":1,"price":15}]')$j$,
+    '«Galletas Venta» no se vende suelto.');
+  assert (select stock from products where id = pg_temp.prod(111)) = 30,
+         'suelto: una venta rechazada movió el stock';
+
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112","quantity":1,"price":160}]');
+  assert (select stock from products where id = pg_temp.prod(111)) = 18, 'suelto: 1 paquete debía dejar el stock en 18';
+  perform annul_sale(v_sale, 'prueba', 'card');
+  assert (select stock from products where id = pg_temp.prod(111)) = 30, 'suelto: anular debía devolver las 12';
+
+  -- Se vuelve a vender suelto.
+  perform pg_temp.guardar(pg_temp.prod(111), true, v_keep);
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","quantity":1,"price":15}]');
+  assert (select stock from products where id = pg_temp.prod(111)) = 29, 'suelto: con sold_loose otra vez en true la suelta debía pasar';
+  perform annul_sale(v_sale, 'prueba', 'card');
+end $t$;
+
+-- Presentación borrada después de vender: la línea conserva nombre y unidades
+-- (presentation_id queda nulo) y anular repone con esas unidades guardadas, no
+-- con las de la presentación, que ya no existe.
+do $t$
+declare v_sale uuid;
+begin
+  v_sale := pg_temp.vender('[
+    {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112","quantity":2,"price":160},
+    {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","quantity":3,"price":15}]');
+  assert (select stock from products where id = pg_temp.prod(111)) = 3, 'borrada: la venta debía dejar el stock en 3';
+
+  delete from product_presentations where id = pg_temp.prod(112);
+  assert (select presentation_id is null and presentation_name = 'Paquete' and units_per = 12
+            from sale_items where sale_id = v_sale and units_per = 12),
+         'borrada: la línea debía conservar nombre y unidades con presentation_id nulo';
+  assert (select count(*) from sale_items where sale_id = v_sale) = 2, 'borrada: la venta perdió líneas';
+
+  perform annul_sale(v_sale, 'prueba', 'card');
+  assert (select stock from products where id = pg_temp.prod(111)) = 30,
+         'borrada: anular debía reponer 27 con las unidades guardadas en la línea';
+end $t$;
+
+-- Sin presentaciones: igual que hoy (units_per 1, stock y costo del producto).
+do $t$
+declare v_sale uuid;
+begin
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e113","product_name":"Sin Presentaciones Venta","quantity":2,"price":8,"itbis":false,"unit":"und"}]');
+  assert (select stock from products where id = pg_temp.prod(113)) = 8, 'sin presentaciones: vender 2 debía dejar 8';
+  assert (select units_per = 1 and presentation_id is null and presentation_name is null and cost = 7
+            from sale_items where sale_id = v_sale),
+         'sin presentaciones: la línea debía quedar con units_per 1, sin presentación y costo 7';
+  perform annul_sale(v_sale, 'prueba', 'card');
+  assert (select stock from products where id = pg_temp.prod(113)) = 10, 'sin presentaciones: anular debía devolver 2';
+
+  -- Sin presentation_id, units_per y presentation_name del navegador no cuentan:
+  -- si contaran, esto pediría 24 unidades de un producto que tiene 10.
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e113","product_name":"Sin Presentaciones Venta","quantity":2,"price":8,"units_per":12,"presentation_name":"Caja"}]');
+  assert (select stock from products where id = pg_temp.prod(113)) = 8, 'falsa: el units_per del navegador debía ignorarse (stock 8)';
+  assert (select units_per = 1 and presentation_name is null from sale_items where sale_id = v_sale),
+         'falsa: la línea suelta debía quedar con units_per 1 y sin nombre de presentación';
+  perform annul_sale(v_sale, 'prueba', 'card');
+  assert (select stock from products where id = pg_temp.prod(113)) = 10, 'falsa: anular debía dejar el stock en 10';
+end $t$;
+
+-- Producto que no maneja existencias: la presentación se vende y el stock no
+-- se toca, ni al vender ni al anular (aunque lo pedido supere el stock anotado).
+do $t$
+declare v_sale uuid; v_bolsa text;
+begin
+  v_bolsa := (select id::text from product_presentations where product_id = pg_temp.prod(114));
+  v_sale := pg_temp.vender(format('[{"product_id":"00000000-0000-0000-0000-00000000e114","product_name":"Bolsas Sin Control Venta","presentation_id":"%s","quantity":20,"price":30}]', v_bolsa));
+  assert (select stock from products where id = pg_temp.prod(114)) = 50, 'sin control: el stock no debía cambiar al vender';
+  assert (select units_per = 6 and presentation_name = 'Bolsa' and cost = 24 and quantity = 20
+            from sale_items where sale_id = v_sale),
+         'sin control: la línea debía guardar units_per 6, nombre Bolsa y costo 24 (4 × 6)';
+  perform annul_sale(v_sale, 'prueba', 'card');
+  assert (select stock from products where id = pg_temp.prod(114)) = 50, 'sin control: el stock no debía cambiar al anular';
+end $t$;
+
 select 'ok' as resultado;
