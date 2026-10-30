@@ -77,6 +77,17 @@ begin
   return import_product_presentations(p_rows::jsonb);
 end $$;
 
+-- Venta pagada con tarjeta (así la caja no interviene). La usan la Task 2 y la
+-- revisión final; vive aquí para que cada grupo de secciones se pueda correr solo.
+create function pg_temp.vender(p_items text) returns uuid
+language plpgsql as $$
+begin
+  return (create_sale_with_items(jsonb_build_object(
+    'branch_id', '00000000-0000-0000-0000-0000000000b1', 'subtotal', 100, 'itbis_amount', 0,
+    'total', 100, 'payment_method', 'card', 'payment_status', 'paid',
+    'amount_paid', 100, 'ncf_type', 'consumer'), p_items::jsonb)).id;
+end $$;
+
 -- == Task 1: esquema, validación y guardado ==
 -- Estado explícito de la sección: super admin de la demo (arriba). Fixtures en
 -- la sucursal Principal (b1): e101 "Galletas Prueba" (und, código E101),
@@ -503,16 +514,6 @@ end $t$;
 select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
 delete from company_modules
  where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'quick-sales';
-
--- Venta pagada con tarjeta (así la caja no interviene).
-create function pg_temp.vender(p_items text) returns uuid
-language plpgsql as $$
-begin
-  return (create_sale_with_items(jsonb_build_object(
-    'branch_id', '00000000-0000-0000-0000-0000000000b1', 'subtotal', 100, 'itbis_amount', 0,
-    'total', 100, 'payment_method', 'card', 'payment_status', 'paid',
-    'amount_paid', 100, 'ncf_type', 'consumer'), p_items::jsonb)).id;
-end $$;
 
 insert into products (id, company_id, branch_id, name, code, unit, stock, cost, price, tracks_stock) values
   (pg_temp.prod(111), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',

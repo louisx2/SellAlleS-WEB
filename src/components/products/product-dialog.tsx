@@ -144,9 +144,10 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     () => (open ? buildTakenCodes(products, selfId, codeInput, nameInput) : new Map<string, string>()),
     [open, products, selfId, codeInput, nameInput],
   );
-  // El código del producto no puede ser el de otro producto ni el de una presentación
-  // de otro: el escaneo no sabría cuál es. La base solo vigila las presentaciones, así
-  // que el aviso (y el bloqueo al guardar) está aquí.
+  // El código del producto no puede ser el de una presentación de otro producto: el
+  // escaneo no sabría cuál es. La base solo vigila las presentaciones, así que el aviso
+  // (y el bloqueo al guardar) está aquí. Dos productos con el mismo código siguen
+  // permitidos, como antes.
   const codeWarning = useMemo(
     () => (open ? productCodeError(codeInput, selfId, products) : null),
     [open, products, selfId, codeInput],

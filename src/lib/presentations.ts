@@ -105,15 +105,17 @@ export function toLinePresentation(p: ProductPresentation): LinePresentation {
 
 // Lo que vende un código: el producto suelto o una de sus presentaciones.
 export type CodeMatch = { product: Product; presentation?: ProductPresentation };
-// El código lleva a más de un destino (producto y presentación, dos productos o dos
-// presentaciones): no se puede saber cuál es.
+// El código lleva a más de un destino y alguno es una presentación (producto y
+// presentación, o dos presentaciones): no se puede saber cuál es.
 export type AmbiguousCode = { ambiguous: true; matches: CodeMatch[] };
 
 // Búsqueda por código escrito o escaneado, sin distinguir mayúsculas ni espacios en
 // los bordes. La base no deja que el código de una presentación choque con otro,
-// pero el de un producto sí puede quedar repetido (se cambió después, se restauró un
-// archivado, llegó por una transferencia): entonces no se elige ninguno, porque
-// cobrar el que salga primero sería cobrar mal sin avisar.
+// pero el de un producto sí puede terminar igual al de una presentación (se cambió
+// después, se restauró un archivado, llegó por una transferencia): entonces no se
+// elige ninguno, porque cobrar el que salga primero sería cobrar mal sin avisar.
+// Si solo hay productos con ese código (un problema de datos anterior a las
+// presentaciones), sigue como siempre: el primero de la lista.
 export function findByCode(code: string, products: Product[]): CodeMatch | AmbiguousCode | undefined {
   const needle = codeKey(code);
   if (needle === '') return undefined;
@@ -126,7 +128,8 @@ export function findByCode(code: string, products: Product[]): CodeMatch | Ambig
     }
   }
   if (matches.length === 0) return undefined;
-  return matches.length === 1 ? matches[0] : { ambiguous: true, matches };
+  if (matches.length === 1 || matches.every((m) => m.presentation === undefined)) return matches[0];
+  return { ambiguous: true, matches };
 }
 
 // Lo que dice el POS cuando el código está repetido.
@@ -148,10 +151,11 @@ export function isPrefixOfLongerCode(term: string, products: Product[]): boolean
   return products.some((p) => longer(p.code) || (p.presentations ?? []).some((x) => longer(x.code)));
 }
 
-// Código del producto en el formulario: no puede ser el de otro producto de la
-// sucursal ni el de una presentación de otro producto (el escaneo no sabría cuál es).
-// `selfId` es el producto que se edita (ausente al crear): sus presentaciones las
-// revisa `validateDrafts` contra este mismo código. Primer error o null.
+// Código del producto en el formulario: no puede ser el de una presentación de otro
+// producto de la sucursal (el escaneo no sabría cuál es). Dos productos con el mismo
+// código siguen permitidos, como antes de las presentaciones. `selfId` es el producto
+// que se edita (ausente al crear): sus presentaciones las revisa `validateDrafts`
+// contra este mismo código. Primer error o null.
 export function productCodeError(
   code: string,
   selfId: string | undefined,
@@ -162,8 +166,6 @@ export function productCodeError(
   const shown = code.trim();
   const others = products.filter((p) => p.id !== selfId);
 
-  const product = others.find((p) => codeKey(p.code) === key);
-  if (product) return `El código «${shown}» ya lo usa «${product.name}» en esta sucursal.`;
   for (const p of others) {
     const presentation = (p.presentations ?? []).find((x) => codeKey(x.code) === key);
     if (presentation) {

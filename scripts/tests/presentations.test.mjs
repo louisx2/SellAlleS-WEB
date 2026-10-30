@@ -207,11 +207,19 @@ test('findByCode: código repetido es ambiguo', () => {
   assert.ok(r1.matches.some((m) => m.product === conPres && m.presentation === caja));
   assert.equal(findByCode('X', [conCodigo, conPres]).ambiguous, true);
 
-  // Dos productos con el mismo código.
+  // Dos productos con el mismo código y ninguna presentación de por medio: es un
+  // problema de datos anterior a las presentaciones y se conserva lo de siempre,
+  // el primero de la lista.
   const otroX = galletas({ id: 'c1', code: 'x', presentations: [] });
   const r2 = findByCode('X', [conCodigo, otroX]);
-  assert.equal(r2.ambiguous, true);
-  assert.deepEqual(r2.matches.map((m) => m.product.id), ['b1', 'c1']);
+  assert.equal('ambiguous' in r2, false);
+  assert.equal(r2.product, conCodigo);
+  assert.equal(r2.presentation, undefined);
+  assert.equal(findByCode('x', [otroX, conCodigo]).product, otroX);
+  // Pero si además hay una presentación con ese código, sí es ambiguo.
+  const r2b = findByCode('X', [conCodigo, otroX, conPres]);
+  assert.equal(r2b.ambiguous, true);
+  assert.equal(r2b.matches.length, 3);
 
   // Dos presentaciones (de productos distintos o del mismo).
   const otraCaja = galletas({ id: 'd1', code: 'D', presentations: [{ id: 'y', name: 'Fardo', units: 24, price: 1, code: 'x' }] });
@@ -262,8 +270,9 @@ test('isPrefixOfLongerCode', () => {
   assert.equal(isPrefixOfLongerCode('ZZZ', lista), false);
 });
 
-// Formulario del producto: su código no puede ser el de otro producto ni el de una
-// presentación de otro producto de la sucursal (el escaneo no sabría cuál es).
+// Formulario del producto: su código no puede ser el de una presentación de otro
+// producto de la sucursal (el escaneo no sabría cuál es). Dos productos con el mismo
+// código siguen permitidos, como antes de las presentaciones.
 test('productCodeError', () => {
   const productos = [
     galletas(), // g1: código 7501, presentaciones 7501-12 y 7501-288
@@ -272,21 +281,24 @@ test('productCodeError', () => {
 
   assert.equal(productCodeError('LIBRE', undefined, productos), null);
   assert.equal(productCodeError('   ', undefined, productos), null);
-  // El código de otro producto.
+  // El de una presentación de otro producto, nombrándola (sin mayúsculas ni bordes).
   assert.equal(
-    productCodeError(' j-1 ', undefined, productos),
-    'El código «j-1» ya lo usa «Jabón» en esta sucursal.',
-  );
-  // El de una presentación de otro producto, nombrándola.
-  assert.equal(
-    productCodeError('7501-288', 'j1', productos),
+    productCodeError(' 7501-288 ', 'j1', productos),
     'El código «7501-288» ya lo usa la presentación «Caja» de «Galletas» en esta sucursal.',
   );
+  assert.equal(
+    productCodeError('7501-12', undefined, productos),
+    'El código «7501-12» ya lo usa la presentación «Paquete» de «Galletas» en esta sucursal.',
+  );
+  // El código de otro producto no se bloquea aquí.
+  assert.equal(productCodeError(' j-1 ', undefined, productos), null);
+  assert.equal(productCodeError('7501', 'j1', productos), null);
   // El producto que se edita no choca consigo mismo (sus presentaciones las revisa validateDrafts).
-  assert.equal(productCodeError('7501', 'g1', productos), null);
   assert.equal(productCodeError('7501-12', 'g1', productos), null);
-  // Pero sí con el código de otro producto aunque se esté editando.
-  assert.equal(productCodeError('7501', 'j1', productos), 'El código «7501» ya lo usa «Galletas» en esta sucursal.');
+  // Sin presentaciones en la sucursal no hay nada que bloquear.
+  const sinPresentaciones = productos.map((p) => ({ ...p, presentations: [] }));
+  assert.equal(productCodeError('7501', 'j1', sinPresentaciones), null);
+  assert.equal(productCodeError('7501-288', 'j1', sinPresentaciones), null);
 });
 
 test('breakdownStock', () => {
