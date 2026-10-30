@@ -1,13 +1,16 @@
 'use client';
 
-import { Info, Package, MapPin, Tag, Truck, Boxes, Layers } from 'lucide-react';
+import { Info, Package, MapPin, Tag, Truck, Boxes, Layers, Box } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useCategories } from '@/context/category-provider';
 import { useLocations } from '@/context/location-provider';
 import { useSuppliers } from '@/context/supplier-provider';
 import { cn, formatCurrency } from '@/lib/utils';
-import { formatQuantity } from '@/lib/units';
+import { formatQuantity, getUnit } from '@/lib/units';
+import {
+  breakdownStock, formatBreakdown, isSoldLoose, presentationLabel, presentationsOf,
+} from '@/lib/presentations';
 import type { Product } from '@/lib/types';
 
 interface ProductDetailButtonProps {
@@ -28,6 +31,8 @@ export function ProductDetailButton({ product, className }: ProductDetailButtonP
   const supplierName = suppliers.find((s) => s.id === product.supplierId)?.name;
 
   const hasWholesale = product.wholesalePrice != null && product.wholesalePrice > 0;
+  const presentations = presentationsOf(product);
+  const unitShort = getUnit(product.unit).short;
 
   return (
     <Popover>
@@ -76,6 +81,31 @@ export function ProductDetailButton({ product, className }: ProductDetailButtonP
               <Boxes className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <span>Stock disponible: <span className="font-medium">{formatQuantity(product.stock, product.unit)}</span></span>
             </div>
+            {/* Las existencias siempre son unidades base: aquí se leen por caja, paquete y sueltas. */}
+            {product.tracksStock && presentations.length > 0 && (
+              <p className="pl-5 text-muted-foreground">
+                Equivale a {formatBreakdown(breakdownStock(product.stock, presentations), unitShort)}
+              </p>
+            )}
+            {presentations.length > 0 && (
+              <div className="flex items-start gap-1.5">
+                <Box className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+                <div className="flex-1 space-y-0.5">
+                  <p className="text-muted-foreground">
+                    Presentaciones{!isSoldLoose(product) && ' (no se vende suelto)'}
+                  </p>
+                  {presentations.map((p) => (
+                    <div key={p.id} className="flex items-baseline justify-between gap-2">
+                      <span>
+                        {presentationLabel(p, unitShort)}
+                        {p.code && <span className="text-muted-foreground"> · {p.code}</span>}
+                      </span>
+                      <span className="font-medium whitespace-nowrap">{formatCurrency(p.price)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {hasWholesale && (
               <div className="flex items-start gap-1.5">
                 <Layers className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />

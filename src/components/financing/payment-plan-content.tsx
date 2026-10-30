@@ -5,7 +5,7 @@ import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { parseYmd, scheduleDueDate } from '@/lib/financing-schedule';
-import { formatQtyCompact } from '@/lib/units';
+import { formatLineQty } from '@/lib/line-format';
 import type { Sale } from '@/lib/types';
 
 interface PaymentPlanContentProps {
@@ -81,7 +81,7 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
               const price = item.customPrice ?? item.product.price;
               return (
                 <div key={item.cartItemId} className="flex justify-between gap-2">
-                  <span>{formatQtyCompact(item.quantity, item.product.unit)} x {item.product.name}</span>
+                  <span>{formatLineQty(item)} x {item.product.name}</span>
                   <span className="whitespace-nowrap">{formatCurrency(price * item.quantity)}</span>
                 </div>
               );

@@ -5,6 +5,10 @@ import { Input } from '@/components/ui/input';
 import { ProductGrid } from './product-grid';
 import { useProducts } from '@/context/product-provider';
 import { useCart } from '@/context/cart-provider';
+import {
+  baseQtyInCart, findByCode, isSellable, isSoldLoose, maxAddable, presentationLabel,
+} from '@/lib/presentations';
+import { formatQuantity, getUnit, roundQty } from '@/lib/units';
 import { useToast } from '@/hooks/use-toast';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
@@ -33,7 +37,7 @@ export function ProductSearch() {
   // Por defecto activado, para no cambiarle el comportamiento a quien ya usa lector.
   const [scannerMode, setScannerMode] = useState(true);
   const { products: allProducts } = useProducts();
-  const { addItem, saleCompletionCount } = useCart();
+  const { addItem, saleCompletionCount, activeCart } = useCart();
   const { toast } = useToast();
   const { appUser, setInventoryView } = useAuth();
   const inventoryView = appUser?.inventoryView ?? 'grid';
@@ -51,28 +55,44 @@ export function ProductSearch() {
   }, []);
 
   // Misma búsqueda para el código escrito y para el escaneado, para que el
-  // lector de mano y la cámara no encuentren cosas distintas.
-  const buscarPorCodigo = useCallback((codigo: string) => {
-    const objetivo = codigo.trim().toLowerCase();
-    if (!objetivo) return undefined;
-    return allProducts.find(p => (p.code ?? '').trim().toLowerCase() === objetivo);
-  }, [allProducts]);
+  // lector de mano y la cámara no encuentren cosas distintas. Devuelve el producto
+  // y, si el código es el de una presentación, cuál.
+  const buscarPorCodigo = useCallback((codigo: string) => findByCode(codigo, allProducts), [allProducts]);
 
   const manejarCodigoEscaneado = useCallback((codigo: string): ResultadoEscaneo => {
-    const producto = buscarPorCodigo(codigo);
-    if (!producto) return { ok: false, mensaje: `Ningún producto tiene el código ${codigo}` };
+    const encontrado = buscarPorCodigo(codigo);
+    if (!encontrado) return { ok: false, mensaje: `Ningún producto tiene el código ${codigo}` };
+    const { product: producto, presentation } = encontrado;
     // `addItem` también frena por existencias, pero en silencio: con la cámara
     // en la cara hace falta decir por qué no entró al carrito.
+    if (presentation) {
+      const items = activeCart?.items ?? [];
+      if (maxAddable(producto, items, presentation.units) < 1) {
+        const unidad = getUnit(producto.unit);
+        const restante = roundQty(producto.stock - baseQtyInCart(producto.id, items));
+        return {
+          ok: false,
+          mensaje: `No alcanza para 1 ${presentationLabel(presentation, unidad.short)} de ${producto.name} (quedan ${formatQuantity(restante, producto.unit)}).`,
+        };
+      }
+      addItem(producto, 1, presentation);
+      return { ok: true, mensaje: `${producto.name} · ${presentationLabel(presentation, getUnit(producto.unit).short)} agregado` };
+    }
+    // El código del producto mismo vende una unidad suelta: si no se vende suelto,
+    // no entra nada (el mismo texto que da el carrito y la base).
+    if (!isSoldLoose(producto)) return { ok: false, mensaje: `«${producto.name}» no se vende suelto.` };
     if (producto.tracksStock && producto.stock <= 0) {
       return { ok: false, mensaje: `${producto.name} no tiene existencias` };
     }
     addItem(producto);
     return { ok: true, mensaje: `${producto.name} agregado` };
-  }, [buscarPorCodigo, addItem]);
+  }, [buscarPorCodigo, addItem, activeCart]);
 
   const filteredProducts = useMemo(() => {
     // Los productos sin inventario (platos, servicios) siempre están a la venta.
-    const productsInStock = allProducts.filter(p => !p.tracksStock || p.stock > 0);
+    // `isSellable` cubre además al que no se vende suelto: tiene que alcanzar para
+    // la presentación más chica, no basta con que haya una unidad.
+    const productsInStock = allProducts.filter(isSellable);
     const term = searchTerm.trim().toLowerCase();
     if (!term) {
       // When search is empty, show all products.
@@ -82,8 +102,11 @@ export function ProductSearch() {
       // Con el modo lector activo no filtramos la grilla: el codigo escaneado
       // se agrega solo al carrito. Con el modo apagado solo filtramos.
       if (scannerMode) return productsInStock;
+      // También por el código de sus presentaciones: quien teclea el de la caja
+      // tiene que ver el producto.
       return productsInStock.filter(product =>
         (product.code ?? '').toLowerCase().includes(term)
+        || (product.presentations ?? []).some(p => (p.code ?? '').toLowerCase().includes(term))
       );
     }
     return productsInStock.filter(product =>
@@ -119,9 +142,11 @@ export function ProductSearch() {
   // intención explícita del cajero y agrega al carrito esté como esté.
   useEffect(() => {
     if (scannerMode && searchMode === 'code' && searchTerm.trim() !== '') {
-      const product = buscarPorCodigo(searchTerm);
-      if (product) {
-        addItem(product);
+      const encontrado = buscarPorCodigo(searchTerm);
+      if (encontrado) {
+        // Con el código de una presentación entra esa presentación; el del producto
+        // mismo entra suelto (y `addItem` lo rechaza, con aviso, si no se vende suelto).
+        addItem(encontrado.product, 1, encontrado.presentation);
         setSearchTerm(''); // Clear input after adding
       }
     }

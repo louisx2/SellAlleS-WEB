@@ -22,7 +22,7 @@ import { openQuoteCart } from '@/context/cart-provider';
 import { useCanQuickSell } from '@/hooks/use-can-quick-sell';
 import { buildQuickCartItem } from '@/lib/quick-sales';
 import { formatCurrency } from '@/lib/utils';
-import { formatQtyCompact } from '@/lib/units';
+import { formatLineQty } from '@/lib/line-format';
 import { lineProduct, resolveQuotedPresentation, toLinePresentation } from '@/lib/presentations';
 import type { Quote, QuoteStatus, CartItem } from '@/lib/types';
 import { ShoppingCart, Eye, FileText } from 'lucide-react';
@@ -246,7 +246,7 @@ export default function QuotesPage() {
                   const price = it.customPrice ?? it.product.price;
                   return (
                     <div key={it.cartItemId} className="flex justify-between gap-2">
-                      <span>{formatQtyCompact(it.quantity, it.product.unit)} × {it.product.name}</span>
+                      <span>{formatLineQty(it)} × {it.product.name}</span>
                       <span className="font-medium">{formatCurrency(price * it.quantity)}</span>
                     </div>
                   );

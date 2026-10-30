@@ -11,7 +11,7 @@ import { rowToCreditPayment, rowToFinancingAmendment, rowToRefinancing } from '@
 import { cn, formatCurrency, calculateFinancingStatus } from '@/lib/utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
-import { formatQtyCompact } from '@/lib/units';
+import { formatLineQty } from '@/lib/line-format';
 import type { CreditPayment, FinancingAmendment, PaymentMethod, Refinancing } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -282,7 +282,7 @@ export default function FinancingDetailClient() {
                       <TableRow key={item.cartItemId}>
                         <TableCell className="font-medium">{item.product.name}</TableCell>
                         <TableCell className="text-right whitespace-nowrap">
-                          {formatQtyCompact(item.quantity, item.product.unit)}
+                          {formatLineQty(item)}
                         </TableCell>
                         <TableCell className="text-right">{formatCurrency(price)}</TableCell>
                         <TableCell className="text-right">{formatCurrency(price * item.quantity)}</TableCell>

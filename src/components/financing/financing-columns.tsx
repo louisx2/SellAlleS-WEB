@@ -4,12 +4,14 @@ import Link from 'next/link';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Sale } from '@/lib/types';
 import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
-import { formatQtyCompact } from '@/lib/units';
+import { formatLineQty } from '@/lib/line-format';
 import { FinancingActions } from './financing-actions';
 import { Badge } from '../ui/badge';
 
+// Una sola unidad suelta se lee por el nombre; con presentación hay que decir cuál
+// ("1 Caja x24 × Refresco"), aunque sea una sola.
 const itemLabel = (item: Sale['items'][number]) =>
-  item.quantity === 1 ? item.product.name : `${formatQtyCompact(item.quantity, item.product.unit)} × ${item.product.name}`;
+  item.quantity === 1 && !item.presentation ? item.product.name : `${formatLineQty(item)} × ${item.product.name}`;
 
 // Factoría: la tasa de mora viene de companies.late_fee_rate (perfil de empresa).
 export const buildFinancingColumns = (lateFeeRate: number, graceDays = 0): ColumnDef<Sale>[] => [
