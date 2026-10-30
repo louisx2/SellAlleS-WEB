@@ -19,6 +19,7 @@ import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { ExportButton } from '@/components/reports/export-button';
+import { lineBaseQty } from '@/lib/presentations';
 
 const METHOD_LABEL: Record<string, string> = {
   cash: 'Efectivo',
@@ -39,7 +40,15 @@ type FilaVenta = {
   total: number | null;
   payment_method: string | null;
   cancelled_at: string | null;
-  sale_items: { quantity: number | null; price: number | null; custom_price: number | null }[] | null;
+  // `presentation_name` y `units_per` dicen si la línea se vendió por paquete o caja
+  // (como en `rowToLinePresentation`); sin nombre es una línea suelta.
+  sale_items: {
+    quantity: number | null;
+    price: number | null;
+    custom_price: number | null;
+    presentation_name: string | null;
+    units_per: number | null;
+  }[] | null;
 };
 
 type Resumen = {
@@ -101,7 +110,7 @@ export default function UserSalesReportPage() {
       setLoading(true);
       let q = supabase
         .from('sales')
-        .select('user_id,user_name,user_email,branch_id,total,payment_method,cancelled_at,sale_items(quantity,price,custom_price)')
+        .select('user_id,user_name,user_email,branch_id,total,payment_method,cancelled_at,sale_items(quantity,price,custom_price,presentation_name,units_per)')
         .gte('created_at', desdeIso)
         .lte('created_at', hastaIso);
       if (selectedBranch !== 'all') q = q.eq('branch_id', selectedBranch);
@@ -151,7 +160,14 @@ export default function UserSalesReportPage() {
         if (metodo in acc.porMetodo) acc.porMetodo[metodo] += Number(v.total ?? 0);
         (v.sale_items ?? []).forEach((it) => {
           const qty = Number(it.quantity ?? 0);
-          acc.articulos += qty;
+          // Artículos en unidades base (2 paquetes de 12 son 24); el descuento de abajo
+          // es dinero por presentación y sigue multiplicando la cantidad de la línea.
+          acc.articulos += lineBaseQty({
+            quantity: qty,
+            presentation: it.presentation_name
+              ? { name: it.presentation_name, units: Number(it.units_per ?? 1) }
+              : undefined,
+          });
           const lista = Number(it.price ?? 0);
           const cobrado = it.custom_price == null ? lista : Number(it.custom_price);
           if (cobrado < lista) acc.descuentos += (lista - cobrado) * qty;
