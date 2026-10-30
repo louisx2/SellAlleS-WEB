@@ -3,14 +3,19 @@
 // Ver supabase/migrations/20260926000000_envios_entre_sucursales.sql.
 
 import { supabase } from '@/lib/supabase/client';
+import type { LinePresentation } from '@/lib/types';
 
 export interface TransferLine {
   id: string;
   productName: string;
   productCode: string | null;
+  /** En la presentación si la línea trae `presentation` (2 = 2 cajas); si no, en la unidad del artículo. */
   quantity: number;
   unit: string | null;
+  /** Costo de lo que cuenta `quantity`: por presentación si la hay, por unidad si no. */
   unitCost: number | null;
+  /** Presentación en la que se mandó. Ausente en las líneas sueltas y en los envíos anteriores a las presentaciones. */
+  presentation?: LinePresentation;
   /** El artículo no existía en la sucursal que recibió y se creó allá. */
   targetCreated: boolean;
   /** Existía archivado en la que recibió y se reactivó. */
@@ -33,7 +38,7 @@ export interface TransferBatch {
 const SELECT_BATCH = `
   id, number, from_branch_id, to_branch_id, notes, created_by_name, created_at,
   product_transfers(id, product_name, product_code, quantity, unit, unit_cost,
-    target_created, target_reactivated, source_archived)
+    presentation_name, units_per, target_created, target_reactivated, source_archived)
 `;
 
 const rowToBatch = (r: any): TransferBatch => ({
@@ -52,6 +57,11 @@ const rowToBatch = (r: any): TransferBatch => ({
       quantity: Number(t.quantity),
       unit: t.unit ?? null,
       unitCost: t.unit_cost != null ? Number(t.unit_cost) : null,
+      // Los envíos sueltos y los anteriores a las presentaciones traen
+      // presentation_name nulo (y units_per 1): se leen como siempre.
+      presentation: t.presentation_name != null
+        ? { name: t.presentation_name, units: Number(t.units_per) }
+        : undefined,
       targetCreated: !!t.target_created,
       targetReactivated: !!t.target_reactivated,
       sourceArchived: !!t.source_archived,
@@ -87,7 +97,10 @@ export async function fetchTransferBatches(opts: { branchId?: string; limit?: nu
 
 export interface TransferItemInput {
   productId: string;
+  /** En la presentación si se manda `presentationId` (2 = 2 cajas); si no, en la unidad del artículo. */
   quantity: number;
+  /** Presentación en la que se manda; ausente = suelto. La base valida que sea del artículo. */
+  presentationId?: string;
 }
 
 export interface TransferResult {
@@ -108,7 +121,12 @@ export async function sendTransfer(input: {
   const { data, error } = await supabase.rpc('transfer_products', {
     p_from_branch_id: input.fromBranchId,
     p_to_branch_id: input.toBranchId,
-    p_items: input.items.map((i) => ({ product_id: i.productId, quantity: i.quantity })),
+    // `||` y no `??`: un id vacío tiene que ir como null, nunca como "" (uuid inválido).
+    p_items: input.items.map((i) => ({
+      product_id: i.productId,
+      quantity: i.quantity,
+      presentation_id: i.presentationId || null,
+    })),
     p_target_location_id: input.targetLocationId,
     p_archive_empty: input.archiveEmpty,
     p_notes: input.notes.trim() || null,
