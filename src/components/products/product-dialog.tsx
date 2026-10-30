@@ -35,9 +35,12 @@ import { useLocations } from '@/context/location-provider';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { ProductImage, SUFIJO_THUMB } from '@/components/products/product-image';
+import { PresentationsEditor } from '@/components/products/presentations-editor';
+import { CountByPresentationDialog } from '@/components/products/count-by-presentation-dialog';
+import { isSoldLoose, presentationsOf, validateDrafts, type PresentationDraft } from '@/lib/presentations';
 import { optimizarImagen } from '@/lib/image-optim';
 import { ArrowRightLeft, ImagePlus, Loader2, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 interface ProductDialogProps {
   product?: Product;
@@ -46,9 +49,31 @@ interface ProductDialogProps {
   onOpenChange?: (open: boolean) => void;
 }
 
+// Las presentaciones del producto como filas del formulario. Llevan el `id` para
+// que el guardado actualice en vez de recrear (el historial de ventas conserva su vínculo).
+const draftsOf = (p?: Product): PresentationDraft[] =>
+  p ? presentationsOf(p).map((x) => ({ id: x.id, name: x.name, units: x.units, price: x.price, code: x.code ?? '' })) : [];
+
+// Códigos que ya usan otros en la sucursal (clave en minúscula y recortada → nombre del
+// dueño): los demás productos y las presentaciones de esos productos, más el código del
+// propio producto tal como está escrito ahora. Una presentación no puede repetir el código
+// de su producto: el escaneo busca primero entre los productos y ella nunca saldría.
+function buildTakenCodes(products: Product[], selfId: string | undefined, ownCode: string, ownName: string) {
+  const taken = new Map<string, string>();
+  const add = (code: string | undefined, owner: string) => {
+    const key = (code ?? '').trim().toLowerCase();
+    if (key !== '' && !taken.has(key)) taken.set(key, owner);
+  };
+  add(ownCode, ownName.trim() || 'este producto');
+  const others = products.filter((p) => p.id !== selfId);
+  for (const p of others) add(p.code, p.name);
+  for (const p of others) for (const x of p.presentations ?? []) add(x.code, p.name);
+  return taken;
+}
+
 export function ProductDialog({ product, children, open: openProp, onOpenChange: onOpenChangeProp }: ProductDialogProps) {
   const { toast } = useToast();
-  const { addProduct, updateProduct } = useProducts();
+  const { products, addProduct, updateProduct, savePresentations } = useProducts();
   const { suppliers } = useSuppliers();
   const { categories } = useCategories();
   const { locations } = useLocations();
@@ -82,6 +107,52 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   // Platos preparados, servicios y tarifas: se venden siempre y no llevan
   // existencias, así que el formulario esconde stock, unidad y mayoreo.
   const [tracksStock, setTracksStock] = useState(product?.tracksStock ?? true);
+
+  // Presentaciones (paquete, caja…): viven en estado de React; el resto del
+  // formulario se lee con FormData. Código, nombre y costo son campos sin controlar,
+  // pero se reflejan aquí (`onChange`, sin tocar `defaultValue`) porque el editor
+  // necesita saber el código del propio producto y el costo para el margen.
+  const [drafts, setDrafts] = useState<PresentationDraft[]>(() => draftsOf(product));
+  const [soldLoose, setSoldLoose] = useState(product ? isSoldLoose(product) : true);
+  const [codeInput, setCodeInput] = useState(product?.code ?? '');
+  const [nameInput, setNameInput] = useState(product?.name ?? '');
+  const [costInput, setCostInput] = useState(product?.cost != null ? String(product.cost) : '');
+  // Producto creado en este diálogo: si las presentaciones fallan, el diálogo sigue
+  // abierto y reintentar tiene que actualizarlo, no crear otro igual.
+  const [created, setCreated] = useState<Product | null>(null);
+
+  // Cada vez que se abre, las presentaciones vuelven a lo guardado: si no, lo que se
+  // escribió y se canceló reaparecería, y las filas recién guardadas no traerían su id.
+  useEffect(() => {
+    if (!open) return;
+    setDrafts(draftsOf(product));
+    setSoldLoose(product ? isSoldLoose(product) : true);
+    setCodeInput(product?.code ?? '');
+    setNameInput(product?.name ?? '');
+    setCostInput(product?.cost != null ? String(product.cost) : '');
+    setCreated(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Sin filas, "no se vende suelto" no tiene sentido (la base lo rechaza).
+  const effectiveSoldLoose = drafts.length === 0 ? true : soldLoose;
+  const selfId = product?.id ?? created?.id;
+  // Cada fila del inventario monta su propio diálogo: el mapa solo se arma con el diálogo abierto.
+  const takenCodes = useMemo(
+    () => (open ? buildTakenCodes(products, selfId, codeInput, nameInput) : new Map<string, string>()),
+    [open, products, selfId, codeInput, nameInput],
+  );
+  const handleDraftsChange = (next: PresentationDraft[]) => {
+    setDrafts(next);
+    if (next.length === 0) setSoldLoose(true);
+  };
+  // Para "Contar por presentación": solo las filas completas y válidas para la unidad.
+  const countable = drafts.flatMap((d) => {
+    const name = d.name.trim();
+    return name !== '' && d.units !== '' && d.units > 1 && (allowsDecimals || Number.isInteger(d.units))
+      ? [{ name, units: d.units }]
+      : [];
+  });
 
   const handleUnitChange = (next: string) => {
     const nextUnit = normalizeUnitCode(next);
@@ -204,6 +275,21 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       }
     }
 
+    // Las presentaciones se validan antes de guardar nada: si algo está mal, no se
+    // guarda ni el producto. Un producto sin inventario se guarda en 'und'.
+    const presentationError = validateDrafts(drafts, {
+      productName: ((formData.get('name') as string) ?? '').trim(),
+      decimals: tracksStock && allowsDecimals,
+      soldLoose: effectiveSoldLoose,
+      takenCodes: buildTakenCodes(
+        products, selfId, (formData.get('code') as string) ?? '', (formData.get('name') as string) ?? '',
+      ),
+    });
+    if (presentationError) {
+      toast({ title: 'Revisa las presentaciones', description: presentationError, variant: 'destructive' });
+      return;
+    }
+
     // We omit 'id' because Firestore/Supabase will generate it for new documents.
     const productData: Omit<Product, 'id'> = {
       code: formData.get('code') as string,
@@ -227,7 +313,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     // cuenta, así que esto es solo un aviso: si la mercancía en realidad salió
     // de otra sucursal, crearla aquí deja sin descontar la de allá. Se ofrece
     // ir a transferirla; crear igual sigue siendo posible.
-    if (!isEditMode && productData.tracksStock && appUser?.activeBranchId) {
+    if (!isEditMode && !created && productData.tracksStock && appUser?.activeBranchId) {
       setComprobando(true);
       const encontrados = await findInOtherBranches(appUser.activeBranchId, productData.code ?? '', productData.name);
       setComprobando(false);
@@ -242,24 +328,22 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   };
 
   const guardar = async (productData: Omit<Product, 'id'>) => {
+    // El producto tal como quedó guardado (con su id), para las presentaciones.
+    let saved: Product;
     try {
-      if (isEditMode && product) {
+      // Si ya se creó en este diálogo (las presentaciones fallaron y se reintenta),
+      // se actualiza ese mismo en vez de crear otro.
+      const existing = product ?? created;
+      if (existing) {
         // Se parte del producto original: productData solo trae lo que hay en el
         // formulario, y productToRow manda como null todo lo ausente. Sin esto,
         // editar el precio borraba la fecha de ingreso del artículo.
-        await updateProduct({ ...product, ...productData, id: product.id });
-        toast({
-          title: `Producto actualizado`,
-          description: `El producto '${productData.name}' ha sido actualizado.`,
-        });
+        saved = { ...existing, ...productData, id: existing.id };
+        await updateProduct(saved);
       } else {
-        await addProduct(productData);
-        toast({
-          title: `Producto añadido`,
-          description: `El producto '${productData.name}' ha sido añadido al catálogo.`,
-        });
+        saved = await addProduct(productData);
+        setCreated(saved);
       }
-      setOpen(false); // Close the dialog on successful submit
     } catch (error) {
        console.error("Failed to save product: ", error);
        toast({
@@ -267,7 +351,33 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
          description: 'No se pudo guardar el producto. Inténtalo de nuevo.',
          variant: 'destructive',
        });
+       return;
     }
+
+    // Las presentaciones van aparte y en una sola transacción. Solo se llaman si el
+    // producto tiene o tenía presentaciones, o si cambió "se vende suelto": un
+    // producto sin presentaciones se guarda sin ninguna llamada de más.
+    const hadPresentations = (saved.presentations?.length ?? 0) > 0;
+    const soldLooseChanged = effectiveSoldLoose !== isSoldLoose(saved);
+    if (drafts.length > 0 || hadPresentations || soldLooseChanged) {
+      try {
+        await savePresentations(saved.id, effectiveSoldLoose, drafts);
+      } catch (error: any) {
+        console.error("Failed to save presentations: ", error);
+        // El producto ya quedó guardado: el diálogo sigue abierto para corregir y reintentar.
+        toast({
+          title: 'No se guardaron las presentaciones',
+          description: `El producto sí se guardó. ${error?.message ?? 'Inténtalo de nuevo.'}`,
+          variant: 'destructive',
+        });
+        return;
+      }
+    }
+
+    toast(isEditMode
+      ? { title: `Producto actualizado`, description: `El producto '${productData.name}' ha sido actualizado.` }
+      : { title: `Producto añadido`, description: `El producto '${productData.name}' ha sido añadido al catálogo.` });
+    setOpen(false); // Close the dialog on successful submit
   };
 
   const cerrarAviso = () => { setEnOtras([]); setPendiente(null); };
@@ -355,7 +465,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="code">Código</Label>
-              <Input id="code" name="code" defaultValue={product?.code} required />
+              <Input id="code" name="code" defaultValue={product?.code} onChange={(e) => setCodeInput(e.target.value)} required />
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="categoryId">Categoría</Label>
@@ -376,7 +486,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
             
             <div className="flex flex-col gap-2 md:col-span-2">
               <Label htmlFor="name">Nombre</Label>
-              <Input id="name" name="name" defaultValue={product?.name} required />
+              <Input id="name" name="name" defaultValue={product?.name} onChange={(e) => setNameInput(e.target.value)} required />
             </div>
             
             <div className="flex flex-col gap-2 md:col-span-2">
@@ -401,7 +511,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="cost">Precio Compra (Costo)</Label>
-              <Input id="cost" name="cost" type="number" step="0.01" defaultValue={product?.cost} required/>
+              <Input id="cost" name="cost" type="number" step="0.01" defaultValue={product?.cost} onChange={(e) => setCostInput(e.target.value)} required/>
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="price">Precio Venta</Label>
@@ -433,6 +543,13 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                 onChange={(e) => setStockInput(e.target.value)}
                 required
               />
+              {countable.length > 0 && (
+                <CountByPresentationDialog
+                  unit={unit}
+                  presentations={countable}
+                  onApply={(total) => setStockInput(formatQty(total))}
+                />
+              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="unit">Unidad de medida</Label>
@@ -503,6 +620,18 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                 </div>
               </>
             )}
+
+            <div className="md:col-span-2">
+              <PresentationsEditor
+                unit={tracksStock ? unit : DEFAULT_UNIT_CODE}
+                cost={parseFloat(costInput)}
+                drafts={drafts}
+                onChange={handleDraftsChange}
+                soldLoose={effectiveSoldLoose}
+                onSoldLooseChange={setSoldLoose}
+                takenCodes={takenCodes}
+              />
+            </div>
           </div>
           
           <DialogFooter className="mt-4">

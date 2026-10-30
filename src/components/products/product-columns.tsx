@@ -3,7 +3,8 @@
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Product } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
-import { formatQuantity } from '@/lib/units';
+import { formatQuantity, getUnit } from '@/lib/units';
+import { breakdownStock, formatBreakdown } from '@/lib/presentations';
 import { Badge } from '@/components/ui/badge';
 import { ProductActions } from './product-actions';
 import { cn } from '@/lib/utils';
@@ -48,14 +49,23 @@ export const buildProductColumns = (categoryName: Map<string, string>): ColumnDe
       if (!row.original.tracksStock) {
         return <span className="text-muted-foreground">No aplica</span>;
       }
+      const { unit, presentations } = row.original;
       return (
-        <span
-          className={cn({
-            'text-destructive font-bold': stock <= 5,
-          })}
-        >
-          {formatQuantity(stock, row.original.unit)}
-        </span>
+        <div>
+          <span
+            className={cn({
+              'text-destructive font-bold': stock <= 5,
+            })}
+          >
+            {formatQuantity(stock, unit)}
+          </span>
+          {/* Con presentaciones, el mismo stock repartido: "4 Caja, 8 Paq., 2 und". */}
+          {presentations && presentations.length > 0 && (
+            <div className="text-xs text-muted-foreground">
+              {formatBreakdown(breakdownStock(stock, presentations), getUnit(unit).short)}
+            </div>
+          )}
+        </div>
       );
     },
   },
