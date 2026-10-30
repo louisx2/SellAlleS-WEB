@@ -11,6 +11,10 @@ import { useAuth } from '@/context/auth-provider';
 // = la cantidad entra al inventario (lo hace la RPC en la misma transacción).
 export type NewSupplierInvoiceItem = {
   productId?: string;
+  // Presentación comprada (caja, paquete…); ausente = unidades sueltas. Con
+  // presentación, `quantity` y `unitCost` son por presentación y la RPC suma
+  // `quantity × unidades` al stock.
+  presentationId?: string;
   description: string;
   quantity: number;
   unitCost: number;
@@ -117,6 +121,7 @@ export function PayablesProvider({ children }: { children: ReactNode }) {
       p_initial_reference: inv.initialReference ?? null,
       p_items: (inv.items ?? []).map((it) => ({
         product_id: it.productId ?? null,
+        presentation_id: it.presentationId ?? null,
         description: it.description,
         quantity: it.quantity,
         unit_cost: it.unitCost,

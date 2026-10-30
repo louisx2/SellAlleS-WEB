@@ -27,7 +27,8 @@ import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
-import { getUnit, unitAllowsDecimals } from '@/lib/units';
+import { formatQty, getUnit, unitAllowsDecimals } from '@/lib/units';
+import { presentationLabel, presentationsOf } from '@/lib/presentations';
 import { EXPENSE_TYPES_606, ISR_RETENTION_TYPES_606, PAYMENT_FORMS_606, suggestPaymentForm606 } from '@/lib/dgii-606';
 import { ChevronsUpDown, Loader2, Plus, Trash2 } from 'lucide-react';
 
@@ -37,11 +38,20 @@ interface PayableInvoiceDialogProps {
 
 type ItemRow = {
   productId?: string;
+  // Presentación elegida; ausente = unidades sueltas. Nunca '' (la columna es uuid).
+  presentationId?: string;
   description: string;
   quantity: number | '';
   unitCost: number | '';
   itbisAmount: number | '';
+  // El usuario escribió el costo: cambiar la presentación ya no lo sobrescribe.
+  costByHand?: boolean;
 };
+
+// Valor del selector de presentación para "comprar suelto" (los ids reales son uuid).
+const LOOSE = 'suelto';
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -126,11 +136,24 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
     setPaymentForm(suggestPaymentForm606(condition === 'credit', method));
   }, [condition, method]);
 
+  // Producto ligado a la línea; las líneas libres no tienen.
+  const lineProductOf = (item: ItemRow) =>
+    item.productId ? products.find((p) => p.id === item.productId) : undefined;
   // Unidad del producto ligado a la línea; las líneas libres no tienen.
-  const lineUnit = (item: ItemRow) =>
-    item.productId ? products.find((p) => p.id === item.productId)?.unit : undefined;
-  const lineAllowsDecimals = (item: ItemRow) =>
-    item.productId ? unitAllowsDecimals(lineUnit(item)) : true;
+  const lineUnit = (item: ItemRow) => lineProductOf(item)?.unit;
+  // La presentación elegida, tal como la tiene hoy el producto (undefined si la
+  // línea es suelta o si la presentación ya no existe).
+  const linePresentationOf = (item: ItemRow) => {
+    const product = lineProductOf(item);
+    return product && item.presentationId
+      ? presentationsOf(product).find((p) => p.id === item.presentationId)
+      : undefined;
+  };
+  // Una presentación se compra entera, aunque la unidad base sea medible (lb, m…).
+  const lineAllowsDecimals = (item: ItemRow) => {
+    if (item.presentationId) return false;
+    return item.productId ? unitAllowsDecimals(lineUnit(item)) : true;
+  };
 
   const hasItems = items.length > 0;
   const itemsGoods = useMemo(() => round2(items.reduce((s, it) => s + num(it.quantity) * num(it.unitCost), 0)), [items]);
@@ -150,20 +173,92 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
 
   const handleProductPick = (index: number, productId: string) => {
     if (productId === 'libre') {
-      setItem(index, { productId: undefined });
+      setItem(index, { productId: undefined, presentationId: undefined });
       return;
     }
     const product = products.find((p) => p.id === productId);
     if (!product) return;
     const row = items[index];
     const qty = num(row.quantity) || 1;
+    // Otro producto: la presentación del anterior no le corresponde, y el costo
+    // vuelve a ser el sugerido (el que se escribió era del producto anterior).
     setItem(index, {
       productId,
+      presentationId: undefined,
+      costByHand: false,
       description: product.name,
       quantity: qty,
       unitCost: product.cost,
       itbisAmount: showFiscal && product.itbis ? round2(qty * product.cost * ITBIS_RATE) : 0,
     });
+  };
+
+  // Elegir cómo se compra: suelto o una presentación del producto. Con presentación
+  // la cantidad cuenta presentaciones, así que pasa a entera (mínimo 1) y el costo
+  // sugerido es el del producto por las unidades que trae. Si el usuario ya escribió
+  // el costo a mano, no se le pisa: la ayuda de la línea le muestra el costo por unidad.
+  const handlePresentationPick = (index: number, value: string) => {
+    const row = items[index];
+    const product = lineProductOf(row);
+    if (!product) return;
+    const presentation = value === LOOSE ? undefined : presentationsOf(product).find((p) => p.id === value);
+    if (value !== LOOSE && !presentation) return;
+
+    const quantity = presentation ? Math.max(1, Math.round(num(row.quantity))) : row.quantity;
+    const unitCost = row.costByHand ? row.unitCost : round2(product.cost * (presentation?.units ?? 1));
+    setItem(index, {
+      presentationId: presentation?.id,
+      quantity,
+      unitCost,
+      // El ITBIS de la línea se calculó con la cantidad y el costo de antes.
+      itbisAmount: showFiscal && product.itbis ? round2(num(quantity) * num(unitCost) * ITBIS_RATE) : 0,
+    });
+  };
+
+  // Con presentación, cantidad y costo son por presentación: la etiqueta lo dice.
+  const quantityLabel = (item: ItemRow) => {
+    const presentation = linePresentationOf(item);
+    if (presentation) return `Cantidad (${presentation.name})`;
+    return lineUnit(item) ? `Cantidad (${getUnit(lineUnit(item)).short})` : 'Cantidad';
+  };
+  const costLabel = (item: ItemRow) => {
+    const presentation = linePresentationOf(item);
+    return presentation ? `Costo por ${presentation.name}` : 'Costo unit.';
+  };
+
+  // Segunda fila de la línea, solo si el producto tiene presentaciones: cómo se compra
+  // (suelto o por presentación) y, ya elegida una, cuánto entra al inventario y a qué
+  // costo por unidad base.
+  const renderPresentationRow = (item: ItemRow, index: number) => {
+    const product = lineProductOf(item);
+    const presentations = product ? presentationsOf(product) : [];
+    // Con una presentación ya elegida que desapareció se sigue mostrando el selector,
+    // para poder volver a "suelto" u otra.
+    if (!product || (presentations.length === 0 && !item.presentationId)) return null;
+    const unit = getUnit(product.unit);
+    const presentation = linePresentationOf(item);
+    return (
+      <div className="col-span-12 flex flex-wrap items-center gap-x-3 gap-y-1">
+        <Label className="text-xs text-muted-foreground">Se compra por</Label>
+        <Select value={item.presentationId ?? LOOSE} onValueChange={(v) => handlePresentationPick(index, v)}>
+          <SelectTrigger className="h-8 w-full sm:w-64" aria-label="Presentación de la compra">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={LOOSE}>{capitalize(unit.singular)}</SelectItem>
+            {presentations.map((p) => (
+              <SelectItem key={p.id} value={p.id}>{presentationLabel(p, unit.short)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {presentation && (
+          <span className="text-xs text-muted-foreground">
+            = {formatQty(num(item.quantity) * presentation.units)} {unit.short}
+            {item.unitCost !== '' && <> a {formatCurrency(num(item.unitCost) / presentation.units)} c/u</>}
+          </span>
+        )}
+      </div>
+    );
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -190,10 +285,23 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
         toast({ title: 'Cantidad inválida', description: 'La cantidad de cada línea debe ser mayor que cero.', variant: 'destructive' });
         return;
       }
+      // La presentación se borró mientras el formulario estaba abierto: mandar la
+      // cantidad como si fuera suelta sumaría al inventario unidades de menos.
+      if (it.presentationId && !linePresentationOf(it)) {
+        toast({
+          title: 'Presentación no disponible',
+          description: `La presentación elegida para «${it.description.trim() || 'una línea'}» ya no existe. Elige otra forma de compra.`,
+          variant: 'destructive',
+        });
+        return;
+      }
       if (!lineAllowsDecimals(it) && !Number.isInteger(num(it.quantity))) {
+        const presentation = linePresentationOf(it);
         toast({
           title: 'Cantidad inválida',
-          description: `«${getUnit(lineUnit(it)).plural}» solo admite cantidades enteras.`,
+          description: presentation
+            ? `«${presentationLabel(presentation, getUnit(lineUnit(it)).short)}» se compra entera: la cantidad tiene que ser un número entero.`
+            : `«${getUnit(lineUnit(it)).plural}» solo admite cantidades enteras.`,
           variant: 'destructive',
         });
         return;
@@ -217,6 +325,9 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
 
     const payloadItems: NewSupplierInvoiceItem[] = items.map((it) => ({
       productId: it.productId,
+      // El id sale de la presentación encontrada en el producto, nunca de un texto
+      // vacío: la RPC lo recibe como uuid.
+      presentationId: linePresentationOf(it)?.id,
       description: it.description.trim(),
       quantity: num(it.quantity),
       unitCost: num(it.unitCost),
@@ -381,11 +492,10 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
                       <Input value={item.description} onChange={(e) => setItem(index, { description: e.target.value })} />
                     </div>
                     <div className="col-span-4 sm:col-span-2 space-y-1">
-                      <Label className="text-xs text-muted-foreground">
-                        Cantidad{lineUnit(item) ? ` (${getUnit(lineUnit(item)).short})` : ''}
-                      </Label>
+                      <Label className="text-xs text-muted-foreground">{quantityLabel(item)}</Label>
                       {/* El paso sigue la unidad del producto ligado: comprar
-                          2.55 cajas dejaría el inventario en cajas partidas. */}
+                          2.55 cajas dejaría el inventario en cajas partidas.
+                          Una presentación va siempre entera. */}
                       <Input
                         type="number"
                         step={lineAllowsDecimals(item) ? '0.001' : '1'}
@@ -395,10 +505,15 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
                       />
                     </div>
                     <div className="col-span-5 sm:col-span-2 space-y-1">
-                      <Label className="text-xs text-muted-foreground">Costo unit.</Label>
+                      <Label className="text-xs text-muted-foreground">{costLabel(item)}</Label>
+                      {/* Escrito a mano, el costo ya no se re-sugiere al cambiar la
+                          presentación; vaciado, vuelve a ser el sugerido. */}
                       <Input
                         type="number" step="0.01" min="0" value={item.unitCost}
-                        onChange={(e) => setItem(index, { unitCost: e.target.value === '' ? '' : Number(e.target.value) })}
+                        onChange={(e) => setItem(index, {
+                          unitCost: e.target.value === '' ? '' : Number(e.target.value),
+                          costByHand: e.target.value !== '',
+                        })}
                       />
                     </div>
                     <div className="col-span-3 sm:col-span-1">
@@ -406,6 +521,7 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </Button>
                     </div>
+                    {renderPresentationRow(item, index)}
                   </div>
                 ))}
                 {hasItems && (
