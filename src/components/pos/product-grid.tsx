@@ -82,21 +82,26 @@ function AddButtons({
       {options.map((o) => (
         // El title va en el contenedor: un botón deshabilitado no recibe el puntero y
         // no mostraría el "Quedan N und".
+        // `flex-auto` (base = el ancho del contenido) y un mínimo de 5.5rem: el salto
+        // de fila depende de lo que dicen los botones, no de un mínimo fijo. El
+        // `min(…, 100%)` evita que, en un contenedor más angosto que 5.5rem, el botón
+        // se salga de él.
         <span
           key={o.key}
-          className="flex min-w-[3.5rem] flex-1"
+          className="flex min-w-[min(5.5rem,100%)] flex-auto"
           title={o.disabled ? quedan : `${o.name} · ${formatCurrency(o.price)}`}
         >
           <Button
             type="button"
             size="sm"
-            className="h-auto w-full flex-col gap-0 px-2 py-1.5 leading-tight"
+            className="h-auto w-full flex-col gap-0 whitespace-normal px-2 py-1.5 leading-tight"
             onClick={() => onAdd(product, o.presentation)}
             disabled={o.disabled}
             aria-label={`Añadir ${o.name} de ${product.name}`}
           >
-            <span className="text-sm font-medium">{o.text}</span>
-            <span className="text-[11px] font-normal opacity-90">{formatCurrency(o.price)}</span>
+            <span className="whitespace-nowrap text-sm font-medium">{o.text}</span>
+            {/* Si el precio no cabe, baja de renglón en vez de salirse del botón. */}
+            <span className="max-w-full text-center text-[11px] font-normal opacity-90 [overflow-wrap:anywhere]">{formatCurrency(o.price)}</span>
           </Button>
         </span>
       ))}
