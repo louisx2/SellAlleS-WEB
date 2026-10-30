@@ -190,6 +190,15 @@ export function SalesProvider({ children }: { children: ReactNode }) {
     } else {
       branchUuid = await resolveBranchId(saleData.branchId);
     }
+    // Una línea con presentación sin id (de las que se borraron) viajaría como
+    // suelta: 2 paquetes se descontarían como 2 unidades. El POS no deja armar
+    // una así; esto es el último candado antes de la base.
+    const sinId = saleData.items.find((item) => item.presentation && !item.presentation.id);
+    if (sinId) {
+      throw new Error(
+        `La presentación «${sinId.presentation!.name}» de ${sinId.product.name} ya no existe. Quita la línea y vuelve a agregarla.`,
+      );
+    }
     // El NCF lo asigna el trigger set_sale_ncf en la base (atómico, desde
     // ncf_sequences y solo si la empresa tiene ncf_enabled).
     const { data: sale, error } = await supabase.rpc('create_sale_with_items', {
@@ -206,6 +215,9 @@ export function SalesProvider({ children }: { children: ReactNode }) {
         // toma el costo de aquí, porque no hay producto del cual leerlo.
         is_quick: !!item.isQuick,
         cost: item.isQuick ? item.cost ?? null : null,
+        // Solo el id: el nombre y las unidades los toma el servidor de la fila de
+        // la presentación. Es uuid, así que nunca "": sin presentación va null.
+        presentation_id: item.presentation?.id ?? null,
       })),
     });
     if (error) throw error;

@@ -1,4 +1,4 @@
-import type { Product, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing } from '@/lib/types';
+import type { Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
 
@@ -12,7 +12,30 @@ export const roleToRow = (r: Partial<Role>) => ({
   name: r.name, description: r.description ?? null, permissions: r.permissions ?? {},
 });
 
+// ---------- Presentaciones (unidad / paquete / caja) ----------
+export const rowToPresentation = (r: any): ProductPresentation => ({
+  id: r.id,
+  name: r.name,
+  units: Number(r.units),
+  price: Number(r.price),
+  code: r.code ?? undefined,
+});
+
+// La presentación que lleva una línea ya guardada (venta, cotización, compra), tal
+// como se vendió: `presentation_name` y `units_per` son copia de ese momento y se
+// conservan aunque la presentación cambie o se borre (entonces `presentation_id`
+// queda nulo y la línea sigue leyéndose con su nombre y sus unidades). Sin nombre,
+// la línea es suelta —también las anteriores a la migración, que no traen estas
+// columnas—, y `presentation` queda undefined.
+const rowToLinePresentation = (r: any): LinePresentation | undefined =>
+  r.presentation_name
+    ? { id: r.presentation_id ?? undefined, name: r.presentation_name, units: Number(r.units_per) }
+    : undefined;
+
 // ---------- Product ----------
+// `sold_loose` y `product_presentations` son de la migración de presentaciones: una
+// fila que no los trae (sin el embed, o leída antes de migrar) es un producto que
+// se vende suelto y no tiene presentaciones.
 export const rowToProduct = (r: any): Product => ({
   id: r.id, 
   code: r.code ?? '',
@@ -33,7 +56,13 @@ export const rowToProduct = (r: any): Product => ({
   wholesalePrice: r.wholesale_price != null ? Number(r.wholesale_price) : undefined,
   wholesaleMinQuantity: r.wholesale_min_quantity != null ? Number(r.wholesale_min_quantity) : undefined,
   branchId: r.branch_id ?? undefined,
+  soldLoose: r.sold_loose ?? true,
+  presentations: (r.product_presentations ?? []).map(rowToPresentation),
 });
+// `sold_loose` no viaja aquí a propósito: solo lo escriben `save_product_presentations`
+// e `import_product_presentations`, que lo guardan junto con las presentaciones en la
+// misma transacción. Mandarlo en un update suelto dejaría un producto "no se vende
+// suelto" sin presentaciones, o al revés.
 export const productToRow = (p: Partial<Product>) => ({
   code: p.code ?? null, 
   category_id: p.categoryId ?? null,
@@ -189,6 +218,7 @@ export const rowToSupplierInvoiceItem = (r: any): SupplierInvoiceItem => ({
   quantity: Number(r.quantity),
   unitCost: Number(r.unit_cost),
   itbisAmount: Number(r.itbis_amount ?? 0),
+  presentation: rowToLinePresentation(r),
 });
 
 export const rowToSupplierPayment = (r: any): SupplierPayment => ({
@@ -338,6 +368,8 @@ const rowToCartItem = (i: any): CartItem => ({
   // Marca de la base: `product_id` nulo no basta (el legacy trae miles de líneas
   // sin producto emparejar que no son ventas rápidas).
   isQuick: !!i.is_quick,
+  // Presentación vendida (copia de ese momento); undefined = línea suelta.
+  presentation: rowToLinePresentation(i),
   product: {
     id: i.product_id ?? '', name: i.product_name, price: Number(i.price), cost: 0,
     itbis: !!i.itbis, image: '', stock: 0, code: '', unit: normalizeUnitCode(i.unit),
@@ -542,6 +574,8 @@ const rowToQuoteItem = (i: any): CartItem => ({
   // Costo cotizado de un artículo rápido; nulo (sin costo) se deja en undefined.
   cost: i.cost != null ? Number(i.cost) : undefined,
   isQuick: !!i.is_quick,
+  // Presentación cotizada (copia de ese momento); undefined = línea suelta.
+  presentation: rowToLinePresentation(i),
   product: {
     id: i.product_id ?? '', name: i.product_name, price: Number(i.price), cost: 0,
     itbis: !!i.itbis, image: '', stock: 0, code: '', unit: normalizeUnitCode(i.unit),
@@ -584,6 +618,12 @@ export const quoteItemToRow = (item: CartItem, quoteId: string) => ({
   // que al convertir la cotización en venta no se pierda.
   is_quick: !!item.isQuick,
   cost: item.isQuick ? item.cost ?? null : null,
+  // Una cotización no mueve stock, así que guarda la presentación tal cual la vio
+  // el cliente. Al convertirla en venta el servidor revalida contra la presentación
+  // vigente (por `presentation_id`) y toma de ahí nombre y unidades.
+  presentation_id: item.presentation?.id ?? null,
+  presentation_name: item.presentation?.name ?? null,
+  units_per: item.presentation?.units ?? 1,
 });
 
 export const saleItemToRow = (item: CartItem, saleId: string) => ({

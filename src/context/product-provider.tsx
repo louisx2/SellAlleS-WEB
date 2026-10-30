@@ -1,16 +1,24 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Product } from '@/lib/types';
+import type { Product, ProductPresentation } from '@/lib/types';
+import type { PresentationDraft, PresentationInput } from '@/lib/presentations';
 import { supabase } from '@/lib/supabase/client';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
-import { rowToProduct, productToRow } from '@/lib/supabase/mappers';
+import { rowToProduct, productToRow, rowToPresentation } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
+
+// Productos con sus presentaciones en la misma consulta (embed de PostgREST).
+const PRODUCT_SELECT = '*, product_presentations(*)';
 
 export interface BulkImportItem {
   /** null = crear; id = actualizar ese producto existente. */
   existingId: string | null;
   data: Omit<Product, 'id'>;
+  /** Se vende suelto; undefined = no tocar (en un producto nuevo queda en sí). */
+  soldLoose?: boolean;
+  /** Presentaciones ya validadas del CSV; se escriben sin borrar las que existan. */
+  presentations?: PresentationInput[];
 }
 
 export interface BulkImportResult {
@@ -32,12 +40,76 @@ interface ProductContextType {
   loadArchived: () => Promise<void>;
   restoreProduct: (id: string) => Promise<void>;
   bulkImportProducts: (items: BulkImportItem[], onProgress?: (done: number, total: number) => void) => Promise<BulkImportResult>;
+  /**
+   * Guarda el estado completo de las presentaciones del producto (las que no vengan
+   * se borran) y si se vende suelto, en una sola transacción. Los borradores ya tienen
+   * que haber pasado `validateDrafts`. Devuelve las presentaciones como quedaron y
+   * actualiza el producto en el estado local.
+   */
+  savePresentations: (productId: string, soldLoose: boolean, drafts: PresentationDraft[]) => Promise<ProductPresentation[]>;
   /** Relee productos de la base (p. ej. tras una compra que sumó stock en el servidor). */
   reload: () => Promise<void>;
   loading: boolean;
 }
 
 const ProductContext = createContext<ProductContextType | undefined>(undefined);
+
+// ---------- Importación de presentaciones ----------
+
+// Forma que espera `import_product_presentations`: una fila por producto. `code` solo
+// va cuando tiene valor (la base lo deja como está cuando la clave falta, y lo borra
+// cuando viene vacía); `sold_loose` ausente deja el valor actual.
+type ImportPresentationRow = {
+  product_id: string;
+  sold_loose?: boolean;
+  presentations: { name: string; units: number; price: number; code?: string }[];
+};
+
+const wantsPresentations = (item: BulkImportItem) =>
+  (item.presentations?.length ?? 0) > 0 || item.soldLoose === false;
+
+const toImportPresentationRow = (item: BulkImportItem, productId: string): ImportPresentationRow => ({
+  product_id: productId,
+  ...(item.soldLoose !== undefined ? { sold_loose: item.soldLoose } : {}),
+  presentations: (item.presentations ?? []).map((p) => {
+    const code = p.code?.trim() ?? '';
+    return {
+      name: p.name.trim(),
+      units: p.units,
+      price: p.price,
+      ...(code !== '' ? { code } : {}),
+    };
+  }),
+});
+
+const norm = (s?: string | null) => (s ?? '').trim().toLowerCase();
+
+// Empareja cada producto del lote con la fila que devolvió el insert (el orden de un
+// insert múltiple no está garantizado): primero por código y, a los que no tienen
+// código o no aparecen, por nombre. Cada fila se usa una sola vez, así dos productos
+// con el mismo nombre no se quedan con el mismo id. Devuelve el id (o undefined) en el
+// mismo orden del lote.
+function matchCreatedProducts(
+  batch: BulkImportItem[],
+  rows: { id: string; code?: string | null; name?: string | null }[],
+): (string | undefined)[] {
+  const used = new Set<string>();
+  const ids: (string | undefined)[] = batch.map(() => undefined);
+
+  batch.forEach((b, idx) => {
+    const code = norm(b.data.code);
+    if (code === '') return;
+    const hit = rows.find((r) => !used.has(r.id) && norm(r.code) === code);
+    if (hit) { used.add(hit.id); ids[idx] = hit.id; }
+  });
+  batch.forEach((b, idx) => {
+    if (ids[idx]) return;
+    const name = norm(b.data.name);
+    const hit = rows.find((r) => !used.has(r.id) && norm(r.name) === name);
+    if (hit) { used.add(hit.id); ids[idx] = hit.id; }
+  });
+  return ids;
+}
 
 export function ProductProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -51,7 +123,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   const load = useCallback(async () => {
     if (!activeBranchId) return;
     // Los archivados no se listan: siguen en la base por su historial de ventas.
-    const { data, error } = await supabase.from('products').select('*')
+    const { data, error } = await supabase.from('products').select(PRODUCT_SELECT)
       .eq('branch_id', activeBranchId).eq('is_active', true).order('name');
     if (!error && data) setProducts(data.map(rowToProduct));
     setLoading(false);
@@ -104,7 +176,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
 
   const loadArchived = useCallback(async () => {
     if (!activeBranchId) { setArchivedProducts([]); return; }
-    const { data } = await supabase.from('products').select('*')
+    const { data } = await supabase.from('products').select(PRODUCT_SELECT)
       .eq('branch_id', activeBranchId).eq('is_active', false)
       .order('archived_at', { ascending: false });
     setArchivedProducts((data ?? []).map((row: any) => ({
@@ -123,6 +195,11 @@ export function ProductProvider({ children }: { children: ReactNode }) {
 
   // Importación por lote: inserta los nuevos en tandas y actualiza los emparejados
   // por código uno a uno. company_id lo pone la base (default current_company_id()).
+  // Las presentaciones del CSV se escriben al final, todas juntas, con una sola
+  // llamada a `import_product_presentations`: necesita el id de cada producto, por eso
+  // los nuevos se insertan pidiendo `id, code, name` de vuelta. Si esa llamada falla,
+  // la base deshace todas las presentaciones del lote (los productos ya están creados)
+  // y el error sale en `failed` con el nombre "Presentaciones".
   const bulkImportProducts = async (
     items: BulkImportItem[],
     onProgress?: (done: number, total: number) => void,
@@ -138,19 +215,44 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     const toCreate = items.filter((i) => !i.existingId);
     const toUpdate = items.filter((i) => i.existingId);
 
+    // Una fila por producto que trae presentaciones o que ya no se vende suelto.
+    const presentationRows: ImportPresentationRow[] = [];
+    const queuePresentations = (item: BulkImportItem, productId: string) => {
+      if (wantsPresentations(item)) presentationRows.push(toImportPresentationRow(item, productId));
+    };
+
     const BATCH = 200;
     for (let i = 0; i < toCreate.length; i += BATCH) {
       const batch = toCreate.slice(i, i + BATCH);
-      const { error } = await supabase.from('products').insert(batch.map((b) => productToRow({ ...b.data, branchId: activeBranchId })));
+      const { data: createdRows, error } = await supabase.from('products')
+        .insert(batch.map((b) => productToRow({ ...b.data, branchId: activeBranchId })))
+        .select('id, code, name');
       if (error) {
         // Si el lote falla, insertar fila a fila para reportar cuáles fallaron.
         for (const b of batch) {
-          const { error: e2 } = await supabase.from('products').insert(productToRow({ ...b.data, branchId: activeBranchId }));
-          if (e2) result.failed.push({ name: b.data.name, error: e2.message });
-          else result.created += 1;
+          const { data: one, error: e2 } = await supabase.from('products')
+            .insert(productToRow({ ...b.data, branchId: activeBranchId }))
+            .select('id, code, name').single();
+          if (e2) {
+            result.failed.push({ name: b.data.name, error: e2.message });
+          } else {
+            result.created += 1;
+            queuePresentations(b, one.id);
+          }
         }
       } else {
         result.created += batch.length;
+        const ids = matchCreatedProducts(batch, createdRows ?? []);
+        batch.forEach((b, idx) => {
+          const id = ids[idx];
+          if (id) queuePresentations(b, id);
+          else if (wantsPresentations(b)) {
+            result.failed.push({
+              name: b.data.name,
+              error: 'Se creó, pero no se encontró para guardarle las presentaciones.',
+            });
+          }
+        });
       }
       done += batch.length;
       onProgress?.(done, total);
@@ -158,14 +260,56 @@ export function ProductProvider({ children }: { children: ReactNode }) {
 
     for (const b of toUpdate) {
       const { error } = await supabase.from('products').update(productToRow(b.data)).eq('id', b.existingId!);
-      if (error) result.failed.push({ name: b.data.name, error: error.message });
-      else result.updated += 1;
+      if (error) {
+        result.failed.push({ name: b.data.name, error: error.message });
+      } else {
+        result.updated += 1;
+        queuePresentations(b, b.existingId!);
+      }
       done += 1;
       onProgress?.(done, total);
     }
 
+    if (presentationRows.length > 0) {
+      const { error } = await supabase.rpc('import_product_presentations', { p_rows: presentationRows });
+      if (error) result.failed.push({ name: 'Presentaciones', error: error.message });
+    }
+
     await load();
     return result;
+  };
+
+  const savePresentations = async (
+    productId: string,
+    soldLoose: boolean,
+    drafts: PresentationDraft[],
+  ): Promise<ProductPresentation[]> => {
+    // Los borradores llegan validados, pero un '' convertido con Number() daría 0 y
+    // se guardaría como si fuera un dato.
+    if (drafts.some((d) => d.units === '' || d.price === '')) {
+      throw new Error('Cada presentación necesita cuántas unidades trae y su precio.');
+    }
+    const items = drafts.map((d) => {
+      const code = d.code.trim();
+      return {
+        // Sin id = presentación nueva. Un id vacío no puede llegar: la columna es uuid.
+        ...(d.id ? { id: d.id } : {}),
+        name: d.name.trim(),
+        units: Number(d.units),
+        price: Number(d.price),
+        // Sin `code` la presentación queda sin código.
+        ...(code !== '' ? { code } : {}),
+      };
+    });
+    const { data, error } = await supabase.rpc('save_product_presentations', {
+      p_product_id: productId,
+      p_sold_loose: soldLoose,
+      p_items: items,
+    });
+    if (error) throw error;
+    const saved: ProductPresentation[] = ((data ?? []) as any[]).map(rowToPresentation);
+    setProducts((prev) => prev.map((p) => (p.id === productId ? { ...p, soldLoose, presentations: saved } : p)));
+    return saved;
   };
 
   const updateStock = async (productId: string, quantitySold: number) => {
@@ -177,7 +321,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, bulkImportProducts, archivedProducts, loadArchived, restoreProduct, reload: load, loading }}>
+    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, bulkImportProducts, savePresentations, archivedProducts, loadArchived, restoreProduct, reload: load, loading }}>
       {children}
     </ProductContext.Provider>
   );
