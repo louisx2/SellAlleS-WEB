@@ -65,8 +65,11 @@ type ImportPresentationRow = {
   presentations: { name: string; units: number; price: number; code?: string }[];
 };
 
+// Va a la RPC todo el que trae presentaciones o dice sí/no en «se vende suelto» (un sí
+// explícito sirve para volver a vender suelto un producto que ya no lo estaba). Con
+// `soldLoose` undefined —celda vacía— no se toca nada de eso.
 const wantsPresentations = (item: BulkImportItem) =>
-  (item.presentations?.length ?? 0) > 0 || item.soldLoose === false;
+  (item.presentations?.length ?? 0) > 0 || item.soldLoose !== undefined;
 
 const toImportPresentationRow = (item: BulkImportItem, productId: string): ImportPresentationRow => ({
   product_id: productId,
@@ -215,7 +218,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     const toCreate = items.filter((i) => !i.existingId);
     const toUpdate = items.filter((i) => i.existingId);
 
-    // Una fila por producto que trae presentaciones o que ya no se vende suelto.
+    // Una fila por producto que trae presentaciones o que dice si se vende suelto.
     const presentationRows: ImportPresentationRow[] = [];
     const queuePresentations = (item: BulkImportItem, productId: string) => {
       if (wantsPresentations(item)) presentationRows.push(toImportPresentationRow(item, productId));

@@ -22,6 +22,8 @@ import {
   PRESENTATION_CSV_HEADERS,
   parsePresentationColumns,
   presentationColumns,
+  validatePresentationInputs,
+  csvSoldLooseError,
   resolveQuotedPresentation,
 } from '../../src/lib/presentations.ts';
 
@@ -383,6 +385,90 @@ test('presentationColumns', () => {
   assert.equal(cols.codigo_1, '');
   assert.equal(cols.presentacion_2, 'Quintal');
   assert.equal(cols.presentacion_3, 'Fardo');
+});
+
+// Lo que el CSV exporta se vuelve a leer igual: sin presentaciones, con 1 y con 3, y las
+// presentaciones salen de menor a mayor aunque estén desordenadas en el producto.
+test('presentationColumns se lee de vuelta con parsePresentationColumns', () => {
+  const sinCodigo = { id: 'ps', name: 'Docena', units: 12, price: 99.5 };
+  const casos = [
+    galletas({ presentations: [] }),
+    galletas({ presentations: [sinCodigo] }),
+    galletas({ presentations: [CAJA, PAQUETE, { id: 'px', name: 'Display', units: 48, price: 700, code: '7501-48' }] }),
+    galletas({ unit: 'lb', presentations: [{ id: 'sa', name: 'Saco', units: 62.5, price: 1500 }] }),
+  ];
+  for (const producto of casos) {
+    const cols = presentationColumns(producto);
+    const { presentations, errors } = parsePresentationColumns((k) => cols[k], parseNum);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(
+      presentations,
+      presentationsOf(producto).map(({ name, units, price, code }) => (code ? { name, units, price, code } : { name, units, price })),
+    );
+    // Y lo leído pasa el chequeo de rangos con la unidad del producto.
+    assert.equal(
+      validatePresentationInputs(presentations, { productName: producto.name, decimals: producto.unit === 'lb' }),
+      null,
+    );
+  }
+});
+
+test('validatePresentationInputs', () => {
+  const opts = (over = {}) => ({ productName: 'Galletas', decimals: false, ...over });
+  const input = (over = {}) => ({ name: 'Paquete', units: 12, price: 160, ...over });
+
+  // Sin presentaciones no es error aquí: eso lo decide csvSoldLooseError.
+  assert.equal(validatePresentationInputs([], opts()), null);
+  assert.equal(validatePresentationInputs([input(), input({ name: 'Caja', units: 288, code: 'A-1' })], opts()), null);
+  assert.equal(validatePresentationInputs([input({ price: 0 })], opts()), null);
+  assert.equal(validatePresentationInputs([input({ units: 62.5 })], opts({ decimals: true })), null);
+
+  // Mismos textos que el formulario y la base.
+  assert.equal(
+    validatePresentationInputs([input({ units: 1 })], opts()),
+    'Una presentación tiene que traer más de una unidad.',
+  );
+  assert.equal(
+    validatePresentationInputs([input({ units: 0 })], opts()),
+    'Una presentación tiene que traer más de una unidad.',
+  );
+  assert.equal(
+    validatePresentationInputs([input({ units: 12.5 })], opts()),
+    '«Galletas» se cuenta por piezas: la presentación tiene que traer una cantidad entera.',
+  );
+  assert.equal(
+    validatePresentationInputs([input({ price: -5 })], opts()),
+    'El precio de la presentación no puede ser negativo.',
+  );
+  assert.equal(
+    validatePresentationInputs([input(), input({ name: ' PAQUETE ', units: 24 })], opts()),
+    'Ya hay una presentación llamada «PAQUETE» en este producto.',
+  );
+  // El mismo código dos veces en la fila; contra la sucursal no se compara (lo hace la base).
+  assert.equal(
+    validatePresentationInputs([input({ code: 'X' }), input({ name: 'Caja', units: 24, code: ' x ' })], opts()),
+    'El código «x» ya lo usa «Galletas» en esta sucursal.',
+  );
+  assert.equal(validatePresentationInputs([input({ code: 'ABC-1' })], opts()), null);
+});
+
+test('csvSoldLooseError', () => {
+  const MSG = 'Si «Galletas» no se vende suelto, necesita al menos una presentación.';
+  const row = (over = {}) => ({ name: 'Galletas', soldLoose: undefined, presentations: [], ...over });
+  const conPresentaciones = { presentations: [{ name: 'Caja' }] };
+
+  // Celda vacía (undefined) o «sí»: no se pide nada.
+  assert.equal(csvSoldLooseError(row()), null);
+  assert.equal(csvSoldLooseError(row({ soldLoose: true })), null);
+  // «No» con presentaciones en la fila.
+  assert.equal(csvSoldLooseError(row({ soldLoose: false, presentations: [{ name: 'Caja', units: 288, price: 3600 }] })), null);
+  // «No» sin presentaciones: error, igual que la base, si el producto es nuevo...
+  assert.equal(csvSoldLooseError(row({ soldLoose: false })), MSG);
+  // ...o existe pero no tiene ninguna.
+  assert.equal(csvSoldLooseError(row({ soldLoose: false }), { presentations: [] }), MSG);
+  assert.equal(csvSoldLooseError(row({ soldLoose: false }), {}), MSG);
+  // Actualiza un producto que ya las tiene: la importación no borra, así que se quedan.
+  assert.equal(csvSoldLooseError(row({ soldLoose: false }), conPresentaciones), null);
 });
 
 test('resolveQuotedPresentation', () => {

@@ -19,6 +19,7 @@ import { useCategories } from '@/context/category-provider';
 import { useSuppliers } from '@/context/supplier-provider';
 import { useLocations } from '@/context/location-provider';
 import { parseProductsCsv, buildTemplateCsv, downloadTextFile, type ParsedProductRow } from '@/lib/inventory-csv';
+import { csvSoldLooseError } from '@/lib/presentations';
 import type { Product } from '@/lib/types';
 import { Download, FileUp, Loader2, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
@@ -113,7 +114,14 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
   const handleFile = async (file: File) => {
     try {
       const text = await file.text();
-      const parsed = await parseProductsCsv(text);
+      // «No se vende suelto» sin presentaciones en la fila solo vale si actualiza un
+      // producto que ya las tiene (importar nunca borra). El parser no conoce el
+      // inventario, así que se revisa aquí, donde se empareja cada fila por código.
+      const parsed = (await parseProductsCsv(text)).map((r) => {
+        if (!r.name) return r;
+        const error = csvSoldLooseError(r, r.code ? codeMap.get(normName(r.code)) : undefined);
+        return error ? { ...r, errors: [...r.errors, error] } : r;
+      });
       if (parsed.length === 0) {
         toast({ title: 'Archivo vacío', description: 'No se encontraron filas de productos.', variant: 'destructive' });
         return;
@@ -138,6 +146,12 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
     for (const r of conflictRows) {
       const d = dupDecisions[r.rowNumber];
       if (d?.action === 'create') {
+        // Crear con código nuevo es un producto nuevo: no hereda las presentaciones del existente.
+        const looseError = csvSoldLooseError(r);
+        if (looseError) {
+          toast({ title: 'Falta una presentación', description: `Fila ${r.rowNumber}: ${looseError}`, variant: 'destructive' });
+          return;
+        }
         const nc = d.newCode.trim();
         if (!nc) {
           toast({ title: 'Falta un código', description: `Fila ${r.rowNumber}: escribe el código nuevo.`, variant: 'destructive' });
@@ -183,6 +197,8 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
           wholesaleMinQuantity: r.wholesaleMinQuantity,
           image: r.imageUrl && /^(https?:|data:)/i.test(r.imageUrl) ? r.imageUrl : 'placeholder',
         },
+        soldLoose: r.soldLoose,
+        presentations: r.presentations,
       });
 
       const items: BulkImportItem[] = [
@@ -235,6 +251,13 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
               <p className="text-xs text-muted-foreground">
                 Unidades válidas: und, caja, doc, par, rollo, saco, paq, lb, kg, g, oz, qq, m, pie, yd, plg, gal, l, ml.
                 En blanco = unidades. Usa <span className="font-mono">punto</span> para los decimales (1.7), no coma.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Presentaciones (paquete, caja…): hasta 3 por producto, con presentacion_1, contiene_1, precio_1 y codigo_1
+                (y lo mismo con _2 y _3). <span className="font-mono">existencias</span> va siempre en unidades base, no en
+                paquetes ni cajas, y <span className="font-mono">contiene</span> es cuántas unidades base trae cada una.
+                Con <span className="font-mono">se_vende_suelto</span> en «no», el producto solo se vende por presentación;
+                en blanco no cambia nada. Importar nunca borra presentaciones que ya existan.
               </p>
             </div>
             <Button onClick={() => fileRef.current?.click()}>

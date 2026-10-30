@@ -274,6 +274,41 @@ export function parsePresentationColumns(
   return { presentations, errors };
 }
 
+// Rangos de las presentaciones que leyó `parsePresentationColumns` (más de una unidad,
+// entera si la unidad es contable, precio no negativo, nombres sin repetir), con los
+// mismos textos que el formulario y la base. Primer error o null. No revisa códigos
+// contra la sucursal (`takenCodes` vacío): ahí manda la base, que rechaza el lote
+// completo; sí detecta el mismo código dos veces dentro de la fila. Tampoco exige
+// presentaciones: eso depende de si la fila actualiza un producto que ya las tiene
+// (ver `csvSoldLooseError`).
+export function validatePresentationInputs(
+  inputs: PresentationInput[],
+  opts: { productName: string; decimals: boolean },
+): string | null {
+  return validateDrafts(
+    inputs.map((p) => ({ name: p.name, units: p.units, price: p.price, code: p.code ?? '' })),
+    { productName: opts.productName, decimals: opts.decimals, soldLoose: true, takenCodes: new Map() },
+  );
+}
+
+// Fila del CSV con `se_vende_suelto = no` y sin presentaciones: el mismo error que
+// `save_product_presentations`. No es error si la fila actualiza un producto que ya
+// tiene presentaciones: la importación nunca borra, así que seguirán ahí. Una celda
+// vacía (`soldLoose` undefined) no cambia nada y tampoco es error.
+export function csvSoldLooseError(
+  row: { name: string; soldLoose?: boolean; presentations: readonly unknown[] },
+  existing?: { presentations?: readonly unknown[] },
+): string | null {
+  if (row.soldLoose !== false || row.presentations.length > 0) return null;
+  if ((existing?.presentations?.length ?? 0) > 0) return null;
+  return validateDrafts([], {
+    productName: row.name,
+    decimals: true,
+    soldLoose: false,
+    takenCodes: new Map(),
+  });
+}
+
 // Las 3 primeras presentaciones (de menor a mayor) como columnas del CSV; las que
 // faltan quedan vacías. Siempre trae las 12 claves de `PRESENTATION_CSV_HEADERS`.
 export function presentationColumns(product: Product): Record<string, string> {

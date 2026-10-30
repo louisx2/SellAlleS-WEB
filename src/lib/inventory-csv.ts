@@ -4,6 +4,10 @@ import {
   DEFAULT_UNIT_CODE, formatQty, getUnit, normalizeQty, parseUnitInput,
   unitAllowsDecimals, type UnitCode,
 } from '@/lib/units';
+import {
+  PRESENTATION_CSV_HEADERS, isSoldLoose, parsePresentationColumns, presentationColumns,
+  validatePresentationInputs, type PresentationInput,
+} from '@/lib/presentations';
 
 // Encabezados de la plantilla (en español, en minúscula). El parseo es tolerante:
 // acepta mayúsculas/espacios y columnas en cualquier orden.
@@ -23,6 +27,8 @@ export const CSV_HEADERS = [
   'precio_mayoreo',
   'cant_min_mayoreo',
   'imagen_url',
+  'se_vende_suelto',
+  ...PRESENTATION_CSV_HEADERS,
 ] as const;
 
 export interface ParsedProductRow {
@@ -42,6 +48,11 @@ export interface ParsedProductRow {
   wholesalePrice?: number;
   wholesaleMinQuantity?: number;
   imageUrl?: string;
+  /** Sí/no explícito de `se_vende_suelto`. undefined = celda vacía o columna ausente:
+   *  no cambia nada (en un producto nuevo la base lo deja en «sí»). */
+  soldLoose: boolean | undefined;
+  /** Hasta 3, ya completas y dentro de rango. La importación nunca borra las que existan. */
+  presentations: PresentationInput[];
   errors: string[];
 }
 
@@ -66,9 +77,22 @@ function parseNumber(raw: string | undefined): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+const YES_VALUES = ['si', 'sí', 's', 'true', '1', 'x', 'yes', 'y'];
+const NO_VALUES = ['no', 'n', 'false', '0'];
+
 function parseBool(raw: string | undefined): boolean {
+  return YES_VALUES.includes(norm(String(raw ?? '')));
+}
+
+// Sí/no explícito con el mismo vocabulario de `itbis`. A diferencia de `parseBool`,
+// vacío es "no dice nada" (value undefined) y lo que no es ni sí ni no es `invalid`:
+// un typo no debe apagar la venta suelta de un producto sin que nadie lo note.
+function parseYesNo(raw: string | undefined): { value: boolean | undefined; invalid: boolean } {
   const s = norm(String(raw ?? ''));
-  return ['si', 'sí', 's', 'true', '1', 'x', 'yes', 'y'].includes(s);
+  if (s === '') return { value: undefined, invalid: false };
+  if (YES_VALUES.includes(s)) return { value: true, invalid: false };
+  if (NO_VALUES.includes(s)) return { value: false, invalid: false };
+  return { value: undefined, invalid: true };
 }
 
 function cleanStr(raw: string | undefined): string {
@@ -116,6 +140,22 @@ export function parseProductsCsv(text: string): Promise<ParsedProductRow[]> {
             errors.push(`«${getUnit(unit).plural}» no admite decimales en la cantidad mínima de mayoreo.`);
           }
 
+          // Presentaciones (paquete, caja…). `existencias` sigue en unidades base. Aquí
+          // solo se revisa lo que se ve en la fila; «no se vende suelto» sin
+          // presentaciones depende de si el producto ya existe y lo revisa el diálogo
+          // (`csvSoldLooseError`). Los códigos los valida la base.
+          const looseCell = parseYesNo(g('se_vende_suelto'));
+          if (looseCell.invalid) {
+            errors.push('«se_vende_suelto» no se entiende: escribe sí o no, o déjalo en blanco.');
+          }
+          const parsedPresentations = parsePresentationColumns(g, parseNumber);
+          errors.push(...parsedPresentations.errors);
+          const rangeError = validatePresentationInputs(parsedPresentations.presentations, {
+            productName: name,
+            decimals: unitAllowsDecimals(unit),
+          });
+          if (rangeError) errors.push(rangeError);
+
           return {
             rowNumber: i + 1,
             code: cleanStr(g('codigo')),
@@ -133,6 +173,8 @@ export function parseProductsCsv(text: string): Promise<ParsedProductRow[]> {
             wholesalePrice: wholesalePrice,
             wholesaleMinQuantity: wholesaleMinQuantity === undefined ? undefined : normalizeQty(wholesaleMinQuantity, unit),
             imageUrl: cleanStr(g('imagen_url')) || undefined,
+            soldLoose: looseCell.value,
+            presentations: parsedPresentations.presentations,
             errors,
           };
         });
@@ -143,8 +185,9 @@ export function parseProductsCsv(text: string): Promise<ParsedProductRow[]> {
   });
 }
 
-/** CSV de plantilla con dos filas de ejemplo: una por pieza y otra por peso,
- *  para que el formato de la columna `unidad` se explique solo. */
+/** CSV de plantilla con tres filas de ejemplo: una por pieza, otra por peso y otra
+ *  con presentaciones (paquete y caja), para que el formato de las columnas `unidad`
+ *  y `presentacion_N` se explique solo. */
 export function buildTemplateCsv(): string {
   const porPieza: Record<string, string> = {
     codigo: 'ABC123',
@@ -162,6 +205,7 @@ export function buildTemplateCsv(): string {
     precio_mayoreo: '550',
     cant_min_mayoreo: '6',
     imagen_url: '',
+    se_vende_suelto: 'si',
   };
   const porPeso: Record<string, string> = {
     codigo: 'FER-CEM',
@@ -179,8 +223,37 @@ export function buildTemplateCsv(): string {
     precio_mayoreo: '',
     cant_min_mayoreo: '',
     imagen_url: '',
+    se_vende_suelto: 'si',
   };
-  return Papa.unparse({ fields: [...CSV_HEADERS], data: [porPieza, porPeso] });
+  // `existencias` va en unidades base: 1250 galletas, no 1250 cajas. Los 12 y los
+  // 288 de `contiene_N` también son unidades base.
+  const conPresentaciones: Record<string, string> = {
+    codigo: 'GAL-001',
+    nombre: 'Galletas surtidas',
+    descripcion: 'Existencias en unidades, no en cajas',
+    categoria: 'Víveres',
+    proveedor: '',
+    costo: '10',
+    precio: '15',
+    itbis: 'no',
+    existencias: '1250',
+    unidad: 'und',
+    maneja_inventario: 'si',
+    ubicacion: '',
+    precio_mayoreo: '',
+    cant_min_mayoreo: '',
+    imagen_url: '',
+    se_vende_suelto: 'si',
+    presentacion_1: 'Paquete',
+    contiene_1: '12',
+    precio_1: '160',
+    codigo_1: 'GAL-001-12',
+    presentacion_2: 'Caja',
+    contiene_2: '288',
+    precio_2: '3600',
+    codigo_2: 'GAL-001-288',
+  };
+  return Papa.unparse({ fields: [...CSV_HEADERS], data: [porPieza, porPeso, conPresentaciones] });
 }
 
 /** Exporta el catálogo actual a CSV (mismos encabezados que la plantilla). */
@@ -211,6 +284,10 @@ export function buildExportCsv(
     precio_mayoreo: p.wholesalePrice != null ? String(p.wholesalePrice) : '',
     cant_min_mayoreo: p.wholesaleMinQuantity != null ? formatQty(p.wholesaleMinQuantity) : '',
     imagen_url: p.image && /^(https?:|data:)/i.test(p.image) ? p.image : '',
+    // Igual que itbis: sí/no. Los productos anteriores a las presentaciones se venden sueltos.
+    se_vende_suelto: isSoldLoose(p) ? 'si' : 'no',
+    // Las 3 más chicas. Si tiene más, las demás se quedan como están: importar nunca borra.
+    ...presentationColumns(p),
   }));
 
   return Papa.unparse({ fields: [...CSV_HEADERS], data });
