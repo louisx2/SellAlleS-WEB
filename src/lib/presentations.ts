@@ -63,12 +63,16 @@ export function baseQtyInCart(productId: string, items: CartItem[], exceptCartIt
 }
 
 // Cuántas presentaciones de `units` unidades base caben todavía, contando lo que ya
-// hay en el carrito. Sin control de inventario no hay tope.
+// hay en el carrito: enteras, porque una presentación no se parte. Con `units === 1`
+// (venta suelta) devuelve el saldo exacto en unidades base, sin redondear hacia abajo:
+// una unidad medible puede venderse por fracciones (0.5 lb sigue siendo vendible).
+// Sin control de inventario no hay tope.
 export function maxAddable(product: Product, items: CartItem[], units: number): number {
   if (!product.tracksStock) return Infinity;
   if (!(units > 0)) return 0;
   const remaining = round3(product.stock - baseQtyInCart(product.id, items));
   if (remaining <= 0) return 0;
+  if (units === 1) return remaining;
   return Math.floor(remaining / units + EPS);
 }
 
@@ -82,9 +86,14 @@ export function isSellable(product: Product): boolean {
 }
 
 // El producto tal como lo lleva la línea: con presentación, `price` es el de la
-// presentación (el precio de lista de la línea). Sin presentación, el mismo objeto.
+// presentación (el precio de lista de la línea). El precio por mayor es por unidad
+// base, así que la línea no lo hereda: de lo contrario, al llegar al mínimo de
+// paquetes se cobraría cada uno al precio de una unidad. Sin presentación, el mismo
+// objeto.
 export function lineProduct(product: Product, p?: ProductPresentation): Product {
-  return p ? { ...product, price: p.price } : product;
+  return p
+    ? { ...product, price: p.price, wholesalePrice: undefined, wholesaleMinQuantity: undefined }
+    : product;
 }
 
 export function toLinePresentation(p: ProductPresentation): LinePresentation {

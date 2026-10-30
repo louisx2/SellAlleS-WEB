@@ -111,6 +111,15 @@ test('maxAddable', () => {
   assert.equal(maxAddable(galletas({ stock: 0, tracksStock: false }), items, 12), Infinity);
   // Nunca negativo.
   assert.equal(maxAddable(galletas({ stock: 10 }), items, 1), 0);
+
+  // Lo suelto no se redondea hacia abajo: una unidad medible con saldo fraccionario
+  // muestra el saldo exacto (0.5 lb sigue siendo vendible); las presentaciones sí.
+  const libras = galletas({ unit: 'lb', stock: 3.5 });
+  assert.equal(maxAddable(libras, [], 1), 3.5);
+  assert.equal(maxAddable(libras, [], 2), 1);
+  assert.equal(maxAddable(galletas({ unit: 'lb', stock: 0.5 }), [], 1), 0.5);
+  // El saldo suelto descuenta lo que ya hay en el carrito, sin ruido de coma flotante.
+  assert.equal(maxAddable(libras, [line({ quantity: 0.1 }), line({ cartItemId: 'c2', quantity: 0.2 })], 1), 3.2);
 });
 
 test('isSellable', () => {
@@ -137,6 +146,19 @@ test('lineProduct', () => {
   // Sin presentación devuelve el mismo objeto.
   assert.equal(lineProduct(p), p);
   assert.equal(lineProduct(p, undefined), p);
+
+  // El precio por mayor es por unidad: la línea de una presentación no lo hereda
+  // (5 paquetes no deben cobrarse a 12 cada uno en vez de 160).
+  const conMayor = galletas({ wholesalePrice: 12, wholesaleMinQuantity: 5 });
+  const lm = lineProduct(conMayor, PAQUETE);
+  assert.equal(lm.price, 160);
+  assert.equal(lm.wholesalePrice, undefined);
+  assert.equal(lm.wholesaleMinQuantity, undefined);
+  assert.equal(lm.id, 'g1');
+  // El original conserva su precio por mayor.
+  assert.equal(conMayor.wholesalePrice, 12);
+  assert.equal(conMayor.wholesaleMinQuantity, 5);
+  assert.equal(lineProduct(conMayor), conMayor);
 });
 
 test('toLinePresentation', () => {
