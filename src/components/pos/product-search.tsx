@@ -159,6 +159,14 @@ export function ProductSearch() {
     setSearchTerm('');
   }, [addItem, toast]);
 
+  // La espera en curso de un código que es el comienzo de otro más largo: el temporizador,
+  // lo tecleado y lo que encontró. Enter solo puede cerrar esta espera.
+  const esperaRef = useRef<{
+    timer: ReturnType<typeof setTimeout>;
+    codigo: string;
+    encontrado: CodeMatch | AmbiguousCode;
+  } | null>(null);
+
   // El modo lector solo gobierna lo que se teclea: el botón de la cámara es una
   // intención explícita del cajero y agrega al carrito esté como esté. Un código que
   // es el comienzo de otro más largo no se agrega todavía: espera a Enter (abajo) o a
@@ -171,17 +179,33 @@ export function ProductSearch() {
       agregarPorCodigo(searchTerm, encontrado);
       return;
     }
-    const espera = setTimeout(() => agregarPorCodigo(searchTerm, encontrado), ESPERA_PREFIJO_MS);
-    return () => clearTimeout(espera);
+    const espera = {
+      codigo: searchTerm,
+      encontrado,
+      timer: setTimeout(() => {
+        esperaRef.current = null;
+        agregarPorCodigo(searchTerm, encontrado);
+      }, ESPERA_PREFIJO_MS),
+    };
+    esperaRef.current = espera;
+    return () => {
+      clearTimeout(espera.timer);
+      if (esperaRef.current === espera) esperaRef.current = null;
+    };
   }, [searchTerm, searchMode, scannerMode, buscarPorCodigo, allProducts, agregarPorCodigo]);
 
-  // Enter (los lectores lo mandan al final del código) agrega sin esperar.
+  // Enter (los lectores lo mandan al final del código) cierra la espera sin aguardar
+  // los 250 ms. Sin espera pendiente no hace nada: el código ya entró solo y la caja
+  // puede no haberse limpiado todavía en pantalla; volver a buscar ese texto lo
+  // agregaría dos veces.
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key !== 'Enter' || !scannerMode || searchMode !== 'code') return;
-    const encontrado = buscarPorCodigo(searchTerm);
-    if (!encontrado) return;
+    if (e.key !== 'Enter') return;
+    const espera = esperaRef.current;
+    if (!espera) return;
     e.preventDefault();
-    agregarPorCodigo(searchTerm, encontrado);
+    clearTimeout(espera.timer);
+    esperaRef.current = null;
+    agregarPorCodigo(espera.codigo, espera.encontrado);
   };
 
   const handleModeChange = (mode: 'name' | 'code') => {
