@@ -982,6 +982,46 @@ begin
   assert (select stock from products where id = pg_temp.prod(124)) = 0, 'colisión: e124 no debía recibir stock';
 end $t$;
 
+-- sold_loose viaja con el producto: si el original solo se vende por
+-- presentaciones, el que se crea en el destino también (y trae sus
+-- presentaciones); si se vende suelto, el creado también. Se borra la copia de
+-- Prueba, se apaga sold_loose en el origen con save_product_presentations
+-- (conservando las presentaciones por su id) y se vuelve a enviar; después se
+-- vuelve a encender y se repite.
+do $t$
+declare v jsonb; v_dest uuid; v_keep text;
+begin
+  v_keep := jsonb_build_array(
+    jsonb_build_object('id', pg_temp.prod(122), 'name', 'Caja', 'units', 288, 'price', 3600, 'code', 'E121-288'),
+    jsonb_build_object('id', pg_temp.prod(123), 'name', 'Paquete', 'units', 12, 'price', 180, 'code', 'E121-12'))::text;
+
+  delete from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  perform pg_temp.guardar(pg_temp.prod(121), false, v_keep);
+  assert not (select sold_loose from products where id = pg_temp.prod(121)),
+         'sold_loose: el origen debía quedar sin venderse suelto';
+
+  v := pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":1}]');
+  select id into v_dest from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  assert v_dest is not null and (select target_created from product_transfers where batch_id = (v->>'batch_id')::uuid),
+         'sold_loose: el producto debía crearse en Prueba';
+  assert (select not sold_loose from products where id = v_dest),
+         'sold_loose: el producto creado en el destino debía copiar sold_loose = false del original';
+  assert (select count(*) from product_presentations where product_id = v_dest) = 2,
+         'sold_loose: el producto creado debía conservar sus dos presentaciones';
+
+  -- Control: con sold_loose en true se copia true.
+  delete from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  perform pg_temp.guardar(pg_temp.prod(121), true, v_keep);
+  v := pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":1}]');
+  select id into v_dest from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  assert v_dest is not null and (select sold_loose from products where id = v_dest),
+         'sold_loose: con el original vendiéndose suelto, el creado también debía quedar en true';
+end $t$;
+
 -- Compras: suelta, mezcla y las condiciones de hoy (módulo purchases y
 -- tracks_stock) siguen mandando sobre el stock.
 do $t$

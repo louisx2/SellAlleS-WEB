@@ -819,10 +819,12 @@ $function$;
 --     anteriores del mismo producto: el stock se valida contra la suma.
 --     `product_transfers.quantity` queda en la presentación y se guardan
 --     `presentation_name`, `units_per` y `unit_cost = products.cost × units_per`.
---     Cuando la transferencia CREA el producto en el destino, copia todas sus
---     presentaciones; la copia queda sin código si allá ya lo usa un producto
---     activo u otra presentación (se comprueba antes de insertar, con el
---     criterio del trigger). Si el producto ya existía, no toca las suyas.
+--     Cuando la transferencia CREA el producto en el destino, copia su
+--     `sold_loose` (un producto que solo se vende por presentaciones no pasa a
+--     venderse suelto allá) y todas sus presentaciones; la copia queda sin
+--     código si allá ya lo usa un producto activo u otra presentación (se
+--     comprueba antes de insertar, con el criterio del trigger). Si el producto
+--     ya existía, no toca las suyas.
 -- Siguen igual el modo de seguridad (create_supplier_invoice, invoker;
 -- transfer_products, definer), el search_path, los permisos, el candado del
 -- número de conduce, el archivado al vaciar y el manejo de ubicación y categoría.
@@ -1181,12 +1183,14 @@ begin
             insert into public.products (
                 company_id, branch_id, name, code, price, cost, itbis,
                 image, stock, category_id, description, supplier_id,
-                location_id, unit, tracks_stock, wholesale_price, wholesale_min_quantity
+                location_id, unit, tracks_stock, wholesale_price, wholesale_min_quantity,
+                sold_loose
             ) values (
                 v_company, p_to_branch_id, v_source.name, v_source.code, v_source.price,
                 v_source.cost, v_source.itbis, v_source.image, v_base_qty, v_target_category_id,
                 v_source.description, v_source.supplier_id, p_target_location_id, v_source.unit,
-                v_source.tracks_stock, v_source.wholesale_price, v_source.wholesale_min_quantity
+                v_source.tracks_stock, v_source.wholesale_price, v_source.wholesale_min_quantity,
+                v_source.sold_loose
             ) returning id into v_target_product_id;
 
             v_created := true;
