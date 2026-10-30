@@ -5,6 +5,26 @@ import type { LateFeeMode } from './late-fee';
 export type { InterestMode, PaymentFrequency } from './frequency';
 export type { LateFeeMode } from './late-fee';
 
+// Una forma de vender el producto por varias unidades base (paquete, caja, saco).
+// El stock siempre se cuenta en unidades base: una presentación solo dice cuántas
+// unidades trae (`units`) y a qué precio se vende. Mapea a `product_presentations`.
+export type ProductPresentation = {
+  id: string;
+  name: string;
+  units: number;  // unidades base que trae; > 1 (entero salvo en unidades medibles)
+  price: number;  // precio de la presentación completa
+  code?: string;  // código de barras propio; único en la sucursal
+};
+
+// Copia de la presentación que lleva una línea (carrito, venta, cotización, compra).
+// Es una foto: `id` falta cuando la presentación se borró después de vender o cotizar,
+// y `name`/`units` se conservan para que el documento viejo se reimprima igual.
+export type LinePresentation = {
+  id?: string;
+  name: string;
+  units: number;
+};
+
 export type Product = {
   id: string;
   code: string;
@@ -25,6 +45,10 @@ export type Product = {
   wholesalePrice?: number;
   wholesaleMinQuantity?: number;
   branchId?: string;
+  // Se vende suelto (por unidad base). undefined = sí; así los productos y los
+  // carritos anteriores a las presentaciones no cambian.
+  soldLoose?: boolean;
+  presentations?: ProductPresentation[];
 };
 
 export type ProductCategory = {
@@ -246,6 +270,10 @@ export type CartItem = {
   cost?: number;
   // Línea de venta rápida: artículo fuera de inventario, con producto sintético (id vacío).
   isQuick?: boolean;
+  // Presentación en la que se vende la línea; undefined = suelta (1 unidad base).
+  // `quantity` cuenta presentaciones. Con presentación, `product.price` es el
+  // precio de la presentación, es decir, el precio de lista de la línea.
+  presentation?: LinePresentation;
 };
 
 export type Cart = {
@@ -783,6 +811,8 @@ export type SupplierInvoiceItem = {
   quantity: number;
   unitCost: number;
   itbisAmount: number;
+  // Presentación comprada; ausente = suelta. `quantity` y `unitCost` son por presentación.
+  presentation?: LinePresentation;
 };
 
 export type SupplierPayment = {
