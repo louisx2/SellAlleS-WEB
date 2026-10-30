@@ -215,9 +215,13 @@ export function SalesProvider({ children }: { children: ReactNode }) {
         // toma el costo de aquí, porque no hay producto del cual leerlo.
         is_quick: !!item.isQuick,
         cost: item.isQuick ? item.cost ?? null : null,
-        // Solo el id: el nombre y las unidades los toma el servidor de la fila de
-        // la presentación. Es uuid, así que nunca "": sin presentación va null.
+        // El nombre y las unidades los toma el servidor de la fila de la presentación.
+        // Es uuid, así que nunca "": sin presentación va null.
         presentation_id: item.presentation?.id ?? null,
+        // Las unidades que tenía la presentación al agregarla al carrito: el servidor
+        // rechaza la línea si ya no son las de hoy (carrito guardado u otra tableta),
+        // porque el precio de la línea es el de la presentación vieja. No mueve stock.
+        units_per: item.presentation?.units ?? null,
       })),
     });
     if (error) throw error;

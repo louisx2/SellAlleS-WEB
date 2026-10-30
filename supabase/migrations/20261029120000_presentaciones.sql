@@ -9,7 +9,7 @@
 --
 -- PARTE 1 — esquema, validación y guardado (esta parte):
 --   1. `products.sold_loose` ("se vende suelto").
---   2. Tabla `product_presentations`, su RLS (copia de `products_all`) y el
+--   2. Tabla `product_presentations`, su RLS (la de `products_all`) y el
 --      trigger `product_presentations_before_write`, que es el ÚNICO lugar donde
 --      se valida (vale también para escrituras directas por PostgREST).
 --   3. Columnas de presentación en las líneas de venta, cotización, compra y en
@@ -19,6 +19,9 @@
 -- al final de este mismo archivo.
 --
 -- Se prueba con supabase/tests/presentaciones.sql (ver su cabecera).
+
+-- Toma candados exclusivos de products y sale_items: si están ocupados, falla a los 5 s en vez de frenar las ventas.
+set local lock_timeout = '5s';
 
 -- ── products.sold_loose ────────────────────────────────────────────────────
 alter table public.products
@@ -62,18 +65,20 @@ create index if not exists product_presentations_branch_code_idx
 
 alter table public.product_presentations enable row level security;
 
+-- Lo mismo que products_all, con cada llamada en (select …) como sale_items_all:
+-- así Postgres la evalúa una vez por consulta y no una vez por fila.
 drop policy if exists product_presentations_all on public.product_presentations;
 create policy product_presentations_all on public.product_presentations
   for all
   using (
-    ((company_id = current_company_id())
-      and (is_company_admin() or (branch_id in (select user_branch_ids() as user_branch_ids))))
-    or is_super_admin()
+    ((company_id = (select current_company_id()))
+      and ((select is_company_admin()) or (branch_id in (select user_branch_ids() as user_branch_ids))))
+    or (select is_super_admin())
   )
   with check (
-    ((company_id = current_company_id())
-      and (is_company_admin() or (branch_id in (select user_branch_ids() as user_branch_ids))))
-    or is_super_admin()
+    ((company_id = (select current_company_id()))
+      and ((select is_company_admin()) or (branch_id in (select user_branch_ids() as user_branch_ids))))
+    or (select is_super_admin())
   );
 
 revoke all on public.product_presentations from anon;
@@ -128,12 +133,20 @@ begin
     raise exception 'Ya hay una presentación llamada «%» en este producto.', new.name;
   end if;
 
-  -- Un código no puede repetirse en la sucursal: ni con un producto activo (los
-  -- archivados no cuentan; tampoco el del propio producto: el escaneo busca
-  -- primero entre los códigos de producto y la presentación nunca saldría) ni
-  -- con otra presentación, sin distinguir mayúsculas. En otra sucursal sí puede
-  -- repetirse. El dueño que se nombra en el mensaje es el producto que ya lo usa.
-  if new.code is not null then
+  -- Un código no puede repetirse en la sucursal, sin distinguir mayúsculas: ni con
+  -- el código de un producto activo, y eso INCLUYE el del propio producto (el
+  -- escaneo no sabría si es la unidad suelta o la presentación), ni con otra
+  -- presentación. Los códigos de los productos archivados no cuentan. En otra
+  -- sucursal sí puede repetirse. El dueño que se nombra en el mensaje es el
+  -- producto que ya lo usa.
+  -- Solo se revisa al insertar, si el código cambia o si la presentación pasa a
+  -- otro producto: un choque que nació del lado del producto (se le puso el
+  -- código de esta presentación) no debe impedir editar el precio. El resto de
+  -- las validaciones corre siempre.
+  if new.code is not null
+     and (tg_op = 'INSERT'
+          or lower(btrim(new.code)) is distinct from lower(btrim(old.code))
+          or new.product_id is distinct from old.product_id) then
     select p.name into v_owner
       from public.products p
      where p.branch_id = v_product.branch_id
@@ -391,7 +404,8 @@ grant execute on function public.import_product_presentations(jsonb) to authenti
 -- desde el repo, y solo cambia lo siguiente:
 --   · create_sale_with_items: lee `presentation_id` por línea y busca la
 --     presentación en el servidor, comprobando que sea del mismo producto
---     (`units_per` y `presentation_name` del navegador se ignoran); con
+--     (`presentation_name` del navegador se ignora; `units_per`, si viene, solo
+--     se compara: si no es el de la presentación de hoy se rechaza la línea); con
 --     presentación exige cantidad entera; sin ella, rechaza el producto que ya
 --     no se vende suelto; un artículo rápido no admite presentación; el costo
 --     de la línea es `products.cost × units_per`. Se conservan los casts a
@@ -465,7 +479,7 @@ begin
     select * from jsonb_to_recordset(p_items) as x(
       product_id uuid, product_name text, quantity numeric, price numeric,
       custom_price numeric, itbis boolean, unit text, is_quick boolean, cost numeric,
-      presentation_id uuid
+      presentation_id uuid, units_per numeric
     )
   loop
     -- Lo que la línea mueva del inventario lo decide el servidor: nombre y
@@ -503,6 +517,12 @@ begin
        where pp.id = v_item.presentation_id and pp.product_id = v_item.product_id;
       if not found then
         raise exception 'La presentación no corresponde a este producto.';
+      end if;
+      -- El carrito manda las unidades que tenía la presentación al agregarla. Si
+      -- ya no son las de hoy (carrito guardado, otra tableta), el precio de la
+      -- línea es el de la presentación vieja. Sin el dato (app vieja) pasa igual.
+      if v_item.units_per is not null and v_item.units_per <> v_units_per then
+        raise exception 'La presentación «%» cambió; quítala del carrito y vuelve a agregarla.', v_pres_name;
       end if;
       if v_item.quantity <> trunc(v_item.quantity) then
         raise exception 'Las presentaciones van enteras: la cantidad tiene que ser un número entero.';

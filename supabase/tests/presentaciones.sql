@@ -102,13 +102,27 @@ begin
   assert (select relrowsecurity from pg_class where oid = 'public.product_presentations'::regclass),
          'esquema: product_presentations sin RLS';
 
-  -- La política copia la expresión de products_all (mismo qual y with_check).
+  -- La política dice lo mismo que products_all (qual y with_check), con cada llamada
+  -- a función envuelta en (select …) como sale_items_all, para que Postgres la evalúe
+  -- una vez por consulta y no una vez por fila. Se comparan quitando los envoltorios
+  -- `( SELECT f() AS f)` de los dos lados (misma expresión) y después se comprueba
+  -- que no quede ninguna llamada sin envolver.
   assert exists (select 1 from pg_policies pr, pg_policies p
                   where pr.schemaname = 'public' and pr.tablename = 'product_presentations'
                     and pr.policyname = 'product_presentations_all' and pr.cmd = 'ALL'
                     and p.schemaname = 'public' and p.tablename = 'products' and p.policyname = 'products_all'
-                    and pr.qual = p.qual and pr.with_check = p.with_check and pr.roles = p.roles),
-         'esquema: product_presentations_all no copia products_all';
+                    and regexp_replace(pr.qual, '\( SELECT (\w+\(\)) AS \w+\)', '\1', 'g')
+                        = regexp_replace(p.qual, '\( SELECT (\w+\(\)) AS \w+\)', '\1', 'g')
+                    and regexp_replace(pr.with_check, '\( SELECT (\w+\(\)) AS \w+\)', '\1', 'g')
+                        = regexp_replace(p.with_check, '\( SELECT (\w+\(\)) AS \w+\)', '\1', 'g')
+                    and pr.roles = p.roles),
+         'esquema: product_presentations_all no dice lo mismo que products_all';
+  assert (select regexp_replace(qual || ' ' || with_check, '\( SELECT \w+\(\) AS \w+\)', '', 'g')
+                 !~ '(current_company_id|is_company_admin|is_super_admin|user_branch_ids)\(\)'
+            from pg_policies
+           where schemaname = 'public' and tablename = 'product_presentations'
+             and policyname = 'product_presentations_all'),
+         'esquema: product_presentations_all llama una función sin envolverla en (select …)';
 
   -- Única clave foránea: a products (cascade). Ninguna a companies ni branches.
   assert (select count(*) from pg_constraint
@@ -277,8 +291,8 @@ begin
     $j$select pg_temp.guardar(pg_temp.prod(101), true,
          '[{"name":"Paquete","units":12,"price":160,"code":"X-1"},{"name":"Caja","units":288,"price":3600,"code":"x-1"}]')$j$,
     'El código «x-1» ya lo usa «Galletas Prueba» en esta sucursal.');
-  -- Ni siquiera el código del propio producto (e101 tiene "E101"): el escaneo
-  -- busca primero entre los códigos de producto y la presentación no saldría.
+  -- Ni siquiera el código del propio producto (e101 tiene "E101"): el escaneo no
+  -- sabría si es la unidad suelta o la presentación.
   perform pg_temp.debe_fallar(
     $j$select pg_temp.guardar(pg_temp.prod(101), true, '[{"name":"Paquete","units":12,"price":160,"code":"e101"}]')$j$,
     'El código «e101» ya lo usa «Galletas Prueba» en esta sucursal.');
@@ -516,14 +530,15 @@ insert into product_presentations (product_id, name, units, price) values
   (pg_temp.prod(114), 'Bolsa', 6, 30);
 
 -- 2 paquetes + 3 sueltas = 27 unidades base; anular las devuelve. Lo que el
--- navegador mande en `units_per` / `presentation_name` / `cost` se ignora: los
--- pone el servidor desde la presentación.
+-- navegador mande en `presentation_name` / `cost` se ignora: los pone el servidor
+-- desde la presentación. `units_per` solo se compara con el de la presentación
+-- (ver «la venta rechaza una presentación que cambió», al final).
 do $t$
 declare v_sale uuid;
 begin
   v_sale := pg_temp.vender('[
     {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","presentation_id":"00000000-0000-0000-0000-00000000e112",
-     "quantity":2,"price":160,"units_per":1,"presentation_name":"X","cost":0},
+     "quantity":2,"price":160,"units_per":12,"presentation_name":"X","cost":0},
     {"product_id":"00000000-0000-0000-0000-00000000e111","product_name":"Galletas Venta","quantity":3,"price":15}]');
   assert (select stock from products where id = pg_temp.prod(111)) = 3,
          'venta: 2 paquetes + 3 sueltas debían dejar el stock en 3 (30 − 27); quedó en '
@@ -1063,6 +1078,117 @@ begin
   assert (select stock from products where id = pg_temp.prod(121)) = v_antes,
          'sin control: la compra no debía mover el stock';
   update products set tracks_stock = true where id = pg_temp.prod(121);
+end $t$;
+
+-- == Revisión final: el código de una presentación solo se revisa si cambia ==
+-- Estado explícito de la sección: super admin de la demo. Fixtures en la sucursal
+-- Principal (b1): e131 "Choque A" (código E131) con la Caja e132 (24 u, código
+-- E131-24); e133 "Choque B" (código E133) y e134 "Choque C" (código E134). La base
+-- solo vigila los códigos al escribir presentaciones: si después un producto toma
+-- el código de una (formulario, CSV, transferencia, restaurar un archivado), el
+-- dueño de la presentación tiene que poder seguir editándola mientras no le cambie
+-- el código.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+insert into products (id, company_id, branch_id, name, code, unit, stock, cost, price, tracks_stock) values
+  (pg_temp.prod(131), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Choque A', 'E131', 'und', 0, 10, 15, true),
+  (pg_temp.prod(133), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Choque B', 'E133', 'und', 0, 10, 15, true),
+  (pg_temp.prod(134), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Choque C', 'E134', 'und', 0, 10, 15, true);
+insert into product_presentations (id, product_id, name, units, price, code) values
+  (pg_temp.prod(132), pg_temp.prod(131), 'Caja', 24, 300, 'E131-24');
+
+do $t$
+declare v_caja text;
+begin
+  -- El choque nace del lado del producto: B toma el código de la Caja de A.
+  update products set code = 'e131-24' where id = pg_temp.prod(133);
+
+  -- Editar solo el precio de la Caja (mismo código, con otras mayúsculas y espacios) pasa.
+  v_caja := jsonb_build_array(jsonb_build_object(
+    'id', pg_temp.prod(132), 'name', 'Caja', 'units', 24, 'price', 320, 'code', ' e131-24 '))::text;
+  perform pg_temp.guardar(pg_temp.prod(131), true, v_caja);
+  assert (select price = 320 and code = 'e131-24' from product_presentations where id = pg_temp.prod(132)),
+         'código sin cambio: editar el precio de la Caja debía pasar aunque «Choque B» tenga su código';
+  -- Directo (PostgREST) también.
+  update product_presentations set price = 330 where id = pg_temp.prod(132);
+  assert (select price from product_presentations where id = pg_temp.prod(132)) = 330,
+         'código sin cambio: el update directo del precio debía pasar';
+
+  -- Cambiar el código sí se revisa, con los mismos mensajes: el de otro producto...
+  perform pg_temp.debe_fallar(
+    format($j$select pg_temp.guardar(%L, true, %L)$j$, pg_temp.prod(131),
+           jsonb_build_array(jsonb_build_object(
+             'id', pg_temp.prod(132), 'name', 'Caja', 'units', 24, 'price', 320, 'code', 'e134'))::text),
+    'El código «e134» ya lo usa «Choque C» en esta sucursal.');
+  -- ...el del propio producto...
+  perform pg_temp.debe_fallar(
+    format($j$update product_presentations set code = 'E131' where id = %L$j$, pg_temp.prod(132)),
+    'El código «E131» ya lo usa «Choque A» en esta sucursal.');
+  -- ...y una presentación nueva con el código ocupado tampoco entra.
+  perform pg_temp.debe_fallar(
+    format($j$select pg_temp.guardar(%L, true, '[{"name":"Fardo","units":48,"price":600,"code":"E134"}]')$j$,
+           pg_temp.prod(133)),
+    'El código «E134» ya lo usa «Choque C» en esta sucursal.');
+  -- Pasar la Caja a otro producto es como crearla allá: se revisa (B tiene su código).
+  perform pg_temp.debe_fallar(
+    format($j$update product_presentations set product_id = %L where id = %L$j$,
+           pg_temp.prod(133), pg_temp.prod(132)),
+    'El código «e131-24» ya lo usa «Choque B» en esta sucursal.');
+
+  assert (select product_id = pg_temp.prod(131) and code = 'e131-24' and price = 330
+            from product_presentations where id = pg_temp.prod(132)),
+         'código: los rechazos no debían tocar la Caja';
+end $t$;
+
+-- == Revisión final: la venta rechaza una presentación que cambió ==
+-- Estado explícito de la sección: super admin de la demo. Fixtures en la sucursal
+-- Principal (b1): e141 "Galletas Carrito" (und, stock 100, costo 10) con el
+-- Paquete e142 (12 u, RD$160). El carrito manda en `units_per` las unidades que
+-- tenía la presentación al agregarla; si ya no son las de hoy (un carrito guardado,
+-- otra tableta), la línea traería el precio de la presentación vieja.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+insert into products (id, company_id, branch_id, name, code, unit, stock, cost, price, tracks_stock) values
+  (pg_temp.prod(141), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Galletas Carrito', null, 'und', 100, 10, 15, true);
+insert into product_presentations (id, product_id, name, units, price) values
+  (pg_temp.prod(142), pg_temp.prod(141), 'Paquete', 12, 160);
+
+do $t$
+declare v_sale uuid;
+begin
+  -- Las unidades de hoy (se comparan como número: 12 y 12.000 son lo mismo).
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e141","product_name":"Galletas Carrito","presentation_id":"00000000-0000-0000-0000-00000000e142","quantity":1,"price":160,"units_per":12}]');
+  assert (select stock from products where id = pg_temp.prod(141)) = 88, 'carrito: 1 paquete con units_per 12 debía dejar 88';
+  assert (select units_per = 12 from sale_items where sale_id = v_sale), 'carrito: la línea debía quedar con units_per 12';
+  perform annul_sale(v_sale, 'prueba', 'card');
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e141","product_name":"Galletas Carrito","presentation_id":"00000000-0000-0000-0000-00000000e142","quantity":1,"price":160,"units_per":12.000}]');
+  perform annul_sale(v_sale, 'prueba', 'card');
+  -- Una app vieja (en caché) no manda units_per, o lo manda nulo: pasa como hoy.
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e141","product_name":"Galletas Carrito","presentation_id":"00000000-0000-0000-0000-00000000e142","quantity":1,"price":160}]');
+  perform annul_sale(v_sale, 'prueba', 'card');
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e141","product_name":"Galletas Carrito","presentation_id":"00000000-0000-0000-0000-00000000e142","quantity":1,"price":160,"units_per":null}]');
+  perform annul_sale(v_sale, 'prueba', 'card');
+  assert (select stock from products where id = pg_temp.prod(141)) = 100, 'carrito: anular debía dejar el stock en 100';
+
+  -- El Paquete pasa a traer 10: el carrito que lo agregó con 12 ya no vale.
+  update product_presentations set units = 10 where id = pg_temp.prod(142);
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e141","product_name":"Galletas Carrito","presentation_id":"00000000-0000-0000-0000-00000000e142","quantity":1,"price":160,"units_per":12}]')$j$,
+    'La presentación «Paquete» cambió; quítala del carrito y vuelve a agregarla.');
+  -- Basta una línea vieja para rechazar toda la venta (aunque haya una suelta al lado).
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.vender('[
+        {"product_id":"00000000-0000-0000-0000-00000000e141","product_name":"Galletas Carrito","quantity":3,"price":15,"units_per":null},
+        {"product_id":"00000000-0000-0000-0000-00000000e141","product_name":"Galletas Carrito","presentation_id":"00000000-0000-0000-0000-00000000e142","quantity":2,"price":160,"units_per":12}]')$j$,
+    'La presentación «Paquete» cambió; quítala del carrito y vuelve a agregarla.');
+  assert (select stock from products where id = pg_temp.prod(141)) = 100, 'carrito: una venta rechazada movió el stock';
+
+  -- Con las unidades nuevas pasa y descuenta 10.
+  v_sale := pg_temp.vender('[{"product_id":"00000000-0000-0000-0000-00000000e141","product_name":"Galletas Carrito","presentation_id":"00000000-0000-0000-0000-00000000e142","quantity":1,"price":160,"units_per":10}]');
+  assert (select stock from products where id = pg_temp.prod(141)) = 90, 'carrito: 1 paquete de 10 debía dejar 90';
+  perform annul_sale(v_sale, 'prueba', 'card');
 end $t$;
 
 select 'ok' as resultado;
