@@ -102,10 +102,15 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
     return { cats: [...cats], sups: [...sups], locs: [...locs] };
   }, [rows, categories, suppliers, locations]);
 
-  // Sugerir un código libre: ABC -> ABC-2, ABC-3…
+  // Sugerir un código libre: ABC -> ABC-2, ABC-3… Tampoco el de una presentación (de la
+  // sucursal o del archivo): el escaneo no sabría cuál es.
   const suggestCode = (base: string): string => {
     const taken = new Set<string>(codeMap.keys());
-    rows.forEach((r) => { if (r.code) taken.add(normName(r.code)); });
+    products.forEach((p) => p.presentations?.forEach((x) => { if (x.code) taken.add(normName(x.code)); }));
+    rows.forEach((r) => {
+      if (r.code) taken.add(normName(r.code));
+      r.presentations.forEach((x) => { if (x.code) taken.add(normName(x.code)); });
+    });
     let i = 2;
     while (taken.has(normName(`${base}-${i}`))) i++;
     return `${base}-${i}`;
@@ -137,7 +142,10 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
       });
       // Un código de presentación repetido (en el archivo o en la sucursal) haría que la
       // base deshaga TODAS las presentaciones del archivo: se marca la fila que lo trae.
-      // Las filas que ya tienen error, o que repiten el código de otra, no se importan.
+      // Un `codigo` de producto igual al de una presentación (de otra fila o de otro
+      // producto de la sucursal) también se marca: la base no lo atajaría y el escaneo
+      // no sabría cuál es. Las filas que ya tienen error, o que repiten el código de
+      // otra, no se importan.
       const seenCodes = new Set<string>();
       const entries: CsvCodeEntry[] = [];
       for (const r of checked) {
@@ -194,9 +202,10 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
       }
     }
 
-    // Códigos de presentación con las decisiones ya tomadas: «Crear con código nuevo» sobre
-    // una fila de un export trae los códigos de presentación del producto original, y un
-    // choque en la base deshace TODAS las presentaciones del archivo.
+    // Códigos con las decisiones ya tomadas: «Crear con código nuevo» sobre una fila de un
+    // export trae los códigos de presentación del producto original, y un choque en la
+    // base deshace TODAS las presentaciones del archivo; el código nuevo tampoco puede
+    // ser el de una presentación.
     const codeErrors = csvPresentationCodeErrors(
       [...cleanRows, ...conflictRows]
         .sort((a, b) => a.rowNumber - b.rowNumber)
@@ -213,7 +222,7 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
         ? ` Hay ${codeErrors.size - 1} ${codeErrors.size === 2 ? 'fila más' : 'filas más'} con el mismo problema.`
         : '';
       toast({
-        title: 'Código de presentación repetido',
+        title: 'Código repetido',
         description: `Fila ${rowNumber}${row?.name ? ` (${row.name})` : ''}: ${message}${hint}${more}`,
         variant: 'destructive',
       });

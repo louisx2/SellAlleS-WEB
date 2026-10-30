@@ -226,9 +226,12 @@ export function buildTemplateCsv(): string {
     se_vende_suelto: 'si',
   };
   // `existencias` va en unidades base: 1250 galletas, no 1250 cajas. Los 12 y los
-  // 288 de `contiene_N` también son unidades base.
+  // 288 de `contiene_N` también son unidades base. Los códigos son como los de verdad
+  // (EAN-13 de la unidad, GTIN-14 del paquete y de la caja) y ninguno es el comienzo
+  // de otro: con GAL-001 y GAL-001-12, el lector de mano pasaría por «GAL-001» antes
+  // de terminar de teclear el del paquete.
   const conPresentaciones: Record<string, string> = {
-    codigo: 'GAL-001',
+    codigo: '7460012345675',
     nombre: 'Galletas surtidas',
     descripcion: 'Existencias en unidades, no en cajas',
     categoria: 'Víveres',
@@ -247,11 +250,11 @@ export function buildTemplateCsv(): string {
     presentacion_1: 'Paquete',
     contiene_1: '12',
     precio_1: '160',
-    codigo_1: 'GAL-001-12',
+    codigo_1: '17460012345672',
     presentacion_2: 'Caja',
     contiene_2: '288',
     precio_2: '3600',
-    codigo_2: 'GAL-001-288',
+    codigo_2: '27460012345679',
   };
   return Papa.unparse({ fields: [...CSV_HEADERS], data: [porPieza, porPeso, conPresentaciones] });
 }

@@ -18,6 +18,9 @@ const CSV_SLOTS = 3;
 
 const num = (n: number) => String(round3(n));
 
+// Un código tal como lo compara la base: recortado y en minúscula ('' = sin código).
+const codeKey = (code?: string) => (code ?? '').trim().toLowerCase();
+
 // ---------- Consultas sobre el producto ----------
 
 // Copia ordenada de menor a mayor cantidad de unidades; no toca la lista del producto.
@@ -100,25 +103,74 @@ export function toLinePresentation(p: ProductPresentation): LinePresentation {
   return { id: p.id, name: p.name, units: p.units };
 }
 
+// Lo que vende un código: el producto suelto o una de sus presentaciones.
+export type CodeMatch = { product: Product; presentation?: ProductPresentation };
+// El código lleva a más de un destino (producto y presentación, dos productos o dos
+// presentaciones): no se puede saber cuál es.
+export type AmbiguousCode = { ambiguous: true; matches: CodeMatch[] };
+
 // Búsqueda por código escrito o escaneado, sin distinguir mayúsculas ni espacios en
-// los bordes. El código del producto gana sobre el de una presentación, igual que
-// en la base (donde un código no se puede repetir en la sucursal).
-export function findByCode(
-  code: string,
-  products: Product[],
-): { product: Product; presentation?: ProductPresentation } | undefined {
-  const needle = code.trim().toLowerCase();
+// los bordes. La base no deja que el código de una presentación choque con otro,
+// pero el de un producto sí puede quedar repetido (se cambió después, se restauró un
+// archivado, llegó por una transferencia): entonces no se elige ninguno, porque
+// cobrar el que salga primero sería cobrar mal sin avisar.
+export function findByCode(code: string, products: Product[]): CodeMatch | AmbiguousCode | undefined {
+  const needle = codeKey(code);
   if (needle === '') return undefined;
 
+  const matches: CodeMatch[] = [];
   for (const product of products) {
-    if ((product.code ?? '').trim().toLowerCase() === needle) return { product };
-  }
-  for (const product of products) {
+    if (codeKey(product.code) === needle) matches.push({ product });
     for (const presentation of product.presentations ?? []) {
-      if ((presentation.code ?? '').trim().toLowerCase() === needle) return { product, presentation };
+      if (codeKey(presentation.code) === needle) matches.push({ product, presentation });
     }
   }
-  return undefined;
+  if (matches.length === 0) return undefined;
+  return matches.length === 1 ? matches[0] : { ambiguous: true, matches };
+}
+
+// Lo que dice el POS cuando el código está repetido.
+export function duplicateCodeMessage(code: string): string {
+  return `El código «${code.trim()}» está repetido en esta sucursal; corrígelo en Inventario.`;
+}
+
+// ¿Hay un código más largo (de producto o de presentación) que empieza por `term`?
+// Sin distinguir mayúsculas ni espacios en los bordes. El lector de mano teclea un
+// carácter a la vez: con GAL-001 y GAL-001-12, al llegar a «GAL-001» todavía puede
+// venir más, y el POS no debe agregar la unidad suelta por adelantado.
+export function isPrefixOfLongerCode(term: string, products: Product[]): boolean {
+  const needle = codeKey(term);
+  if (needle === '') return false;
+  const longer = (code?: string) => {
+    const key = codeKey(code);
+    return key.length > needle.length && key.startsWith(needle);
+  };
+  return products.some((p) => longer(p.code) || (p.presentations ?? []).some((x) => longer(x.code)));
+}
+
+// Código del producto en el formulario: no puede ser el de otro producto de la
+// sucursal ni el de una presentación de otro producto (el escaneo no sabría cuál es).
+// `selfId` es el producto que se edita (ausente al crear): sus presentaciones las
+// revisa `validateDrafts` contra este mismo código. Primer error o null.
+export function productCodeError(
+  code: string,
+  selfId: string | undefined,
+  products: readonly CsvCodeOwner[],
+): string | null {
+  const key = codeKey(code);
+  if (key === '') return null;
+  const shown = code.trim();
+  const others = products.filter((p) => p.id !== selfId);
+
+  const product = others.find((p) => codeKey(p.code) === key);
+  if (product) return `El código «${shown}» ya lo usa «${product.name}» en esta sucursal.`;
+  for (const p of others) {
+    const presentation = (p.presentations ?? []).find((x) => codeKey(x.code) === key);
+    if (presentation) {
+      return `El código «${shown}» ya lo usa la presentación «${presentation.name}» de «${p.name}» en esta sucursal.`;
+    }
+  }
+  return null;
 }
 
 // ---------- Existencias ----------
@@ -309,7 +361,7 @@ export function csvSoldLooseError(
   });
 }
 
-// Un producto que ya está en la sucursal, para comprobar códigos del CSV.
+// Un producto que ya está en la sucursal, para comprobar códigos (CSV y formulario).
 export interface CsvCodeOwner {
   id: string;
   name: string;
@@ -328,22 +380,53 @@ export interface CsvCodeEntry {
   updatesId?: string;
 }
 
-const codeKey = (code?: string) => (code ?? '').trim().toLowerCase();
+// El `codigo` de la fila (el del producto) contra las presentaciones: las de las
+// OTRAS filas del archivo y las de los demás productos de la sucursal (las del
+// producto que la fila actualiza las revisa el chequeo de presentaciones). Primer
+// choque o null.
+function csvProductCodeError(
+  entry: CsvCodeEntry,
+  entries: readonly CsvCodeEntry[],
+  existing: readonly CsvCodeOwner[],
+): string | null {
+  const key = codeKey(entry.code);
+  if (key === '') return null;
+  const shown = entry.code.trim();
 
-// Códigos de presentación que chocarían al importar, por número de fila (el primer
-// choque de cada fila). `import_product_presentations` es un solo lote: si la base
-// rechaza un código, deshace TODAS las presentaciones del archivo, así que conviene
-// atajarlo antes, fila por fila. Se comparan recortados y en minúscula, como la base.
+  for (const other of entries) {
+    if (other === entry) continue;
+    const p = other.presentations.find((x) => codeKey(x.code) === key);
+    if (p) {
+      return `El código «${shown}» ya lo usa la presentación «${p.name}» de la fila ${other.rowNumber} («${other.name}») del archivo.`;
+    }
+  }
+  for (const product of existing) {
+    if (product.id === entry.updatesId) continue;
+    const p = (product.presentations ?? []).find((x) => codeKey(x.code) === key);
+    if (p) return `El código «${shown}» ya lo usa la presentación «${p.name}» de «${product.name}» en esta sucursal.`;
+  }
+  return null;
+}
+
+// Códigos que chocarían al importar, por número de fila (el primer choque de cada
+// fila). `import_product_presentations` es un solo lote: si la base rechaza un
+// código, deshace TODAS las presentaciones del archivo, así que conviene atajarlo
+// antes, fila por fila. Se comparan recortados y en minúscula, como la base.
 //  - En el archivo: el código de una presentación no puede ser el `codigo` de otro
 //    producto del archivo (esté antes o después) ni repetir el de una presentación de
-//    una fila anterior. Se marca la fila que tiene el código en la presentación.
+//    una fila anterior. Si choca con el `codigo` de otra fila se marcan las dos (no se
+//    sabe cuál está mal), cada una nombrando a la otra.
 //  - En la sucursal: ni el código de un producto existente (también el del propio
 //    producto: el trigger lo prohíbe) ni el de una presentación existente, con los
 //    textos de la base. Una fila que actualiza un producto puede repetir las
 //    presentaciones suyas que trae (se emparejan por nombre), no las demás.
+//  - El `codigo` del producto tampoco puede ser el de una presentación de otro
+//    producto de la sucursal: la base solo vigila las presentaciones, y el escaneo
+//    no sabría cuál de los dos es (ver `findByCode`). Vale también para las filas
+//    sin presentaciones y para las que actualizan.
 // Las filas ya tienen que haber pasado `validatePresentationInputs`. Una fila marcada
-// no se queda con sus códigos, porque no se va a importar. Los productos archivados
-// no se conocen aquí: ahí la base sigue siendo la última palabra.
+// no se queda con sus códigos de presentación, porque no se va a importar. Los
+// productos archivados no se conocen aquí: ahí la base sigue siendo la última palabra.
 export function csvPresentationCodeErrors(
   entries: readonly CsvCodeEntry[],
   existing: readonly CsvCodeOwner[],
@@ -352,7 +435,11 @@ export function csvPresentationCodeErrors(
   const claimed = new Map<string, { rowNumber: number; name: string }>();
 
   for (const entry of entries) {
-    if (entry.presentations.every((p) => codeKey(p.code) === '')) continue;
+    if (entry.presentations.every((p) => codeKey(p.code) === '')) {
+      const error = csvProductCodeError(entry, entries, existing);
+      if (error !== null) errors.set(entry.rowNumber, error);
+      continue;
+    }
 
     let error: string | null = null;
     for (const p of entry.presentations) {
@@ -393,6 +480,8 @@ export function csvPresentationCodeErrors(
         { productName: entry.name, decimals: true, soldLoose: true, takenCodes },
       );
     }
+
+    if (error === null) error = csvProductCodeError(entry, entries, existing);
 
     if (error !== null) {
       errors.set(entry.rowNumber, error);

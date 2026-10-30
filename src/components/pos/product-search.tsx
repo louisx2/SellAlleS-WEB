@@ -6,7 +6,8 @@ import { ProductGrid } from './product-grid';
 import { useProducts } from '@/context/product-provider';
 import { useCart } from '@/context/cart-provider';
 import {
-  baseQtyInCart, findByCode, isSellable, isSoldLoose, maxAddable, presentationLabel,
+  baseQtyInCart, duplicateCodeMessage, findByCode, isPrefixOfLongerCode, isSellable, isSoldLoose,
+  maxAddable, presentationLabel, type CodeMatch, type AmbiguousCode,
 } from '@/lib/presentations';
 import { formatQuantity, getUnit, roundQty } from '@/lib/units';
 import { useToast } from '@/hooks/use-toast';
@@ -30,6 +31,11 @@ import {
 // Preferencia por dispositivo: la caja que tiene el lector fisico deja el modo
 // activo, las que se teclean a mano lo apagan.
 const SCANNER_MODE_KEY = 'posScannerMode';
+
+// Con un código que es el comienzo de otro más largo (GAL-001 y GAL-001-12), el modo
+// lector espera a Enter o a que se deje de teclear este tiempo antes de agregar: el
+// lector de mano teclea un carácter a la vez y el resto puede venir en camino.
+const ESPERA_PREFIJO_MS = 250;
 
 export function ProductSearch() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -62,6 +68,8 @@ export function ProductSearch() {
   const manejarCodigoEscaneado = useCallback((codigo: string): ResultadoEscaneo => {
     const encontrado = buscarPorCodigo(codigo);
     if (!encontrado) return { ok: false, mensaje: `Ningún producto tiene el código ${codigo}` };
+    // Repetido en la sucursal: cualquiera que se agregue puede ser el equivocado.
+    if ('ambiguous' in encontrado) return { ok: false, mensaje: duplicateCodeMessage(codigo) };
     const { product: producto, presentation } = encontrado;
     // `addItem` también frena por existencias, pero en silencio: con la cámara
     // en la cara hace falta decir por qué no entró al carrito.
@@ -138,19 +146,43 @@ export function ProductSearch() {
     }
   };
 
-  // El modo lector solo gobierna lo que se teclea: el botón de la cámara es una
-  // intención explícita del cajero y agrega al carrito esté como esté.
-  useEffect(() => {
-    if (scannerMode && searchMode === 'code' && searchTerm.trim() !== '') {
-      const encontrado = buscarPorCodigo(searchTerm);
-      if (encontrado) {
-        // Con el código de una presentación entra esa presentación; el del producto
-        // mismo entra suelto (y `addItem` lo rechaza, con aviso, si no se vende suelto).
-        addItem(encontrado.product, 1, encontrado.presentation);
-        setSearchTerm(''); // Clear input after adding
-      }
+  // Lo tecleado (o escaneado con el lector de mano) ya es un código: con el de una
+  // presentación entra esa presentación; el del producto mismo entra suelto (y
+  // `addItem` lo rechaza, con aviso, si no se vende suelto). Un código repetido en la
+  // sucursal no agrega nada. En los dos casos la caja queda limpia para el siguiente.
+  const agregarPorCodigo = useCallback((codigo: string, encontrado: CodeMatch | AmbiguousCode) => {
+    if ('ambiguous' in encontrado) {
+      toast({ title: 'Código repetido', description: duplicateCodeMessage(codigo), variant: 'destructive' });
+    } else {
+      addItem(encontrado.product, 1, encontrado.presentation);
     }
-  }, [searchTerm, searchMode, scannerMode, buscarPorCodigo, addItem, toast]);
+    setSearchTerm('');
+  }, [addItem, toast]);
+
+  // El modo lector solo gobierna lo que se teclea: el botón de la cámara es una
+  // intención explícita del cajero y agrega al carrito esté como esté. Un código que
+  // es el comienzo de otro más largo no se agrega todavía: espera a Enter (abajo) o a
+  // que se deje de teclear; cualquier otro entra en cuanto se completa, como siempre.
+  useEffect(() => {
+    if (!scannerMode || searchMode !== 'code' || searchTerm.trim() === '') return;
+    const encontrado = buscarPorCodigo(searchTerm);
+    if (!encontrado) return;
+    if (!isPrefixOfLongerCode(searchTerm, allProducts)) {
+      agregarPorCodigo(searchTerm, encontrado);
+      return;
+    }
+    const espera = setTimeout(() => agregarPorCodigo(searchTerm, encontrado), ESPERA_PREFIJO_MS);
+    return () => clearTimeout(espera);
+  }, [searchTerm, searchMode, scannerMode, buscarPorCodigo, allProducts, agregarPorCodigo]);
+
+  // Enter (los lectores lo mandan al final del código) agrega sin esperar.
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter' || !scannerMode || searchMode !== 'code') return;
+    const encontrado = buscarPorCodigo(searchTerm);
+    if (!encontrado) return;
+    e.preventDefault();
+    agregarPorCodigo(searchTerm, encontrado);
+  };
 
   const handleModeChange = (mode: 'name' | 'code') => {
     setSearchMode(mode);
@@ -173,6 +205,7 @@ export function ProductSearch() {
               placeholder={placeholderText}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={handleSearchKeyDown}
               className="h-12 pl-12 text-base sm:text-lg w-full"
               autoFocus
             />

@@ -16,6 +16,9 @@ import {
   lineProduct,
   toLinePresentation,
   findByCode,
+  isPrefixOfLongerCode,
+  duplicateCodeMessage,
+  productCodeError,
   breakdownStock,
   formatBreakdown,
   validateDrafts,
@@ -183,13 +186,107 @@ test('findByCode', () => {
   assert.equal(findByCode('nope', [otro, g]), undefined);
   assert.equal(findByCode('   ', [otro, g]), undefined);
 
-  // Si un producto tiene el código 'X' y la presentación de otro también, gana el producto,
-  // aunque la presentación aparezca primero en la lista.
-  const conPres = galletas({ id: 'a1', code: 'A', presentations: [{ id: 'x', name: 'Caja', units: 6, price: 1, code: 'X' }] });
+  // Un solo destino: no trae la marca de ambiguo.
+  assert.equal('ambiguous' in found, false);
+  assert.equal('ambiguous' in porProducto, false);
+});
+
+// Un código que lleva a más de un destino no elige ninguno: cobrar el que salga
+// primero sería cobrar mal sin avisar (p. ej. un producto cuyo código se cambió al
+// de la caja de otro).
+test('findByCode: código repetido es ambiguo', () => {
+  const caja = { id: 'x', name: 'Caja', units: 6, price: 1, code: 'X' };
+  const conPres = galletas({ id: 'a1', code: 'A', presentations: [caja] });
   const conCodigo = galletas({ id: 'b1', code: 'X', presentations: [] });
-  const gana = findByCode('x', [conPres, conCodigo]);
-  assert.equal(gana.product, conCodigo);
-  assert.equal(gana.presentation, undefined);
+
+  // Producto + presentación de otro (sin importar el orden ni las mayúsculas).
+  const r1 = findByCode(' x ', [conPres, conCodigo]);
+  assert.equal(r1.ambiguous, true);
+  assert.equal(r1.matches.length, 2);
+  assert.ok(r1.matches.some((m) => m.product === conCodigo && m.presentation === undefined));
+  assert.ok(r1.matches.some((m) => m.product === conPres && m.presentation === caja));
+  assert.equal(findByCode('X', [conCodigo, conPres]).ambiguous, true);
+
+  // Dos productos con el mismo código.
+  const otroX = galletas({ id: 'c1', code: 'x', presentations: [] });
+  const r2 = findByCode('X', [conCodigo, otroX]);
+  assert.equal(r2.ambiguous, true);
+  assert.deepEqual(r2.matches.map((m) => m.product.id), ['b1', 'c1']);
+
+  // Dos presentaciones (de productos distintos o del mismo).
+  const otraCaja = galletas({ id: 'd1', code: 'D', presentations: [{ id: 'y', name: 'Fardo', units: 24, price: 1, code: 'x' }] });
+  assert.equal(findByCode('x', [conPres, otraCaja]).ambiguous, true);
+  const dosEnUno = galletas({
+    id: 'e1', code: 'E',
+    presentations: [{ id: 'p1', name: 'Paquete', units: 6, price: 1, code: 'Z' }, { id: 'p2', name: 'Caja', units: 24, price: 1, code: 'z' }],
+  });
+  assert.equal(findByCode('z', [dosEnUno]).ambiguous, true);
+
+  // El producto y su propia presentación con el mismo código: tampoco se sabe si es suelto o la caja.
+  const propio = galletas({ id: 'f1', code: 'F', presentations: [{ id: 'pf', name: 'Caja', units: 6, price: 1, code: 'f' }] });
+  const r3 = findByCode('F', [propio]);
+  assert.equal(r3.ambiguous, true);
+  assert.deepEqual(r3.matches.map((m) => m.presentation?.id), [undefined, 'pf']);
+});
+
+test('duplicateCodeMessage', () => {
+  assert.equal(
+    duplicateCodeMessage(' 7501-288 '),
+    'El código «7501-288» está repetido en esta sucursal; corrígelo en Inventario.',
+  );
+});
+
+// El lector de mano teclea un carácter a la vez: con GAL-001 y GAL-001-12, al llegar a
+// «GAL-001» el POS tiene que esperar en vez de agregar la unidad suelta.
+test('isPrefixOfLongerCode', () => {
+  const gal = galletas({
+    id: 'g', code: 'GAL-001',
+    presentations: [{ id: 'p12', name: 'Paquete', units: 12, price: 1, code: 'GAL-001-12' }],
+  });
+  const abc = galletas({ id: 'a', code: 'ABC', presentations: undefined });
+  const abcd = galletas({ id: 'b', code: 'ABCD', presentations: [] });
+  const sinCodigo = galletas({ id: 's', code: '', presentations: [{ id: 'sp', name: 'Caja', units: 6, price: 1 }] });
+  const lista = [gal, abc, abcd, sinCodigo];
+
+  // Prefijo de una presentación y de otro producto; sin distinguir mayúsculas ni bordes.
+  assert.equal(isPrefixOfLongerCode('GAL-001', lista), true);
+  assert.equal(isPrefixOfLongerCode(' gal-001 ', lista), true);
+  assert.equal(isPrefixOfLongerCode('abc', lista), true);
+  // El código completo, o uno igual a otro, no es prefijo de uno MÁS largo.
+  assert.equal(isPrefixOfLongerCode('GAL-001-12', lista), false);
+  assert.equal(isPrefixOfLongerCode('ABCD', lista), false);
+  assert.equal(isPrefixOfLongerCode('ABC', [abc, galletas({ id: 'a2', code: 'abc', presentations: [] })]), false);
+  // Nada que esperar: vacío, o un código que no empieza ningún otro.
+  assert.equal(isPrefixOfLongerCode('', lista), false);
+  assert.equal(isPrefixOfLongerCode('   ', lista), false);
+  assert.equal(isPrefixOfLongerCode('ZZZ', lista), false);
+});
+
+// Formulario del producto: su código no puede ser el de otro producto ni el de una
+// presentación de otro producto de la sucursal (el escaneo no sabría cuál es).
+test('productCodeError', () => {
+  const productos = [
+    galletas(), // g1: código 7501, presentaciones 7501-12 y 7501-288
+    galletas({ id: 'j1', name: 'Jabón', code: 'J-1', presentations: [] }),
+  ];
+
+  assert.equal(productCodeError('LIBRE', undefined, productos), null);
+  assert.equal(productCodeError('   ', undefined, productos), null);
+  // El código de otro producto.
+  assert.equal(
+    productCodeError(' j-1 ', undefined, productos),
+    'El código «j-1» ya lo usa «Jabón» en esta sucursal.',
+  );
+  // El de una presentación de otro producto, nombrándola.
+  assert.equal(
+    productCodeError('7501-288', 'j1', productos),
+    'El código «7501-288» ya lo usa la presentación «Caja» de «Galletas» en esta sucursal.',
+  );
+  // El producto que se edita no choca consigo mismo (sus presentaciones las revisa validateDrafts).
+  assert.equal(productCodeError('7501', 'g1', productos), null);
+  assert.equal(productCodeError('7501-12', 'g1', productos), null);
+  // Pero sí con el código de otro producto aunque se esté editando.
+  assert.equal(productCodeError('7501', 'j1', productos), 'El código «7501» ya lo usa «Galletas» en esta sucursal.');
 });
 
 test('breakdownStock', () => {
@@ -542,15 +639,21 @@ test('csvPresentationCodeErrors', () => {
     ]),
     { 2: 'El código «x-1» de la presentación «Caja» ya lo usa la fila 1 («A») del archivo.' },
   );
-  // Igual al `codigo` de otro producto del archivo, esté antes o después: se marca la
-  // fila que tiene el código en la presentación.
+  // Igual al `codigo` de otro producto del archivo, esté antes o después: se marcan las
+  // dos filas (no se sabe cuál está mal), cada una nombrando a la otra.
   assert.deepEqual(
     run([entry(1, 'A', { code: 'P-1' }), entry(2, 'B', { presentations: [pres('Caja', 'p-1')] })]),
-    { 2: 'El código «p-1» de la presentación «Caja» es el código del producto de la fila 1 («A») del archivo.' },
+    {
+      1: 'El código «P-1» ya lo usa la presentación «Caja» de la fila 2 («B») del archivo.',
+      2: 'El código «p-1» de la presentación «Caja» es el código del producto de la fila 1 («A») del archivo.',
+    },
   );
   assert.deepEqual(
     run([entry(1, 'B', { presentations: [pres('Caja', 'P-1')] }), entry(2, 'A', { code: 'p-1' })]),
-    { 1: 'El código «P-1» de la presentación «Caja» es el código del producto de la fila 2 («A») del archivo.' },
+    {
+      1: 'El código «P-1» de la presentación «Caja» es el código del producto de la fila 2 («A») del archivo.',
+      2: 'El código «p-1» ya lo usa la presentación «Caja» de la fila 1 («B») del archivo.',
+    },
   );
   // Un código repetido dentro de la misma fila lo marca el chequeo del formulario.
   assert.deepEqual(
@@ -573,6 +676,57 @@ test('csvPresentationCodeErrors', () => {
     entry(3, 'C', { presentations: [pres('Caja', 'G-12')] }),
   ]);
   assert.deepEqual(Object.keys(varios), ['1', '3']);
+});
+
+// El `codigo` de la fila (el del producto) contra las presentaciones: antes solo se
+// revisaban las filas que traían códigos de presentación, y un producto con el código
+// de la caja de otro hacía que el escaneo cobrara el producto equivocado.
+test('csvPresentationCodeErrors: el codigo del producto', () => {
+  const pres = (name, code) => ({ name, units: 12, price: 100, ...(code ? { code } : {}) });
+  const entry = (rowNumber, name, over = {}) => ({ rowNumber, name, code: '', presentations: [], ...over });
+  const galletas = {
+    id: 'g1', name: 'Galletas', code: '7501',
+    presentations: [{ name: 'Paquete', code: 'G-12' }, { name: 'Caja', code: 'G-288' }],
+  };
+  const jabon = { id: 'j1', name: 'Jabón', code: 'J-1', presentations: [] };
+  const run = (entries, ex = [galletas, jabon]) => Object.fromEntries(csvPresentationCodeErrors(entries, ex));
+
+  // Fila nueva, sin presentaciones, con el código de una presentación de la sucursal.
+  assert.deepEqual(
+    run([entry(3, 'Nuevo', { code: ' g-288 ' })]),
+    { 3: 'El código «g-288» ya lo usa la presentación «Caja» de «Galletas» en esta sucursal.' },
+  );
+  // Una fila que actualiza otro producto también (el código de Jabón choca con la caja
+  // de Galletas aunque ya estuviera así antes: el escaneo no sabría cuál es).
+  assert.deepEqual(
+    run([entry(2, 'Jabón', { code: 'G-12', updatesId: 'j1' })], [galletas, { ...jabon, code: 'G-12' }]),
+    { 2: 'El código «G-12» ya lo usa la presentación «Paquete» de «Galletas» en esta sucursal.' },
+  );
+  // Crear con código nuevo: el código nuevo se compara igual.
+  assert.deepEqual(
+    run([entry(4, 'Galletas', { code: 'G-12', presentations: [pres('Display', 'G-48')] })]),
+    { 4: 'El código «G-12» ya lo usa la presentación «Paquete» de «Galletas» en esta sucursal.' },
+  );
+  // Las presentaciones del producto que la fila actualiza no cuentan contra su propio
+  // código (de eso se encarga el chequeo de las presentaciones).
+  assert.deepEqual(run([entry(1, 'Galletas', { code: '7501', updatesId: 'g1' })]), {});
+  // Códigos libres, o filas sin código: nada.
+  assert.deepEqual(run([entry(1, 'Nuevo', { code: 'N-1' }), entry(2, 'Otro')]), {});
+
+  // Contra una presentación de otra fila del archivo que NO trae códigos en conflicto
+  // con la sucursal: se marcan ambas.
+  assert.deepEqual(
+    run([entry(1, 'A', { code: 'A-1', presentations: [pres('Caja', 'X-24')] }), entry(2, 'B', { code: 'x-24' })]),
+    {
+      1: 'El código «X-24» de la presentación «Caja» es el código del producto de la fila 2 («B») del archivo.',
+      2: 'El código «x-24» ya lo usa la presentación «Caja» de la fila 1 («A») del archivo.',
+    },
+  );
+  // Si la fila ya tiene un error de presentación, se informa ese (uno por fila).
+  assert.deepEqual(
+    run([entry(5, 'Nuevo', { code: 'G-288', presentations: [pres('Caja', '7501')] })]),
+    { 5: 'El código «7501» ya lo usa «Galletas» en esta sucursal.' },
+  );
 });
 
 test('resolveQuotedPresentation', () => {

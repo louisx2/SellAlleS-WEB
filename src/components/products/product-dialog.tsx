@@ -37,7 +37,9 @@ import { supabase } from '@/lib/supabase/client';
 import { ProductImage, SUFIJO_THUMB } from '@/components/products/product-image';
 import { PresentationsEditor } from '@/components/products/presentations-editor';
 import { CountByPresentationDialog } from '@/components/products/count-by-presentation-dialog';
-import { isSoldLoose, presentationsOf, validateDrafts, type PresentationDraft } from '@/lib/presentations';
+import {
+  isSoldLoose, presentationsOf, productCodeError, validateDrafts, type PresentationDraft,
+} from '@/lib/presentations';
 import { optimizarImagen } from '@/lib/image-optim';
 import { ArrowRightLeft, ImagePlus, Loader2, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -57,7 +59,7 @@ const draftsOf = (p?: Product): PresentationDraft[] =>
 // Códigos que ya usan otros en la sucursal (clave en minúscula y recortada → nombre del
 // dueño): los demás productos y las presentaciones de esos productos, más el código del
 // propio producto tal como está escrito ahora. Una presentación no puede repetir el código
-// de su producto: el escaneo busca primero entre los productos y ella nunca saldría.
+// de su producto: el escaneo no sabría si es la unidad suelta o la presentación.
 function buildTakenCodes(products: Product[], selfId: string | undefined, ownCode: string, ownName: string) {
   const taken = new Map<string, string>();
   const add = (code: string | undefined, owner: string) => {
@@ -141,6 +143,13 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const takenCodes = useMemo(
     () => (open ? buildTakenCodes(products, selfId, codeInput, nameInput) : new Map<string, string>()),
     [open, products, selfId, codeInput, nameInput],
+  );
+  // El código del producto no puede ser el de otro producto ni el de una presentación
+  // de otro: el escaneo no sabría cuál es. La base solo vigila las presentaciones, así
+  // que el aviso (y el bloqueo al guardar) está aquí.
+  const codeWarning = useMemo(
+    () => (open ? productCodeError(codeInput, selfId, products) : null),
+    [open, products, selfId, codeInput],
   );
   const handleDraftsChange = (next: PresentationDraft[]) => {
     setDrafts(next);
@@ -275,8 +284,13 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       }
     }
 
-    // Las presentaciones se validan antes de guardar nada: si algo está mal, no se
-    // guarda ni el producto. Un producto sin inventario se guarda en 'und'.
+    // El código y las presentaciones se validan antes de guardar nada: si algo está
+    // mal, no se guarda ni el producto. Un producto sin inventario se guarda en 'und'.
+    const codeError = productCodeError((formData.get('code') as string) ?? '', selfId, products);
+    if (codeError) {
+      toast({ title: 'Revisa el código', description: codeError, variant: 'destructive' });
+      return;
+    }
     const presentationError = validateDrafts(drafts, {
       productName: ((formData.get('name') as string) ?? '').trim(),
       decimals: tracksStock && allowsDecimals,
@@ -466,6 +480,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
             <div className="flex flex-col gap-2">
               <Label htmlFor="code">Código</Label>
               <Input id="code" name="code" defaultValue={product?.code} onChange={(e) => setCodeInput(e.target.value)} required />
+              {codeWarning && <p className="text-xs text-destructive">{codeWarning}</p>}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="categoryId">Categoría</Label>
