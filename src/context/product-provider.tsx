@@ -275,7 +275,14 @@ export function ProductProvider({ children }: { children: ReactNode }) {
 
     if (presentationRows.length > 0) {
       const { error } = await supabase.rpc('import_product_presentations', { p_rows: presentationRows });
-      if (error) result.failed.push({ name: 'Presentaciones', error: error.message });
+      if (error) {
+        // Una sola transacción: una fila mala deshace TODO, también los cambios de
+        // «se vende suelto». Hay que decirlo, porque lo demás sí quedó importado.
+        result.failed.push({
+          name: 'Presentaciones',
+          error: `No se guardó ninguna presentación de este archivo, ni ningún cambio de «se vende suelto» (los productos sí se importaron): ${error.message.replace(/[.\s]+$/, '')}. Corrige el archivo y vuelve a importar.`,
+        });
+      }
     }
 
     await load();

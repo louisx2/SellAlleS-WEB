@@ -19,7 +19,7 @@ import { useCategories } from '@/context/category-provider';
 import { useSuppliers } from '@/context/supplier-provider';
 import { useLocations } from '@/context/location-provider';
 import { parseProductsCsv, buildTemplateCsv, downloadTextFile, type ParsedProductRow } from '@/lib/inventory-csv';
-import { csvSoldLooseError } from '@/lib/presentations';
+import { csvPresentationCodeErrors, csvSoldLooseError, type CsvCodeEntry } from '@/lib/presentations';
 import type { Product } from '@/lib/types';
 import { Download, FileUp, Loader2, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
@@ -111,15 +111,45 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
     return `${base}-${i}`;
   };
 
+  // La fila tal como quedaría para comprobar sus códigos de presentación: con el código
+  // nuevo si se crea con código nuevo, o actualizando el producto que empareja por código.
+  const codeEntry = (r: ParsedProductRow, d?: DupDecision): CsvCodeEntry => {
+    const creating = d?.action === 'create';
+    return {
+      rowNumber: r.rowNumber,
+      name: r.name,
+      code: d && creating ? d.newCode.trim() : r.code,
+      presentations: r.presentations,
+      updatesId: creating ? undefined : codeMap.get(normName(r.code))?.id,
+    };
+  };
+
   const handleFile = async (file: File) => {
     try {
       const text = await file.text();
       // «No se vende suelto» sin presentaciones en la fila solo vale si actualiza un
       // producto que ya las tiene (importar nunca borra). El parser no conoce el
       // inventario, así que se revisa aquí, donde se empareja cada fila por código.
-      const parsed = (await parseProductsCsv(text)).map((r) => {
+      const checked = (await parseProductsCsv(text)).map((r) => {
         if (!r.name) return r;
         const error = csvSoldLooseError(r, r.code ? codeMap.get(normName(r.code)) : undefined);
+        return error ? { ...r, errors: [...r.errors, error] } : r;
+      });
+      // Un código de presentación repetido (en el archivo o en la sucursal) haría que la
+      // base deshaga TODAS las presentaciones del archivo: se marca la fila que lo trae.
+      // Las filas que ya tienen error, o que repiten el código de otra, no se importan.
+      const seenCodes = new Set<string>();
+      const entries: CsvCodeEntry[] = [];
+      for (const r of checked) {
+        if (r.errors.length > 0) continue;
+        const c = normName(r.code);
+        if (c && seenCodes.has(c)) continue;
+        if (c) seenCodes.add(c);
+        entries.push(codeEntry(r));
+      }
+      const codeErrors = csvPresentationCodeErrors(entries, products);
+      const parsed = checked.map((r) => {
+        const error = codeErrors.get(r.rowNumber);
         return error ? { ...r, errors: [...r.errors, error] } : r;
       });
       if (parsed.length === 0) {
@@ -162,6 +192,32 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
           return;
         }
       }
+    }
+
+    // Códigos de presentación con las decisiones ya tomadas: «Crear con código nuevo» sobre
+    // una fila de un export trae los códigos de presentación del producto original, y un
+    // choque en la base deshace TODAS las presentaciones del archivo.
+    const codeErrors = csvPresentationCodeErrors(
+      [...cleanRows, ...conflictRows]
+        .sort((a, b) => a.rowNumber - b.rowNumber)
+        .map((r) => codeEntry(r, dupDecisions[r.rowNumber])),
+      products,
+    );
+    if (codeErrors.size > 0) {
+      const [rowNumber, message] = [...codeErrors][0];
+      const row = rows.find((r) => r.rowNumber === rowNumber);
+      const hint = dupDecisions[rowNumber]?.action === 'create'
+        ? ' Esa fila se crearía con código nuevo: si el código es del producto original, quítalo del archivo o elige «Actualizar el existente».'
+        : '';
+      const more = codeErrors.size > 1
+        ? ` Hay ${codeErrors.size - 1} ${codeErrors.size === 2 ? 'fila más' : 'filas más'} con el mismo problema.`
+        : '';
+      toast({
+        title: 'Código de presentación repetido',
+        description: `Fila ${rowNumber}${row?.name ? ` (${row.name})` : ''}: ${message}${hint}${more}`,
+        variant: 'destructive',
+      });
+      return;
     }
 
     setImporting(true);

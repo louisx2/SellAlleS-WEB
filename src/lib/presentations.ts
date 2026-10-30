@@ -309,6 +309,103 @@ export function csvSoldLooseError(
   });
 }
 
+// Un producto que ya está en la sucursal, para comprobar códigos del CSV.
+export interface CsvCodeOwner {
+  id: string;
+  name: string;
+  code?: string;
+  presentations?: readonly { name: string; code?: string }[];
+}
+
+// Una fila del CSV que se va a importar, tal como quedará: `code` es el código con el que
+// quedará el producto (el de la fila, o el nuevo si se crea con código nuevo) y
+// `updatesId` es el producto existente que actualiza (ausente si crea uno nuevo).
+export interface CsvCodeEntry {
+  rowNumber: number;
+  name: string;
+  code: string;
+  presentations: readonly PresentationInput[];
+  updatesId?: string;
+}
+
+const codeKey = (code?: string) => (code ?? '').trim().toLowerCase();
+
+// Códigos de presentación que chocarían al importar, por número de fila (el primer
+// choque de cada fila). `import_product_presentations` es un solo lote: si la base
+// rechaza un código, deshace TODAS las presentaciones del archivo, así que conviene
+// atajarlo antes, fila por fila. Se comparan recortados y en minúscula, como la base.
+//  - En el archivo: el código de una presentación no puede ser el `codigo` de otro
+//    producto del archivo (esté antes o después) ni repetir el de una presentación de
+//    una fila anterior. Se marca la fila que tiene el código en la presentación.
+//  - En la sucursal: ni el código de un producto existente (también el del propio
+//    producto: el trigger lo prohíbe) ni el de una presentación existente, con los
+//    textos de la base. Una fila que actualiza un producto puede repetir las
+//    presentaciones suyas que trae (se emparejan por nombre), no las demás.
+// Las filas ya tienen que haber pasado `validatePresentationInputs`. Una fila marcada
+// no se queda con sus códigos, porque no se va a importar. Los productos archivados
+// no se conocen aquí: ahí la base sigue siendo la última palabra.
+export function csvPresentationCodeErrors(
+  entries: readonly CsvCodeEntry[],
+  existing: readonly CsvCodeOwner[],
+): Map<number, string> {
+  const errors = new Map<number, string>();
+  const claimed = new Map<string, { rowNumber: number; name: string }>();
+
+  for (const entry of entries) {
+    if (entry.presentations.every((p) => codeKey(p.code) === '')) continue;
+
+    let error: string | null = null;
+    for (const p of entry.presentations) {
+      const key = codeKey(p.code);
+      if (key === '') continue;
+      const shown = (p.code ?? '').trim();
+      const owner = entries.find((other) => other !== entry && codeKey(other.code) === key);
+      if (owner) {
+        error = `El código «${shown}» de la presentación «${p.name}» es el código del producto de la fila ${owner.rowNumber} («${owner.name}») del archivo.`;
+        break;
+      }
+      const earlier = claimed.get(key);
+      if (earlier) {
+        error = `El código «${shown}» de la presentación «${p.name}» ya lo usa la fila ${earlier.rowNumber} («${earlier.name}») del archivo.`;
+        break;
+      }
+    }
+
+    if (error === null) {
+      const takenCodes = new Map<string, string>();
+      const take = (code: string | undefined, owner: string) => {
+        const key = codeKey(code);
+        if (key !== '' && !takenCodes.has(key)) takenCodes.set(key, owner);
+      };
+      const rewritten = new Set(entry.presentations.map((p) => p.name.trim().toLowerCase()));
+      for (const product of existing) {
+        take(product.code, product.name);
+        for (const p of product.presentations ?? []) {
+          if (product.id === entry.updatesId && rewritten.has(p.name.trim().toLowerCase())) continue;
+          take(p.code, product.name);
+        }
+      }
+      take(entry.code, entry.name);
+
+      error = validateDrafts(
+        entry.presentations.map((p) => ({ name: p.name, units: p.units, price: p.price, code: p.code ?? '' })),
+        // Los rangos ya los revisó el parser: aquí solo importan los códigos.
+        { productName: entry.name, decimals: true, soldLoose: true, takenCodes },
+      );
+    }
+
+    if (error !== null) {
+      errors.set(entry.rowNumber, error);
+      continue;
+    }
+    for (const p of entry.presentations) {
+      const key = codeKey(p.code);
+      if (key !== '' && !claimed.has(key)) claimed.set(key, { rowNumber: entry.rowNumber, name: entry.name });
+    }
+  }
+  return errors;
+}
+
 // Las 3 primeras presentaciones (de menor a mayor) como columnas del CSV; las que
 // faltan quedan vacías. Siempre trae las 12 claves de `PRESENTATION_CSV_HEADERS`.
 export function presentationColumns(product: Product): Record<string, string> {

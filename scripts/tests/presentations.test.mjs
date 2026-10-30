@@ -24,6 +24,7 @@ import {
   presentationColumns,
   validatePresentationInputs,
   csvSoldLooseError,
+  csvPresentationCodeErrors,
   resolveQuotedPresentation,
 } from '../../src/lib/presentations.ts';
 
@@ -469,6 +470,109 @@ test('csvSoldLooseError', () => {
   assert.equal(csvSoldLooseError(row({ soldLoose: false }), {}), MSG);
   // Actualiza un producto que ya las tiene: la importación no borra, así que se quedan.
   assert.equal(csvSoldLooseError(row({ soldLoose: false }), conPresentaciones), null);
+});
+
+// Códigos de presentación del CSV contra el archivo y la sucursal, antes de llegar a la
+// base: un solo choque en `import_product_presentations` deshace TODAS las presentaciones.
+test('csvPresentationCodeErrors', () => {
+  const pres = (name, code) => ({ name, units: 12, price: 100, ...(code ? { code } : {}) });
+  const entry = (rowNumber, name, over = {}) => ({ rowNumber, name, code: '', presentations: [], ...over });
+  const galletas = {
+    id: 'g1', name: 'Galletas', code: '7501',
+    presentations: [{ name: 'Paquete', code: 'G-12' }, { name: 'Caja', code: 'G-288' }],
+  };
+  const jabon = { id: 'j1', name: 'Jabón', code: 'J-1', presentations: [] };
+  const existing = [galletas, jabon];
+  const run = (entries, ex = existing) => Object.fromEntries(csvPresentationCodeErrors(entries, ex));
+
+  // Nada que revisar: sin códigos de presentación, o códigos libres.
+  assert.deepEqual(run([]), {});
+  assert.deepEqual(run([entry(1, 'A', { presentations: [pres('Caja')] })]), {});
+  assert.deepEqual(
+    run([entry(1, 'A', { code: 'A1', presentations: [pres('Caja', 'A-CAJA')] }), entry(2, 'B', { presentations: [pres('Caja', 'B-CAJA')] })]),
+    {},
+  );
+
+  // Contra la sucursal: el código de un producto o de una presentación existente.
+  assert.deepEqual(
+    run([entry(1, 'Nuevo', { presentations: [pres('Caja', '7501')] })]),
+    { 1: 'El código «7501» ya lo usa «Galletas» en esta sucursal.' },
+  );
+  assert.deepEqual(
+    run([entry(4, 'Nuevo', { presentations: [pres('Caja', ' g-288 ')] })]),
+    { 4: 'El código «g-288» ya lo usa «Galletas» en esta sucursal.' },
+  );
+  assert.deepEqual(
+    run([entry(2, 'Nuevo', { presentations: [pres('Paquete', 'j-1')] })]),
+    { 2: 'El código «j-1» ya lo usa «Jabón» en esta sucursal.' },
+  );
+
+  // Una fila que actualiza un producto puede repetir sus propios códigos de presentación
+  // (exportar y volver a importar)...
+  assert.deepEqual(
+    run([entry(1, 'Galletas', { code: '7501', updatesId: 'g1', presentations: [pres('Paquete', 'G-12'), pres('caja', 'g-288')] })]),
+    {},
+  );
+  // ...pero no el código del propio producto (el trigger lo prohíbe)...
+  assert.deepEqual(
+    run([entry(1, 'Galletas', { code: '7501', updatesId: 'g1', presentations: [pres('Display', '7501')] })]),
+    { 1: 'El código «7501» ya lo usa «Galletas» en esta sucursal.' },
+  );
+  // ...ni el de otra presentación suya que la fila no toca.
+  assert.deepEqual(
+    run([entry(1, 'Galletas', { code: '7501', updatesId: 'g1', presentations: [pres('Display', 'G-288')] })]),
+    { 1: 'El código «G-288» ya lo usa «Galletas» en esta sucursal.' },
+  );
+  // Crear con código nuevo: no hereda nada del original, así que sus códigos chocan.
+  assert.deepEqual(
+    run([entry(1, 'Galletas', { code: '7501-2', presentations: [pres('Paquete', 'G-12'), pres('Caja', 'G-288')] })]),
+    { 1: 'El código «G-12» ya lo usa «Galletas» en esta sucursal.' },
+  );
+  // Una presentación tampoco puede llevar el código de su propio producto nuevo.
+  assert.deepEqual(
+    run([entry(3, 'Nuevo', { code: 'N-1', presentations: [pres('Caja', 'n-1')] })]),
+    { 3: 'El código «n-1» ya lo usa «Nuevo» en esta sucursal.' },
+  );
+
+  // Dentro del archivo: el mismo código en dos filas marca la segunda y nombra la primera.
+  assert.deepEqual(
+    run([
+      entry(1, 'A', { presentations: [pres('Caja', 'X-1')] }),
+      entry(2, 'B', { presentations: [pres('Caja', ' x-1')] }),
+    ]),
+    { 2: 'El código «x-1» de la presentación «Caja» ya lo usa la fila 1 («A») del archivo.' },
+  );
+  // Igual al `codigo` de otro producto del archivo, esté antes o después: se marca la
+  // fila que tiene el código en la presentación.
+  assert.deepEqual(
+    run([entry(1, 'A', { code: 'P-1' }), entry(2, 'B', { presentations: [pres('Caja', 'p-1')] })]),
+    { 2: 'El código «p-1» de la presentación «Caja» es el código del producto de la fila 1 («A») del archivo.' },
+  );
+  assert.deepEqual(
+    run([entry(1, 'B', { presentations: [pres('Caja', 'P-1')] }), entry(2, 'A', { code: 'p-1' })]),
+    { 1: 'El código «P-1» de la presentación «Caja» es el código del producto de la fila 2 («A») del archivo.' },
+  );
+  // Un código repetido dentro de la misma fila lo marca el chequeo del formulario.
+  assert.deepEqual(
+    run([entry(5, 'A', { presentations: [pres('Caja', 'Z'), pres('Paquete', 'z')] })]),
+    { 5: 'El código «z» ya lo usa «A» en esta sucursal.' },
+  );
+
+  // Una fila marcada no se queda con sus códigos: la siguiente que use otro de ellos pasa.
+  assert.deepEqual(
+    run([
+      entry(1, 'A', { presentations: [pres('Caja', '7501'), pres('Paquete', 'Y-1')] }),
+      entry(2, 'B', { presentations: [pres('Caja', 'Y-1')] }),
+    ]),
+    { 1: 'El código «7501» ya lo usa «Galletas» en esta sucursal.' },
+  );
+  // Varias filas malas: un mensaje por fila.
+  const varios = run([
+    entry(1, 'A', { presentations: [pres('Caja', 'J-1')] }),
+    entry(2, 'B', { presentations: [pres('Caja', 'LIBRE')] }),
+    entry(3, 'C', { presentations: [pres('Caja', 'G-12')] }),
+  ]);
+  assert.deepEqual(Object.keys(varios), ['1', '3']);
 });
 
 test('resolveQuotedPresentation', () => {
