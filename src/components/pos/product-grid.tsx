@@ -42,13 +42,15 @@ interface AddOption {
 // presentación, de la más chica a la más grande. Se deshabilitan según lo que queda
 // una vez descontado lo que ya está en el carrito, en unidades base.
 function AddButtons({
-  product, items, presentations, onAdd, className,
+  product, items, presentations, onAdd, className, itemClassName,
 }: {
   product: Product;
   items: CartItem[];
   presentations: ProductPresentation[];
   onAdd: (product: Product, presentation?: ProductPresentation) => void;
   className?: string;
+  // Clases extra de cada botón (el contenedor que lleva el `title`).
+  itemClassName?: string;
 }) {
   const unit = getUnit(product.unit);
   const remaining = product.tracksStock ? Math.max(0, roundQty(product.stock - baseQtyInCart(product.id, items))) : Infinity;
@@ -88,7 +90,7 @@ function AddButtons({
         // se salga de él.
         <span
           key={o.key}
-          className="flex min-w-[min(5.5rem,100%)] flex-auto"
+          className={cn('flex min-w-[min(5.5rem,100%)] flex-auto', itemClassName)}
           title={o.disabled ? quedan : `${o.name} · ${formatCurrency(o.price)}`}
         >
           <Button
@@ -147,6 +149,11 @@ export function ProductGrid({ products, view }: ProductGridProps) {
                   presentations={presentations}
                   onAdd={handleAddToCart}
                   className="w-full sm:w-auto"
+                  // Con `sm:w-auto` el ancho del grupo sale del contenido, y un mínimo en
+                  // porcentaje cuenta como 0 en ese cálculo: el grupo quedaría más angosto
+                  // que la suma de los mínimos reales y el último botón saltaría de fila.
+                  // Un mínimo fijo hace que el ancho calculado y el real coincidan.
+                  itemClassName="sm:min-w-[5.5rem]"
                 />
               ) : (
                 <Button size="icon" onClick={() => handleAddToCart(product)} aria-label="Añadir al carrito" disabled={isSoldOut(product)} title={isSoldOut(product) ? 'Sin existencias' : undefined}>
