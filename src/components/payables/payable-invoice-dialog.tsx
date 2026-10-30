@@ -171,6 +171,23 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
     setItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)));
   };
 
+  // ITBIS de una línea: 18 % de cantidad × costo si el producto lo lleva (solo en
+  // empresas formalizadas). La línea no tiene campo para escribirlo a mano, así que se
+  // rehace cada vez que cambia lo que lo determina: producto, presentación, cantidad o costo.
+  const lineItbis = (product: { itbis: boolean } | undefined, quantity: number | '', unitCost: number | '') =>
+    showFiscal && product?.itbis ? round2(num(quantity) * num(unitCost) * ITBIS_RATE) : 0;
+
+  // Cambiar cantidad o costo: el ITBIS se calcula con los valores nuevos de la línea.
+  // Sin esto, «producto → Caja → 20» dejaba el ITBIS de 1 caja en el ITBIS facturado,
+  // el total, el saldo por pagar y el 606.
+  const setItemAmounts = (index: number, patch: Pick<Partial<ItemRow>, 'quantity' | 'unitCost' | 'costByHand'>) => {
+    setItems((prev) => prev.map((it, i) => {
+      if (i !== index) return it;
+      const next = { ...it, ...patch };
+      return { ...next, itbisAmount: lineItbis(lineProductOf(next), next.quantity, next.unitCost) };
+    }));
+  };
+
   const handleProductPick = (index: number, productId: string) => {
     if (productId === 'libre') {
       setItem(index, { productId: undefined, presentationId: undefined });
@@ -189,7 +206,7 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
       description: product.name,
       quantity: qty,
       unitCost: product.cost,
-      itbisAmount: showFiscal && product.itbis ? round2(qty * product.cost * ITBIS_RATE) : 0,
+      itbisAmount: lineItbis(product, qty, product.cost),
     });
   };
 
@@ -211,7 +228,7 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
       quantity,
       unitCost,
       // El ITBIS de la línea se calculó con la cantidad y el costo de antes.
-      itbisAmount: showFiscal && product.itbis ? round2(num(quantity) * num(unitCost) * ITBIS_RATE) : 0,
+      itbisAmount: lineItbis(product, quantity, unitCost),
     });
   };
 
@@ -501,7 +518,7 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
                         step={lineAllowsDecimals(item) ? '0.001' : '1'}
                         min="0"
                         value={item.quantity}
-                        onChange={(e) => setItem(index, { quantity: e.target.value === '' ? '' : Number(e.target.value) })}
+                        onChange={(e) => setItemAmounts(index, { quantity: e.target.value === '' ? '' : Number(e.target.value) })}
                       />
                     </div>
                     <div className="col-span-5 sm:col-span-2 space-y-1">
@@ -510,7 +527,7 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
                           presentación; vaciado, vuelve a ser el sugerido. */}
                       <Input
                         type="number" step="0.01" min="0" value={item.unitCost}
-                        onChange={(e) => setItem(index, {
+                        onChange={(e) => setItemAmounts(index, {
                           unitCost: e.target.value === '' ? '' : Number(e.target.value),
                           costByHand: e.target.value !== '',
                         })}
