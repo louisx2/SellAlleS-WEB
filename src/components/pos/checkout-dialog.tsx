@@ -15,7 +15,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
-import { formatQtyCompact } from '@/lib/units';
+import { formatLineQty } from '@/lib/line-format';
 import { useToast } from '@/hooks/use-toast';
 import type { Sale, FinancingDetails, NcfType } from '@/lib/types';
 import { useProducts } from '@/context/product-provider';
@@ -603,7 +603,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                   <p className="font-medium text-sm">{item.product.name}</p>
                                   <div className="flex items-center gap-2 mt-0.5">
                                       <span className="text-xs text-muted-foreground">
-                                          {formatQtyCompact(item.quantity, item.product.unit)} x {formatCurrency(unitPrice)}
+                                          {formatLineQty(item)} x {formatCurrency(unitPrice)}
                                       </span>
                                       {hasDiscount && (
                                           <span className="text-[10px] bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 px-1.5 py-0.5 rounded font-medium animate-pulse">

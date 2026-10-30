@@ -19,6 +19,7 @@ import { useCategories } from '@/context/category-provider';
 import { useSuppliers } from '@/context/supplier-provider';
 import { useLocations } from '@/context/location-provider';
 import { parseProductsCsv, buildTemplateCsv, downloadTextFile, type ParsedProductRow } from '@/lib/inventory-csv';
+import { csvPresentationCodeErrors, csvSoldLooseError, type CsvCodeEntry } from '@/lib/presentations';
 import type { Product } from '@/lib/types';
 import { Download, FileUp, Loader2, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 
@@ -101,19 +102,64 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
     return { cats: [...cats], sups: [...sups], locs: [...locs] };
   }, [rows, categories, suppliers, locations]);
 
-  // Sugerir un código libre: ABC -> ABC-2, ABC-3…
+  // Sugerir un código libre: ABC -> ABC-2, ABC-3… Tampoco el de una presentación (de la
+  // sucursal o del archivo): el escaneo no sabría cuál es.
   const suggestCode = (base: string): string => {
     const taken = new Set<string>(codeMap.keys());
-    rows.forEach((r) => { if (r.code) taken.add(normName(r.code)); });
+    products.forEach((p) => p.presentations?.forEach((x) => { if (x.code) taken.add(normName(x.code)); }));
+    rows.forEach((r) => {
+      if (r.code) taken.add(normName(r.code));
+      r.presentations.forEach((x) => { if (x.code) taken.add(normName(x.code)); });
+    });
     let i = 2;
     while (taken.has(normName(`${base}-${i}`))) i++;
     return `${base}-${i}`;
   };
 
+  // La fila tal como quedaría para comprobar sus códigos de presentación: con el código
+  // nuevo si se crea con código nuevo, o actualizando el producto que empareja por código.
+  const codeEntry = (r: ParsedProductRow, d?: DupDecision): CsvCodeEntry => {
+    const creating = d?.action === 'create';
+    return {
+      rowNumber: r.rowNumber,
+      name: r.name,
+      code: d && creating ? d.newCode.trim() : r.code,
+      presentations: r.presentations,
+      updatesId: creating ? undefined : codeMap.get(normName(r.code))?.id,
+    };
+  };
+
   const handleFile = async (file: File) => {
     try {
       const text = await file.text();
-      const parsed = await parseProductsCsv(text);
+      // «No se vende suelto» sin presentaciones en la fila solo vale si actualiza un
+      // producto que ya las tiene (importar nunca borra). El parser no conoce el
+      // inventario, así que se revisa aquí, donde se empareja cada fila por código.
+      const checked = (await parseProductsCsv(text)).map((r) => {
+        if (!r.name) return r;
+        const error = csvSoldLooseError(r, r.code ? codeMap.get(normName(r.code)) : undefined);
+        return error ? { ...r, errors: [...r.errors, error] } : r;
+      });
+      // Un código de presentación repetido (en el archivo o en la sucursal) haría que la
+      // base deshaga TODAS las presentaciones del archivo: se marca la fila que lo trae.
+      // Un `codigo` de producto igual al de una presentación (de otra fila o de otro
+      // producto de la sucursal) también se marca: la base no lo atajaría y el escaneo
+      // no sabría cuál es. Las filas que ya tienen error, o que repiten el código de
+      // otra, no se importan.
+      const seenCodes = new Set<string>();
+      const entries: CsvCodeEntry[] = [];
+      for (const r of checked) {
+        if (r.errors.length > 0) continue;
+        const c = normName(r.code);
+        if (c && seenCodes.has(c)) continue;
+        if (c) seenCodes.add(c);
+        entries.push(codeEntry(r));
+      }
+      const codeErrors = csvPresentationCodeErrors(entries, products);
+      const parsed = checked.map((r) => {
+        const error = codeErrors.get(r.rowNumber);
+        return error ? { ...r, errors: [...r.errors, error] } : r;
+      });
       if (parsed.length === 0) {
         toast({ title: 'Archivo vacío', description: 'No se encontraron filas de productos.', variant: 'destructive' });
         return;
@@ -138,6 +184,12 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
     for (const r of conflictRows) {
       const d = dupDecisions[r.rowNumber];
       if (d?.action === 'create') {
+        // Crear con código nuevo es un producto nuevo: no hereda las presentaciones del existente.
+        const looseError = csvSoldLooseError(r);
+        if (looseError) {
+          toast({ title: 'Falta una presentación', description: `Fila ${r.rowNumber}: ${looseError}`, variant: 'destructive' });
+          return;
+        }
         const nc = d.newCode.trim();
         if (!nc) {
           toast({ title: 'Falta un código', description: `Fila ${r.rowNumber}: escribe el código nuevo.`, variant: 'destructive' });
@@ -148,6 +200,33 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
           return;
         }
       }
+    }
+
+    // Códigos con las decisiones ya tomadas: «Crear con código nuevo» sobre una fila de un
+    // export trae los códigos de presentación del producto original, y un choque en la
+    // base deshace TODAS las presentaciones del archivo; el código nuevo tampoco puede
+    // ser el de una presentación.
+    const codeErrors = csvPresentationCodeErrors(
+      [...cleanRows, ...conflictRows]
+        .sort((a, b) => a.rowNumber - b.rowNumber)
+        .map((r) => codeEntry(r, dupDecisions[r.rowNumber])),
+      products,
+    );
+    if (codeErrors.size > 0) {
+      const [rowNumber, message] = [...codeErrors][0];
+      const row = rows.find((r) => r.rowNumber === rowNumber);
+      const hint = dupDecisions[rowNumber]?.action === 'create'
+        ? ' Esa fila se crearía con código nuevo: si el código es del producto original, quítalo del archivo o elige «Actualizar el existente».'
+        : '';
+      const more = codeErrors.size > 1
+        ? ` Hay ${codeErrors.size - 1} ${codeErrors.size === 2 ? 'fila más' : 'filas más'} con el mismo problema.`
+        : '';
+      toast({
+        title: 'Código repetido',
+        description: `Fila ${rowNumber}${row?.name ? ` (${row.name})` : ''}: ${message}${hint}${more}`,
+        variant: 'destructive',
+      });
+      return;
     }
 
     setImporting(true);
@@ -183,6 +262,8 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
           wholesaleMinQuantity: r.wholesaleMinQuantity,
           image: r.imageUrl && /^(https?:|data:)/i.test(r.imageUrl) ? r.imageUrl : 'placeholder',
         },
+        soldLoose: r.soldLoose,
+        presentations: r.presentations,
       });
 
       const items: BulkImportItem[] = [
@@ -235,6 +316,13 @@ export function ImportProductsDialog({ open, onOpenChange }: ImportProductsDialo
               <p className="text-xs text-muted-foreground">
                 Unidades válidas: und, caja, doc, par, rollo, saco, paq, lb, kg, g, oz, qq, m, pie, yd, plg, gal, l, ml.
                 En blanco = unidades. Usa <span className="font-mono">punto</span> para los decimales (1.7), no coma.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Presentaciones (paquete, caja…): hasta 3 por producto, con presentacion_1, contiene_1, precio_1 y codigo_1
+                (y lo mismo con _2 y _3). <span className="font-mono">existencias</span> va siempre en unidades base, no en
+                paquetes ni cajas, y <span className="font-mono">contiene</span> es cuántas unidades base trae cada una.
+                Con <span className="font-mono">se_vende_suelto</span> en «no», el producto solo se vende por presentación;
+                en blanco no cambia nada. Importar nunca borra presentaciones que ya existan.
               </p>
             </div>
             <Button onClick={() => fileRef.current?.click()}>

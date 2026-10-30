@@ -3,7 +3,7 @@
 import type { Sale } from '@/lib/types';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
-import { formatQtyCompact } from '@/lib/units';
+import { formatLineQty } from '@/lib/line-format';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
@@ -103,7 +103,7 @@ export function ReceiptItems({ sale }: ReceiptProps) {
                 <div key={item.cartItemId}>
                   <p>{item.product.name}</p>
                   <div className="flex justify-between pl-2">
-                    <span>{formatQtyCompact(item.quantity, item.product.unit)} x {formatCurrency(unitPrice)}</span>
+                    <span>{formatLineQty(item)} x {formatCurrency(unitPrice)}</span>
                     <span>{formatCurrency(itemGross)}</span>
                   </div>
                    {hasDiscount && (

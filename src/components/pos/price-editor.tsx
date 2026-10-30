@@ -29,6 +29,10 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
   const [discountPercentage, setDiscountPercentage] = useState<string | number>('');
   const [isOpen, setIsOpen] = useState(false);
   const isMobile = useIsMobile();
+  // Una línea por paquete/caja cuenta presentaciones, siempre enteras (aunque la
+  // unidad base sea medible), y su precio es por presentación, no por unidad base.
+  const { presentation } = cartItem;
+  const qtyUnit = presentation ? 'und' : cartItem.product.unit;
 
   const calculateDiscount = (price: number) => {
     const originalPrice = cartItem.product.price;
@@ -77,7 +81,7 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
       return;
     }
 
-    const unit = cartItem.product.unit;
+    const unit = qtyUnit;
     const allowsDecimals = unitAllowsDecimals(unit);
     const quantityValue = parseQtyInput(String(newQuantity));
     if (!Number.isFinite(quantityValue) || quantityValue <= 0 || (!allowsDecimals && !Number.isInteger(quantityValue))) {
@@ -113,7 +117,7 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
   const handleQuantityChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     // La máscara depende de la unidad: en una contable el punto ni se teclea.
-    if (qtyInputRegex(cartItem.product.unit).test(value) && value.length <= 8) {
+    if (qtyInputRegex(qtyUnit).test(value) && value.length <= 8) {
       setNewQuantity(value);
     }
   };
@@ -140,7 +144,7 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
     <div className="grid gap-6 py-4">
         <div className="grid gap-4">
              <div className="grid grid-cols-3 items-center gap-4">
-                <Label htmlFor="quantity">Cantidad ({getUnit(cartItem.product.unit).short})</Label>
+                <Label htmlFor="quantity">Cantidad ({presentation ? presentation.name : getUnit(cartItem.product.unit).short})</Label>
                 <Input
                 id="quantity"
                 value={newQuantity}
@@ -148,11 +152,11 @@ export function PriceEditor({ cartItem }: PriceEditorProps) {
                 className="col-span-2 h-8"
                 onFocus={e => e.target.select()}
                 type="text"
-                inputMode={unitAllowsDecimals(cartItem.product.unit) ? 'decimal' : 'numeric'}
+                inputMode={unitAllowsDecimals(qtyUnit) ? 'decimal' : 'numeric'}
                 />
             </div>
             <div className="grid grid-cols-3 items-center gap-4">
-                <Label htmlFor="price">Precio por {getUnit(cartItem.product.unit).singular}</Label>
+                <Label htmlFor="price">Precio por {presentation ? presentation.name : getUnit(cartItem.product.unit).singular}</Label>
                 <Input
                 id="price"
                 value={newPrice}

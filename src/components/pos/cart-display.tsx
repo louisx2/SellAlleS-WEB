@@ -33,6 +33,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { PriceEditor } from './price-editor';
 import { QuantityInput } from './quantity-input';
 import { formatQuantity, getUnit, roundQty } from '@/lib/units';
+import { baseQtyInCart, presentationLabel } from '@/lib/presentations';
+import type { CartItem } from '@/lib/types';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { TooltipProvider, Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -44,6 +46,15 @@ const perUnitLabel = (unit?: string | null) => {
   const u = getUnit(unit);
   return u.code === 'und' ? 'c/u' : `/ ${u.short}`;
 };
+
+// Con presentación el precio es por paquete/caja: "/ Paquete", no "/ und".
+const priceSuffix = (item: CartItem) =>
+  item.presentation ? `/ ${item.presentation.name}` : perUnitLabel(item.product.unit);
+
+// Lo que se pide del producto en unidades base, sumando todas sus líneas (2 paquetes
+// + 7 sueltas) contra el stock, que también está en unidades base.
+const exceedsStock = (item: CartItem, items: CartItem[]) =>
+  item.product.tracksStock && roundQty(baseQtyInCart(item.product.id, items)) > item.product.stock;
 
 function CartItemImage({ image, alt }: { image?: string | null, alt: string }) {
     const [imageLoaded, setImageLoaded] = useState(false);
@@ -91,9 +102,7 @@ export function CartDisplay() {
   const { isModuleEnabled } = useModules();
 
   const activeCart = carts.find(cart => cart.id === activeCartId);
-  const hasStockError = activeCart?.items.some(
-    item => item.product.tracksStock && item.quantity > item.product.stock
-  ) || false;
+  const hasStockError = activeCart?.items.some(item => exceedsStock(item, activeCart.items)) || false;
   
   const handleSaleComplete = (sale: Sale) => {
     setCompletedSale(sale);
@@ -266,7 +275,10 @@ export function CartDisplay() {
                                   </div>
                                   <div className="flex-grow space-y-2">
                                     <div className="flex items-center gap-2">
-                                      <p className="font-medium text-sm leading-tight">{item.product.name}</p>
+                                      <p className="font-medium text-sm leading-tight">
+                                        {item.product.name}
+                                        {item.presentation && ` · ${presentationLabel(item.presentation, getUnit(item.product.unit).short)}`}
+                                      </p>
                                       {item.isQuick && <Badge variant="secondary">Rápida</Badge>}
                                     </div>
                                     <div className="flex items-center gap-1.5">
@@ -275,12 +287,13 @@ export function CartDisplay() {
                                       </Button>
                                       <QuantityInput
                                         value={item.quantity}
-                                        unit={item.product.unit}
+                                        // Las presentaciones se cuentan enteras, aunque la unidad base sea medible.
+                                        unit={item.presentation ? 'und' : item.product.unit}
                                         onCommit={(qty) => updateQuantity(item.cartItemId, qty)}
                                         className="h-7 w-16 px-1 text-sm font-bold"
                                         aria-label={`Cantidad de ${item.product.name}`}
                                       />
-                                      {getUnit(item.product.unit).code !== 'und' && (
+                                      {!item.presentation && getUnit(item.product.unit).code !== 'und' && (
                                         <span className="text-xs text-muted-foreground">{getUnit(item.product.unit).short}</span>
                                       )}
                                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.cartItemId, roundQty(item.quantity + 1))}>
@@ -291,13 +304,13 @@ export function CartDisplay() {
                                       {isDiscounted ? (
                                         <div className="block">
                                           <span className="text-xs text-muted-foreground line-through">{formatCurrency(item.product.price)}</span>
-                                          <span className="text-xs font-semibold block">{formatCurrency(currentPrice)} {perUnitLabel(item.product.unit)}</span>
+                                          <span className="text-xs font-semibold block">{formatCurrency(currentPrice)} {priceSuffix(item)}</span>
                                         </div>
                                       ) : (
-                                        <div className="text-xs font-semibold">{formatCurrency(currentPrice)} {perUnitLabel(item.product.unit)}</div>
+                                        <div className="text-xs font-semibold">{formatCurrency(currentPrice)} {priceSuffix(item)}</div>
                                       )}
                                       <p className="font-semibold text-base mt-1">{formatCurrency(currentPrice * item.quantity)}</p>
-                                      {item.product.tracksStock && roundQty(item.quantity) > item.product.stock && (
+                                      {exceedsStock(item, cart.items) && (
                                         <p className="text-xs text-destructive font-semibold mt-1 animate-pulse">
                                           ⚠️ Stock insuficiente (Disponibles: {formatQuantity(item.product.stock, item.product.unit)})
                                         </p>

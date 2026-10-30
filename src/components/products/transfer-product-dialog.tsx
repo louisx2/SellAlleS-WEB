@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Loader2, Search, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Search, Trash2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -24,26 +24,56 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
-import type { Product } from '@/lib/types';
+import type { CartItem, Product, ProductPresentation } from '@/lib/types';
 import { useBranches } from '@/context/branch-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useProducts } from '@/context/product-provider';
 import { useCanTransfer } from '@/hooks/use-can-transfer';
 import {
-  formatQuantity, formatQty, getUnit, parseQtyInput, qtyInputRegex, unitAllowsDecimals,
+  formatQuantity, formatQty, getUnit, parseQtyInput, qtyInputRegex, roundQty, unitAllowsDecimals,
 } from '@/lib/units';
+import {
+  isSoldLoose, lineBaseQty, maxAddable, presentationLabel, presentationsOf, toLinePresentation,
+} from '@/lib/presentations';
 import { sendTransfer } from '@/lib/transfers';
 import { TransferSlipDialog, formatTransferNumber } from './transfer-slip';
 
-// Valores centinela del desplegable de ubicación. No son ids.
+// Valores centinela del desplegable de ubicación y del de presentación. No son ids.
 const SIN_UBICACION = '__sin__';
 const NUEVA_UBICACION = '__nueva__';
+const SUELTO = '__suelto__';
 
 type LocationOption = { id: string; name: string };
-type Line = { product: Product; qty: string };
+// `presentationId` null = suelto. Un artículo puede ir en varias líneas (1 Caja + 5 und),
+// por eso la línea tiene su propia clave y no se identifica por el artículo.
+type Line = { key: string; product: Product; presentationId: string | null; qty: string };
 
 const normalizar = (s: string) =>
   s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+
+const capitalize = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+// Opciones de un artículo: suelto (null) y cada presentación. Se puede mandar suelto
+// aunque no se venda así: es mover existencias, y la base no lo impide.
+const optionsOf = (product: Product): (string | null)[] => [
+  null,
+  ...presentationsOf(product).map((p) => p.id),
+];
+
+// Un artículo que no se vende suelto arranca en su presentación más chica que alcance;
+// los demás, suelto, como siempre.
+const startingPresentationId = (product: Product): string | null => {
+  if (isSoldLoose(product)) return null;
+  return presentationsOf(product).find((p) => p.units <= product.stock)?.id ?? null;
+};
+
+let lineSeq = 0;
+const newLine = (product: Product, presentationId: string | null = startingPresentationId(product)): Line => ({
+  key: `l${++lineSeq}`,
+  product,
+  presentationId,
+  qty: '1',
+});
 
 // ── Host ────────────────────────────────────────────────────────────────────
 // El diálogo vive a nivel de página y no en la fila del inventario: al enviar,
@@ -133,7 +163,7 @@ export function TransferProductDialog({
     if (!open) return;
     setLines((initialProducts ?? [])
       .filter((p) => p.tracksStock && p.stock > 0)
-      .map((p) => ({ product: p, qty: '1' })));
+      .map((p) => newLine(p)));
     setTargetBranchId(
       initialTargetBranchId && availableBranches.some((b) => b.id === initialTargetBranchId)
         ? initialTargetBranchId
@@ -190,8 +220,23 @@ export function TransferProductDialog({
   }, [candidatos, query]);
 
   const agregar = (p: Product) => {
-    setLines((prev) => [...prev, { product: p, qty: '1' }]);
+    setLines((prev) => [...prev, newLine(p)]);
     setQuery('');
+  };
+
+  // Otra línea del mismo artículo con una presentación que todavía no esté en el envío,
+  // pegada a las suyas.
+  const agregarOtra = (product: Product) => {
+    setLines((prev) => {
+      const usadas = prev.filter((l) => l.product.id === product.id).map((l) => l.presentationId);
+      const libre = optionsOf(product).find((o) => !usadas.includes(o));
+      if (libre === undefined) return prev;
+      let ultima = -1;
+      prev.forEach((l, i) => { if (l.product.id === product.id) ultima = i; });
+      const next = [...prev];
+      next.splice(ultima + 1, 0, newLine(product, libre));
+      return next;
+    });
   };
 
   // Enter con un lector de códigos: si el código coincide exacto, se agrega.
@@ -205,25 +250,85 @@ export function TransferProductDialog({
     if (resultados.length === 1) agregar(resultados[0]);
   };
 
-  const setQty = (id: string, raw: string) => {
+  const setQty = (key: string, raw: string) => {
     setLines((prev) => prev.map((l) => {
-      if (l.product.id !== id) return l;
-      return qtyInputRegex(l.product.unit).test(raw) ? { ...l, qty: raw } : l;
+      if (l.key !== key) return l;
+      // Las presentaciones van enteras aunque la unidad del artículo sea medible.
+      const mask = l.presentationId ? qtyInputRegex('und') : qtyInputRegex(l.product.unit);
+      return mask.test(raw) ? { ...l, qty: raw } : l;
     }));
   };
 
-  const quitar = (id: string) => setLines((prev) => prev.filter((l) => l.product.id !== id));
+  const setPresentation = (key: string, value: string) => {
+    setLines((prev) => prev.map((l) => {
+      if (l.key !== key) return l;
+      if (value === SUELTO) return { ...l, presentationId: null };
+      // 1.5 lb no se vuelve "2 sacos" sola: si la cantidad no es entera, arranca en 1.
+      const q = parseQtyInput(l.qty);
+      return { ...l, presentationId: value, qty: Number.isInteger(q) && q > 0 ? l.qty : '1' };
+    }));
+  };
+
+  const quitar = (key: string) => setLines((prev) => prev.filter((l) => l.key !== key));
+
+  // ── Presentaciones y tope por línea ──
+  // La presentación que lleva la línea, buscada en las del artículo; undefined = suelta.
+  const presentationOf = (l: Line): ProductPresentation | undefined =>
+    l.presentationId ? presentationsOf(l.product).find((p) => p.id === l.presentationId) : undefined;
+
+  // La línea como renglón de carrito, para reusar lineBaseQty y maxAddable. Una
+  // cantidad vacía o ilegible cuenta 0, así una línea a medio escribir no le quita
+  // lugar a las demás.
+  const asItem = (l: Line): CartItem => {
+    const q = parseQtyInput(l.qty);
+    const presentation = presentationOf(l);
+    return {
+      cartItemId: l.key,
+      product: l.product,
+      quantity: Number.isFinite(q) && q > 0 ? q : 0,
+      presentation: presentation ? toLinePresentation(presentation) : undefined,
+    };
+  };
+
+  const comparteArticulo = (l: Line) => lines.some((o) => o.key !== l.key && o.product.id === l.product.id);
+
+  // Lo más que cabe en la línea: las existencias menos lo que piden las OTRAS líneas
+  // del mismo artículo (todo en unidades base), entre las unidades de la presentación.
+  const maxDe = (l: Line): number =>
+    maxAddable(
+      l.product,
+      lines.filter((o) => o.key !== l.key).map(asItem),
+      presentationOf(l)?.units ?? 1,
+    );
 
   // ── Validación ──
   const errorDe = (l: Line): string | null => {
+    const presentation = presentationOf(l);
+    if (l.presentationId && !presentation) return 'Presentación no disponible';
     const q = parseQtyInput(l.qty);
     if (!Number.isFinite(q) || q <= 0) return 'Cantidad inválida';
-    if (!unitAllowsDecimals(l.product.unit) && !Number.isInteger(q)) return 'Solo enteros';
-    if (q > l.product.stock) return `Solo hay ${formatQty(l.product.stock)}`;
+    if ((presentation || !unitAllowsDecimals(l.product.unit)) && !Number.isInteger(q)) return 'Solo enteros';
+    const max = maxDe(l);
+    if (q > max) {
+      // Suelto y sin otras líneas del artículo: lo de siempre.
+      if (!presentation && !comparteArticulo(l)) return `Solo hay ${formatQty(l.product.stock)}`;
+      return max > 0 ? `Máximo ${formatQty(max)}` : 'No alcanza';
+    }
     return null;
   };
   const hayErrores = lines.some((l) => errorDe(l) !== null);
-  const quedanEnCero = lines.filter((l) => !errorDe(l) && parseQtyInput(l.qty) === l.product.stock);
+
+  // Artículos que se mandan completos: lo de todas sus líneas, en unidades base,
+  // suma exactamente sus existencias.
+  const quedanEnCero = lines
+    .filter((l, i) => lines.findIndex((o) => o.product.id === l.product.id) === i)
+    .filter((l) => {
+      const suyas = lines.filter((o) => o.product.id === l.product.id);
+      if (suyas.some((o) => errorDe(o) !== null)) return false;
+      return roundQty(suyas.reduce((acc, o) => acc + lineBaseQty(asItem(o)), 0)) === roundQty(l.product.stock);
+    })
+    .map((l) => l.product);
+  const cuantosArticulos = new Set(lines.map((l) => l.product.id)).size;
 
   const onSubmit = async () => {
     if (!activeBranchId) return;
@@ -258,7 +363,11 @@ export function TransferProductDialog({
       const result = await sendTransfer({
         fromBranchId: activeBranchId,
         toBranchId: targetBranchId,
-        items: lines.map((l) => ({ productId: l.product.id, quantity: parseQtyInput(l.qty) })),
+        items: lines.map((l) => ({
+          productId: l.product.id,
+          quantity: parseQtyInput(l.qty),
+          presentationId: l.presentationId ?? undefined,
+        })),
         targetLocationId: locationId,
         archiveEmpty,
         notes,
@@ -267,7 +376,8 @@ export function TransferProductDialog({
       const destino = branches.find((b) => b.id === targetBranchId)?.name ?? 'la otra sucursal';
       toast({
         title: `Conduce ${formatTransferNumber(result.number)} enviado`,
-        description: `${result.items} ${result.items === 1 ? 'artículo' : 'artículos'} a ${destino}.`,
+        // Los artículos, no las líneas: 1 Caja + 5 sueltas del mismo artículo es uno.
+        description: `${cuantosArticulos} ${cuantosArticulos === 1 ? 'artículo' : 'artículos'} a ${destino}.`,
       });
       onOpenChange(false);
       onSent?.(result.batchId);
@@ -356,24 +466,65 @@ export function TransferProductDialog({
               <div className="rounded-md border divide-y">
                 {lines.map((l) => {
                   const err = errorDe(l);
+                  const presentation = presentationOf(l);
+                  const unit = getUnit(l.product.unit);
+                  const presentations = presentationsOf(l.product);
+                  const suyas = lines.filter((o) => o.product.id === l.product.id);
+                  const usadaPorOtra = (id: string | null) => suyas.some((o) => o.key !== l.key && o.presentationId === id);
+                  const hayLibres = optionsOf(l.product).some((o) => !suyas.some((s) => s.presentationId === o));
+                  const esUltima = suyas[suyas.length - 1].key === l.key;
+                  const base = lineBaseQty(asItem(l));
                   return (
-                    <div key={l.product.id} className="flex items-start gap-2 p-2">
+                    <div key={l.key} className="flex items-start gap-2 p-2">
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium break-words">{l.product.name}</p>
                         <p className="text-xs text-muted-foreground">
                           {l.product.code ? `${l.product.code} · ` : ''}hay {formatQuantity(l.product.stock, l.product.unit)}
                         </p>
+                        {presentations.length > 0 && (
+                          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <Select value={l.presentationId ?? SUELTO} onValueChange={(v) => setPresentation(l.key, v)}>
+                              <SelectTrigger className="h-8 w-full text-xs sm:w-56" aria-label={`Presentación de ${l.product.name}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value={SUELTO} disabled={usadaPorOtra(null)}>
+                                  {capitalize(unit.singular)}
+                                </SelectItem>
+                                {presentations.map((p) => (
+                                  <SelectItem key={p.id} value={p.id} disabled={usadaPorOtra(p.id)}>
+                                    {presentationLabel(p, unit.short)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {presentation && base > 0 && (
+                              <span className="text-xs text-muted-foreground">= {formatQuantity(base, l.product.unit)}</span>
+                            )}
+                          </div>
+                        )}
+                        {presentations.length > 0 && hayLibres && esUltima && (
+                          <Button
+                            type="button"
+                            variant="link"
+                            size="sm"
+                            className="mt-0.5 h-auto p-0 text-xs"
+                            onClick={() => agregarOtra(l.product)}
+                          >
+                            <Plus className="mr-1 h-3 w-3" /> Otra presentación de este artículo
+                          </Button>
+                        )}
                       </div>
                       <div className="w-24 shrink-0">
                         <Input
-                          inputMode={unitAllowsDecimals(l.product.unit) ? 'decimal' : 'numeric'}
+                          inputMode={presentation || !unitAllowsDecimals(l.product.unit) ? 'numeric' : 'decimal'}
                           value={l.qty}
-                          onChange={(e) => setQty(l.product.id, e.target.value)}
-                          aria-label={`Cantidad de ${l.product.name}`}
+                          onChange={(e) => setQty(l.key, e.target.value)}
+                          aria-label={`Cantidad de ${l.product.name}${presentation ? ` (${presentation.name})` : ''}`}
                           className={err ? 'border-destructive' : undefined}
                         />
                         <p className={`mt-0.5 text-[11px] ${err ? 'text-destructive' : 'text-muted-foreground'}`}>
-                          {err ?? getUnit(l.product.unit).plural}
+                          {err ?? (presentation ? presentation.name : unit.plural)}
                         </p>
                       </div>
                       <Button
@@ -381,8 +532,8 @@ export function TransferProductDialog({
                         variant="ghost"
                         size="icon"
                         className="shrink-0"
-                        onClick={() => quitar(l.product.id)}
-                        aria-label={`Quitar ${l.product.name}`}
+                        onClick={() => quitar(l.key)}
+                        aria-label={`Quitar ${l.product.name}${presentation ? ` (${presentation.name})` : ''}`}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -441,7 +592,7 @@ export function TransferProductDialog({
               <p className="text-xs text-muted-foreground">
                 Se archivan, no se borran: su historial sigue y, si vuelven por transferencia, se reactivan solos.
                 {archiveEmpty && quedanEnCero.length > 0 && (
-                  <> Con este envío: {quedanEnCero.map((l) => `«${l.product.name}»`).join(', ')}.</>
+                  <> Con este envío: {quedanEnCero.map((p) => `«${p.name}»`).join(', ')}.</>
                 )}
               </p>
             </div>
@@ -469,7 +620,7 @@ export function TransferProductDialog({
             disabled={isSubmitting || availableBranches.length === 0 || lines.length === 0}
           >
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Transferir {lines.length > 0 ? `${lines.length} ${lines.length === 1 ? 'artículo' : 'artículos'}` : ''}
+            Transferir {lines.length > 0 ? `${cuantosArticulos} ${cuantosArticulos === 1 ? 'artículo' : 'artículos'}` : ''}
           </Button>
         </DialogFooter>
       </DialogContent>

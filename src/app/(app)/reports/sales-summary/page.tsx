@@ -26,6 +26,7 @@ import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToSale } from '@/lib/supabase/mappers';
 import { fetchAllRows } from '@/lib/supabase/paginate';
+import { lineBaseQty } from '@/lib/presentations';
 import type { Sale } from '@/lib/types';
 import { ExportButton } from '@/components/reports/export-button';
 
@@ -185,7 +186,8 @@ export default function SalesSummaryReportPage() {
       subtotal += s.subtotal;
       if (s.customerId) clientes.add(s.customerId);
       s.items.forEach((it) => {
-        articulos += it.quantity;
+        // Unidades base. El descuento de abajo es dinero por presentación: no se convierte.
+        articulos += lineBaseQty(it);
         // `product.price` es el precio de lista que quedó grabado en la línea;
         // `customPrice`, lo que se cobró de verdad si en caja se rebajó.
         const lista = it.product.price;
@@ -315,7 +317,7 @@ export default function SalesSummaryReportPage() {
               { header: 'Usuario', value: (s) => s.userName ?? '' },
               { header: 'Cliente', value: (s) => s.customer?.name ?? '' },
               { header: 'NCF', value: (s) => s.ncf ?? '' },
-              { header: 'Articulos', value: (s) => s.items.reduce((a, i) => a + i.quantity, 0) },
+              { header: 'Articulos', value: (s) => s.items.reduce((a, i) => a + lineBaseQty(i), 0) },
               { header: 'Subtotal', value: (s) => s.subtotal },
               { header: 'ITBIS', value: (s) => s.itbisAmount },
               { header: 'Total', value: (s) => s.total },

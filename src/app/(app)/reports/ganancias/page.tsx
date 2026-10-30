@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCurrency } from '@/lib/utils';
 import { formatQty } from '@/lib/units';
+import { lineBaseQty } from '@/lib/presentations';
 import type { CartItem, Sale } from '@/lib/types';
 import { isUncostedQuick, lineBase, quickUnitPrice, topProductKey } from '@/lib/quick-sales';
 import { useSales } from '@/context/sales-provider';
@@ -295,7 +296,9 @@ export default function GananciasReportPage() {
     filteredSales.forEach((sale) => {
       (sale.items ?? []).forEach((item) => {
         if (isUncostedQuick(item)) return;
-        filaDe(item).qty += item.quantity;
+        // Unidades base: 2 paquetes de 12 son 24. El dinero de abajo no se convierte,
+        // porque precio y costo de la línea ya son por presentación.
+        filaDe(item).qty += lineBaseQty(item);
       });
     });
 

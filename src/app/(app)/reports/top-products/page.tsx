@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { formatCurrency } from '@/lib/utils';
 import { formatQuantity, roundQty } from '@/lib/units';
 import { topProductKey } from '@/lib/quick-sales';
+import { lineBaseQty } from '@/lib/presentations';
 import { BarChart } from 'lucide-react';
 import { ExportButton } from '@/components/reports/export-button';
 import { SalesChart } from '@/components/reports/sales-chart';
@@ -47,7 +48,10 @@ export default function TopProductsReportPage() {
         const price = item.customPrice ?? item.product.price;
         productSales.set(key, {
           ...currentSales,
-          quantity: roundQty(currentSales.quantity + item.quantity),
+          // Las unidades se cuentan en la base del producto (2 paquetes de 12 son 24),
+          // para que el ranking y la unidad mostrada coincidan. El ingreso no cambia:
+          // el precio de la línea ya es el de la presentación.
+          quantity: roundQty(currentSales.quantity + lineBaseQty(item)),
           revenue: currentSales.revenue + (price * item.quantity),
           unit: currentSales.unit ?? item.product.unit,
         });

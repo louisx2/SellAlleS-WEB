@@ -14,9 +14,10 @@ import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
 import { useToast } from '@/hooks/use-toast';
 import { TransferDialogHost, useOpenTransfer } from '@/components/products/transfer-product-dialog';
-import { TransferSlipDialog, formatTransferDate, formatTransferNumber } from '@/components/products/transfer-slip';
+import {
+  TransferSlipDialog, formatTransferDate, formatTransferLineQty, formatTransferNumber, transferBaseTotal,
+} from '@/components/products/transfer-slip';
 import { fetchTransferBatches, type TransferBatch } from '@/lib/transfers';
-import { formatQuantity, roundQty } from '@/lib/units';
 
 const normalizar = (s: string) =>
   s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
@@ -134,7 +135,7 @@ function TransferenciasContent({ refresh }: { refresh: number }) {
             const abierto = abiertos.has(b.id);
             const sale = b.fromBranchId === activeBranchId;
             const entra = b.toBranchId === activeBranchId;
-            const total = roundQty(b.lines.reduce((acc, l) => acc + l.quantity, 0));
+            const total = transferBaseTotal(b.lines);
             return (
               <Card key={b.id}>
                 <CardContent className="p-0">
@@ -186,7 +187,7 @@ function TransferenciasContent({ refresh }: { refresh: number }) {
                                 {l.sourceArchived && ' · quedó en 0 y se archivó en la que envió'}
                               </p>
                             </div>
-                            <span className="shrink-0 whitespace-nowrap font-medium">{formatQuantity(l.quantity, l.unit)}</span>
+                            <span className="shrink-0 whitespace-nowrap font-medium">{formatTransferLineQty(l)}</span>
                           </li>
                         ))}
                       </ul>

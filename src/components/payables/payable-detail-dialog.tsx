@@ -10,9 +10,10 @@ import {
 import { Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import type { SupplierInvoice, SupplierPayment } from '@/lib/types';
+import type { SupplierInvoice, SupplierInvoiceItem, SupplierPayment } from '@/lib/types';
 import { cn, formatCurrency } from '@/lib/utils';
-import { formatQty } from '@/lib/units';
+import { useProducts } from '@/context/product-provider';
+import { formatLineQty } from '@/lib/line-format';
 import { EXPENSE_TYPES_606, ISR_RETENTION_TYPES_606, PAYMENT_FORMS_606 } from '@/lib/dgii-606';
 
 interface PayableDetailDialogProps {
@@ -40,8 +41,23 @@ const Row = ({ label, value }: { label: string; value: React.ReactNode }) => (
 );
 
 export function PayableDetailDialog({ invoice, open, onOpenChange, onVoidPayment }: PayableDetailDialogProps) {
+  const { products } = useProducts();
   const retenciones = invoice.itbisRetenido + invoice.isrRetentionAmount;
   const hasFiscal = !!invoice.ncf || invoice.itbisFacturado > 0 || retenciones > 0;
+
+  // La línea guardada no trae la unidad del producto, solo su id. Con presentación
+  // hace falta ("2 Saco x125 lb"); el producto puede estar archivado o no cargado, y
+  // entonces queda "2 Saco x125". Una línea suelta se muestra como siempre: sin unidad.
+  const lineQty = (item: SupplierInvoiceItem) =>
+    formatLineQty({
+      quantity: item.quantity,
+      presentation: item.presentation,
+      product: {
+        unit: item.presentation
+          ? (products.find((p) => p.id === item.productId)?.unit ?? 'und')
+          : 'und',
+      },
+    });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -97,7 +113,7 @@ export function PayableDetailDialog({ invoice, open, onOpenChange, onVoidPayment
                 <div key={item.id} className="flex justify-between gap-4 text-sm">
                   <span>
                     {item.description}
-                    <span className="text-muted-foreground"> × {formatQty(item.quantity)}</span>
+                    <span className="text-muted-foreground"> × {lineQty(item)}</span>
                   </span>
                   <span className="font-medium">{formatCurrency(item.quantity * item.unitCost)}</span>
                 </div>

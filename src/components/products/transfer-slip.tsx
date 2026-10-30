@@ -10,9 +10,22 @@ import { Button } from '@/components/ui/button';
 import { useBranches } from '@/context/branch-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatQuantity, roundQty } from '@/lib/units';
-import { fetchTransferBatch, type TransferBatch } from '@/lib/transfers';
+import { formatLineQty } from '@/lib/line-format';
+import { lineBaseQty } from '@/lib/presentations';
+import { fetchTransferBatch, type TransferBatch, type TransferLine } from '@/lib/transfers';
 
 export const formatTransferNumber = (n: number) => `#${String(n).padStart(5, '0')}`;
+
+/** Lo que se mandó en la línea: "2 Caja x12" si fue por presentación; si no,
+ *  igual que antes de las presentaciones ("3 unidades", "1.7 lb"). */
+export const formatTransferLineQty = (l: TransferLine) =>
+  l.presentation
+    ? formatLineQty({ quantity: l.quantity, presentation: l.presentation, product: { unit: l.unit ?? 'und' } })
+    : formatQuantity(l.quantity, l.unit);
+
+/** Unidades base de todo el envío: 2 Caja x12 + 5 sueltas = 29. */
+export const transferBaseTotal = (lines: TransferLine[]) =>
+  roundQty(lines.reduce((acc, l) => acc + lineBaseQty(l), 0));
 
 export const formatTransferDate = (iso: string) =>
   new Date(iso).toLocaleString('es-DO', {
@@ -25,7 +38,7 @@ export const TransferSlip = forwardRef<HTMLDivElement, { batch: TransferBatch }>
   const { branches } = useBranches();
   const { profile } = useCompanyProfile();
   const branchName = (id: string) => branches.find((b) => b.id === id)?.name ?? 'Sucursal';
-  const totalUnits = roundQty(batch.lines.reduce((acc, l) => acc + l.quantity, 0));
+  const totalUnits = transferBaseTotal(batch.lines);
 
   return (
     <div ref={ref} className="bg-white p-6 text-sm text-black">
@@ -76,7 +89,14 @@ export const TransferSlip = forwardRef<HTMLDivElement, { batch: TransferBatch }>
             <tr key={l.id} className="border-b align-top">
               <td className="py-1.5 pr-2 font-mono text-xs break-all">{l.productCode ?? '—'}</td>
               <td className="py-1.5 pr-2">{l.productName}</td>
-              <td className="py-1.5 text-right whitespace-nowrap">{formatQuantity(l.quantity, l.unit)}</td>
+              <td className="py-1.5 text-right whitespace-nowrap">
+                {formatTransferLineQty(l)}
+                {l.presentation && (
+                  <span className="block text-xs text-gray-500">
+                    = {formatQuantity(lineBaseQty(l), l.unit)}
+                  </span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
