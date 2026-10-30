@@ -5,7 +5,7 @@ import type { CartItem, Product, ProductPresentation, LinePresentation, Sale, Cu
 import { ITBIS_RATE, GENERIC_CUSTOMER, round2 } from '@/lib/utils';
 import { roundQty, normalizeQty, formatQuantity, unitAllowsDecimals, getUnit } from '@/lib/units';
 import {
-  baseQtyInCart, lineBaseQty, lineProduct, maxAddable, presentationLabel, toLinePresentation,
+  baseQtyInCart, isSoldLoose, lineBaseQty, lineProduct, maxAddable, presentationLabel, toLinePresentation,
 } from '@/lib/presentations';
 import { buildQuickCartItem, quickUnitPrice, type QuickItemInput } from '@/lib/quick-sales';
 import { useAuth } from '@/context/auth-provider';
@@ -35,7 +35,9 @@ interface CartState {
 interface CartActions {
   // `quantity` es para quien agrega varias unidades de una vez (alta desde Venta
   // rápida); sin él se suma 1, como siempre. Con `presentation` la línea se vende
-  // por paquete/caja: `quantity` cuenta presentaciones, no unidades base.
+  // por paquete/caja: `quantity` cuenta presentaciones, no unidades base. Un producto
+  // que no se vende suelto (`soldLoose === false`) se rechaza si llega sin presentación
+  // (código escaneado o botón viejo): si no, el cobro fallaría recién al final.
   addItem: (product: Product, quantity?: number, presentation?: ProductPresentation) => void;
   addQuickItem: (input: QuickItemInput) => void;
   removeItem: (cartItemId: string) => void;
@@ -118,6 +120,11 @@ const cartStore = create<CartStore>()(
       addItem: (product, quantity = 1, presentation) => set(state => {
         const newCarts = state.carts.map(cart => {
           if (cart.id === state.activeCartId) {
+            if (!presentation && !isSoldLoose(product)) {
+              set({ toast: `«${product.name}» no se vende suelto.` });
+              setTimeout(() => set({ toast: null }), 3000);
+              return cart;
+            }
             // Unidades base que trae lo que se agrega: 1 si es suelto. El stock se
             // compara siempre contra la suma de todas las líneas del producto en
             // unidades base (2 paquetes + 7 sueltas), no contra cada línea sola.

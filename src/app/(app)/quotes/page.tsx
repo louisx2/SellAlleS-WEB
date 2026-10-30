@@ -100,8 +100,9 @@ export default function QuotesPage() {
         continue;
       }
       // Si la línea se cotizó por paquete/caja, se busca esa presentación en el
-      // producto de hoy (por id): se carga con su precio actual. Si ya no existe, o
-      // el producto dejó de venderse suelto, la línea no se carga.
+      // producto de hoy (por id). Si ya no existe, trae otra cantidad de unidades o
+      // el producto dejó de venderse suelto, la línea no se carga. Si sigue igual,
+      // el precio cotizado manda (abajo, vía `customPrice`) aunque el de lista cambie.
       const { presentation, missing: gone } = resolveQuotedPresentation(it.presentation, product);
       if (gone) {
         presentationBlocked = true;

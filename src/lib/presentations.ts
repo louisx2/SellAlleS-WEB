@@ -293,7 +293,9 @@ export function presentationColumns(product: Product): Record<string, string> {
 
 // Qué hacer con una línea cotizada al cargarla en el POS. Con la presentación que
 // sigue existiendo (se busca por id), devuelve la ACTUAL, con su precio de hoy. Si
-// ya no existe o el producto ya no se vende suelto, `missing` dice qué falta.
+// ya no existe, si trae otra cantidad de unidades que cuando se cotizó (el precio
+// cotizado era el de otra caja) o si el producto ya no se vende suelto, `missing`
+// dice qué falta.
 export function resolveQuotedPresentation(
   quoted: LinePresentation | undefined,
   product: Product,
@@ -302,7 +304,9 @@ export function resolveQuotedPresentation(
     return isSoldLoose(product) ? {} : { missing: `${product.name} (ya no se vende suelto)` };
   }
   const current = quoted.id ? (product.presentations ?? []).find((p) => p.id === quoted.id) : undefined;
-  return current
-    ? { presentation: current }
-    : { missing: `${quoted.name} de ${product.name} (la presentación ya no existe)` };
+  if (!current) return { missing: `${quoted.name} de ${product.name} (la presentación ya no existe)` };
+  if (round3(current.units) !== round3(quoted.units)) {
+    return { missing: `${quoted.name} de ${product.name} (la presentación cambió)` };
+  }
+  return { presentation: current };
 }

@@ -403,6 +403,12 @@ test('resolveQuotedPresentation', () => {
     resolveQuotedPresentation(undefined, galletas({ soldLoose: false })),
     { missing: 'Galletas (ya no se vende suelto)' },
   );
+  // La Caja sigue existiendo (mismo id) pero ahora trae otra cantidad: el precio
+  // cotizado era el de una caja de 12 y no se le puede aplicar a una de 288.
+  assert.deepEqual(
+    resolveQuotedPresentation({ id: CAJA.id, name: 'Caja', units: 12 }, galletas()),
+    { missing: 'Caja de Galletas (la presentación cambió)' },
+  );
   // Con el id presente: la presentación ACTUAL, con su precio de hoy.
   const r = resolveQuotedPresentation({ id: 'pp', name: 'Paquete', units: 12 }, p);
   assert.equal(r.missing, undefined);
