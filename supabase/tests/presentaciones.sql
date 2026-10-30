@@ -689,4 +689,340 @@ begin
   assert (select stock from products where id = pg_temp.prod(114)) = 50, 'sin control: el stock no debía cambiar al anular';
 end $t$;
 
+-- == Task 3: compras y transferencias por presentación ==
+-- Estado explícito de la sección: super admin de la demo; el módulo de compras
+-- se enciende dentro de la transacción (company_modules: clave primaria
+-- (company_id, module_key)). Fixtures: suplidor e1f0; en la sucursal Principal
+-- (b1) e121 "Galletas Envio" (und, código E121, stock 0, costo 12.5) con la Caja
+-- e122 (288 u, RD$3,600, código E121-288) y el Paquete e123 (12 u, RD$180,
+-- código E121-12); en la sucursal Prueba e124 "Otro Envio" con código E121-288
+-- (otro nombre a propósito: transfer_products busca el destino por código y
+-- luego por NOMBRE, y uno llamado igual recibiría el stock en vez de crearse el
+-- producto). La presentación e1f1 (de e124) se crea en el escenario que la usa.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'purchases', true)
+on conflict (company_id, module_key) do update set enabled = true;
+
+-- Compra a nombre del suplidor de prueba.
+create function pg_temp.comprar(p_items text) returns jsonb
+language plpgsql as $$
+begin
+  return create_supplier_invoice(
+    p_supplier_id => '00000000-0000-0000-0000-00000000e1f0',
+    p_issue_date => current_date,
+    p_branch_id => '00000000-0000-0000-0000-0000000000b1',
+    p_subtotal_goods => 6000,
+    p_items => p_items::jsonb);
+end $$;
+
+-- Envío de la sucursal Principal a la sucursal Prueba.
+create function pg_temp.enviar(p_items text) returns jsonb
+language plpgsql as $$
+begin
+  return transfer_products('00000000-0000-0000-0000-0000000000b1',
+                           '169fe6bb-91fa-4633-8e43-5a45e410e2b0', p_items::jsonb);
+end $$;
+
+insert into suppliers (id, company_id, name) values
+  ('00000000-0000-0000-0000-00000000e1f0', '00000000-0000-0000-0000-0000000000aa', 'Suplidor Envio');
+insert into products (id, company_id, branch_id, name, code, unit, stock, cost, price, tracks_stock) values
+  (pg_temp.prod(121), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'Galletas Envio', 'E121', 'und', 0, 12.5, 15, true),
+  (pg_temp.prod(124), '00000000-0000-0000-0000-0000000000aa', '169fe6bb-91fa-4633-8e43-5a45e410e2b0',
+   'Otro Envio', 'E121-288', 'und', 0, 5, 8, true);
+insert into product_presentations (id, product_id, name, units, price, code) values
+  (pg_temp.prod(122), pg_temp.prod(121), 'Caja', 288, 3600, 'E121-288'),
+  (pg_temp.prod(123), pg_temp.prod(121), 'Paquete', 12, 180, 'E121-12');
+
+-- Las dos funciones conservan su modo de seguridad y su search_path (se
+-- reescriben con CREATE OR REPLACE y no pueden cambiar de dueño de privilegios).
+do $t$
+begin
+  assert (select prosecdef from pg_proc where oid = 'public.transfer_products'::regproc),
+         'seguridad: transfer_products dejó de ser security definer';
+  assert not (select prosecdef from pg_proc where oid = 'public.create_supplier_invoice'::regproc),
+         'seguridad: create_supplier_invoice dejó de ser security invoker';
+  assert (select 'search_path=public' = any (coalesce(proconfig, '{}'))
+            from pg_proc where oid = 'public.transfer_products'::regproc),
+         'seguridad: transfer_products sin search_path';
+  assert (select 'search_path=public' = any (coalesce(proconfig, '{}'))
+            from pg_proc where oid = 'public.create_supplier_invoice'::regproc),
+         'seguridad: create_supplier_invoice sin search_path';
+  assert not has_function_privilege('anon', 'public.transfer_products'::regproc, 'execute'),
+         'permisos: anon puede ejecutar transfer_products';
+end $t$;
+
+-- Compra de 2 cajas → +576 unidades base. Lo que el navegador mande en
+-- `units_per` / `presentation_name` se ignora: los pone el servidor.
+do $t$
+declare v jsonb;
+begin
+  v := pg_temp.comprar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122",
+      "description":"Caja","quantity":2,"unit_cost":3000,"units_per":1,"presentation_name":"X"}]');
+  assert (select stock from products where id = pg_temp.prod(121)) = 576,
+         'compra: 2 cajas de 288 debían dejar el stock en 576; quedó en '
+         || (select stock from products where id = pg_temp.prod(121));
+  assert (select units_per = 288 and presentation_name = 'Caja' and presentation_id = pg_temp.prod(122)
+              and quantity = 2 and unit_cost = 3000
+            from supplier_invoice_items where invoice_id = (v->>'invoice_id')::uuid),
+         'compra: la línea debía guardar units_per 288, nombre Caja, la presentación, cantidad 2 y costo 3000 por caja';
+end $t$;
+
+-- Rechazos de la compra (cada uno revierte lo que hiciera antes de fallar).
+do $t$
+begin
+  -- La presentación de otro producto no vale (e123 es de e121, no de e124).
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.comprar('[{"product_id":"00000000-0000-0000-0000-00000000e124","presentation_id":"00000000-0000-0000-0000-00000000e123","description":"Paquete","quantity":1,"unit_cost":150}]')$j$,
+    'La presentación no corresponde a este producto.');
+  -- Ni una que no existe.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.comprar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e1ff","description":"Caja","quantity":1,"unit_cost":3000}]')$j$,
+    'La presentación no corresponde a este producto.');
+  -- Ni una línea sin producto.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.comprar('[{"presentation_id":"00000000-0000-0000-0000-00000000e122","description":"Caja","quantity":1,"unit_cost":3000}]')$j$,
+    'La presentación no corresponde a este producto.');
+  -- Las presentaciones van enteras.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.comprar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122","description":"Caja","quantity":1.5,"unit_cost":3000}]')$j$,
+    'Las presentaciones van enteras: la cantidad tiene que ser un número entero.');
+
+  assert (select stock from products where id = pg_temp.prod(121)) = 576, 'compra rechazada: movió el stock';
+  assert (select count(*) from supplier_invoices where supplier_id = '00000000-0000-0000-0000-00000000e1f0') = 1,
+         'compra rechazada: dejó una factura a medias';
+end $t$;
+
+-- Transferir 1 caja a la sucursal Prueba, donde E121 no existe: se crea el
+-- producto con todas las presentaciones del original. La Caja trae el código
+-- E121-288, que allá ya usa e124: la copia queda sin código; el Paquete trae
+-- E121-12, que allá está libre: lo conserva.
+do $t$
+declare v jsonb;
+begin
+  v := pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122","quantity":1}]');
+  assert (select stock from products where id = pg_temp.prod(121)) = 288,
+         'envío 1: el origen debía quedar en 288 (576 − 288); quedó en '
+         || (select stock from products where id = pg_temp.prod(121));
+  assert (select stock from products where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121') = 288,
+         'envío 1: el producto creado en Prueba debía nacer con 288';
+  assert (select stock from products where id = pg_temp.prod(124)) = 0,
+         'envío 1: e124 (otro nombre y otro código) no debía recibir stock';
+  assert (select count(*) from product_presentations pp join products p on p.id = pp.product_id
+           where p.branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and p.code = 'E121') = 2,
+         'envío 1: el producto creado debía traer sus dos presentaciones';
+  assert (select pp.code is null and pp.units = 288 and pp.price = 3600
+            from product_presentations pp join products p on p.id = pp.product_id
+           where p.branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and p.code = 'E121' and pp.name = 'Caja'),
+         'envío 1: la Caja copiada debía quedar sin código (E121-288 ya lo usa e124 allá) y con sus unidades y precio';
+  assert (select pp.code = 'E121-12' and pp.units = 12 and pp.price = 180
+            from product_presentations pp join products p on p.id = pp.product_id
+           where p.branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and p.code = 'E121' and pp.name = 'Paquete'),
+         'envío 1: el Paquete debía conservar su código E121-12 (allá está libre)';
+  assert (select count(*) from product_presentations where product_id = pg_temp.prod(121)) = 2,
+         'envío 1: las presentaciones del origen no debían tocarse';
+  assert (select quantity = 1 and units_per = 288 and presentation_name = 'Caja' and unit_cost = 3600
+              and unit = 'und' and target_created and not source_archived
+            from product_transfers where batch_id = (v->>'batch_id')::uuid),
+         'envío 1: product_transfers debía guardar cantidad 1, units_per 288, nombre Caja y costo 3600 (12.5 × 288)';
+end $t$;
+
+-- Segundo envío: el destino ya existe y sus presentaciones no se tocan (se
+-- sube el precio de la Caja allá, se borra el Paquete allá, se envía 1 paquete:
+-- el precio sigue igual y el Paquete no reaparece).
+do $t$
+declare v jsonb; v_dest uuid;
+begin
+  select id into v_dest from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  update product_presentations set price = 4000 where product_id = v_dest and name = 'Caja';
+  delete from product_presentations where product_id = v_dest and name = 'Paquete';
+
+  v := pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":1}]');
+  assert (select stock from products where id = pg_temp.prod(121)) = 276,
+         'envío 2: el origen debía quedar en 276 (288 − 12); quedó en '
+         || (select stock from products where id = pg_temp.prod(121));
+  assert (select stock from products where id = v_dest) = 300, 'envío 2: el destino existente debía subir a 300';
+  assert (select count(*) from product_presentations where product_id = v_dest) = 1
+     and (select price = 4000 and units = 288 from product_presentations where product_id = v_dest and name = 'Caja'),
+         'envío 2: las presentaciones del destino existente no debían tocarse';
+  assert (select quantity = 1 and units_per = 12 and presentation_name = 'Paquete' and unit_cost = 150
+              and not target_created and target_product_id = v_dest
+            from product_transfers where batch_id = (v->>'batch_id')::uuid),
+         'envío 2: product_transfers debía guardar cantidad 1, units_per 12, nombre Paquete y costo 150 (12.5 × 12)';
+end $t$;
+
+-- Rechazos del envío. El origen tiene 276; el stock se compara contra el total
+-- en unidades base de TODAS las líneas del mismo producto.
+do $t$
+begin
+  -- 1 caja + 3 sueltas = 291 > 276.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122","quantity":1},
+         {"product_id":"00000000-0000-0000-0000-00000000e121","quantity":3}]')$j$,
+    'No hay suficiente «Galletas Envio»%');
+  -- Cada línea cabe sola (240 y 37 de 276) pero juntas son 277.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","quantity":37},
+         {"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":20}]')$j$,
+    'No hay suficiente «Galletas Envio»%');
+  -- Una sola línea: 24 paquetes son 288 unidades base, no 24.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":24}]')$j$,
+    'No hay suficiente «Galletas Envio»: hay 276, se quieren enviar 288.');
+  -- Las presentaciones van enteras (aunque el producto sea contable, el mensaje es el de las presentaciones).
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122","quantity":1.5}]')$j$,
+    'Las presentaciones van enteras%');
+  -- La presentación de otro producto (la Caja del producto creado en Prueba) no vale.
+  perform pg_temp.debe_fallar(
+    format($j$select pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"%s","quantity":1}]')$j$,
+           (select pp.id from product_presentations pp join products p on p.id = pp.product_id
+             where p.branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and p.code = 'E121' and pp.name = 'Caja')),
+    'La presentación no corresponde a este producto.');
+  -- Ni una que no existe.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e1ff","quantity":1}]')$j$,
+    'La presentación no corresponde a este producto.');
+  -- La cantidad suelta sigue pidiendo enteros en una unidad contable.
+  perform pg_temp.debe_fallar(
+    $j$select pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","quantity":1.5}]')$j$,
+    '«Galletas Envio» se cuenta por piezas: la cantidad tiene que ser entera.');
+
+  assert (select stock from products where id = pg_temp.prod(121)) = 276, 'envío rechazado: movió el stock del origen';
+  assert (select stock from products where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121') = 300,
+         'envío rechazado: movió el stock del destino';
+end $t$;
+
+-- El mismo producto en varias líneas: las repetidas de una misma presentación se
+-- suman en una sola línea del conduce, y la suelta va aparte. Sin presentation_id
+-- (payload viejo) la línea es suelta: units_per 1 y costo del producto.
+do $t$
+declare v jsonb; v_dest uuid;
+begin
+  select id into v_dest from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  v := pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","quantity":5},
+      {"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":1},
+      {"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":1}]');
+  assert (select stock from products where id = pg_temp.prod(121)) = 247,
+         'líneas: 2 paquetes + 5 sueltas = 29 debían dejar el origen en 247; quedó en '
+         || (select stock from products where id = pg_temp.prod(121));
+  assert (select stock from products where id = v_dest) = 329, 'líneas: el destino debía subir a 329';
+  assert (v->>'items')::integer = 2, 'líneas: debían quedar dos líneas en el conduce';
+  assert (select count(*) from product_transfers where batch_id = (v->>'batch_id')::uuid) = 2,
+         'líneas: product_transfers debía tener dos filas';
+  assert (select quantity = 2 and units_per = 12 and unit_cost = 150
+            from product_transfers where batch_id = (v->>'batch_id')::uuid and presentation_name = 'Paquete'),
+         'líneas: los dos paquetes debían sumarse (cantidad 2, units_per 12, costo 150)';
+  assert (select quantity = 5 and units_per = 1 and unit_cost = 12.5 and presentation_name is null
+            from product_transfers where batch_id = (v->>'batch_id')::uuid and presentation_name is null),
+         'líneas: la suelta debía quedar con cantidad 5, units_per 1, costo 12.5 y sin presentación';
+  assert (select count(*) from product_presentations where product_id = v_dest) = 1,
+         'líneas: las presentaciones del destino existente no debían tocarse';
+end $t$;
+
+-- Archivado al vaciar: el chequeo usa la misma cantidad en unidades base. 20
+-- paquetes + 36 sueltas = 276 vacían el origen justo en el límite; la última
+-- línea es la que lo archiva.
+do $t$
+declare v jsonb; v_dest uuid;
+begin
+  select id into v_dest from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  update products set stock = 276 where id = pg_temp.prod(121);
+  v := pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":20},
+      {"product_id":"00000000-0000-0000-0000-00000000e121","quantity":36}]');
+  assert (select stock = 0 and not is_active from products where id = pg_temp.prod(121)),
+         'archivado: 240 + 36 = 276 debían vaciar y archivar el origen';
+  assert (select stock from products where id = v_dest) = 605, 'archivado: el destino debía subir a 605 (329 + 276)';
+  assert (select source_archived from product_transfers
+           where batch_id = (v->>'batch_id')::uuid and presentation_name is null),
+         'archivado: la última línea (la que vacía el origen) debía marcar source_archived';
+  assert not (select source_archived from product_transfers
+               where batch_id = (v->>'batch_id')::uuid and presentation_name = 'Paquete'),
+         'archivado: la línea de paquetes todavía no vaciaba el origen';
+  -- Un envío que no vacía no archiva: se vuelve a activar y se manda 1 caja de 300.
+  update products set is_active = true, stock = 300 where id = pg_temp.prod(121);
+  v := pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122","quantity":1}]');
+  assert (select stock = 12 and is_active from products where id = pg_temp.prod(121)),
+         'archivado: 300 − 288 = 12 no debía archivar el origen';
+  assert not (select source_archived from product_transfers where batch_id = (v->>'batch_id')::uuid),
+         'archivado: source_archived debía ser falso si queda stock';
+  update products set stock = 300 where id = pg_temp.prod(121);
+end $t$;
+
+-- Copia con el código ocupado por OTRA PRESENTACIÓN de la sucursal destino (sin
+-- distinguir mayúsculas): se borra el producto creado allá, e124 recibe una
+-- presentación con el código del Paquete y se vuelve a enviar. Ni la Caja
+-- (código de e124) ni el Paquete (código de la presentación de e124) lo
+-- conservan, y el trigger no llega a fallar.
+do $t$
+declare v jsonb; v_dest uuid;
+begin
+  delete from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  insert into product_presentations (id, product_id, name, units, price, code) values
+    ('00000000-0000-0000-0000-00000000e1f1', pg_temp.prod(124), 'Docena', 12, 190, 'e121-12');
+
+  v := pg_temp.enviar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e123","quantity":1}]');
+  select id into v_dest from products
+   where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0' and code = 'E121';
+  assert v_dest is not null and (select target_created from product_transfers where batch_id = (v->>'batch_id')::uuid),
+         'colisión: el producto debía volver a crearse en Prueba';
+  assert (select stock from products where id = v_dest) = 12, 'colisión: el producto creado debía nacer con 12 (1 paquete)';
+  assert (select count(*) from product_presentations where product_id = v_dest) = 2,
+         'colisión: debía copiar las dos presentaciones aunque el envío sea de una';
+  assert (select count(*) from product_presentations where product_id = v_dest and code is null) = 2,
+         'colisión: la Caja (código de e124) y el Paquete (código de la Docena de e124) debían quedar sin código';
+  assert (select code = 'e121-12' from product_presentations where id = '00000000-0000-0000-0000-00000000e1f1'),
+         'colisión: la presentación de e124 no debía tocarse';
+  assert (select stock from products where id = pg_temp.prod(124)) = 0, 'colisión: e124 no debía recibir stock';
+end $t$;
+
+-- Compras: suelta, mezcla y las condiciones de hoy (módulo purchases y
+-- tracks_stock) siguen mandando sobre el stock.
+do $t$
+declare v jsonb; v_antes numeric;
+begin
+  -- Línea sin presentación (payload viejo): suma la cantidad tal cual.
+  select stock into v_antes from products where id = pg_temp.prod(121);
+  v := pg_temp.comprar('[{"product_id":"00000000-0000-0000-0000-00000000e121","description":"Suelta","quantity":5,"unit_cost":12.5}]');
+  assert (select stock from products where id = pg_temp.prod(121)) = v_antes + 5,
+         'compra suelta: debía sumar 5 unidades';
+  assert (select units_per = 1 and presentation_id is null and presentation_name is null
+            from supplier_invoice_items where invoice_id = (v->>'invoice_id')::uuid),
+         'compra suelta: la línea debía quedar con units_per 1 y sin presentación';
+
+  -- Una caja y 5 sueltas en la misma compra: 288 + 5.
+  select stock into v_antes from products where id = pg_temp.prod(121);
+  v := pg_temp.comprar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122","description":"Caja","quantity":1,"unit_cost":3000},
+      {"product_id":"00000000-0000-0000-0000-00000000e121","description":"Suelta","quantity":5,"unit_cost":12.5}]');
+  assert (select stock from products where id = pg_temp.prod(121)) = v_antes + 293,
+         'compra mixta: 1 caja + 5 sueltas debían sumar 293';
+
+  -- Sin el módulo de compras no se toca el stock, pero la línea se guarda con la presentación.
+  update company_modules set enabled = false
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'purchases';
+  select stock into v_antes from products where id = pg_temp.prod(121);
+  v := pg_temp.comprar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122","description":"Caja","quantity":1,"unit_cost":3000}]');
+  assert (select stock from products where id = pg_temp.prod(121)) = v_antes,
+         'sin módulo: la compra no debía mover el stock';
+  assert (select units_per = 288 and presentation_name = 'Caja'
+            from supplier_invoice_items where invoice_id = (v->>'invoice_id')::uuid),
+         'sin módulo: la línea debía guardarse igual con units_per 288 y nombre Caja';
+  update company_modules set enabled = true
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'purchases';
+
+  -- Producto sin control de existencias: tampoco se suma.
+  update products set tracks_stock = false where id = pg_temp.prod(121);
+  select stock into v_antes from products where id = pg_temp.prod(121);
+  v := pg_temp.comprar('[{"product_id":"00000000-0000-0000-0000-00000000e121","presentation_id":"00000000-0000-0000-0000-00000000e122","description":"Caja","quantity":1,"unit_cost":3000}]');
+  assert (select stock from products where id = pg_temp.prod(121)) = v_antes,
+         'sin control: la compra no debía mover el stock';
+  update products set tracks_stock = true where id = pg_temp.prod(121);
+end $t$;
+
 select 'ok' as resultado;

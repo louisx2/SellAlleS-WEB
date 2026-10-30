@@ -795,3 +795,457 @@ begin
 end;
 $function$;
 
+-- ════════════════════════════════════════════════════════════════════════════
+-- PARTE 3 — compras y transferencias entre sucursales por presentación (base)
+-- ════════════════════════════════════════════════════════════════════════════
+-- Igual que en la venta, el stock se cuenta en unidad base: una línea de
+-- `quantity` presentaciones de `units_per` unidades mueve `quantity × units_per`.
+-- Las dos funciones se reescriben desde su definición viva (`pg_get_functiondef` del
+-- 2026-10-29: md5 a9abd60a6e8d1304c46ab154d91f9338 y
+-- 01f96cd3d6d045c33be98257189f2cda), no desde el repo, y solo cambia lo
+-- siguiente:
+--   · create_supplier_invoice: cada ítem acepta `presentation_id`; se busca en el
+--     servidor y tiene que ser del mismo producto (`units_per` y
+--     `presentation_name` del navegador se ignoran); con presentación exige
+--     cantidad entera; guarda las tres columnas en la línea y suma
+--     `quantity × units_per` al stock, con las mismas condiciones de hoy (módulo
+--     `purchases` encendido y `tracks_stock`). `unit_cost` sigue siendo por
+--     presentación y no toca `products.cost`.
+--   · transfer_products: cada ítem acepta `presentation_id`; las líneas se
+--     agrupan por (producto, presentación) en orden de producto. Cada vuelta
+--     resuelve `units_per` (1 sin presentación), exige cantidad entera si hay
+--     presentación y compara, descuenta y suma `quantity × units_per` (también
+--     para decidir si se archiva el origen), sobre lo que dejaron las líneas
+--     anteriores del mismo producto: el stock se valida contra la suma.
+--     `product_transfers.quantity` queda en la presentación y se guardan
+--     `presentation_name`, `units_per` y `unit_cost = products.cost × units_per`.
+--     Cuando la transferencia CREA el producto en el destino, copia todas sus
+--     presentaciones; la copia queda sin código si allá ya lo usa un producto
+--     activo u otra presentación (se comprueba antes de insertar, con el
+--     criterio del trigger). Si el producto ya existía, no toca las suyas.
+-- Siguen igual el modo de seguridad (create_supplier_invoice, invoker;
+-- transfer_products, definer), el search_path, los permisos, el candado del
+-- número de conduce, el archivado al vaciar y el manejo de ubicación y categoría.
+-- Son CREATE OR REPLACE con la misma firma: conservan dueño y permisos.
+
+CREATE OR REPLACE FUNCTION public.create_supplier_invoice(p_supplier_id uuid, p_issue_date date, p_branch_id uuid DEFAULT NULL::uuid, p_invoice_number text DEFAULT NULL::text, p_due_date date DEFAULT NULL::date, p_subtotal_goods numeric DEFAULT 0, p_subtotal_services numeric DEFAULT 0, p_ncf text DEFAULT NULL::text, p_ncf_modified text DEFAULT NULL::text, p_expense_type text DEFAULT NULL::text, p_itbis_facturado numeric DEFAULT 0, p_itbis_retenido numeric DEFAULT 0, p_itbis_proporcionalidad numeric DEFAULT 0, p_itbis_llevado_costo numeric DEFAULT 0, p_isr_retention_type text DEFAULT NULL::text, p_isr_retention_amount numeric DEFAULT 0, p_impuesto_selectivo numeric DEFAULT 0, p_otros_impuestos numeric DEFAULT 0, p_propina_legal numeric DEFAULT 0, p_payment_form text DEFAULT NULL::text, p_notes text DEFAULT NULL::text, p_initial_payment numeric DEFAULT 0, p_initial_method text DEFAULT 'cash'::text, p_initial_reference text DEFAULT NULL::text, p_items jsonb DEFAULT '[]'::jsonb)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SET search_path TO 'public'
+AS $function$
+declare
+  v_company      uuid;
+  v_goods        numeric := coalesce(p_subtotal_goods, 0);
+  v_services     numeric := coalesce(p_subtotal_services, 0);
+  v_ncf          text    := nullif(trim(coalesce(p_ncf, '')), '');
+  v_total        numeric;
+  v_invoice      supplier_invoices%rowtype;
+  v_item         record;
+  v_desc         text;
+  v_user_name    text;
+  v_purchases_on boolean;
+  v_pay          jsonb;
+  v_units_per    numeric;
+  v_pres_id      uuid;
+  v_pres_name    text;
+begin
+  v_company := current_company_id();
+
+  if not exists (select 1 from suppliers where id = p_supplier_id and company_id = v_company) then
+    raise exception 'Suplidor no encontrado.';
+  end if;
+  if p_issue_date is null then
+    raise exception 'La fecha del comprobante es obligatoria.';
+  end if;
+  if v_goods + v_services <= 0 then
+    raise exception 'El monto facturado debe ser mayor que cero.';
+  end if;
+  if v_ncf is not null and upper(v_ncf) !~ '^[BE][0-9]{10,12}$' then
+    raise exception 'El NCF no tiene un formato válido (ej. B0100000001).';
+  end if;
+  if v_ncf is not null and p_expense_type is null then
+    raise exception 'Con NCF, el tipo de gasto (Formato 606) es obligatorio.';
+  end if;
+  if v_ncf is not null and exists (
+    select 1 from supplier_invoices
+     where company_id = v_company and supplier_id = p_supplier_id and ncf = upper(v_ncf)
+  ) then
+    raise exception 'Ya existe una factura con ese NCF para este suplidor.';
+  end if;
+
+  v_total := v_goods + v_services
+           + coalesce(p_itbis_facturado, 0) + coalesce(p_impuesto_selectivo, 0)
+           + coalesce(p_otros_impuestos, 0) + coalesce(p_propina_legal, 0);
+
+  if coalesce(p_itbis_retenido, 0) + coalesce(p_isr_retention_amount, 0) > v_total then
+    raise exception 'Las retenciones no pueden exceder el total de la factura.';
+  end if;
+
+  select name into v_user_name from profiles where id = auth.uid();
+
+  insert into supplier_invoices (
+    company_id, branch_id, supplier_id, invoice_number, issue_date, due_date,
+    subtotal_goods, subtotal_services, total,
+    ncf, ncf_modified, expense_type,
+    itbis_facturado, itbis_retenido, itbis_proporcionalidad, itbis_llevado_costo,
+    isr_retention_type, isr_retention_amount,
+    impuesto_selectivo, otros_impuestos, propina_legal,
+    payment_form, notes, user_id, user_name
+  ) values (
+    v_company, p_branch_id, p_supplier_id, nullif(trim(coalesce(p_invoice_number, '')), ''),
+    p_issue_date, p_due_date,
+    v_goods, v_services, v_total,
+    upper(v_ncf), nullif(trim(coalesce(p_ncf_modified, '')), ''), p_expense_type,
+    coalesce(p_itbis_facturado, 0), coalesce(p_itbis_retenido, 0),
+    coalesce(p_itbis_proporcionalidad, 0), coalesce(p_itbis_llevado_costo, 0),
+    p_isr_retention_type, coalesce(p_isr_retention_amount, 0),
+    coalesce(p_impuesto_selectivo, 0), coalesce(p_otros_impuestos, 0), coalesce(p_propina_legal, 0),
+    p_payment_form, p_notes, auth.uid(), v_user_name
+  ) returning * into v_invoice;
+
+  v_purchases_on := is_module_enabled(v_company, 'purchases', false);
+
+  for v_item in
+    select * from jsonb_to_recordset(coalesce(p_items, '[]'::jsonb))
+      as x(product_id uuid, description text, quantity numeric, unit_cost numeric, itbis_amount numeric,
+           presentation_id uuid)
+  loop
+    if coalesce(v_item.quantity, 0) <= 0 then
+      raise exception 'La cantidad de cada línea debe ser mayor que cero.';
+    end if;
+    if coalesce(v_item.unit_cost, -1) < 0 then
+      raise exception 'El costo unitario de cada línea no puede ser negativo.';
+    end if;
+
+    -- Lo que la línea sume al inventario lo decide el servidor: nombre y
+    -- unidades salen de la fila de la presentación, nunca del navegador. Sin
+    -- presentación la línea es suelta (1 unidad base). `unit_cost` es por
+    -- presentación.
+    v_units_per := 1;
+    v_pres_id := null;
+    v_pres_name := null;
+    if v_item.presentation_id is not null then
+      select pp.id, pp.name, pp.units
+        into v_pres_id, v_pres_name, v_units_per
+        from product_presentations pp
+       where pp.id = v_item.presentation_id and pp.product_id = v_item.product_id;
+      if not found then
+        raise exception 'La presentación no corresponde a este producto.';
+      end if;
+      if v_item.quantity <> trunc(v_item.quantity) then
+        raise exception 'Las presentaciones van enteras: la cantidad tiene que ser un número entero.';
+      end if;
+    end if;
+
+    v_desc := nullif(trim(coalesce(v_item.description, '')), '');
+    if v_desc is null and v_item.product_id is not null then
+      select name into v_desc from products where id = v_item.product_id and company_id = v_company;
+    end if;
+    if v_desc is null then
+      raise exception 'Cada línea debe tener una descripción.';
+    end if;
+
+    insert into supplier_invoice_items
+      (company_id, invoice_id, product_id, description, quantity, unit_cost, itbis_amount,
+       presentation_id, presentation_name, units_per)
+    values
+      (v_company, v_invoice.id, v_item.product_id, v_desc,
+       v_item.quantity, v_item.unit_cost, coalesce(v_item.itbis_amount, 0),
+       v_pres_id, v_pres_name, v_units_per);
+
+    if v_purchases_on and v_item.product_id is not null then
+      if not exists (
+        select 1 from products where id = v_item.product_id and company_id = v_company
+      ) then
+        raise exception 'Producto no encontrado para esta empresa.';
+      end if;
+      update products set stock = stock + v_item.quantity * v_units_per
+       where id = v_item.product_id and company_id = v_company and tracks_stock;
+    end if;
+  end loop;
+
+  if coalesce(p_initial_payment, 0) > 0 then
+    v_pay := register_supplier_payment(
+      v_invoice.id, p_initial_payment, coalesce(p_initial_method, 'cash'),
+      p_branch_id, 'Pago inicial', p_initial_reference);
+    select * into v_invoice from supplier_invoices where id = v_invoice.id;
+  end if;
+
+  return jsonb_build_object(
+    'invoice_id',      v_invoice.id,
+    'total',           v_invoice.total,
+    'status',          v_invoice.status,
+    'balance',         v_invoice.balance,
+    'initial_payment', v_pay
+  );
+end;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.transfer_products(p_from_branch_id uuid, p_to_branch_id uuid, p_items jsonb, p_target_location_id uuid DEFAULT NULL::uuid, p_archive_empty boolean DEFAULT true, p_notes text DEFAULT NULL::text)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+declare
+    v_company uuid;
+    v_to_company uuid;
+    v_to_active boolean;
+    v_batch_id uuid;
+    v_number integer;
+    v_item record;
+    v_source public.products%rowtype;
+    v_target_product_id uuid;
+    v_target_active boolean;
+    v_target_category_id uuid;
+    v_created boolean;
+    v_reactivated boolean;
+    v_archived boolean;
+    v_count integer := 0;
+    v_units_per numeric;
+    v_pres_name text;
+    v_base_qty numeric;
+    v_copy record;
+    v_copy_code text;
+begin
+    if p_items is null or jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+        raise exception 'El envío no tiene artículos.';
+    end if;
+
+    if jsonb_array_length(p_items) > 300 then
+        raise exception 'Un envío admite hasta 300 artículos. Divídelo en varios.';
+    end if;
+
+    select company_id into v_company from public.branches where id = p_from_branch_id;
+    if v_company is null then
+        raise exception 'La sucursal que envía no existe.';
+    end if;
+
+    if not (v_company = public.current_company_id() or public.is_super_admin()) then
+        raise exception 'No tienes permiso para mover inventario de esta empresa.';
+    end if;
+
+    if not public.puede_editar_inventario(p_from_branch_id) then
+        raise exception 'No tienes permiso para transferir desde esta sucursal: hace falta poder editar su inventario.';
+    end if;
+
+    select company_id, is_active into v_to_company, v_to_active
+      from public.branches where id = p_to_branch_id;
+    if v_to_company is distinct from v_company then
+        raise exception 'La sucursal destino no es válida.';
+    end if;
+    if not coalesce(v_to_active, true) then
+        raise exception 'La sucursal destino está desactivada.';
+    end if;
+
+    if p_to_branch_id = p_from_branch_id then
+        raise exception 'La sucursal destino tiene que ser distinta de la de origen.';
+    end if;
+
+    if p_target_location_id is not null and not exists (
+      select 1 from public.product_locations
+       where id = p_target_location_id and branch_id = p_to_branch_id) then
+        raise exception 'La ubicación elegida no es de la sucursal destino.';
+    end if;
+
+    -- Número del conduce. El candado por empresa hace que dos envíos a la vez
+    -- esperen uno por el otro en vez de sacar el mismo número; se suelta con la
+    -- transacción. Los envíos no se borran (solo con la empresa entera), así
+    -- que max + 1 no repite números.
+    perform pg_advisory_xact_lock(hashtext('product_transfer_batches:' || v_company::text));
+    select coalesce(max(number), 0) + 1 into v_number
+      from public.product_transfer_batches where company_id = v_company;
+
+    insert into public.product_transfer_batches
+        (company_id, number, from_branch_id, to_branch_id, notes, created_by, created_by_name)
+    values
+        (v_company, v_number, p_from_branch_id, p_to_branch_id, nullif(btrim(p_notes), ''), auth.uid(),
+         (select name from public.profiles where id = auth.uid()))
+    returning id into v_batch_id;
+
+    -- Un mismo artículo (y presentación) dos veces en la lista se suma en una
+    -- línea. Se recorren en orden de id para que dos envíos simultáneos bloqueen
+    -- las filas en el mismo orden y no se traben entre sí. El mismo producto en
+    -- varias líneas (suelto y por presentaciones) se valida contra la suma: cada
+    -- vuelta compara y descuenta sobre lo que dejaron las anteriores.
+    for v_item in
+        select x.product_id, x.presentation_id, sum(x.quantity) as quantity
+          from jsonb_to_recordset(p_items) as x(product_id uuid, quantity numeric, presentation_id uuid)
+         group by x.product_id, x.presentation_id
+         order by x.product_id, x.presentation_id
+    loop
+        if v_item.product_id is null then
+            raise exception 'Hay un artículo sin identificar en el envío.';
+        end if;
+
+        select * into v_source from public.products
+         where id = v_item.product_id and branch_id = p_from_branch_id
+           for update;
+        if not found then
+            raise exception 'Un artículo del envío no está en la sucursal que envía.';
+        end if;
+
+        if not v_source.is_active then
+            raise exception '«%» está archivado; restáuralo antes de enviarlo.', v_source.name;
+        end if;
+
+        if not v_source.tracks_stock then
+            raise exception '«%» no lleva inventario, no hay existencias que enviar.', v_source.name;
+        end if;
+
+        if v_item.quantity is null or v_item.quantity <= 0 then
+            raise exception 'La cantidad de «%» debe ser mayor que cero.', v_source.name;
+        end if;
+
+        -- `quantity` es en la presentación (1 si es suelta); el inventario se
+        -- mueve siempre en unidad base: quantity × units_per. Las unidades y el
+        -- nombre salen de la fila de la presentación, que tiene que ser de este
+        -- producto (la función salta la RLS, así que se comprueba aquí).
+        v_units_per := 1;
+        v_pres_name := null;
+        if v_item.presentation_id is not null then
+            select pp.name, pp.units into v_pres_name, v_units_per
+              from public.product_presentations pp
+             where pp.id = v_item.presentation_id and pp.product_id = v_source.id;
+            if not found then
+                raise exception 'La presentación no corresponde a este producto.';
+            end if;
+            if v_item.quantity <> trunc(v_item.quantity) then
+                raise exception 'Las presentaciones van enteras: la cantidad tiene que ser un número entero.';
+            end if;
+        end if;
+        v_base_qty := v_item.quantity * v_units_per;
+
+        -- Mismo criterio que src/lib/units.ts: solo las unidades medibles
+        -- admiten fracciones; cualquier otra (o una desconocida) va entera.
+        if v_source.unit not in ('lb','kg','g','oz','qq','m','pie','yd','plg','gal','l','ml')
+           and v_item.quantity <> trunc(v_item.quantity) then
+            raise exception '«%» se cuenta por piezas: la cantidad tiene que ser entera.', v_source.name;
+        end if;
+
+        if v_source.stock < v_base_qty then
+            raise exception 'No hay suficiente «%»: hay %, se quieren enviar %.',
+                v_source.name, trim_scale(v_source.stock), trim_scale(v_base_qty);
+        end if;
+
+        v_target_product_id := null;
+        v_target_active := null;
+        v_created := false;
+        v_reactivated := false;
+        v_archived := false;
+
+        -- El mismo artículo en el destino: por código y, si no, por nombre.
+        -- Se prefiere uno activo; si solo hay uno archivado se reactiva, que
+        -- sumarle stock a un archivado es esconderlo.
+        if v_source.code is not null and v_source.code <> '' then
+            select id, is_active into v_target_product_id, v_target_active
+              from public.products
+             where branch_id = p_to_branch_id and code = v_source.code
+             order by is_active desc, created_at desc
+             limit 1;
+        end if;
+
+        if v_target_product_id is null then
+            select id, is_active into v_target_product_id, v_target_active
+              from public.products
+             where branch_id = p_to_branch_id and name = v_source.name
+             order by is_active desc, created_at desc
+             limit 1;
+        end if;
+
+        -- Sale de la sucursal que envía. Si queda en 0 y así se pidió, se
+        -- archiva allá (archived_at lo pone trg_marcar_archivado_producto).
+        v_archived := coalesce(p_archive_empty, false) and v_source.stock - v_base_qty = 0;
+        update public.products
+           set stock = stock - v_base_qty,
+               is_active = case when v_archived then false else is_active end
+         where id = v_source.id;
+
+        if v_target_product_id is not null then
+            v_reactivated := not v_target_active;
+
+            update public.products
+               set stock = stock + v_base_qty,
+                   location_id = coalesce(location_id, p_target_location_id),
+                   is_active = true
+             where id = v_target_product_id;
+        else
+            -- Las categorías son por sucursal: se busca una del mismo nombre
+            -- en el destino y, si no hay, se queda sin categoría.
+            select c.id into v_target_category_id
+              from public.product_categories c
+             where c.branch_id = p_to_branch_id
+               and c.name = (select name from public.product_categories where id = v_source.category_id)
+             limit 1;
+
+            insert into public.products (
+                company_id, branch_id, name, code, price, cost, itbis,
+                image, stock, category_id, description, supplier_id,
+                location_id, unit, tracks_stock, wholesale_price, wholesale_min_quantity
+            ) values (
+                v_company, p_to_branch_id, v_source.name, v_source.code, v_source.price,
+                v_source.cost, v_source.itbis, v_source.image, v_base_qty, v_target_category_id,
+                v_source.description, v_source.supplier_id, p_target_location_id, v_source.unit,
+                v_source.tracks_stock, v_source.wholesale_price, v_source.wholesale_min_quantity
+            ) returning id into v_target_product_id;
+
+            v_created := true;
+
+            -- El producto nuevo trae todas las presentaciones del original (aunque
+            -- el envío sea de una sola). El código de una presentación no puede
+            -- repetirse en la sucursal (ni con un producto activo ni con otra
+            -- presentación): si allá ya está ocupado, la copia queda sin código.
+            -- Se comprueba antes de insertar, con el mismo criterio del trigger
+            -- product_presentations_before_write, para que éste nunca falle.
+            -- Si el producto ya existía en el destino no se tocan las suyas.
+            for v_copy in
+                select pp.name, pp.units, pp.price, pp.code
+                  from public.product_presentations pp
+                 where pp.product_id = v_source.id
+                 order by pp.units, pp.created_at, pp.id
+            loop
+                v_copy_code := nullif(btrim(v_copy.code), '');
+                if v_copy_code is not null and (
+                    exists (select 1 from public.products p
+                             where p.branch_id = p_to_branch_id
+                               and p.is_active
+                               and p.code is not null
+                               and lower(btrim(p.code)) = lower(v_copy_code))
+                    or exists (select 1 from public.product_presentations x
+                                where x.branch_id = p_to_branch_id
+                                  and x.code is not null and btrim(x.code) <> ''
+                                  and lower(btrim(x.code)) = lower(v_copy_code))
+                ) then
+                    v_copy_code := null;
+                end if;
+
+                insert into public.product_presentations (product_id, name, units, price, code)
+                values (v_target_product_id, v_copy.name, v_copy.units, v_copy.price, v_copy_code);
+            end loop;
+        end if;
+
+        insert into public.product_transfers (
+            company_id, batch_id, from_branch_id, to_branch_id, source_product_id, target_product_id,
+            product_name, product_code, quantity, unit, unit_cost,
+            target_created, target_reactivated, source_archived, created_by,
+            presentation_name, units_per
+        ) values (
+            v_company, v_batch_id, p_from_branch_id, p_to_branch_id, v_source.id, v_target_product_id,
+            v_source.name, nullif(v_source.code, ''), v_item.quantity, v_source.unit,
+            v_source.cost * v_units_per,
+            v_created, v_reactivated, v_archived, auth.uid(),
+            v_pres_name, v_units_per
+        );
+
+        v_count := v_count + 1;
+    end loop;
+
+    return jsonb_build_object(
+        'success', true,
+        'batch_id', v_batch_id,
+        'number', v_number,
+        'items', v_count
+    );
+end;
+$function$;
+
