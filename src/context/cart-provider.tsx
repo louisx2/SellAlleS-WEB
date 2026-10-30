@@ -1,9 +1,12 @@
 'use client';
 
 import { createContext, useEffect, ReactNode, useContext } from 'react';
-import type { CartItem, Product, Sale, Customer, FinancingDetails, Cart, Coupon, NcfType } from '@/lib/types';
+import type { CartItem, Product, ProductPresentation, LinePresentation, Sale, Customer, FinancingDetails, Cart, Coupon, NcfType } from '@/lib/types';
 import { ITBIS_RATE, GENERIC_CUSTOMER, round2 } from '@/lib/utils';
-import { roundQty, normalizeQty, formatQuantity, unitAllowsDecimals } from '@/lib/units';
+import { roundQty, normalizeQty, formatQuantity, unitAllowsDecimals, getUnit } from '@/lib/units';
+import {
+  baseQtyInCart, lineBaseQty, lineProduct, maxAddable, presentationLabel, toLinePresentation,
+} from '@/lib/presentations';
 import { buildQuickCartItem, quickUnitPrice, type QuickItemInput } from '@/lib/quick-sales';
 import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
@@ -11,6 +14,16 @@ import { create, useStore } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
 const MAX_CARTS = 3;
+
+// Las presentaciones se cuentan de a una (2 sacos, nunca 2.5), aunque la unidad
+// base del producto sea medible: su cantidad se normaliza con una unidad contable.
+const COUNTABLE_UNIT = 'und';
+
+// ¿Dos líneas del mismo producto venden lo mismo? Ambas sueltas, o ambas con la
+// misma presentación (por id: una copia sin id, de una presentación ya borrada,
+// no se junta con nada).
+const sameLinePresentation = (a?: LinePresentation, b?: LinePresentation): boolean =>
+  a === undefined || b === undefined ? a === b : a.id !== undefined && a.id === b.id;
 
 interface CartState {
   carts: Cart[];
@@ -21,8 +34,9 @@ interface CartState {
 
 interface CartActions {
   // `quantity` es para quien agrega varias unidades de una vez (alta desde Venta
-  // rápida); sin él se suma 1, como siempre.
-  addItem: (product: Product, quantity?: number) => void;
+  // rápida); sin él se suma 1, como siempre. Con `presentation` la línea se vende
+  // por paquete/caja: `quantity` cuenta presentaciones, no unidades base.
+  addItem: (product: Product, quantity?: number, presentation?: ProductPresentation) => void;
   addQuickItem: (input: QuickItemInput) => void;
   removeItem: (cartItemId: string) => void;
   updateQuantity: (cartItemId: string, quantity: number) => void;
@@ -52,6 +66,9 @@ export const getEffectiveUnitPrice = (item: CartItem, customer?: Customer): numb
   // 1. Determinar precio base (por mayor si cumple la cantidad mínima, si no, al detalle)
   let basePrice = item.product.price;
   if (
+    // El precio por mayor es por unidad base: una línea con presentación nunca lo
+    // usa (`lineProduct` ya le quita esos campos; esto es una segunda barrera).
+    !item.presentation &&
     item.product.wholesalePrice !== undefined &&
     item.product.wholesalePrice !== null &&
     item.product.wholesaleMinQuantity !== undefined &&
@@ -98,30 +115,41 @@ const cartStore = create<CartStore>()(
       },
 
       // Actions
-      addItem: (product, quantity = 1) => set(state => {
+      addItem: (product, quantity = 1, presentation) => set(state => {
         const newCarts = state.carts.map(cart => {
           if (cart.id === state.activeCartId) {
-            const quantityInCart = cart.items
-              .filter(item => item.product.id === product.id)
-              .reduce((total, item) => total + item.quantity, 0);
-
-            // Los productos sin inventario (platos preparados, servicios) se
-            // venden siempre: no hay existencias que agotar.
-            const remaining = product.tracksStock
-              ? roundQty(product.stock - quantityInCart)
-              : Number.POSITIVE_INFINITY;
-            if (remaining <= 0) {
-              set({ toast: product.stock <= 0
-                ? `${product.name} no tiene existencias disponibles.`
-                : `Solo hay ${formatQuantity(product.stock, product.unit)} de ${product.name}.` });
+            // Unidades base que trae lo que se agrega: 1 si es suelto. El stock se
+            // compara siempre contra la suma de todas las líneas del producto en
+            // unidades base (2 paquetes + 7 sueltas), no contra cada línea sola.
+            const units = presentation?.units ?? 1;
+            // Los productos sin inventario (platos preparados, servicios) se venden
+            // siempre (Infinity). Suelto: lo que queda exacto, fracciones incluidas.
+            // Con presentación: presentaciones enteras que todavía caben.
+            const room = maxAddable(product, cart.items, units);
+            if (room <= 0) {
+              if (presentation) {
+                const restante = roundQty(product.stock - baseQtyInCart(product.id, cart.items));
+                const etiqueta = presentationLabel(presentation, getUnit(product.unit).short);
+                set({ toast: `No alcanza para 1 ${etiqueta} de ${product.name} (quedan ${formatQuantity(restante, product.unit)}).` });
+              } else {
+                set({ toast: product.stock <= 0
+                  ? `${product.name} no tiene existencias disponibles.`
+                  : `Solo hay ${formatQuantity(product.stock, product.unit)} de ${product.name}.` });
+              }
               setTimeout(() => set({ toast: null }), 3000);
               return cart;
             }
             // Con `quantity` por defecto (1) y unidades contables el stock es
-            // entero, así que esto sigue siendo 1; nunca pasa de lo que queda.
-            const toAdd = normalizeQty(Math.min(quantity, remaining), product.unit);
-            // Find an item with the same product ID and no custom price
-            const existingItem = cart.items.find(item => item.product.id === product.id && item.customPrice === undefined);
+            // entero, así que esto sigue siendo 1; nunca pasa de lo que queda. Una
+            // presentación se cuenta de a una, así que va entera aunque la unidad
+            // base sea medible (3 sacos de 125 lb, nunca 2.5).
+            const toAdd = normalizeQty(Math.min(quantity, room), presentation ? COUNTABLE_UNIT : product.unit);
+            // Find an item with the same product ID, the same presentation (or both
+            // loose) and no custom price
+            const existingItem = cart.items.find(item =>
+              item.product.id === product.id
+              && item.customPrice === undefined
+              && sameLinePresentation(item.presentation, presentation));
             if (existingItem) {
               // If found, just increase its quantity
               return {
@@ -131,11 +159,13 @@ const cartStore = create<CartStore>()(
                 ),
               };
             }
-            // If not found, add a new line item
+            // If not found, add a new line item. Con presentación, la línea lleva el
+            // precio de la presentación como precio de lista y una copia de ella.
             const newCartItem: CartItem = {
                 cartItemId: `item-${Date.now()}-${Math.random()}`,
-                product,
+                product: lineProduct(product, presentation),
                 quantity: toAdd,
+                ...(presentation ? { presentation: toLinePresentation(presentation) } : {}),
             };
             return { ...cart, items: [...cart.items, newCartItem] };
           }
@@ -170,19 +200,21 @@ const cartStore = create<CartStore>()(
             const itemToUpdate = cart.items.find(item => item.cartItemId === cartItemId);
             if (!itemToUpdate) return cart;
             // La unidad manda: contables se redondean a entero, medibles a 3
-            // decimales (la escala real de products.stock en la base).
-            const qty = normalizeQty(quantity, itemToUpdate.product.unit);
+            // decimales (la escala real de products.stock en la base). Una línea con
+            // presentación cuenta presentaciones, que son enteras siempre.
+            const qty = normalizeQty(quantity, itemToUpdate.presentation ? COUNTABLE_UNIT : itemToUpdate.product.unit);
             if (!Number.isFinite(qty) || qty <= 0) {
               // Remove item if quantity is zero or less
               return { ...cart, items: cart.items.filter(item => item.cartItemId !== cartItemId) };
             }
-            const quantityInOtherLines = cart.items
-              .filter(item => item.product.id === itemToUpdate.product.id && item.cartItemId !== cartItemId)
-              .reduce((total, item) => total + item.quantity, 0);
+            // Unidades base de las demás líneas del producto + las de esta línea con
+            // la cantidad nueva (qty × unidades de su presentación).
+            const baseQtyAfter = baseQtyInCart(itemToUpdate.product.id, cart.items, cartItemId)
+              + lineBaseQty({ quantity: qty, presentation: itemToUpdate.presentation });
             // roundQty sobre la SUMA: sin él, 1.7 + 0.3 da 2.0000000000000004 y
             // dispararía un falso "stock insuficiente" contra un stock de 2.
             if (itemToUpdate.product.tracksStock
-                && roundQty(qty + quantityInOtherLines) > itemToUpdate.product.stock) {
+                && roundQty(baseQtyAfter) > itemToUpdate.product.stock) {
               set({ toast: `Solo hay ${formatQuantity(itemToUpdate.product.stock, itemToUpdate.product.unit)} de ${itemToUpdate.product.name}.` });
               setTimeout(() => set({ toast: null }), 3000);
               return cart;

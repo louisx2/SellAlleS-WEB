@@ -23,6 +23,7 @@ import { useCanQuickSell } from '@/hooks/use-can-quick-sell';
 import { buildQuickCartItem } from '@/lib/quick-sales';
 import { formatCurrency } from '@/lib/utils';
 import { formatQtyCompact } from '@/lib/units';
+import { lineProduct, resolveQuotedPresentation, toLinePresentation } from '@/lib/presentations';
 import type { Quote, QuoteStatus, CartItem } from '@/lib/types';
 import { ShoppingCart, Eye, FileText } from 'lucide-react';
 
@@ -70,6 +71,7 @@ export default function QuotesPage() {
     const items: CartItem[] = [];
     const missing: string[] = [];
     let quickBlocked = false;
+    let presentationBlocked = false;
 
     for (const it of quote.items) {
       // Un artículo rápido no está en el catálogo: se reconstruye desde la línea
@@ -97,22 +99,34 @@ export default function QuotesPage() {
         missing.push(it.product.name);
         continue;
       }
+      // Si la línea se cotizó por paquete/caja, se busca esa presentación en el
+      // producto de hoy (por id): se carga con su precio actual. Si ya no existe, o
+      // el producto dejó de venderse suelto, la línea no se carga.
+      const { presentation, missing: gone } = resolveQuotedPresentation(it.presentation, product);
+      if (gone) {
+        presentationBlocked = true;
+        missing.push(gone);
+        continue;
+      }
+      // Con presentación, el precio de lista de la línea es el de la presentación.
+      const lineProd = lineProduct(product, presentation);
       const quotedPrice = it.customPrice ?? it.product.price;
       items.push({
         cartItemId: `item-${Date.now()}-${Math.random()}`,
-        product,
+        product: lineProd,
         quantity: it.quantity,
+        ...(presentation ? { presentation: toLinePresentation(presentation) } : {}),
         // Precio cotizado manda, aunque el precio de lista haya cambiado.
-        customPrice: quotedPrice !== product.price ? quotedPrice : undefined,
+        customPrice: quotedPrice !== lineProd.price ? quotedPrice : undefined,
       });
     }
 
     if (items.length === 0) {
       toast({
         title: 'No se pudo cargar',
-        // Con líneas rápidas bloqueadas el motivo no es el inventario: se listan
-        // para que el cajero sepa qué quedó fuera y por qué.
-        description: quickBlocked
+        // Con líneas rápidas o presentaciones bloqueadas el motivo no es el
+        // inventario: se listan para que el cajero sepa qué quedó fuera y por qué.
+        description: quickBlocked || presentationBlocked
           ? `No se cargaron: ${missing.join(', ')}.`
           : 'Ninguno de los productos cotizados existe ya en el inventario.',
         variant: 'destructive',
