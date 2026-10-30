@@ -280,7 +280,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
         // «se vende suelto». Hay que decirlo, porque lo demás sí quedó importado.
         result.failed.push({
           name: 'Presentaciones',
-          error: `No se guardó ninguna presentación de este archivo, ni ningún cambio de «se vende suelto» (los productos sí se importaron): ${error.message.replace(/[.\s]+$/, '')}. Corrige el archivo y vuelve a importar.`,
+          error: `No se guardó ninguna presentación de este archivo ni ningún cambio de «se vende suelto»; los productos sí se importaron. Motivo: ${error.message.replace(/[.\s]+$/, '')}. No vuelvas a importar el archivo completo, porque los artículos sin código se duplicarían: corrige el código y agrega esas presentaciones desde cada producto, o importa un archivo solo con esas filas y su código.`,
         });
       }
     }
