@@ -54,6 +54,64 @@ Quedan 2 avisos WARN: `authenticated` puede ejecutar `current_company_id()` e
 del propio usuario. Si se quiere cero avisos, moverlas a un esquema `private` no
 expuesto por la API.
 
+## Grants en migraciones nuevas (cambio de Supabase del 30-oct-2026)
+
+Hasta el 30 de octubre de 2026, todo lo que `postgres` crea en `public` recibe
+permisos automáticos para `anon`, `authenticated` y `service_role` (default
+privileges de tablas, secuencias y funciones). Desde esa fecha Supabase los
+quita: **una tabla o función nueva no es accesible por el Data API hasta que la
+migración le dé `grant`**, y PostgREST responde `42501 permission denied`. Lo
+que ya existe conserva sus grants; un `create or replace function` sobre una
+función existente también conserva los suyos.
+
+Toda migración nueva sigue estas reglas:
+
+- **Tabla nueva → grants en la misma migración**, junto al RLS, y solo los
+  verbos que la tabla necesita:
+
+  ```sql
+  create table public.nueva_tabla ( ... );
+  alter table public.nueva_tabla enable row level security;
+
+  grant select, insert, update, delete on public.nueva_tabla to authenticated;
+  grant select, insert, update, delete on public.nueva_tabla to service_role;
+  ```
+
+- **`anon` no va por defecto.** Casi todo es dato de empresa; solo se le da
+  `select` si una pantalla sin sesión lee la tabla directo.
+- **`service_role` también necesita el grant.** Se salta RLS, no los grants, y
+  es la clave que usan las edge functions.
+- **Se acabó "revocar lo que sobra".** `platform_settings`, `support_tickets`,
+  `platform_email_log` y `receipt_links` se escribieron confiando en el grant
+  automático y quitando verbos con `revoke`. En una tabla nueva ese patrón la
+  deja sin ningún acceso: hay que conceder los verbos que sí van (el
+  equivalente de `platform_settings` sería `grant select, update ... to
+  authenticated`).
+- **Función nueva → `grant execute` explícito** a quien la llama
+  (`authenticated`, `service_role`). Incluye las helpers que usan las políticas
+  RLS: si `authenticated` no puede ejecutarla, la consulta entera falla. Las
+  funciones de trigger no lo necesitan (y ya se les revoca).
+- **Secuencias:** si la tabla usa `serial`/`bigserial` o una secuencia propia,
+  `grant usage, select on sequence ... to authenticated, service_role`. Con
+  `uuid default gen_random_uuid()` o `identity` no hace falta.
+
+Para comprobar una tabla después de aplicar la migración:
+
+```sql
+select grantee, privilege_type
+from information_schema.role_table_grants
+where table_schema = 'public' and table_name = 'nueva_tabla';
+```
+
+Para confirmar que el cambio ya llegó al proyecto, esta consulta debe dejar de
+listar a `anon`/`authenticated`/`service_role` en las filas de `public`:
+
+```sql
+select pg_get_userbyid(defaclrole), defaclobjtype, defaclacl
+from pg_default_acl
+where defaclnamespace = 'public'::regnamespace;
+```
+
 ## Asignación de NCF (migración `ncf_assignment_trigger`)
 
 El trigger `trg_set_sale_ncf` (BEFORE INSERT en `sales`) llama a `assign_ncf`:
