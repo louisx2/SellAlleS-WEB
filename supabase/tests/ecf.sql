@@ -4,6 +4,7 @@
 --
 --   begin; <supabase/migrations/20261030120000_ecf_esquema.sql>
 --          <supabase/migrations/20261030130000_ecf_asignacion.sql>
+--          <supabase/migrations/20261030140000_ecf_anulacion_reemision.sql>
 --          <este archivo> rollback;
 --
 -- Pasa si el último resultado es `ok`; si una aserción falla, la llamada
@@ -1105,6 +1106,574 @@ begin
      or ncf_b_vigente('00000000-0000-0000-0000-0000000000aa') is distinct from true then
     raise exception 'corte B: con el corte mañana la B debía seguir saliendo (B0200000003), dio %',
       pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec75');
+  end if;
+end $t$;
+
+-- == Task 3: anulación con E34, reemisión y reintento ==
+-- Estado explícito de la sección: super admin; la demo formalizada, con
+-- ncf_enabled, módulo `ecf` y ecf_config activa en CerteCF; sin documentos ni
+-- secuencias propias; serie B vigente (corte dentro de 30 días). Secuencias:
+-- E32 desde 7000 (no repite los e-NCF de ventas de secciones anteriores), E34 y
+-- B04 desde 1, y una B02. La E34 se crea un día antes que la B04: si la
+-- anulación de una venta B no excluyera las secuencias electrónicas, la tomaría.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+update companies set is_formalized = true, ncf_enabled = true where id = '00000000-0000-0000-0000-0000000000aa';
+update branches set rnc = null where id = '00000000-0000-0000-0000-0000000000b1';
+delete from company_modules where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'ecf', true);
+delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa';
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
+values ('00000000-0000-0000-0000-0000000000aa', 'activa', 'CerteCF', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ncf_sequences where company_id = '00000000-0000-0000-0000-0000000000aa';
+update platform_settings set ncf_b_fecha_corte = company_today('00000000-0000-0000-0000-0000000000aa') + 30;
+select pg_temp.secuencia('nota_credito', 'E34', true);
+update ncf_sequences set created_at = now() - interval '1 day'
+ where company_id = '00000000-0000-0000-0000-0000000000aa' and prefix = 'E34';
+select pg_temp.secuencia('consumer', 'E32', true, 7000, 7100);
+select pg_temp.secuencia('nota_credito', 'B04', false);
+select pg_temp.secuencia('consumer', 'B02', false, 200, 300);
+
+-- Venta con e-NCF (E32) y su documento en el estado dado.
+create function pg_temp.venta_e(p_id uuid, p_estado text) returns void language plpgsql as $$
+begin
+  perform pg_temp.venta_ncf(p_id, false);
+  update ecf_documentos set estado = p_estado where sale_id = p_id;
+end $$;
+
+-- Venta con una B ya asignada (de antes de activar el e-CF): sin documento.
+create function pg_temp.venta_b(p_id uuid, p_ncf text) returns void language sql as $$
+  insert into sales (id, company_id, branch_id, subtotal, itbis_amount, total, payment_method,
+                     payment_status, amount_paid, ncf)
+  values (p_id, '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+          100, 0, 100, 'transfer', 'paid', 100, p_ncf);
+$$;
+
+-- Id del documento vigente de la venta. Security definer para poder pedirlo
+-- también bajo `authenticated`, sin depender de la RLS.
+create function pg_temp.doc_vigente(p_sale uuid) returns uuid language sql security definer as $$
+  select id from ecf_documentos where sale_id = p_sale and reemplazado_por is null
+   order by created_at desc limit 1
+$$;
+
+-- Cajero o administrador de la demo: usa el perfil cc56c633… (admin de otra
+-- empresa) agregándole una membresía en la demo con ese rol y cambiando su
+-- empresa activa. Deja los claims de esa persona; melany_fuera_de_demo() deshace
+-- todo y devuelve los del super admin.
+create function pg_temp.melany_en_demo(p_rol text) returns void language plpgsql as $$
+begin
+  perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+  delete from profile_companies
+   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = '00000000-0000-0000-0000-0000000000aa';
+  insert into profile_companies (profile_id, company_id, role)
+  values ('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566', '00000000-0000-0000-0000-0000000000aa', p_rol::user_role);
+  update profiles set company_id = '00000000-0000-0000-0000-0000000000aa'
+   where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
+  perform pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
+end $$;
+
+create function pg_temp.melany_fuera_de_demo() returns void language plpgsql as $$
+begin
+  perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+  update profiles set company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+   where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
+  delete from profile_companies
+   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = '00000000-0000-0000-0000-0000000000aa';
+end $$;
+
+do $t$
+begin
+  if ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'Task 3: el estado de partida debía tener e-CF activo en la demo';
+  end if;
+end $t$;
+
+-- Anulación de una venta con e-CF aceptado, hecha como `authenticated` (super
+-- admin): la nota de crédito lleva una E34 de 10 dígitos de la secuencia
+-- electrónica, apunta al e-NCF de la venta y la bandeja crea su documento tipo
+-- 34 por enviar aunque `authenticated` no pueda escribir en ecf_documentos.
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec80', 'aceptado');
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+declare r jsonb;
+begin
+  r := annul_sale('00000000-0000-0000-0000-00000000ec80', 'prueba e-CF', null);
+  perform set_config('ecf.t3_anulacion', r::text, true);
+end $t$;
+reset role;
+do $t$
+declare r jsonb := current_setting('ecf.t3_anulacion')::jsonb; s sales; n credit_notes; d ecf_documentos;
+begin
+  select * into s from sales where id = '00000000-0000-0000-0000-00000000ec80';
+  select * into n from credit_notes where sale_id = '00000000-0000-0000-0000-00000000ec80';
+  select * into d from ecf_documentos where credit_note_id = n.id;
+  if s.cancelled_at is null or s.ncf !~ '^E32\d{10}$' then
+    raise exception 'anulación e-CF: la venta debía quedar anulada y conservar su E32, dio % %', s.cancelled_at, s.ncf;
+  end if;
+  if n.ncf is distinct from 'E340000000001' or n.ncf_modified is distinct from s.ncf then
+    raise exception 'anulación e-CF: la nota debía llevar E340000000001 y modificar %, dio % modifica %',
+      s.ncf, n.ncf, n.ncf_modified;
+  end if;
+  if (r->>'credit_note_id') is distinct from n.id::text or (r->>'ncf') is distinct from n.ncf
+     or (r->>'ncf_modified') is distinct from s.ncf then
+    raise exception 'anulación e-CF: el JSON de respuesta no coincide con la nota: %', r;
+  end if;
+  if (d.tipo_ecf, d.encf, d.estado, d.ambiente) is distinct from (34::smallint, n.ncf, 'por_enviar', 'CerteCF')
+     or d.sale_id is not null or d.branch_id is distinct from n.branch_id or d.company_id <> n.company_id then
+    raise exception 'anulación e-CF: documento de la nota inesperado: % % % % %',
+      d.tipo_ecf, d.encf, d.estado, d.ambiente, d.sale_id;
+  end if;
+  if (select count(*) from ecf_documentos where sale_id = s.id and estado = 'aceptado') <> 1
+     or (select count(*) from ecf_documentos where sale_id = s.id) <> 1 then
+    raise exception 'anulación e-CF: el documento de la venta no debía cambiar';
+  end if;
+  if pg_temp.sig('E34') <> 2 or pg_temp.sig('B04') <> 1 then
+    raise exception 'anulación e-CF: debía gastar solo la E34 (sig E34 = %, B04 = %)', pg_temp.sig('E34'), pg_temp.sig('B04');
+  end if;
+end $t$;
+
+-- Recibido (firmado, sin respuesta de la DGII) y aceptado condicional también
+-- se anulan: la E34 sale igual.
+do $t$
+declare x record; n credit_notes; d ecf_documentos;
+begin
+  for x in
+    select * from (values
+      ('00000000-0000-0000-0000-00000000ec81'::uuid, 'recibido', 'E340000000002'),
+      ('00000000-0000-0000-0000-00000000ec82'::uuid, 'aceptado_condicional', 'E340000000003')
+    ) v(id, estado, esperado)
+  loop
+    perform pg_temp.venta_e(x.id, x.estado);
+    perform annul_sale(x.id, 'prueba e-CF', null);
+    select * into n from credit_notes where sale_id = x.id;
+    select * into d from ecf_documentos where credit_note_id = n.id;
+    if n.ncf is distinct from x.esperado
+       or n.ncf_modified is distinct from (select ncf from sales where id = x.id)
+       or (d.tipo_ecf, d.estado) is distinct from (34::smallint, 'por_enviar') then
+      raise exception 'anulación e-CF con el documento %: debía salir % con su documento 34, dio % %',
+        x.estado, x.esperado, n.ncf, d.estado;
+    end if;
+  end loop;
+end $t$;
+
+-- Sin enviar a la DGII no se puede anular: la venta, el número y la bandeja
+-- quedan como estaban.
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec83', 'por_enviar');
+do $t$
+declare e text; antes bigint := pg_temp.sig('E34');
+begin
+  foreach e in array array['por_enviar', 'enviando', 'error_datos', 'sin_cupo'] loop
+    update ecf_documentos set estado = e where sale_id = '00000000-0000-0000-0000-00000000ec83';
+    perform pg_temp.debe_fallar(
+      $q$select annul_sale('00000000-0000-0000-0000-00000000ec83', 'prueba e-CF', null)$q$,
+      'Esta venta tiene su e-CF todavía sin enviar a la DGII. Espera a que salga o reintenta el envío antes de anularla.');
+    if (select cancelled_at from sales where id = '00000000-0000-0000-0000-00000000ec83') is not null
+       or exists (select 1 from credit_notes where sale_id = '00000000-0000-0000-0000-00000000ec83')
+       or pg_temp.sig('E34') <> antes
+       or (select count(*) from ecf_documentos where tipo_ecf = 34) <> 3 then
+      raise exception 'anulación e-CF con el documento %: no debía anular, gastar la E34 ni crear documentos', e;
+    end if;
+  end loop;
+end $t$;
+
+-- Rechazado: se anula sin nota de crédito (ncf null), sin gastar la E34 y sin
+-- documento 34; el rechazado queda como está.
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec84', 'rechazado');
+do $t$
+declare r jsonb; s sales; n credit_notes; antes bigint := pg_temp.sig('E34');
+begin
+  r := annul_sale('00000000-0000-0000-0000-00000000ec84', 'rechazada por la DGII', null);
+  select * into s from sales where id = '00000000-0000-0000-0000-00000000ec84';
+  select * into n from credit_notes where sale_id = s.id;
+  if s.cancelled_at is null then
+    raise exception 'anulación de un rechazado: la venta debía quedar anulada';
+  end if;
+  if n.id is null or n.ncf is not null or n.ncf_modified is distinct from s.ncf
+     or (r->>'ncf') is not null or (r->>'credit_note_id') is distinct from n.id::text then
+    raise exception 'anulación de un rechazado: la nota debía existir sin ncf y modificar %, dio % / %', s.ncf, n.ncf, r;
+  end if;
+  if pg_temp.sig('E34') <> antes
+     or exists (select 1 from ecf_documentos where credit_note_id = n.id)
+     or (select count(*) from ecf_documentos where tipo_ecf = 34) <> 3
+     or (select estado from ecf_documentos where sale_id = s.id) is distinct from 'rechazado' then
+    raise exception 'anulación de un rechazado: no debía gastar la E34 ni crear documento 34';
+  end if;
+end $t$;
+
+-- Una venta con B (de antes de activar el e-CF) sigue sacando un B04 de 8
+-- dígitos aunque haya una E34 más vieja en la tabla: la anulación de una B no
+-- toca las secuencias electrónicas.
+select pg_temp.venta_b('00000000-0000-0000-0000-00000000ec85', 'B0200000009');
+do $t$
+declare r jsonb;
+begin
+  r := annul_sale('00000000-0000-0000-0000-00000000ec85', 'prueba B', null);
+  if (r->>'ncf') is distinct from 'B0400000001' or (r->>'ncf_modified') is distinct from 'B0200000009' then
+    raise exception 'anulación de una B con e-CF activo: debía salir B0400000001, dio %', r;
+  end if;
+  if pg_temp.sig('B04') <> 2 or pg_temp.sig('E34') <> 4
+     or exists (select 1 from ecf_documentos where credit_note_id = (r->>'credit_note_id')::uuid) then
+    raise exception 'anulación de una B con e-CF activo: solo debía gastar la B04 y no crear documento';
+  end if;
+end $t$;
+
+-- Sin e-CF (suspendida), igual: B04 de 8 dígitos.
+update ecf_config set estado = 'suspendida' where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.venta_b('00000000-0000-0000-0000-00000000ec86', 'B0200000010');
+do $t$
+declare r jsonb;
+begin
+  if ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from false then
+    raise exception 'Task 3: la demo debía estar sin e-CF en esta prueba';
+  end if;
+  r := annul_sale('00000000-0000-0000-0000-00000000ec86', 'prueba B', null);
+  if (r->>'ncf') is distinct from 'B0400000002' or (r->>'ncf') !~ '^B04\d{8}$' then
+    raise exception 'anulación de una B sin e-CF: debía salir B0400000002, dio %', r;
+  end if;
+  if pg_temp.sig('B04') <> 3 or pg_temp.sig('E34') <> 4 then
+    raise exception 'anulación de una B sin e-CF: solo debía gastar la B04';
+  end if;
+end $t$;
+update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+-- Una venta sin NCF se anula sin nota de crédito, como hoy (la E34 no se gasta).
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec8f', false, 'consumer', now() - interval '3 days');
+do $t$
+declare r jsonb;
+begin
+  r := annul_sale('00000000-0000-0000-0000-00000000ec8f', 'prueba sin NCF', null);
+  if (r->>'ncf') is not null or (r->>'ncf_modified') is not null or pg_temp.sig('E34') <> 4 then
+    raise exception 'anulación sin NCF: no debía llevar nota de crédito ni gastar la E34, dio %', r;
+  end if;
+end $t$;
+
+-- El trigger de la bandeja de notas de crédito solo reacciona a una E34 de 10
+-- dígitos: una B04, una E32, una E34 corta o larga, en minúscula o sin NCF no
+-- crean nada. La que sí vale crea su documento sin venta. Cada venta lleva una
+-- sola nota de crédito (credit_notes.sale_id es único), así que cada nota tiene
+-- su venta de hace tres días (sin e-NCF) con el mismo id.
+do $t$
+declare x record; d ecf_documentos;
+begin
+  for x in
+    select * from (values
+      ('00000000-0000-0000-0000-00000000ec91'::uuid, 'E340000009991', 1),
+      ('00000000-0000-0000-0000-00000000ec92'::uuid, 'B0400000099', 0),
+      ('00000000-0000-0000-0000-00000000ec93'::uuid, 'E34000000999', 0),
+      ('00000000-0000-0000-0000-00000000ec94'::uuid, 'E320000009994', 0),
+      ('00000000-0000-0000-0000-00000000ec95'::uuid, 'E3400000099955', 0),
+      ('00000000-0000-0000-0000-00000000ec96'::uuid, 'e340000009996', 0),
+      ('00000000-0000-0000-0000-00000000ec97'::uuid, null, 0)
+    ) v(id, ncf, esperados)
+  loop
+    perform pg_temp.venta_ncf(x.id, false, 'consumer', now() - interval '3 days');
+    insert into credit_notes (id, company_id, branch_id, sale_id, ncf, subtotal, itbis_amount, total)
+    values (x.id, '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+            x.id, x.ncf, 10, 0, 10);
+    if (select count(*) from ecf_documentos where credit_note_id = x.id) <> x.esperados then
+      raise exception 'ecf_encolar_nota_credito: con ncf % debía crear % documento(s)', x.ncf, x.esperados;
+    end if;
+  end loop;
+  select * into d from ecf_documentos where credit_note_id = '00000000-0000-0000-0000-00000000ec91';
+  if (d.tipo_ecf, d.encf, d.estado, d.ambiente, d.branch_id)
+       is distinct from (34::smallint, 'E340000009991', 'por_enviar', 'CerteCF', '00000000-0000-0000-0000-0000000000b1'::uuid)
+     or d.sale_id is not null then
+    raise exception 'ecf_encolar_nota_credito: documento inesperado: % % % % %',
+      d.tipo_ecf, d.encf, d.estado, d.ambiente, d.branch_id;
+  end if;
+end $t$;
+
+-- reemitir_ecf: con el documento rechazado y como `authenticated` (super
+-- admin) la venta pasa al siguiente E32, hay dos documentos y el viejo apunta
+-- al nuevo.
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec87', 'rechazado');
+select set_config('ecf.t3_sig_e32', pg_temp.sig('E32')::text, true);
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+declare r jsonb;
+begin
+  r := reemitir_ecf('00000000-0000-0000-0000-00000000ec87');
+  perform set_config('ecf.t3_reemision', r::text, true);
+end $t$;
+reset role;
+do $t$
+declare
+  r jsonb := current_setting('ecf.t3_reemision')::jsonb;
+  sg bigint := current_setting('ecf.t3_sig_e32')::bigint;
+  s sales; viejo ecf_documentos; nuevo ecf_documentos;
+begin
+  select * into s from sales where id = '00000000-0000-0000-0000-00000000ec87';
+  select * into viejo from ecf_documentos where sale_id = s.id and encf = 'E32' || lpad((sg - 1)::text, 10, '0');
+  select * into nuevo from ecf_documentos where sale_id = s.id and encf = 'E32' || lpad(sg::text, 10, '0');
+  if s.ncf is distinct from 'E32' || lpad(sg::text, 10, '0') or s.cancelled_at is not null then
+    raise exception 'reemitir_ecf: la venta debía pasar a % sin anularse, dio %', 'E32' || lpad(sg::text, 10, '0'), s.ncf;
+  end if;
+  if (select count(*) from ecf_documentos where sale_id = s.id) <> 2 or viejo.id is null or nuevo.id is null then
+    raise exception 'reemitir_ecf: debía haber dos documentos, el viejo y el nuevo';
+  end if;
+  if viejo.reemplazado_por is distinct from nuevo.id or viejo.estado <> 'rechazado' then
+    raise exception 'reemitir_ecf: el viejo debía seguir rechazado y apuntar al nuevo, dio % %', viejo.estado, viejo.reemplazado_por;
+  end if;
+  if (nuevo.tipo_ecf, nuevo.estado, nuevo.ambiente, nuevo.branch_id, nuevo.company_id, nuevo.intentos)
+       is distinct from (32::smallint, 'por_enviar', 'CerteCF', '00000000-0000-0000-0000-0000000000b1'::uuid,
+                         '00000000-0000-0000-0000-0000000000aa'::uuid, 0)
+     or nuevo.reemplazado_por is not null or nuevo.credit_note_id is not null then
+    raise exception 'reemitir_ecf: documento nuevo inesperado: % % % %', nuevo.tipo_ecf, nuevo.estado, nuevo.ambiente, nuevo.reemplazado_por;
+  end if;
+  if (r->>'documento_id') is distinct from nuevo.id::text or (r->>'encf') is distinct from nuevo.encf then
+    raise exception 'reemitir_ecf: el JSON debía traer documento_id y encf del nuevo, dio %', r;
+  end if;
+  if pg_temp.sig('E32') <> sg + 1 then
+    raise exception 'reemitir_ecf: debía gastar un solo número';
+  end if;
+end $t$;
+
+-- Una vez reemitido, el documento vigente es el nuevo: no se puede reemitir
+-- otra vez ni anular mientras no salga; el rechazado viejo no cuenta. Cuando el
+-- nuevo se acepta, la anulación saca la E34 y modifica el e-NCF nuevo.
+do $t$
+declare nuevo uuid := pg_temp.doc_vigente('00000000-0000-0000-0000-00000000ec87'); n credit_notes; s sales;
+begin
+  perform pg_temp.debe_fallar(
+    $q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec87')$q$,
+    'Solo se puede reemitir un comprobante rechazado por la DGII.');
+  perform pg_temp.debe_fallar(
+    $q$select annul_sale('00000000-0000-0000-0000-00000000ec87', 'prueba', null)$q$,
+    'Esta venta tiene su e-CF todavía sin enviar a la DGII%');
+  update ecf_documentos set estado = 'aceptado' where id = nuevo;
+  perform annul_sale('00000000-0000-0000-0000-00000000ec87', 'prueba', null);
+  select * into s from sales where id = '00000000-0000-0000-0000-00000000ec87';
+  select * into n from credit_notes where sale_id = s.id;
+  if n.ncf !~ '^E34\d{10}$' or n.ncf_modified is distinct from s.ncf
+     or n.ncf_modified = (select encf from ecf_documentos where sale_id = s.id and estado = 'rechazado') then
+    raise exception 'anulación tras reemitir: la E34 debía modificar el e-NCF nuevo %, dio % modifica %', s.ncf, n.ncf, n.ncf_modified;
+  end if;
+  -- Y una venta ya anulada no se reemite, aunque su documento esté rechazado.
+  perform pg_temp.debe_fallar(
+    $q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec84')$q$,
+    'Esta venta ya fue anulada.');
+end $t$;
+
+-- reemitir_ecf solo con el documento rechazado: cualquier otro estado, una
+-- venta sin documento (B) o una que no existe se rechazan sin tocar nada. Se
+-- prueba como `authenticated`; fijar_estado (security definer) cambia el estado
+-- del documento desde dentro del mismo bloque, que no puede escribir en la tabla.
+create function pg_temp.fijar_estado(p_sale uuid, p_estado text) returns void language sql security definer as $$
+  update ecf_documentos set estado = p_estado where sale_id = p_sale and reemplazado_por is null
+$$;
+
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec88', 'aceptado');
+select pg_temp.venta_b('00000000-0000-0000-0000-00000000ec8c', 'B0200000011');
+select set_config('ecf.t3_sig_e32_b', pg_temp.sig('E32')::text, true);
+select set_config('ecf.t3_ncf_ec88', pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec88'), true);
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+declare e text;
+begin
+  foreach e in array array['por_enviar', 'enviando', 'recibido', 'aceptado', 'aceptado_condicional', 'error_datos', 'sin_cupo'] loop
+    perform pg_temp.fijar_estado('00000000-0000-0000-0000-00000000ec88', e);
+    perform pg_temp.debe_fallar(
+      $q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec88')$q$,
+      'Solo se puede reemitir un comprobante rechazado por la DGII.');
+  end loop;
+  perform pg_temp.debe_fallar(
+    $q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec8c')$q$,
+    'Solo se puede reemitir un comprobante rechazado por la DGII.');
+  perform pg_temp.debe_fallar($q$select reemitir_ecf(gen_random_uuid())$q$, 'Venta no encontrada.');
+end $t$;
+reset role;
+do $t$
+begin
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec88') is distinct from current_setting('ecf.t3_ncf_ec88')
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec88') <> 1
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec8c') <> 0
+     or pg_temp.sig('E32') <> current_setting('ecf.t3_sig_e32_b')::bigint then
+    raise exception 'reemitir_ecf: las reemisiones rechazadas no debían cambiar la venta, los documentos ni gastar números';
+  end if;
+end $t$;
+
+-- Sin e-CF activo no se reemite (assign_ncf daría una B), y si la secuencia E32
+-- no tiene números no cambia nada: ni la venta, ni el documento, ni el contador.
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec8b', 'rechazado');
+do $t$
+declare sg bigint := pg_temp.sig('E32'); ncf0 text := pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec8b');
+begin
+  update ecf_config set estado = 'suspendida' where company_id = '00000000-0000-0000-0000-0000000000aa';
+  perform pg_temp.debe_fallar(
+    $q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec8b')$q$,
+    'La facturación electrónica no está activa para esta empresa.');
+  update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+  update ncf_sequences set current_val = range_to + 1
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and prefix = 'E32';
+  perform pg_temp.debe_fallar(
+    $q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec8b')$q$,
+    'No hay una secuencia de e-CF (E32) activa con números disponibles%');
+  update ncf_sequences set current_val = sg
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and prefix = 'E32';
+
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec8b') is distinct from ncf0
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec8b') <> 1
+     or (select estado from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec8b') <> 'rechazado'
+     or (select reemplazado_por from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec8b') is not null
+     or pg_temp.sig('E32') <> sg then
+    raise exception 'reemitir_ecf: sin e-CF activo o sin secuencia no debía cambiar nada';
+  end if;
+end $t$;
+
+-- ecf_reintentar: error_datos y sin_cupo vuelven a por_enviar con el próximo
+-- intento en este momento; cualquier otro estado se rechaza sin cambiar nada.
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec8e', 'error_datos');
+do $t$
+declare e text; d uuid := pg_temp.doc_vigente('00000000-0000-0000-0000-00000000ec8e'); x ecf_documentos;
+begin
+  foreach e in array array['error_datos', 'sin_cupo'] loop
+    update ecf_documentos
+       set estado = e, proximo_intento_at = now() + interval '1 hour', intentos = 3, ultimo_error = 'dato inválido'
+     where id = d;
+    perform ecf_reintentar(d);
+    select * into x from ecf_documentos where id = d;
+    if x.estado <> 'por_enviar' or x.proximo_intento_at is distinct from now() then
+      raise exception 'ecf_reintentar desde %: debía quedar por_enviar para ahora, dio % %', e, x.estado, x.proximo_intento_at;
+    end if;
+  end loop;
+
+  foreach e in array array['por_enviar', 'enviando', 'recibido', 'aceptado', 'aceptado_condicional', 'rechazado'] loop
+    update ecf_documentos set estado = e where id = d;
+    perform pg_temp.debe_fallar(
+      format($q$select ecf_reintentar(%L)$q$, d),
+      'Solo se puede reintentar un comprobante con error o sin cupo.');
+    if (select estado from ecf_documentos where id = d) <> e then
+      raise exception 'ecf_reintentar desde %: no debía cambiar el estado', e;
+    end if;
+  end loop;
+  perform pg_temp.debe_fallar($q$select ecf_reintentar(gen_random_uuid())$q$, 'Comprobante no encontrado.');
+end $t$;
+
+-- Cajero de la demo (como `authenticated`): ni reemite, ni reintenta, ni anula,
+-- y lo de otra empresa ni lo ve. Nada cambia.
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec8a', 'rechazado');
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec8d', 'error_datos');
+select set_config('ecf.t3_ncf_ec8a', pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec8a'), true);
+select pg_temp.melany_en_demo('cashier');
+set local role authenticated;
+do $t$
+begin
+  if is_company_admin() then
+    raise exception 'Task 3: la persona de prueba debía ser cajera de la demo, no administradora';
+  end if;
+  perform pg_temp.debe_fallar(
+    $q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec8a')$q$,
+    'Solo un administrador puede reemitir comprobantes.');
+  perform pg_temp.debe_fallar(
+    format($q$select ecf_reintentar(%L)$q$, pg_temp.doc_vigente('00000000-0000-0000-0000-00000000ec8d')),
+    'Solo un administrador puede reintentar comprobantes.');
+  perform pg_temp.debe_fallar(
+    $q$select annul_sale('00000000-0000-0000-0000-00000000ec8a', 'prueba', null)$q$,
+    'Solo un administrador puede anular ventas.');
+  -- Una venta y un documento de otra empresa: ni existen para ella.
+  perform pg_temp.debe_fallar($q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec03')$q$, 'Venta no encontrada.');
+  perform pg_temp.debe_fallar($q$select ecf_reintentar('00000000-0000-0000-0000-00000000ec23')$q$, 'Comprobante no encontrado.');
+end $t$;
+reset role;
+
+-- Administrador de la demo que no es super admin (como `authenticated`): reemite
+-- y reintenta lo de su empresa, y lo de otra empresa sigue sin existir para él.
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec89', 'rechazado');
+select set_config('ecf.t3_sig_e32_c', pg_temp.sig('E32')::text, true);
+select pg_temp.melany_en_demo('admin');
+set local role authenticated;
+do $t$
+declare r jsonb;
+begin
+  if not is_company_admin() or is_super_admin() then
+    raise exception 'Task 3: la persona de prueba debía ser administradora de la demo sin ser super admin';
+  end if;
+  r := reemitir_ecf('00000000-0000-0000-0000-00000000ec89');
+  perform set_config('ecf.t3_admin', r::text, true);
+  perform ecf_reintentar(pg_temp.doc_vigente('00000000-0000-0000-0000-00000000ec8d'));
+  perform pg_temp.debe_fallar($q$select reemitir_ecf('00000000-0000-0000-0000-00000000ec03')$q$, 'Venta no encontrada.');
+  perform pg_temp.debe_fallar($q$select ecf_reintentar('00000000-0000-0000-0000-00000000ec23')$q$, 'Comprobante no encontrado.');
+end $t$;
+reset role;
+select pg_temp.melany_fuera_de_demo();
+do $t$
+declare
+  r jsonb := current_setting('ecf.t3_admin')::jsonb;
+  sg bigint := current_setting('ecf.t3_sig_e32_c')::bigint;
+begin
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec89') is distinct from 'E32' || lpad(sg::text, 10, '0')
+     or (r->>'encf') is distinct from 'E32' || lpad(sg::text, 10, '0')
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec89') <> 2
+     or (r->>'documento_id') is distinct from pg_temp.doc_vigente('00000000-0000-0000-0000-00000000ec89')::text then
+    raise exception 'administrador sin ser super admin: debía poder reemitir su venta, dio %', r;
+  end if;
+  if (select estado from ecf_documentos where id = pg_temp.doc_vigente('00000000-0000-0000-0000-00000000ec8d')) <> 'por_enviar' then
+    raise exception 'administrador sin ser super admin: debía poder reintentar el documento de su empresa';
+  end if;
+
+  -- Lo que intentó el cajero y lo de la otra empresa no cambió.
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec8a') is distinct from current_setting('ecf.t3_ncf_ec8a')
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec8a') <> 1
+     or (select estado from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec8a') <> 'rechazado'
+     or (select cancelled_at from sales where id = '00000000-0000-0000-0000-00000000ec8a') is not null then
+    raise exception 'el cajero no debía poder cambiar nada';
+  end if;
+  if (select estado from ecf_documentos where id = '00000000-0000-0000-0000-00000000ec23') <> 'por_enviar'
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec03') <> 1 then
+    raise exception 'lo de la otra empresa no debía cambiar';
+  end if;
+
+  -- La persona de prueba vuelve a su empresa y a su rol.
+  if (select company_id from profiles where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566')
+       is distinct from 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+     or (select role::text from profiles where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566') <> 'admin'
+     or exists (select 1 from profile_companies
+                 where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = '00000000-0000-0000-0000-0000000000aa') then
+    raise exception 'Task 3: el perfil de prueba no volvió a su empresa y su rol';
+  end if;
+end $t$;
+
+-- Permisos de las funciones: las nuevas cerradas a anon y a PUBLIC, abiertas a
+-- authenticated (ellas validan el rol adentro); el trigger de la bandeja de
+-- notas, solo del servidor; annul_sale sigue igual.
+do $t$
+declare f text;
+begin
+  foreach f in array array['public.reemitir_ecf(uuid)', 'public.ecf_reintentar(uuid)', 'public.annul_sale(uuid,text,text)'] loop
+    if has_function_privilege('anon', f, 'execute') then
+      raise exception 'anon no debía poder ejecutar %', f;
+    end if;
+    if not has_function_privilege('authenticated', f, 'execute') then
+      raise exception 'authenticated debía poder ejecutar %', f;
+    end if;
+    if (select proacl is null from pg_proc where oid = f::regprocedure)
+       or exists (select 1 from pg_proc p cross join lateral aclexplode(p.proacl) a
+                   where p.oid = f::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+      raise exception '% no debía ser ejecutable por PUBLIC', f;
+    end if;
+    if not coalesce((select prosecdef and proconfig @> array['search_path=public']
+                       from pg_proc where oid = f::regprocedure), false) then
+      raise exception '% debía ser security definer con search_path = public', f;
+    end if;
+  end loop;
+
+  f := 'public.ecf_encolar_nota_credito()';
+  if has_function_privilege('anon', f, 'execute') or has_function_privilege('authenticated', f, 'execute') then
+    raise exception 'ecf_encolar_nota_credito no debía ser ejecutable por anon ni authenticated';
+  end if;
+  if (select proacl is null from pg_proc where oid = f::regprocedure)
+     or exists (select 1 from pg_proc p cross join lateral aclexplode(p.proacl) a
+                 where p.oid = f::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+    raise exception 'ecf_encolar_nota_credito no debía ser ejecutable por PUBLIC';
+  end if;
+  if not coalesce((select prosecdef and proconfig @> array['search_path=public']
+                     from pg_proc where oid = f::regprocedure), false) then
+    raise exception 'ecf_encolar_nota_credito debía ser security definer con search_path = public';
   end if;
 end $t$;
 
