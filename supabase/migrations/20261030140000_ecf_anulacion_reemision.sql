@@ -12,6 +12,9 @@
 --   * venta con e-NCF y e-CF activo: depende del documento vigente de la venta
 --     (el que no ha sido reemplazado) y la E34 sale de assign_ncf(), que ya
 --     usa la secuencia electrónica con 10 dígitos;
+--   * venta con e-NCF y e-CF no activo (suspendido): se rechaza con un mensaje;
+--     no se emite ni E34 ni B04 hasta que la empresa reactive la facturación
+--     electrónica;
 --   * cualquier otra venta con NCF (serie B): la B04 de siempre, sin corte de
 --     fecha. La única diferencia es que ahora excluye las secuencias
 --     electrónicas (`not electronica`): antes no existían, y sin el filtro una
@@ -112,7 +115,13 @@ begin
   -- crédito se emite aunque no haya devolución: es lo que la deja anulada ante
   -- la DGII.
   if v_sale.ncf is not null then
-    if v_sale.ncf ~ '^E\d{12}$' and ecf_activa(v_sale.company_id) then
+    if v_sale.ncf ~ '^E\d{12}$' then
+      -- Una venta con e-NCF solo se anula con una E34, y la E34 solo se emite
+      -- con el e-CF activo: suspendido (o apagado) no se anula ni con una B04.
+      if not ecf_activa(v_sale.company_id) then
+        raise exception 'La facturación electrónica de esta empresa no está activa; no se puede anular una venta con comprobante electrónico hasta reactivarla.';
+      end if;
+
       -- e-CF: lo que se puede hacer depende de en qué quedó el comprobante
       -- original (el vigente: el que no ha sido reemplazado por otro).
       select d.estado into v_doc_estado

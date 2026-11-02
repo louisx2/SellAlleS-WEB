@@ -1319,6 +1319,10 @@ begin
   end if;
 end $t$;
 
+-- Una venta con e-NCF necesita el e-CF activo para anularse (la venta ec98 se
+-- crea ahora, con el e-CF todavía activo; la prueba está más abajo).
+select pg_temp.venta_e('00000000-0000-0000-0000-00000000ec98', 'aceptado');
+
 -- Sin e-CF (suspendida), igual: B04 de 8 dígitos.
 update ecf_config set estado = 'suspendida' where company_id = '00000000-0000-0000-0000-0000000000aa';
 select pg_temp.venta_b('00000000-0000-0000-0000-00000000ec86', 'B0200000010');
@@ -1334,6 +1338,26 @@ begin
   end if;
   if pg_temp.sig('B04') <> 3 or pg_temp.sig('E34') <> 4 then
     raise exception 'anulación de una B sin e-CF: solo debía gastar la B04';
+  end if;
+end $t$;
+
+-- Con el e-CF suspendido una venta con e-NCF no se anula: ni E34 ni B04. No se
+-- escribe nada (sin nota de crédito, sin documento 34, secuencias intactas),
+-- sea cual sea el estado de su documento.
+do $t$
+declare e text; b04 bigint := pg_temp.sig('B04'); e34 bigint := pg_temp.sig('E34');
+begin
+  foreach e in array array['aceptado', 'recibido', 'rechazado', 'por_enviar'] loop
+    update ecf_documentos set estado = e where sale_id = '00000000-0000-0000-0000-00000000ec98';
+    perform pg_temp.debe_fallar(
+      $q$select annul_sale('00000000-0000-0000-0000-00000000ec98', 'prueba', null)$q$,
+      'La facturación electrónica de esta empresa no está activa; no se puede anular una venta con comprobante electrónico hasta reactivarla.');
+  end loop;
+  if exists (select 1 from credit_notes where sale_id = '00000000-0000-0000-0000-00000000ec98')
+     or (select cancelled_at from sales where id = '00000000-0000-0000-0000-00000000ec98') is not null
+     or (select count(*) from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec98') <> 1
+     or pg_temp.sig('B04') <> b04 or pg_temp.sig('E34') <> e34 then
+    raise exception 'anulación con e-CF suspendido: no debía crear nota, anular la venta ni gastar B04 ni E34';
   end if;
 end $t$;
 update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
