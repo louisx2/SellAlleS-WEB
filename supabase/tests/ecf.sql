@@ -2,7 +2,9 @@
 -- migración: se corre contra producción dentro de una transacción que se
 -- revierte, después del SQL de la migración:
 --
---   begin; <supabase/migrations/20261030120000_ecf_esquema.sql> <este archivo> rollback;
+--   begin; <supabase/migrations/20261030120000_ecf_esquema.sql>
+--          <supabase/migrations/20261030130000_ecf_asignacion.sql>
+--          <este archivo> rollback;
 --
 -- Pasa si el último resultado es `ok`; si una aserción falla, la llamada
 -- devuelve el error con su mensaje. Antes de que exista la parte de la
@@ -633,6 +635,476 @@ do $t$
 begin
   if (select estado from ecf_config where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9') <> 'preparacion' then
     raise exception 'la ecf_config de la otra empresa cambió pese a la RLS';
+  end if;
+end $t$;
+
+-- == Task 2: e-NCF al guardar la venta, corte de la serie B y bandeja de salida ==
+-- Venta de la demo (sucursal b1 salvo que se diga otra) con lo que decide el NCF.
+create function pg_temp.venta_ncf(p_id uuid, p_requested boolean, p_type text default 'consumer',
+                                  p_created timestamptz default now(),
+                                  p_branch uuid default '00000000-0000-0000-0000-0000000000b1') returns void
+language sql as $$
+  insert into sales (id, company_id, branch_id, subtotal, itbis_amount, total, payment_method,
+                     payment_status, amount_paid, ncf_requested, ncf_type, created_at)
+  values (p_id, '00000000-0000-0000-0000-0000000000aa', p_branch, 100, 0, 100, 'transfer', 'paid', 100,
+          p_requested, p_type::ncf_type, p_created);
+$$;
+
+-- Secuencia de la demo; arranca en p_desde.
+create function pg_temp.secuencia(p_tipo text, p_prefix text, p_electronica boolean,
+                                  p_desde bigint default 1, p_hasta bigint default 100) returns void
+language sql as $$
+  insert into ncf_sequences (company_id, tipo, prefix, range_from, range_to, current_val, electronica)
+  values ('00000000-0000-0000-0000-0000000000aa', p_tipo, p_prefix, p_desde, p_hasta, p_desde, p_electronica);
+$$;
+
+-- Próximo número de la secuencia de la demo con ese prefijo.
+create function pg_temp.sig(p_prefix text) returns bigint language sql as $$
+  select current_val from ncf_sequences
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and prefix = p_prefix
+$$;
+
+create function pg_temp.ncf_de(p_sale uuid) returns text language sql as $$
+  select ncf from sales where id = p_sale
+$$;
+
+create function pg_temp.docs_de(p_sale uuid) returns bigint language sql as $$
+  select count(*) from ecf_documentos where sale_id = p_sale
+$$;
+
+-- Estado explícito de la sección: super admin; la demo formalizada y con
+-- ncf_enabled; módulo `ecf` encendido y ecf_config activa; sin documentos ni
+-- secuencias propias; serie B vigente (corte dentro de 30 días); y las
+-- secuencias que hacen falta, con las B a la vista para ver que no se tocan.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+update companies set is_formalized = true, ncf_enabled = true where id = '00000000-0000-0000-0000-0000000000aa';
+update branches set rnc = null where id = '00000000-0000-0000-0000-0000000000b1';
+delete from company_modules where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'ecf', true);
+delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa';
+insert into ecf_config (company_id, estado, rnc_emisor, razon_social, direccion)
+values ('00000000-0000-0000-0000-0000000000aa', 'activa', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ncf_sequences where company_id = '00000000-0000-0000-0000-0000000000aa';
+update platform_settings set ncf_b_fecha_corte = company_today('00000000-0000-0000-0000-0000000000aa') + 30;
+select pg_temp.secuencia('consumer', 'E32', true);
+select pg_temp.secuencia('fiscal', 'E31', true);
+select pg_temp.secuencia('consumer', 'B02', false, 5, 100);
+select pg_temp.secuencia('fiscal', 'B01', false);
+
+do $t$
+begin
+  if ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'Task 2: el estado de partida debía tener e-CF activo en la demo';
+  end if;
+end $t$;
+
+-- Con e-CF activo la venta recibe un E32 aunque no lo pida: 13 caracteres, y
+-- su documento queda por enviar. Las B de la demo no se tocan.
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec40', false);
+do $t$
+declare s sales; d ecf_documentos;
+begin
+  select * into s from sales where id = '00000000-0000-0000-0000-00000000ec40';
+  if s.ncf is distinct from 'E320000000001' or length(s.ncf) <> 13 then
+    raise exception 'e-CF: la venta debía quedar con E320000000001 (13 caracteres), quedó %', s.ncf;
+  end if;
+  if s.ncf_requested is distinct from true then
+    raise exception 'e-CF: set_sale_ncf debía marcar ncf_requested = true';
+  end if;
+  if pg_temp.docs_de(s.id) <> 1 then
+    raise exception 'e-CF: la venta debía tener exactamente un documento, tiene %', pg_temp.docs_de(s.id);
+  end if;
+  select * into d from ecf_documentos where sale_id = s.id;
+  if (d.company_id, d.branch_id, d.tipo_ecf, d.encf, d.ambiente, d.estado)
+     is distinct from ('00000000-0000-0000-0000-0000000000aa'::uuid, '00000000-0000-0000-0000-0000000000b1'::uuid,
+                       32::smallint, 'E320000000001', 'TesteCF', 'por_enviar') then
+    raise exception 'e-CF: documento inesperado: % % % % % %',
+      d.company_id, d.branch_id, d.tipo_ecf, d.encf, d.ambiente, d.estado;
+  end if;
+  if (pg_temp.sig('E32'), pg_temp.sig('B02'), pg_temp.sig('B01')) is distinct from (2::bigint, 5::bigint, 1::bigint) then
+    raise exception 'e-CF: E32 debía quedar en 2 y las B sin tocar (5 y 1), quedaron % % %',
+      pg_temp.sig('E32'), pg_temp.sig('B02'), pg_temp.sig('B01');
+  end if;
+end $t$;
+
+-- Crédito fiscal: E31, de su propia secuencia.
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec41', false, 'fiscal');
+do $t$
+declare d ecf_documentos;
+begin
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec41') is distinct from 'E310000000001' then
+    raise exception 'e-CF: la venta fiscal debía quedar con E310000000001, quedó %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec41');
+  end if;
+  select * into d from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec41';
+  if (d.tipo_ecf, d.encf, d.estado) is distinct from (31::smallint, 'E310000000001', 'por_enviar') then
+    raise exception 'e-CF: documento fiscal inesperado: % % %', d.tipo_ecf, d.encf, d.estado;
+  end if;
+  if (pg_temp.sig('E31'), pg_temp.sig('E32'), pg_temp.sig('B01'), pg_temp.sig('B02'))
+     is distinct from (2::bigint, 2::bigint, 1::bigint, 5::bigint) then
+    raise exception 'e-CF: la venta fiscal solo debía gastar un número de E31';
+  end if;
+end $t$;
+
+-- El documento lleva el ambiente de ecf_config.
+update ecf_config set ambiente = 'CerteCF' where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec42', false);
+update ecf_config set ambiente = 'TesteCF' where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  if (select ambiente from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec42') is distinct from 'CerteCF' then
+    raise exception 'e-CF: el documento debía llevar el ambiente de ecf_config (CerteCF)';
+  end if;
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec42') is distinct from 'E320000000002' then
+    raise exception 'e-CF: la segunda venta debía quedar con E320000000002, quedó %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec42');
+  end if;
+end $t$;
+
+-- Con e-CF activo se emite e-NCF aunque la empresa no tenga ncf_enabled.
+update companies set ncf_enabled = false where id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec43', false);
+update companies set ncf_enabled = true where id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec43') is distinct from 'E320000000003'
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec43') <> 1 then
+    raise exception 'e-CF: con ecf_activa y sin ncf_enabled debía emitir E320000000003 con su documento, dio %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec43');
+  end if;
+end $t$;
+
+-- Sin secuencia E que sirva, la venta falla: no hay secuencia, o está
+-- inactiva, agotada o vencida. Las B01/B02 que sí existen no la reemplazan.
+do $t$
+declare v text;
+begin
+  delete from ncf_sequences
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and prefix = 'E31';
+  perform pg_temp.debe_fallar(
+    $q$select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec44', false, 'fiscal')$q$,
+    'No hay una secuencia de e-CF (E31) activa con números disponibles. Agrégala en Perfil → Facturación fiscal.');
+  perform pg_temp.debe_fallar(
+    $q$select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec44', false, 'gubernamental')$q$,
+    'No hay una secuencia de e-CF (E45)%');
+  perform pg_temp.debe_fallar(
+    $q$select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec44', false, 'regimen_especial')$q$,
+    'No hay una secuencia de e-CF (E44)%');
+
+  foreach v in array array['active = false', 'current_val = range_to + 1', 'expires_at = company_today(company_id) - 1'] loop
+    perform pg_temp.secuencia('fiscal', 'E31', true);
+    execute format('update ncf_sequences set %s where company_id = %L and prefix = %L',
+                   v, '00000000-0000-0000-0000-0000000000aa', 'E31');
+    perform pg_temp.debe_fallar(
+      $q$select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec44', false, 'fiscal')$q$,
+      'No hay una secuencia de e-CF (E31)%');
+    delete from ncf_sequences
+     where company_id = '00000000-0000-0000-0000-0000000000aa' and prefix = 'E31';
+  end loop;
+
+  if exists (select 1 from sales where id = '00000000-0000-0000-0000-00000000ec44') then
+    raise exception 'e-CF: la venta sin secuencia no debía guardarse';
+  end if;
+  if (pg_temp.sig('B01'), pg_temp.sig('B02')) is distinct from (1::bigint, 5::bigint) then
+    raise exception 'e-CF: las B no debían usarse de reemplazo de la E que falta';
+  end if;
+end $t$;
+
+-- Sucursal con otro RNC que el de la empresa: no emite, y no gasta el número.
+do $t$
+declare antes bigint; r record;
+begin
+  update branches set rnc = '101010101' where id = '00000000-0000-0000-0000-0000000000b1';
+  update ecf_config set rnc_emisor = '130000001' where company_id = '00000000-0000-0000-0000-0000000000aa';
+  antes := pg_temp.sig('E32');
+
+  perform pg_temp.debe_fallar(
+    $q$select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec47', false)$q$,
+    'Esta sucursal tiene un RNC distinto al de la empresa; no puede emitir e-CF con el de la empresa.');
+  if pg_temp.sig('E32') <> antes or exists (select 1 from sales where id = '00000000-0000-0000-0000-00000000ec47') then
+    raise exception 'e-CF: con RNC distinto no debía guardarse la venta ni gastarse un número';
+  end if;
+
+  -- Una venta de días anteriores no pide comprobante: no hay nada que comparar.
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec48', false, 'consumer', now() - interval '3 days');
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec48') is not null or pg_temp.sig('E32') <> antes then
+    raise exception 'e-CF: la venta de días anteriores no debía recibir número';
+  end if;
+
+  -- Una venta sin sucursal no tiene RNC que comparar.
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec49', false, 'consumer', now(), null);
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec49') is distinct from 'E32' || lpad(antes::text, 10, '0')
+     or (select branch_id from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec49') is not null then
+    raise exception 'e-CF: la venta sin sucursal debía emitir con su documento sin sucursal, dio %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec49');
+  end if;
+
+  -- El RNC de la sucursal es texto libre: igual al de la empresa (con o sin
+  -- guiones y espacios) o vacío, emite.
+  update ecf_config set rnc_emisor = '101010101' where company_id = '00000000-0000-0000-0000-0000000000aa';
+  for r in
+    select * from (values
+      ('00000000-0000-0000-0000-00000000ec4a'::uuid, '101010101'),
+      ('00000000-0000-0000-0000-00000000ec4b'::uuid, '1-01-01010-1'),
+      ('00000000-0000-0000-0000-00000000ec4c'::uuid, ' 101 010 101 '),
+      ('00000000-0000-0000-0000-00000000ec4d'::uuid, ''),
+      ('00000000-0000-0000-0000-00000000ec4e'::uuid, '   ')
+    ) v(id, rnc)
+  loop
+    update branches set rnc = r.rnc where id = '00000000-0000-0000-0000-0000000000b1';
+    perform pg_temp.venta_ncf(r.id, false);
+    if pg_temp.ncf_de(r.id) is null or pg_temp.docs_de(r.id) <> 1 then
+      raise exception 'e-CF: con el RNC de sucursal "%" igual o vacío debía emitir', r.rnc;
+    end if;
+  end loop;
+  update branches set rnc = null where id = '00000000-0000-0000-0000-0000000000b1';
+end $t$;
+
+-- Una venta de días anteriores (cargada después) no pide comprobante: queda
+-- sin NCF y sin documento.
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec55', false, 'consumer', now() - interval '3 days');
+do $t$
+declare s sales;
+begin
+  select * into s from sales where id = '00000000-0000-0000-0000-00000000ec55';
+  if s.ncf is not null or s.ncf_requested is distinct from false or pg_temp.docs_de(s.id) <> 0 then
+    raise exception 'e-CF: la venta de hace 3 días debía quedar sin NCF y sin documento, dio % % %',
+      s.ncf, s.ncf_requested, pg_temp.docs_de(s.id);
+  end if;
+end $t$;
+
+-- La fecha de corte solo afecta a la serie B: con e-CF activo se sigue emitiendo.
+update platform_settings set ncf_b_fecha_corte = company_today('00000000-0000-0000-0000-0000000000aa') - 1;
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec56', false);
+update platform_settings set ncf_b_fecha_corte = company_today('00000000-0000-0000-0000-0000000000aa') + 30;
+do $t$
+begin
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec56') !~ '^E32\d{10}$'
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec56') <> 1 then
+    raise exception 'e-CF: con el corte vencido y e-CF activo debía emitir un E32, dio %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec56');
+  end if;
+end $t$;
+
+-- Una venta que ya trae NCF no se toca. Si es un e-NCF entra a la bandeja
+-- (tipo_ecf sale de sus dos dígitos); una B no.
+insert into sales (id, company_id, branch_id, subtotal, itbis_amount, total, payment_method, payment_status, amount_paid, ncf)
+values ('00000000-0000-0000-0000-00000000ec57', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+        100, 0, 100, 'transfer', 'paid', 100, 'B0100000009'),
+       ('00000000-0000-0000-0000-00000000ec58', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+        100, 0, 100, 'transfer', 'paid', 100, 'E450000000007');
+do $t$
+declare d ecf_documentos;
+begin
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec57') is distinct from 'B0100000009'
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec57') <> 0 then
+    raise exception 'e-CF: una venta con B ya asignada debía quedar igual y sin documento';
+  end if;
+  select * into d from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec58';
+  if (d.tipo_ecf, d.encf, d.estado) is distinct from (45::smallint, 'E450000000007', 'por_enviar') then
+    raise exception 'e-CF: una venta con E450000000007 debía crear su documento tipo 45, dio % % %',
+      d.tipo_ecf, d.encf, d.estado;
+  end if;
+end $t$;
+
+-- La bandeja la llena el servidor: la venta de un usuario con rol `authenticated`
+-- (que solo puede leer ecf_documentos) también crea su documento.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+declare d ecf_documentos;
+begin
+  insert into sales (id, company_id, branch_id, subtotal, itbis_amount, total, payment_method, payment_status, amount_paid)
+  values ('00000000-0000-0000-0000-00000000ec60', '00000000-0000-0000-0000-0000000000aa',
+          '00000000-0000-0000-0000-0000000000b1', 100, 0, 100, 'transfer', 'paid', 100);
+  select * into d from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec60';
+  if d.id is null then
+    raise exception 'e-CF: la venta hecha como authenticated debía crear su documento';
+  end if;
+  if d.encf is distinct from (select ncf from sales where id = '00000000-0000-0000-0000-00000000ec60')
+     or d.encf !~ '^E32\d{10}$' or d.estado <> 'por_enviar' then
+    raise exception 'e-CF: documento de la venta como authenticated inesperado: % %', d.encf, d.estado;
+  end if;
+end $t$;
+reset role;
+
+-- ncf_b_vigente: verdadera hasta el día anterior al corte, según el día local de
+-- la empresa. Un usuario autenticado la puede consultar.
+update platform_settings set ncf_b_fecha_corte = company_today('00000000-0000-0000-0000-0000000000aa') + 1;
+set local role authenticated;
+do $t$
+begin
+  if ncf_b_vigente('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'ncf_b_vigente: con el corte mañana debía ser true para un usuario autenticado';
+  end if;
+end $t$;
+reset role;
+do $t$
+declare hoy date := company_today('00000000-0000-0000-0000-0000000000aa');
+begin
+  update platform_settings set ncf_b_fecha_corte = hoy;
+  if ncf_b_vigente('00000000-0000-0000-0000-0000000000aa') is distinct from false then
+    raise exception 'ncf_b_vigente: el día del corte ya no es válida la B';
+  end if;
+  update platform_settings set ncf_b_fecha_corte = hoy - 1;
+  if ncf_b_vigente('00000000-0000-0000-0000-0000000000aa') is distinct from false then
+    raise exception 'ncf_b_vigente: con el corte ayer debía ser false';
+  end if;
+  update platform_settings set ncf_b_fecha_corte = hoy + 30;
+  if ncf_b_vigente('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'ncf_b_vigente: con el corte dentro de 30 días debía ser true';
+  end if;
+end $t$;
+
+-- Permisos de las funciones: las nuevas cerradas a anon; la bandeja, solo del
+-- servidor; assign_ncf y set_sale_ncf siguen sin ser llamables desde la API.
+do $t$
+begin
+  if has_function_privilege('anon', 'public.ncf_b_vigente(uuid)', 'execute') then
+    raise exception 'anon no debía poder ejecutar ncf_b_vigente';
+  end if;
+  if not has_function_privilege('authenticated', 'public.ncf_b_vigente(uuid)', 'execute') then
+    raise exception 'authenticated debía poder ejecutar ncf_b_vigente';
+  end if;
+  if not (select prosecdef and provolatile = 's' from pg_proc where oid = 'public.ncf_b_vigente(uuid)'::regprocedure) then
+    raise exception 'ncf_b_vigente debía ser stable y security definer';
+  end if;
+  if has_function_privilege('anon', 'public.ecf_encolar_venta()', 'execute')
+     or has_function_privilege('authenticated', 'public.ecf_encolar_venta()', 'execute') then
+    raise exception 'ecf_encolar_venta no debía ser ejecutable por anon ni authenticated';
+  end if;
+  if not coalesce((select prosecdef and proconfig @> array['search_path=public']
+                     from pg_proc where oid = 'public.ecf_encolar_venta()'::regprocedure), false) then
+    raise exception 'ecf_encolar_venta debía ser security definer con search_path = public';
+  end if;
+  if has_function_privilege('anon', 'public.assign_ncf(uuid,text)', 'execute')
+     or has_function_privilege('authenticated', 'public.assign_ncf(uuid,text)', 'execute')
+     or has_function_privilege('anon', 'public.set_sale_ncf()', 'execute')
+     or has_function_privilege('authenticated', 'public.set_sale_ncf()', 'execute') then
+    raise exception 'assign_ncf y set_sale_ncf no debían ser ejecutables por anon ni authenticated';
+  end if;
+  if not (select bool_and(prosecdef) from pg_proc
+           where oid in ('public.assign_ncf(uuid,text)'::regprocedure, 'public.set_sale_ncf()'::regprocedure)) then
+    raise exception 'assign_ncf y set_sale_ncf debían seguir siendo security definer';
+  end if;
+end $t$;
+
+-- Sin e-CF (ecf_config suspendida) todo sigue como hoy: solo las B, con 8
+-- dígitos. Las E (aquí una E32 y una E31) ni se usan ni cuentan. La E32 arranca
+-- en 500 para no repetir un e-NCF que ya tiene documento en la bandeja.
+update ecf_config set estado = 'suspendida' where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ncf_sequences where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.secuencia('consumer', 'E32', true, 500, 600);
+select pg_temp.secuencia('consumer', 'B02', false);
+update platform_settings set ncf_b_fecha_corte = company_today('00000000-0000-0000-0000-0000000000aa') + 30;
+do $t$
+begin
+  if ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from false then
+    raise exception 'Task 2: el estado de partida debía tener e-CF inactivo en la demo';
+  end if;
+
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec70', true);
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec70') is distinct from 'B0200000001'
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec70') <> 0
+     or pg_temp.sig('E32') <> 500 then
+    raise exception 'B: la venta con ncf_requested debía quedar con B0200000001, sin documento y sin gastar la E32; dio %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec70');
+  end if;
+
+  -- Sin pedir comprobante, sin NCF (como hoy).
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec71', false);
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec71') is not null then
+    raise exception 'B: la venta sin ncf_requested no debía recibir NCF';
+  end if;
+
+  -- El RNC de la sucursal solo importa para el e-CF.
+  update branches set rnc = '101010101' where id = '00000000-0000-0000-0000-0000000000b1';
+  update ecf_config set rnc_emisor = '130000001' where company_id = '00000000-0000-0000-0000-0000000000aa';
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec72', true);
+  update branches set rnc = null where id = '00000000-0000-0000-0000-0000000000b1';
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec72') is distinct from 'B0200000002' then
+    raise exception 'B: un RNC de sucursal distinto no debía frenar la serie B, dio %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec72');
+  end if;
+
+  -- Una E31 no hace de B01; y como solo cuentan las B, no hay B01 registrada.
+  perform pg_temp.secuencia('fiscal', 'E31', true);
+  perform pg_temp.debe_fallar(
+    $q$select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec73', true, 'fiscal')$q$,
+    'No hay secuencia de Crédito Fiscal (B01) registrada%');
+  if pg_temp.sig('E31') <> 1 then
+    raise exception 'B: la E31 no debía usarse en lugar de la B01';
+  end if;
+  if ncf_b_vigente('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'B: con el corte dentro de 30 días ncf_b_vigente debía ser true';
+  end if;
+end $t$;
+
+-- Empresa que no emite comprobantes y sin e-CF: sin NCF, igual que hoy.
+update companies set ncf_enabled = false where id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec79', true);
+update companies set ncf_enabled = true where id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec79') is not null
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec79') <> 0
+     or pg_temp.sig('B02') <> 3 then
+    raise exception 'sin ncf_enabled y sin e-CF: la venta debía quedar sin NCF, sin documento y sin gastar la B02';
+  end if;
+end $t$;
+
+-- Corte de la serie B: desde el día de corte (inclusive) ya no se emite B.
+do $t$
+declare hoy date := company_today('00000000-0000-0000-0000-0000000000aa'); corte date;
+begin
+  foreach corte in array array[hoy - 1, hoy] loop
+    update platform_settings set ncf_b_fecha_corte = corte;
+    perform pg_temp.debe_fallar(
+      $q$select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec74', true)$q$,
+      format('La serie B dejó de ser válida el %s. Para emitir comprobantes hay que activar la facturación electrónica.',
+             to_char(corte, 'DD/MM/YYYY')));
+    if ncf_b_vigente('00000000-0000-0000-0000-0000000000aa') is distinct from false then
+      raise exception 'ncf_b_vigente: con el corte en % debía ser false', corte;
+    end if;
+  end loop;
+  if exists (select 1 from sales where id = '00000000-0000-0000-0000-00000000ec74') or pg_temp.sig('B02') <> 3 then
+    raise exception 'corte B: la venta rechazada no debía guardarse ni gastar un número';
+  end if;
+
+  -- Una venta que no pide comprobante no se afecta.
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec76', false);
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec76') is not null then
+    raise exception 'corte B: la venta sin ncf_requested debía seguir sin NCF';
+  end if;
+
+  -- Una empresa que no emite comprobantes tampoco recibe el error: sin NCF.
+  update companies set ncf_enabled = false where id = '00000000-0000-0000-0000-0000000000aa';
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec77', true);
+  update companies set ncf_enabled = true where id = '00000000-0000-0000-0000-0000000000aa';
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec77') is not null then
+    raise exception 'corte B: sin ncf_enabled debía devolver NCF null, no el error del corte';
+  end if;
+
+  -- Con e-CF activo el corte no estorba.
+  update ecf_config set estado = 'activa', rnc_emisor = '101010101'
+   where company_id = '00000000-0000-0000-0000-0000000000aa';
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec78', true);
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec78') is distinct from 'E320000000500'
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec78') <> 1 then
+    raise exception 'corte B: con e-CF activo debía emitir E320000000500, dio %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec78');
+  end if;
+  update ecf_config set estado = 'suspendida' where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+  -- Un día antes del corte la B sigue saliendo: B0200000003.
+  update platform_settings set ncf_b_fecha_corte = hoy + 1;
+  perform pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec75', true);
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec75') is distinct from 'B0200000003'
+     or ncf_b_vigente('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'corte B: con el corte mañana la B debía seguir saliendo (B0200000003), dio %',
+      pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec75');
   end if;
 end $t$;
 
