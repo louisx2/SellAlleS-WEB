@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { PlusCircle, ArrowRight, ArrowLeft } from 'lucide-react';
 import { CompanyModulesDialog } from '@/components/admin/company-modules-dialog';
+import { ClaveCobroDialog } from '@/components/admin/clave-cobro-dialog';
 import { CompaniesDataTable } from '@/components/admin/companies-data-table';
 import { DeleteConfirmDialog } from '@/components/admin/delete-confirm-dialog';
 import { ManageCompanyUsersDialog } from '@/components/admin/manage-company-users-dialog';
@@ -91,6 +92,7 @@ export default function CompaniesManagementPage() {
   };
 
   const [modulesFor, setModulesFor] = useState<Company | null>(null);
+  const [claveFor, setClaveFor] = useState<Company | null>(null);
   const [editingBranch, setEditingBranch] = useState<{ id: string; name: string; location: string; companyId: string } | null>(null);
   const [statusTarget, setStatusTarget] = useState<Company | null>(null);
   const [deleteCompanyTarget, setDeleteCompanyTarget] = useState<Company | null>(null);
@@ -701,6 +703,7 @@ export default function CompaniesManagementPage() {
         onAddBranch={(c) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); }}
         onManageUsers={setManageUsersFor}
         onManagePayments={setPaymentsFor}
+        onClaveCobro={setClaveFor}
         onManageRoles={setRolesFor}
         onToggleBranchStatus={setBranchStatusTarget}
         getPlanName={getPlanName}
@@ -1140,6 +1143,13 @@ export default function CompaniesManagementPage() {
         companyName={modulesFor?.name ?? ''}
         open={modulesFor !== null}
         onOpenChange={(o) => { if (!o) setModulesFor(null); }}
+      />
+
+      <ClaveCobroDialog
+        companyId={claveFor?.id ?? null}
+        companyName={claveFor?.name ?? ''}
+        open={claveFor !== null}
+        onOpenChange={(o) => { if (!o) setClaveFor(null); }}
       />
 
       <Dialog open={editingBranch !== null} onOpenChange={(o) => { if (!o) setEditingBranch(null); }}>
