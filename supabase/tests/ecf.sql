@@ -5,6 +5,7 @@
 --   begin; <supabase/migrations/20261030120000_ecf_esquema.sql>
 --          <supabase/migrations/20261030130000_ecf_asignacion.sql>
 --          <supabase/migrations/20261030140000_ecf_anulacion_reemision.sql>
+--          <supabase/migrations/20261030150000_ecf_servidor.sql>
 --          <este archivo> rollback;
 --
 -- Pasa si el último resultado es `ok`; si una aserción falla, la llamada
@@ -1700,5 +1701,640 @@ begin
     raise exception 'ecf_encolar_nota_credito debía ser security definer con search_path = public';
   end if;
 end $t$;
+
+-- == Task 4: credenciales en Vault, reserva, cupo y cron ==
+-- Estado explícito de la sección: super admin; la demo formalizada, sin
+-- ncf_enabled, con el módulo `ecf` y su ecf_config en preparación (así las
+-- ventas de prueba no reciben e-NCF; se activa después de crearlas); sin
+-- documentos, credenciales ni uso (tampoco la otra empresa, b463…, que queda con
+-- su ecf_config en preparación para ver que las funciones solo trabajan con
+-- empresas activas).
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+update companies set is_formalized = true, ncf_enabled = false where id = '00000000-0000-0000-0000-0000000000aa';
+delete from company_modules where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'ecf', true);
+delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa';
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
+values ('00000000-0000-0000-0000-0000000000aa', 'preparacion', 'TesteCF', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
+insert into ecf_config (company_id, estado, rnc_emisor, razon_social, direccion)
+values ('b463d8b5-b589-4194-b0c3-2a912b58b7c9', 'preparacion', '202020202', 'Otra SRL', 'Calle 2')
+on conflict (company_id) do update set estado = 'preparacion';
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_uso where company_id in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9');
+delete from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/%';
+-- Los pendientes de cualquier otra empresa (cuando las haya) se apartan, para
+-- que las listas de abajo (qué se envía, qué se consulta, qué se despacha) sean
+-- solo las de la prueba. Todo esto se revierte con el rollback.
+update ecf_documentos set estado = 'aceptado'
+ where company_id not in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9')
+   and estado in ('por_enviar', 'enviando', 'recibido', 'sin_cupo');
+select pg_temp.venta('00000000-0000-0000-0000-00000000eca0', '00000000-0000-0000-0000-0000000000aa',
+                     '00000000-0000-0000-0000-0000000000b1');
+select pg_temp.venta('00000000-0000-0000-0000-00000000eca1', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9', null);
+update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+-- Documento de la demo (venta eca0) por defecto, creado hace una hora para que
+-- pase la regla de "más de un minuto". p_n arma el e-NCF: E32 + 10 dígitos.
+create function pg_temp.doc_t4(p_id uuid, p_n int, p_estado text, p_ambiente text default 'TesteCF',
+                               p_company uuid default '00000000-0000-0000-0000-0000000000aa',
+                               p_sale uuid default '00000000-0000-0000-0000-00000000eca0') returns void
+language sql as $$
+  insert into ecf_documentos (id, company_id, sale_id, tipo_ecf, encf, ambiente, estado, created_at)
+  values (p_id, p_company, p_sale, 32, 'E32' || lpad(p_n::text, 10, '0'), p_ambiente, p_estado,
+          now() - interval '1 hour');
+$$;
+
+create function pg_temp.estado_de(p_id uuid) returns text language sql as $$
+  select estado from ecf_documentos where id = p_id
+$$;
+
+-- Reserva el documento y resume el resultado: filas:intentos:estado.
+create function pg_temp.reservar(p_id uuid) returns text language plpgsql as $$
+declare d ecf_documentos; n int := 0;
+begin
+  for d in select * from ecf_reservar_documento(p_id) loop
+    n := n + 1;
+  end loop;
+  return n || ':' || coalesce(d.intentos::text, '-') || ':' || coalesce(d.estado, '-');
+end $$;
+
+create function pg_temp.en_cola() returns bigint language sql as $$
+  select count(*) from net.http_request_queue
+$$;
+
+do $t$
+begin
+  if ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'Task 4: el estado de partida debía tener e-CF activo en la demo';
+  end if;
+  if ecf_activa('b463d8b5-b589-4194-b0c3-2a912b58b7c9') is distinct from false then
+    raise exception 'Task 4: el estado de partida debía tener la otra empresa sin e-CF activo';
+  end if;
+end $t$;
+
+-- Guardar las credenciales: la contraseña y la api key van a Vault; la tabla
+-- solo apunta a ellas.
+select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF',
+                                'ecf+demo@sellalles.com', 'clave-x', 'key-y');
+do $t$
+declare c jsonb; n text := 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/';
+begin
+  c := ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+  if (c->>'email', c->>'password', c->>'api_key') is distinct from ('ecf+demo@sellalles.com', 'clave-x', 'key-y') then
+    raise exception 'credenciales: la lectura no devolvió el correo, la contraseña y la api key guardados';
+  end if;
+  if c->>'refresh_token' is not null or c->>'sub' is not null
+     or c->>'id_token' is not null or c->>'id_token_vence' is not null then
+    raise exception 'credenciales: recién guardadas no debían traer sesión: %', c - 'password' - 'api_key';
+  end if;
+  if (select array_agg(k order by k) from jsonb_object_keys(c) k)
+     is distinct from array['api_key', 'email', 'id_token', 'id_token_vence', 'password', 'refresh_token', 'sub'] then
+    raise exception 'credenciales: el JSON debía traer siete llaves, trae %',
+      (select array_agg(k order by k) from jsonb_object_keys(c) k);
+  end if;
+  if exists (select 1 from ecf_credenciales t where t::text like '%clave-x%' or t::text like '%key-y%') then
+    raise exception 'credenciales: la contraseña o la api key quedaron escritas en ecf_credenciales';
+  end if;
+  if (select count(*) from vault.secrets where name = n || 'password') <> 1
+     or (select count(*) from vault.secrets where name = n || 'api_key') <> 1 then
+    raise exception 'credenciales: debía haber un secreto de contraseña y uno de api key en Vault';
+  end if;
+  if (select password_secret_id from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF')
+       is distinct from (select id from vault.secrets where name = n || 'password')
+     or (select api_key_secret_id from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF')
+       is distinct from (select id from vault.secrets where name = n || 'api_key') then
+    raise exception 'credenciales: la tabla debía apuntar a los secretos de Vault';
+  end if;
+  perform set_config('ecf.t4_pass_id', (select id::text from vault.secrets where name = n || 'password'), true);
+end $t$;
+
+-- Guardar otra vez no crea secretos nuevos: se actualiza el que ya hay.
+select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF',
+                                'ecf+demo@sellalles.com', 'clave-z', 'key-y');
+do $t$
+declare n text := 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/';
+begin
+  if ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'password' is distinct from 'clave-z' then
+    raise exception 'credenciales: al guardar otra vez la lectura debía dar la contraseña nueva';
+  end if;
+  if (select count(*) from vault.secrets where name = n || 'password') <> 1
+     or (select count(*) from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/%') <> 2 then
+    raise exception 'credenciales: guardar dos veces debía dejar un solo secreto por nombre';
+  end if;
+  if (select id::text from vault.secrets where name = n || 'password') is distinct from current_setting('ecf.t4_pass_id') then
+    raise exception 'credenciales: el secreto de la contraseña debía conservar su id al actualizarse';
+  end if;
+end $t$;
+
+-- Cada ambiente tiene sus propios secretos.
+select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'CerteCF',
+                                'ecf+certe@sellalles.com', 'clave-certe', 'key-certe');
+do $t$
+begin
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'CerteCF')->>'password') is distinct from 'clave-certe'
+     or (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'password') is distinct from 'clave-z' then
+    raise exception 'credenciales: los dos ambientes debían guardarse por separado';
+  end if;
+  if (select count(*) from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/%') <> 4 then
+    raise exception 'credenciales: dos ambientes debían tener cuatro secretos';
+  end if;
+  -- Sin credenciales guardadas no hay nada que leer.
+  if ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF') is not null then
+    raise exception 'credenciales: sin fila guardada la lectura debía dar null';
+  end if;
+end $t$;
+
+-- Datos que faltan o ambiente que no existe: se rechazan sin tocar Vault.
+do $t$
+begin
+  perform pg_temp.debe_fallar(
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'produccion', 'a@b.com', 'x', 'y')$q$,
+    '%ambiente%');
+  perform pg_temp.debe_fallar(
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF', 'a@b.com', '', 'y')$q$,
+    '%Faltan%');
+  perform pg_temp.debe_fallar(
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF', 'a@b.com', 'x', null)$q$,
+    '%Faltan%');
+  perform pg_temp.debe_fallar(
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF', '  ', 'x', 'y')$q$,
+    '%Faltan%');
+  if exists (select 1 from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/eCF/%') then
+    raise exception 'credenciales: un guardado rechazado no debía dejar secretos';
+  end if;
+end $t$;
+
+-- La sesión: el idToken, su vencimiento, el refresh token (en Vault) y el sub.
+select ecf_guardar_sesion('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'tok', now() + interval '1 hour', 'ref', 'sub-1');
+do $t$
+declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+begin
+  if (c->>'id_token', c->>'refresh_token', c->>'sub') is distinct from ('tok', 'ref', 'sub-1')
+     or (c->>'id_token_vence')::timestamptz is distinct from now() + interval '1 hour' then
+    raise exception 'sesión: la lectura debía devolver el idToken, su vencimiento, el refresh token y el sub guardados';
+  end if;
+  if (c->>'password', c->>'api_key') is distinct from ('clave-z', 'key-y') then
+    raise exception 'sesión: guardar la sesión no debía tocar la contraseña ni la api key';
+  end if;
+  if exists (select 1 from ecf_credenciales t where t::text ~ '[(,"]ref[,")]') then
+    raise exception 'sesión: el refresh token quedó escrito en ecf_credenciales';
+  end if;
+  if (select count(*) from vault.secrets where name = 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/refresh_token') <> 1 then
+    raise exception 'sesión: el refresh token debía quedar en Vault';
+  end if;
+end $t$;
+
+-- Con refresh token null se conserva el que había (y el sub, que MSeller no
+-- repite al renovar el idToken).
+select ecf_guardar_sesion('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'tok2', now() + interval '2 hours', null, null);
+do $t$
+declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+begin
+  if (c->>'id_token', c->>'refresh_token', c->>'sub') is distinct from ('tok2', 'ref', 'sub-1')
+     or (c->>'id_token_vence')::timestamptz is distinct from now() + interval '2 hours' then
+    raise exception 'sesión: con refresh token null debía cambiar el idToken y conservar el refresh token y el sub';
+  end if;
+end $t$;
+
+-- Con uno nuevo se reemplaza, en el mismo secreto.
+select ecf_guardar_sesion('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'tok3', now() + interval '3 hours', 'ref2', 'sub-1');
+do $t$
+begin
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'refresh_token') is distinct from 'ref2'
+     or (select count(*) from vault.secrets where name = 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/refresh_token') <> 1 then
+    raise exception 'sesión: un refresh token nuevo debía reemplazar al anterior en un solo secreto';
+  end if;
+  -- La otra cuenta no se enteró.
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'CerteCF')->>'id_token') is not null then
+    raise exception 'sesión: la sesión de TesteCF no debía aparecer en CerteCF';
+  end if;
+  -- Sin credenciales guardadas no hay a dónde escribir la sesión.
+  perform pg_temp.debe_fallar(
+    $q$select ecf_guardar_sesion('00000000-0000-0000-0000-0000000000aa', 'eCF', 't', now(), 'r', 's')$q$,
+    '%No hay credenciales%');
+end $t$;
+
+-- Cambiar la cuenta (nuevas credenciales) borra la sesión: idToken, sub y el
+-- refresh token, también de Vault.
+select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF',
+                                'ecf+demo2@sellalles.com', 'clave-w', 'key-y');
+do $t$
+declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+begin
+  if (c->>'email', c->>'password') is distinct from ('ecf+demo2@sellalles.com', 'clave-w') then
+    raise exception 'credenciales: al cambiar de cuenta debía leerse el correo y la contraseña nuevos';
+  end if;
+  if c->>'id_token' is not null or c->>'id_token_vence' is not null or c->>'sub' is not null
+     or c->>'refresh_token' is not null then
+    raise exception 'credenciales: al cambiar de cuenta la sesión debía borrarse: %', c - 'password' - 'api_key';
+  end if;
+  if exists (select 1 from ecf_credenciales
+              where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF'
+                and refresh_token_secret_id is not null)
+     or exists (select 1 from vault.secrets where name = 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/refresh_token') then
+    raise exception 'credenciales: al cambiar de cuenta el refresh token debía desaparecer también de Vault';
+  end if;
+end $t$;
+
+-- Reservar un documento: una sola sentencia, la gana quien llegue primero.
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000eca2', 9001, 'por_enviar');
+do $t$
+declare d ecf_documentos; r text := pg_temp.reservar('00000000-0000-0000-0000-00000000eca2');
+begin
+  if r is distinct from '1:1:enviando' then
+    raise exception 'reserva: la primera debía dar 1 fila con intentos = 1 (1:1:enviando), dio %', r;
+  end if;
+  select * into d from ecf_documentos where id = '00000000-0000-0000-0000-00000000eca2';
+  if (d.estado, d.intentos) is distinct from ('enviando', 1) or d.reservado_hasta is distinct from now() + interval '2 minutes' then
+    raise exception 'reserva: debía quedar enviando, 1 intento y reservado 2 minutos, quedó % % %',
+      d.estado, d.intentos, d.reservado_hasta;
+  end if;
+end $t$;
+do $t$
+declare e text;
+begin
+  if pg_temp.reservar('00000000-0000-0000-0000-00000000eca2') is distinct from '0:-:-' then
+    raise exception 'reserva: la segunda, con la reserva vigente, debía dar 0 filas';
+  end if;
+  if (select intentos from ecf_documentos where id = '00000000-0000-0000-0000-00000000eca2') <> 1 then
+    raise exception 'reserva: la segunda no debía sumar un intento';
+  end if;
+
+  -- Reserva vencida: se puede reservar otra vez (segundo intento).
+  update ecf_documentos set reservado_hasta = now() - interval '1 minute' where id = '00000000-0000-0000-0000-00000000eca2';
+  if pg_temp.reservar('00000000-0000-0000-0000-00000000eca2') is distinct from '1:2:enviando' then
+    raise exception 'reserva: con la reserva vencida debía poder reservarse otra vez (intentos = 2)';
+  end if;
+
+  -- Por enviar, pero el próximo intento es en el futuro: todavía no.
+  update ecf_documentos set estado = 'por_enviar', reservado_hasta = null, proximo_intento_at = now() + interval '10 minutes'
+   where id = '00000000-0000-0000-0000-00000000eca2';
+  if pg_temp.reservar('00000000-0000-0000-0000-00000000eca2') is distinct from '0:-:-'
+     or pg_temp.estado_de('00000000-0000-0000-0000-00000000eca2') <> 'por_enviar' then
+    raise exception 'reserva: un documento con el próximo intento en el futuro no debía reservarse';
+  end if;
+  update ecf_documentos set proximo_intento_at = now() - interval '1 minute' where id = '00000000-0000-0000-0000-00000000eca2';
+  if pg_temp.reservar('00000000-0000-0000-0000-00000000eca2') is distinct from '1:3:enviando' then
+    raise exception 'reserva: con el próximo intento ya cumplido debía reservarse (intentos = 3)';
+  end if;
+
+  -- Los demás estados no se reservan, y un id que no existe tampoco.
+  foreach e in array array['recibido', 'aceptado', 'aceptado_condicional', 'rechazado', 'error_datos', 'sin_cupo'] loop
+    update ecf_documentos set estado = e, reservado_hasta = now() - interval '1 hour'
+     where id = '00000000-0000-0000-0000-00000000eca2';
+    if pg_temp.reservar('00000000-0000-0000-0000-00000000eca2') is distinct from '0:-:-' then
+      raise exception 'reserva: un documento en % no debía reservarse', e;
+    end if;
+  end loop;
+  if pg_temp.reservar(gen_random_uuid()) is distinct from '0:-:-' then
+    raise exception 'reserva: un id que no existe debía dar 0 filas';
+  end if;
+  if (select intentos from ecf_documentos where id = '00000000-0000-0000-0000-00000000eca2') <> 3 then
+    raise exception 'reserva: los intentos debían quedar en 3';
+  end if;
+end $t$;
+
+-- El contador de uso: una fila por empresa y mes, sumando.
+select ecf_sumar_uso('00000000-0000-0000-0000-0000000000aa', 2, 1);
+select ecf_sumar_uso('00000000-0000-0000-0000-0000000000aa', 2, 1);
+do $t$
+declare u ecf_uso;
+begin
+  if (select count(*) from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa') <> 1 then
+    raise exception 'uso: dos sumas en el mismo mes debían dejar una sola fila';
+  end if;
+  select * into u from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa';
+  if (u.requests, u.comprobantes) is distinct from (4, 2) then
+    raise exception 'uso: debía sumar 4 requests y 2 comprobantes, quedó % y %', u.requests, u.comprobantes;
+  end if;
+  if u.periodo is distinct from date_trunc('month', now() at time zone 'utc')::date then
+    raise exception 'uso: el periodo debía ser el día 1 del mes en UTC (%), quedó %',
+      date_trunc('month', now() at time zone 'utc')::date, u.periodo;
+  end if;
+  -- Otra empresa lleva su propia cuenta.
+  perform ecf_sumar_uso('b463d8b5-b589-4194-b0c3-2a912b58b7c9', 7, 0);
+  if (select requests from ecf_uso where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+        and periodo = date_trunc('month', now() at time zone 'utc')::date) is distinct from 7
+     or (select requests from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa') <> 4 then
+    raise exception 'uso: cada empresa debía llevar su propia cuenta';
+  end if;
+end $t$;
+
+-- Consultas pendientes: por empresa y ambiente, con los e-NCF que siguen en
+-- `recibido`.
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000eca5', 9011, 'recibido');
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000eca6', 9012, 'recibido');
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000eca7', 9013, 'recibido', 'CerteCF');
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000eca8', 9014, 'por_enviar');
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000eca9', 9015, 'aceptado');
+do $t$
+declare r record;
+begin
+  if (select count(*) from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa') <> 2 then
+    raise exception 'consultas: la demo debía salir una vez por ambiente con recibidos (2 filas), salió % veces',
+      (select count(*) from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa');
+  end if;
+  if (select encfs from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF')
+       is distinct from array['E320000009011', 'E320000009012'] then
+    raise exception 'consultas: TesteCF debía traer solo sus dos e-NCF recibidos, trae %',
+      (select encfs from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF');
+  end if;
+  if (select encfs from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'CerteCF')
+       is distinct from array['E320000009013'] then
+    raise exception 'consultas: CerteCF debía traer su e-NCF recibido';
+  end if;
+  if exists (select 1 from ecf_consultas_pendientes() where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9') then
+    raise exception 'consultas: una empresa sin documentos recibidos no debía salir';
+  end if;
+
+  -- Consultados hace un momento: ya no salen. Cuenta la consulta más reciente.
+  update ecf_documentos set ultima_consulta_at = now() - interval '2 hours' where id = '00000000-0000-0000-0000-00000000eca5';
+  update ecf_documentos set ultima_consulta_at = now() where id = '00000000-0000-0000-0000-00000000eca6';
+  if exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF') then
+    raise exception 'consultas: con una consulta reciente en el lote, TesteCF no debía salir';
+  end if;
+  if not exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'CerteCF') then
+    raise exception 'consultas: CerteCF no se consultó y debía seguir saliendo';
+  end if;
+  -- Pasada la hora del plan gratis (60 minutos) vuelve a salir.
+  update ecf_documentos set ultima_consulta_at = now() - interval '61 minutes' where id = '00000000-0000-0000-0000-00000000eca6';
+  update ecf_documentos set ultima_consulta_at = now() - interval '2 hours' where id = '00000000-0000-0000-0000-00000000eca5';
+  if not exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF') then
+    raise exception 'consultas: pasados 60 minutos TesteCF debía volver a salir';
+  end if;
+  -- El intervalo sale de la configuración de la empresa.
+  update ecf_config set minutos_entre_consultas = 120 where company_id = '00000000-0000-0000-0000-0000000000aa';
+  if exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF') then
+    raise exception 'consultas: con 120 minutos entre consultas y la última hace 61, no debía salir';
+  end if;
+  update ecf_config set minutos_entre_consultas = 30 where company_id = '00000000-0000-0000-0000-0000000000aa';
+  update ecf_documentos set ultima_consulta_at = now() - interval '31 minutes' where id = '00000000-0000-0000-0000-00000000eca6';
+  update ecf_documentos set ultima_consulta_at = now() - interval '45 minutes' where id = '00000000-0000-0000-0000-00000000eca5';
+  if not exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF') then
+    raise exception 'consultas: con 30 minutos entre consultas y la última hace 31, debía salir';
+  end if;
+  update ecf_config set minutos_entre_consultas = 60 where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+  -- Todo consultado ahora mismo: la demo no sale.
+  update ecf_documentos set ultima_consulta_at = now() where company_id = '00000000-0000-0000-0000-0000000000aa';
+  if exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa') then
+    raise exception 'consultas: con ultima_consulta_at = now() la demo no debía salir';
+  end if;
+end $t$;
+
+-- Hasta 100 e-NCF por consulta: los más antiguos primero.
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+insert into ecf_documentos (company_id, sale_id, tipo_ecf, encf, ambiente, estado, created_at)
+select '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000eca0', 32,
+       'E32' || lpad(n::text, 10, '0'), 'eCF', 'recibido', now() - interval '2 days' + n * interval '1 second'
+  from generate_series(9500, 9604) n;
+do $t$
+declare e text[];
+begin
+  select encfs into e from ecf_consultas_pendientes()
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'eCF';
+  if cardinality(e) is distinct from 100 or e[1] <> 'E320000009500' or e[100] <> 'E320000009599' then
+    raise exception 'consultas: con 105 recibidos debía traer 100 (del 9500 al 9599), trajo % de % a %',
+      cardinality(e), e[1], e[cardinality(e)];
+  end if;
+end $t$;
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+-- Documentos por enviar. Cada uno con el motivo por el que sale o no:
+--   b1 por enviar y viejo: sale.            b2 recién creado (menos de 1 minuto): no.
+--   b3 próximo intento en el futuro: no.    b4 enviando con la reserva vencida: sale.
+--   b5 enviando con la reserva vigente: no. b6 sin cupo del mes pasado: pasa a por enviar y sale.
+--   b7 sin cupo de ahora: no.               b8 sin cupo anterior al último cambio de plan: sale.
+--   b9 y ba, de una empresa sin e-CF activo (por enviar, y sin cupo del mes pasado): no, y ba no se toca.
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb1', 9101, 'por_enviar');
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb2', 9102, 'por_enviar');
+update ecf_documentos set created_at = now() where id = '00000000-0000-0000-0000-00000000ecb2';
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb3', 9103, 'por_enviar');
+update ecf_documentos set proximo_intento_at = now() + interval '1 hour' where id = '00000000-0000-0000-0000-00000000ecb3';
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb4', 9104, 'enviando');
+update ecf_documentos set reservado_hasta = now() - interval '1 minute' where id = '00000000-0000-0000-0000-00000000ecb4';
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb5', 9105, 'enviando');
+update ecf_documentos set reservado_hasta = now() + interval '1 minute' where id = '00000000-0000-0000-0000-00000000ecb5';
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb6', 9106, 'sin_cupo');
+update ecf_documentos
+   set estado_at = (date_trunc('month', now() at time zone 'utc') at time zone 'utc') - interval '1 day'
+ where id = '00000000-0000-0000-0000-00000000ecb6';
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb7', 9107, 'sin_cupo');
+update ecf_documentos set estado_at = now() where id = '00000000-0000-0000-0000-00000000ecb7';
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb8', 9108, 'sin_cupo');
+-- Del mes en curso pero anterior a la última vez que se tocó ecf_config (el plan
+-- cambió): ecf_config.updated_at es now() desde el estado de partida.
+update ecf_documentos
+   set estado_at = greatest(date_trunc('month', now() at time zone 'utc') at time zone 'utc', now() - interval '1 hour')
+ where id = '00000000-0000-0000-0000-00000000ecb8';
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb9', 9109, 'por_enviar', 'TesteCF',
+                      'b463d8b5-b589-4194-b0c3-2a912b58b7c9', '00000000-0000-0000-0000-00000000eca1');
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecba', 9110, 'sin_cupo', 'TesteCF',
+                      'b463d8b5-b589-4194-b0c3-2a912b58b7c9', '00000000-0000-0000-0000-00000000eca1');
+update ecf_documentos
+   set estado_at = (date_trunc('month', now() at time zone 'utc') at time zone 'utc') - interval '1 day'
+ where id = '00000000-0000-0000-0000-00000000ecba';
+
+do $t$
+declare v uuid[]; esperado uuid[];
+begin
+  select array_agg(u order by u) into esperado from unnest(array[
+    '00000000-0000-0000-0000-00000000ecb1', '00000000-0000-0000-0000-00000000ecb4',
+    '00000000-0000-0000-0000-00000000ecb6', '00000000-0000-0000-0000-00000000ecb8']::uuid[]) u;
+  select coalesce(array_agg(x order by x), '{}') into v from ecf_documentos_por_enviar() x;
+  if v is distinct from esperado then
+    raise exception 'por enviar: debían salir b1, b4, b6 y b8, salieron %',
+      (select array_agg(right(u::text, 4) order by u) from unnest(v) u);
+  end if;
+  -- Los sin cupo que tocaban volvieron a la fila; los demás no se movieron.
+  if pg_temp.estado_de('00000000-0000-0000-0000-00000000ecb6') <> 'por_enviar'
+     or pg_temp.estado_de('00000000-0000-0000-0000-00000000ecb8') <> 'por_enviar' then
+    raise exception 'por enviar: los sin cupo de otro mes o de antes del cambio de plan debían pasar a por_enviar';
+  end if;
+  if (select estado_at from ecf_documentos where id = '00000000-0000-0000-0000-00000000ecb6') is distinct from now() then
+    raise exception 'por enviar: al volver a la fila el documento debía estrenar estado_at';
+  end if;
+  if pg_temp.estado_de('00000000-0000-0000-0000-00000000ecb7') <> 'sin_cupo' then
+    raise exception 'por enviar: el sin cupo de este mes no debía moverse';
+  end if;
+  if pg_temp.estado_de('00000000-0000-0000-0000-00000000ecba') <> 'sin_cupo'
+     or pg_temp.estado_de('00000000-0000-0000-0000-00000000ecb9') <> 'por_enviar' then
+    raise exception 'por enviar: los documentos de una empresa sin e-CF activo no debían tocarse';
+  end if;
+  if pg_temp.estado_de('00000000-0000-0000-0000-00000000ecb4') <> 'enviando'
+     or pg_temp.estado_de('00000000-0000-0000-0000-00000000ecb5') <> 'enviando' then
+    raise exception 'por enviar: listar no debía cambiar los que estaban enviando';
+  end if;
+
+  -- Llamarla otra vez da lo mismo (ya no hay nada que mover), y respeta el límite.
+  select coalesce(array_agg(x order by x), '{}') into v from ecf_documentos_por_enviar() x;
+  if v is distinct from esperado then
+    raise exception 'por enviar: la segunda llamada debía dar los mismos cuatro';
+  end if;
+  if (select count(*) from ecf_documentos_por_enviar(2)) <> 2 then
+    raise exception 'por enviar: con límite 2 debían salir 2';
+  end if;
+end $t$;
+delete from ecf_documentos
+ where company_id in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9')
+   and encf like 'E3200000091%';
+
+-- Despacho a las Edge Functions (lo que hace el cron). En la transacción de la
+-- prueba el pedido queda en la cola de pg_net y se va con el rollback. La llave
+-- real de Vault se quita dentro de la transacción (también se revierte) para no
+-- depender de ella: primero sin llave, luego con una de prueba.
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecc0', 9301, 'por_enviar');
+select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecc1', 9302, 'recibido');
+delete from vault.secrets where name = 'service_role_key';
+do $t$
+declare antes bigint := pg_temp.en_cola();
+begin
+  -- Sin la llave: avisa y no manda nada.
+  perform ecf_disparar_envios();
+  perform ecf_disparar_consultas();
+  if pg_temp.en_cola() <> antes then
+    raise exception 'despacho: sin service_role_key en Vault no debía encolar nada';
+  end if;
+end $t$;
+select vault.create_secret('llave-de-prueba', 'service_role_key', 'solo para la prueba de ecf.sql');
+do $t$
+declare antes bigint := pg_temp.en_cola(); q record;
+begin
+  perform ecf_disparar_envios();
+  if pg_temp.en_cola() <> antes + 1 then
+    raise exception 'despacho: ecf_disparar_envios con un documento pendiente debía encolar un pedido';
+  end if;
+  select url, headers, convert_from(body, 'utf8')::jsonb as body into q from net.http_request_queue order by id desc limit 1;
+  if q.url is distinct from 'https://qwpjclqinruhtxgkrxwr.supabase.co/functions/v1/ecf-emitir' then
+    raise exception 'despacho: la función de envíos debía llamar a ecf-emitir, llamó a %', q.url;
+  end if;
+  if q.headers->>'Authorization' is distinct from 'Bearer llave-de-prueba'
+     or q.headers->>'Content-Type' is distinct from 'application/json' then
+    raise exception 'despacho: debía mandar Authorization con la llave de Vault y Content-Type json';
+  end if;
+  if q.body is distinct from '{"documentoIds": ["00000000-0000-0000-0000-00000000ecc0"]}'::jsonb then
+    raise exception 'despacho: el cuerpo debía traer solo el documento por enviar, trae %', q.body;
+  end if;
+
+  perform ecf_disparar_consultas();
+  if pg_temp.en_cola() <> antes + 2 then
+    raise exception 'despacho: ecf_disparar_consultas con un recibido pendiente debía encolar un pedido';
+  end if;
+  select url, headers, convert_from(body, 'utf8')::jsonb as body into q from net.http_request_queue order by id desc limit 1;
+  if q.url is distinct from 'https://qwpjclqinruhtxgkrxwr.supabase.co/functions/v1/ecf-estado'
+     or q.body is distinct from '{}'::jsonb
+     or q.headers->>'Authorization' is distinct from 'Bearer llave-de-prueba' then
+    raise exception 'despacho: la función de consultas debía llamar a ecf-estado con cuerpo {} y la llave, mandó % %', q.url, q.body;
+  end if;
+
+  -- Sin nada pendiente no manda nada.
+  update ecf_documentos set estado = 'aceptado' where id in
+    ('00000000-0000-0000-0000-00000000ecc0', '00000000-0000-0000-0000-00000000ecc1');
+  perform ecf_disparar_envios();
+  perform ecf_disparar_consultas();
+  if pg_temp.en_cola() <> antes + 2 then
+    raise exception 'despacho: sin documentos pendientes no debía encolar nada';
+  end if;
+end $t$;
+
+-- Cron: una tarea para los envíos y otra para las consultas.
+do $t$
+begin
+  if (select count(*) from cron.job where jobname in ('ecf-envios', 'ecf-consultas')) <> 2 then
+    raise exception 'cron: debían existir las tareas ecf-envios y ecf-consultas';
+  end if;
+  if (select schedule from cron.job where jobname = 'ecf-envios') is distinct from '* * * * *'
+     or (select command from cron.job where jobname = 'ecf-envios') is distinct from 'select public.ecf_disparar_envios()' then
+    raise exception 'cron: ecf-envios debía correr cada minuto la función de envíos';
+  end if;
+  if (select schedule from cron.job where jobname = 'ecf-consultas') is distinct from '*/15 * * * *'
+     or (select command from cron.job where jobname = 'ecf-consultas') is distinct from 'select public.ecf_disparar_consultas()' then
+    raise exception 'cron: ecf-consultas debía correr cada 15 minutos la función de consultas';
+  end if;
+  if exists (select 1 from cron.job where jobname in ('ecf-envios', 'ecf-consultas') and not active) then
+    raise exception 'cron: las tareas debían estar activas';
+  end if;
+end $t$;
+
+-- Permisos: todas son del servidor. Ni PUBLIC, ni anon, ni authenticated;
+-- sí service_role; security definer con search_path = public.
+do $t$
+declare f text;
+begin
+  foreach f in array array[
+    'public._ecf_guardar_secreto(text,text,text)',
+    'public.ecf_guardar_credenciales(uuid,text,text,text,text)',
+    'public.ecf_leer_credenciales(uuid,text)',
+    'public.ecf_guardar_sesion(uuid,text,text,timestamptz,text,text)',
+    'public.ecf_reservar_documento(uuid)',
+    'public.ecf_sumar_uso(uuid,int,int)',
+    'public.ecf_documentos_por_enviar(int)',
+    'public.ecf_consultas_pendientes()',
+    'public.ecf_disparar_envios()',
+    'public.ecf_disparar_consultas()'] loop
+    if has_function_privilege('anon', f, 'execute') or has_function_privilege('authenticated', f, 'execute') then
+      raise exception '% no debía ser ejecutable por anon ni authenticated', f;
+    end if;
+    if not has_function_privilege('service_role', f, 'execute') then
+      raise exception '% debía ser ejecutable por service_role', f;
+    end if;
+    if (select proacl is null from pg_proc where oid = f::regprocedure)
+       or exists (select 1 from pg_proc p cross join lateral aclexplode(p.proacl) a
+                   where p.oid = f::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+      raise exception '% no debía ser ejecutable por PUBLIC', f;
+    end if;
+    if not coalesce((select prosecdef and proconfig @> array['search_path=public']
+                       from pg_proc where oid = f::regprocedure), false) then
+      raise exception '% debía ser security definer con search_path = public', f;
+    end if;
+  end loop;
+  -- Tiene efectos (devuelve a la fila los sin cupo): no puede ser stable.
+  if (select provolatile from pg_proc where oid = 'public.ecf_documentos_por_enviar(int)'::regprocedure) <> 'v' then
+    raise exception 'ecf_documentos_por_enviar tiene efectos: debía ser volatile';
+  end if;
+end $t$;
+
+-- R1: de verdad como `authenticated` y como `anon`, no como postgres: nadie
+-- fuera del servidor lee las credenciales ni toca la fila de envíos.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+begin
+  perform pg_temp.debe_fallar(
+    $q$select ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')$q$,
+    '%permission denied%');
+  perform pg_temp.debe_fallar(
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'a@b.com', 'x', 'y')$q$,
+    '%permission denied%');
+  perform pg_temp.debe_fallar(
+    $q$select ecf_reservar_documento('00000000-0000-0000-0000-00000000ecc0')$q$,
+    '%permission denied%');
+  perform pg_temp.debe_fallar($q$select ecf_documentos_por_enviar()$q$, '%permission denied%');
+  perform pg_temp.debe_fallar($q$select * from ecf_consultas_pendientes()$q$, '%permission denied%');
+  perform pg_temp.debe_fallar($q$select ecf_disparar_envios()$q$, '%permission denied%');
+  perform pg_temp.debe_fallar($q$select ecf_sumar_uso('00000000-0000-0000-0000-0000000000aa', 1, 1)$q$, '%permission denied%');
+end $t$;
+reset role;
+set local role anon;
+do $t$
+begin
+  perform pg_temp.debe_fallar(
+    $q$select ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')$q$,
+    '%permission denied%');
+end $t$;
+reset role;
+
+-- service_role sí puede.
+set local role service_role;
+do $t$
+begin
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'password') is distinct from 'clave-w' then
+    raise exception 'service_role debía poder leer las credenciales';
+  end if;
+end $t$;
+reset role;
 
 select 'ok';
