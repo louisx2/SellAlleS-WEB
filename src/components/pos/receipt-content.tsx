@@ -4,6 +4,7 @@ import type { Sale } from '@/lib/types';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatLineQty } from '@/lib/line-format';
+import { esEcf, nombreDeEncf } from '@/lib/ecf';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
@@ -61,13 +62,23 @@ export function ReceiptHeader({ sale }: ReceiptProps) {
           {sale.customer?.rnc && <p><span className="font-semibold uppercase">RNC:</span> {sale.customer.rnc}</p>}
        </div>
        {/* Solo las ventas que pidieron comprobante llevan NCF. Imprimir
-           "NCF: N/A" en las demás hacía parecer que el fiscal falló. */}
+           "NCF: N/A" en las demás hacía parecer que el fiscal falló. Un e-NCF
+           (E + tipo + secuencia) se titula con el nombre de su tipo. */}
        {sale.ncf && (
          <>
            <Separator className="my-2" />
            <div className="text-left pt-1 text-xs">
-              <p className="font-semibold uppercase">COMPROBANTE: {ncfTypeText[sale.ncfType]}</p>
-              <p className="font-semibold uppercase">NCF: {sale.ncf}</p>
+              {esEcf(sale.ncf) ? (
+                <>
+                  <p className="font-semibold">{nombreDeEncf(sale.ncf)}</p>
+                  <p className="font-semibold">e-NCF: {sale.ncf}</p>
+                </>
+              ) : (
+                <>
+                  <p className="font-semibold uppercase">COMPROBANTE: {ncfTypeText[sale.ncfType]}</p>
+                  <p className="font-semibold uppercase">NCF: {sale.ncf}</p>
+                </>
+              )}
            </div>
          </>
        )}
@@ -277,6 +288,54 @@ export function ReceiptBarcode({ sale, className }: ReceiptProps & { className?:
   );
 }
 
+/** Lo que hace válido un e-CF impreso: el QR de la DGII, el código de seguridad y
+ *  la fecha de firma. Sin firma todavía (el servidor la sigue intentando) no hay
+ *  nada de eso, y el ticket lo dice en vez de salir sin QR sin explicación. El QR
+ *  se genera aquí como imagen `data:`, igual que en ReceiptBarcode, para que
+ *  html2canvas lo pinte en el PDF. No imprime nada si la venta no es e-CF. */
+export function ReceiptEcf({ sale, className }: ReceiptProps & { className?: string }) {
+  const qrUrl = sale.ecf?.qrUrl;
+  const [src, setSrc] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!qrUrl) {
+      setSrc(null);
+      return;
+    }
+    let cancelado = false;
+    (async () => {
+      try {
+        const QRCode = (await import('qrcode')).default;
+        const url = await QRCode.toDataURL(qrUrl, { margin: 1, width: 200 });
+        if (!cancelado) setSrc(url);
+      } catch (error) {
+        console.error('No se pudo generar el código QR del comprobante electrónico', error);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [qrUrl]);
+
+  if (!esEcf(sale.ncf)) return null;
+
+  if (!qrUrl) {
+    return (
+      <div className={cn('border-t border-dashed pt-3 text-center text-xs', className)}>
+        <p>Comprobante electrónico en proceso. Reimprima desde Movimientos para obtener el código QR.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn('flex flex-col items-center gap-1 border-t border-dashed pt-3 text-center text-xs', className)}>
+      {src && <img src={src} alt="Código QR del comprobante electrónico" className="w-28 h-28" />}
+      {sale.ecf?.securityCode && <p>Código de seguridad: {sale.ecf.securityCode}</p>}
+      {sale.ecf?.signedAt && <p>Fecha de firma: {sale.ecf.signedAt}</p>}
+    </div>
+  );
+}
+
 export function ReceiptContent({ sale }: ReceiptProps) {
   const profile = useTicketProfile(sale.branchId);
 
@@ -287,6 +346,7 @@ export function ReceiptContent({ sale }: ReceiptProps) {
         <div className="pt-2">
             <ReceiptTotals sale={sale} />
         </div>
+        <ReceiptEcf sale={sale} />
         {sale.coupon && (
             <>
                 <Separator className="my-2" />

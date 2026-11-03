@@ -13,8 +13,13 @@ const TIPOS_DE_VENTA: NcfType[] = ['consumer', 'fiscal', 'gubernamental', 'regim
  * (activa, con números y sin vencer). Sin esto el cobro ofrece tipos que no
  * tienen secuencia y la venta muere al confirmar — justo lo que no puede pasar
  * en caja. RLS ya limita las filas a la empresa del usuario.
+ *
+ * `electronica` dice de qué serie contar: una empresa con e-CF activo solo emite
+ * de las secuencias E, y una sin él solo de las B (igual que assign_ncf). Sin
+ * este filtro las B que le quedaron cargadas harían ofrecer tipos que no tienen
+ * secuencia electrónica.
  */
-export const useNcfAvailability = (enabled: boolean) => {
+export const useNcfAvailability = (enabled: boolean, electronica = false) => {
   // null mientras no se ha consultado; [] es "consultado y no hay ninguna".
   const [tiposDisponibles, setTiposDisponibles] = useState<NcfType[] | null>(null);
 
@@ -27,7 +32,8 @@ export const useNcfAvailability = (enabled: boolean) => {
     const { data, error } = await supabase
       .from('ncf_sequences')
       .select('tipo, range_to, current_val, expires_at')
-      .eq('active', true);
+      .eq('active', true)
+      .eq('electronica', electronica);
 
     if (error || !data) {
       setTiposDisponibles([]);
@@ -40,7 +46,7 @@ export const useNcfAvailability = (enabled: boolean) => {
       .filter((t) => TIPOS_DE_VENTA.includes(t));
 
     setTiposDisponibles(Array.from(new Set(usables)));
-  }, [enabled]);
+  }, [enabled, electronica]);
 
   useEffect(() => { load(); }, [load]);
 

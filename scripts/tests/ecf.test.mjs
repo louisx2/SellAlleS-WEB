@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import {
   ECF_NOMBRE,
   esEcf,
+  tipoDeEncf,
+  nombreDeEncf,
   documentoVigente,
   ecfEstadoEtiqueta,
   puedeReintentar,
@@ -50,6 +52,29 @@ test('esEcf: E + 12 dígitos; la serie B y lo vacío no lo son', () => {
   assert.equal(esEcf('e320000000001'), false);
   assert.equal(esEcf(' E320000000001'), false);
   assert.equal(esEcf('E32000000000A'), false);
+});
+
+test('tipoDeEncf: los dos dígitos tras la E; lo que no es e-NCF no tiene tipo', () => {
+  assert.equal(tipoDeEncf('E320000000001'), 32);
+  assert.equal(tipoDeEncf('E340000000123'), 34);
+  assert.equal(tipoDeEncf('E310000000001'), 31);
+  assert.equal(tipoDeEncf('B0200000001'), undefined);
+  assert.equal(tipoDeEncf('E32000000001'), undefined);
+  assert.equal(tipoDeEncf(undefined), undefined);
+  assert.equal(tipoDeEncf(null), undefined);
+});
+
+test('nombreDeEncf: el nombre del tipo; uno genérico si no se conoce, nunca "undefined"', () => {
+  assert.equal(nombreDeEncf('E320000000001'), 'Factura de Consumo Electrónica');
+  assert.equal(nombreDeEncf('E310000000001'), 'Factura de Crédito Fiscal Electrónica');
+  assert.equal(nombreDeEncf('E340000000001'), 'Nota de Crédito Electrónica');
+  assert.equal(nombreDeEncf('E450000000001'), 'Comprobante Electrónico Gubernamental');
+  // Tipo que no está en ECF_NOMBRE (E00, E99): título genérico.
+  assert.equal(nombreDeEncf('E000000000001'), 'Comprobante Fiscal Electrónico');
+  assert.equal(nombreDeEncf('E990000000001'), 'Comprobante Fiscal Electrónico');
+  // No es e-NCF: tampoco rompe.
+  assert.equal(nombreDeEncf('B0200000001'), 'Comprobante Fiscal Electrónico');
+  assert.equal(nombreDeEncf(undefined), 'Comprobante Fiscal Electrónico');
 });
 
 test('documentoVigente: ignora el reemplazado y toma el más reciente de los demás', () => {

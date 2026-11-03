@@ -19,6 +19,21 @@ export function esEcf(ncf?: string | null): boolean {
   return /^E\d{12}$/.test(ncf ?? '');
 }
 
+/** Tipo (31, 32, 34…) que lleva un e-NCF en los dos dígitos que siguen a la E; undefined si no es e-NCF. */
+export function tipoDeEncf(ncf?: string | null): number | undefined {
+  return esEcf(ncf) ? Number((ncf as string).slice(1, 3)) : undefined;
+}
+
+// Cuando el tipo no está en ECF_NOMBRE (un documento sin tipo, que el mapper
+// deja en 0): el ticket nunca debe imprimir "undefined".
+const ECF_NOMBRE_GENERICO = 'Comprobante Fiscal Electrónico';
+
+/** Nombre con que el ticket titula el comprobante de este e-NCF. */
+export function nombreDeEncf(ncf?: string | null): string {
+  const tipo = tipoDeEncf(ncf);
+  return (tipo === undefined ? undefined : ECF_NOMBRE[tipo]) ?? ECF_NOMBRE_GENERICO;
+}
+
 /**
  * El documento que vale hoy: el más reciente que nadie ha reemplazado. Un
  * documento rechazado que se vuelve a emitir queda con `reemplazadoPor`; el
