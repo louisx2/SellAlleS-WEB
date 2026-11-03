@@ -17,7 +17,8 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { useModules } from '@/context/modules-provider';
 import {
-  TIPO_PREFIX_E, avisoSerieB, certificadoPorVencer, diasParaVencer, fechaDMA, formatearNcf,
+  SECUENCIA_E_MAXIMA, TIPO_PREFIX_E, avisoSerieB, certificadoPorVencer, diasParaVencer, fechaDMA, formatearNcf,
+  secuenciaExigeVencimiento,
 } from '@/lib/ecf';
 import { Loader2, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -175,6 +176,8 @@ export function NcfSettingsCard() {
   const formularioDisponible = ecfModulo || ncfBVigente;
   const mostrarSerie = ecfModulo || sequences.some((s) => s.electronica);
   const prefijoEfectivo = serie === 'E' ? TIPO_PREFIX_E[tipo] : prefix.trim().toUpperCase();
+  // E31, E33, E44 y E45 llevan el vencimiento en el comprobante: la base no las acepta sin él.
+  const vencimientoObligatorio = secuenciaExigeVencimiento(serie === 'E', tipo);
 
   // Avisos que hay que ver ANTES de que el POS deje de facturar: secuencias por
   // agotarse, y secuencias encendidas que la base ya no tomaría. Solo cuentan las
@@ -278,6 +281,22 @@ export function NcfSettingsCard() {
       toast({
         title: 'Datos inválidos',
         description: 'Revisa el prefijo y el rango: "hasta" debe ser mayor o igual que "desde".',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (serie === 'E' && to > SECUENCIA_E_MAXIMA) {
+      toast({
+        title: 'Rango inválido',
+        description: 'Un e-NCF lleva 10 dígitos de secuencia: "hasta" no puede pasar de 9999999999.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (vencimientoObligatorio && !expiresAt) {
+      toast({
+        title: 'Falta el vencimiento',
+        description: `La secuencia ${prefijoEfectivo} lleva la fecha de vencimiento que autorizó la DGII.`,
         variant: 'destructive',
       });
       return;
@@ -503,8 +522,14 @@ export function NcfSettingsCard() {
             <div className="rounded-lg border p-4 space-y-4">
               <h4 className="text-sm font-semibold">Agregar secuencia</h4>
               {!ncfBVigente && (
-                <p className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 text-xs text-destructive">
-                  {avisoSerieB(fechaCorteB)}
+                // Con e-CF activo no es un problema, solo que la B ya no se carga.
+                <p
+                  className={cn(
+                    'rounded-lg border p-3 text-xs',
+                    ecfActiva ? 'text-muted-foreground' : 'border-destructive/50 bg-destructive/5 text-destructive',
+                  )}
+                >
+                  {avisoSerieB(fechaCorteB, ecfActiva)}
                 </p>
               )}
               {formularioDisponible && (
@@ -555,8 +580,17 @@ export function NcfSettingsCard() {
                   </div>
                   <div className="flex items-end gap-3 flex-wrap">
                     <div className="space-y-1">
-                      <Label htmlFor="ncf-expires" className="text-xs">Vencimiento (opcional)</Label>
-                      <Input id="ncf-expires" type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} />
+                      <Label htmlFor="ncf-expires" className="text-xs">
+                        {vencimientoObligatorio ? 'Vencimiento' : 'Vencimiento (opcional)'}
+                      </Label>
+                      <Input
+                        id="ncf-expires"
+                        type="date"
+                        value={expiresAt}
+                        onChange={(e) => setExpiresAt(e.target.value)}
+                        required={vencimientoObligatorio}
+                        aria-required={vencimientoObligatorio}
+                      />
                     </div>
                     <Button type="button" onClick={handleAddSequence} disabled={saving || !rangeTo}>
                       {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}

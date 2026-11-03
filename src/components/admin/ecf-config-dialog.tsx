@@ -267,23 +267,30 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
     }
 
     setGuardando(true);
-    // Sin estado, conexion_probada_at ni activada_at: esos no se escriben desde aquí.
-    const { error } = await supabase.from('ecf_config').upsert(
-      {
-        company_id: companyId,
-        rnc_emisor: rnc,
-        razon_social: form.razonSocial.trim(),
-        nombre_comercial: form.nombreComercial.trim() || null,
-        direccion: form.direccion.trim(),
-        ambiente: form.ambiente,
-        plan: form.plan,
-        cupo_comprobantes: cupos[0],
-        cupo_requests: cupos[1],
-        minutos_entre_consultas: cupos[2],
-        certificado_vence: form.certificadoVence || null,
-      },
-      { onConflict: 'company_id' },
-    );
+    // Sin estado, conexion_probada_at ni activada_at: la base no deja escribirlos
+    // desde aquí (solo estas columnas). Por eso no es un upsert: el upsert de
+    // PostgREST también reescribe company_id, y esa columna solo se escribe al crear.
+    const datos = {
+      rnc_emisor: rnc,
+      razon_social: form.razonSocial.trim(),
+      nombre_comercial: form.nombreComercial.trim() || null,
+      direccion: form.direccion.trim(),
+      ambiente: form.ambiente,
+      plan: form.plan,
+      cupo_comprobantes: cupos[0],
+      cupo_requests: cupos[1],
+      minutos_entre_consultas: cupos[2],
+      certificado_vence: form.certificadoVence || null,
+    };
+    let error: { message: string } | null;
+    if (config) {
+      const r = await supabase.from('ecf_config').update(datos).eq('company_id', companyId).select('company_id');
+      error = r.error ?? (r.data && r.data.length === 0
+        ? { message: 'La configuración ya no existe. Cierra y vuelve a abrir la ventana.' }
+        : null);
+    } else {
+      ({ error } = await supabase.from('ecf_config').insert({ company_id: companyId, ...datos }));
+    }
     setGuardando(false);
     if (error) {
       toast({ title: 'No se pudo guardar', description: error.message, variant: 'destructive' });
@@ -325,7 +332,9 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
 
   const hoy = new Date().toLocaleDateString('en-CA');
   const dias = diasParaVencer(form.certificadoVence, hoy);
-  const cambioDeAmbienteEnActiva = config?.estado === 'activa' && config.ambiente !== form.ambiente;
+  // Con la empresa activa la base no deja cambiar el ambiente (los comprobantes
+  // siguientes saldrían por otro sin pasar las comprobaciones de activar).
+  const ambienteBloqueado = config?.estado === 'activa';
 
   return (
     <div className="space-y-4">
@@ -367,7 +376,11 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label>Ambiente</Label>
-            <Select value={form.ambiente} onValueChange={(v) => cambiar({ ambiente: v as AmbienteEcf })}>
+            <Select
+              value={form.ambiente}
+              onValueChange={(v) => cambiar({ ambiente: v as AmbienteEcf })}
+              disabled={ambienteBloqueado}
+            >
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {ECF_AMBIENTES.map((a) => (
@@ -375,10 +388,9 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
                 ))}
               </SelectContent>
             </Select>
-            {cambioDeAmbienteEnActiva && (
-              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                La empresa está activa: al guardar, los comprobantes saldrán por este ambiente y la conexión
-                tendrá que probarse de nuevo.
+            {ambienteBloqueado && (
+              <p className="text-xs text-muted-foreground">
+                Para cambiar el ambiente, pasa primero la empresa a preparación.
               </p>
             )}
           </div>

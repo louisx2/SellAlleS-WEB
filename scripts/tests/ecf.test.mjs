@@ -25,6 +25,8 @@ import {
   diasParaVencer,
   certificadoPorVencer,
   avisoSerieB,
+  secuenciaExigeVencimiento,
+  SECUENCIA_E_MAXIMA,
   porcentajeDeUso,
   cupoPorAgotarse,
   mayorUsoDeCupo,
@@ -304,6 +306,30 @@ test('avisoSerieB: el mismo texto del error de assign_ncf, con la fecha en DD/MM
     avisoSerieB(null),
     'La serie B dejó de ser válida. Para emitir comprobantes hay que activar la facturación electrónica.',
   );
+  // Sin decir nada del e-CF es lo mismo que sin e-CF.
+  assert.equal(avisoSerieB('2026-11-15', false), avisoSerieB('2026-11-15'));
+});
+
+test('avisoSerieB con e-CF activo: solo que las secuencias nuevas son E (I2)', () => {
+  assert.equal(
+    avisoSerieB('2026-11-15', true),
+    'La serie B dejó de ser válida el 15/11/2026. Las secuencias nuevas son E.',
+  );
+  assert.equal(avisoSerieB(null, true), 'La serie B ya no es válida. Las secuencias nuevas son E.');
+  assert.equal(avisoSerieB(undefined, true), 'La serie B ya no es válida. Las secuencias nuevas son E.');
+  assert.ok(!avisoSerieB('2026-11-15', true).includes('activar'), 'la empresa ya tiene la facturación electrónica');
+});
+
+test('secuenciaExigeVencimiento: en la serie E todos menos E32 y E34; en la B ninguno (I4)', () => {
+  for (const tipo of ['fiscal', 'nota_debito', 'regimen_especial', 'gubernamental']) {
+    assert.equal(secuenciaExigeVencimiento(true, tipo), true, tipo);
+    assert.equal(secuenciaExigeVencimiento(false, tipo), false, `${tipo} en B`);
+  }
+  for (const tipo of ['consumer', 'nota_credito']) {
+    assert.equal(secuenciaExigeVencimiento(true, tipo), false, tipo);
+    assert.equal(secuenciaExigeVencimiento(false, tipo), false, `${tipo} en B`);
+  }
+  assert.equal(SECUENCIA_E_MAXIMA, 9999999999);
 });
 
 test('PLANES_MSELLER: cupos de cada plan y minutos entre consultas', () => {

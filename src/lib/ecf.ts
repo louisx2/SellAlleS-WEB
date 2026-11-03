@@ -192,14 +192,32 @@ export function certificadoPorVencer(vence: string | null | undefined, hoy: stri
 }
 
 /**
- * Por qué ya no se puede cargar una secuencia B. Es el mismo texto del error
- * que lanza `assign_ncf` desde la fecha de corte (con la fecha en DD/MM/AAAA);
- * si no se pudo leer la fecha, se dice sin ella.
+ * Por qué ya no se puede cargar una secuencia B. Sin e-CF es el mismo texto del
+ * error que lanza `assign_ncf` desde la fecha de corte (con la fecha en
+ * DD/MM/AAAA). Con e-CF activo no hay nada que activar: solo se dice que las
+ * secuencias nuevas son E. Si no se pudo leer la fecha, se dice sin ella.
  */
-export function avisoSerieB(corte: string | null | undefined): string {
+export function avisoSerieB(corte: string | null | undefined, ecfActiva = false): string {
+  if (ecfActiva) {
+    return corte
+      ? `La serie B dejó de ser válida el ${fechaDMA(corte)}. Las secuencias nuevas son E.`
+      : 'La serie B ya no es válida. Las secuencias nuevas son E.';
+  }
   const cuando = corte ? ` el ${fechaDMA(corte)}` : '';
   return `La serie B dejó de ser válida${cuando}. Para emitir comprobantes hay que activar la facturación electrónica.`;
 }
+
+/**
+ * ¿Hay que pedir la fecha de vencimiento al cargar la secuencia? En la serie E,
+ * todos menos el E32 (consumo) y el E34 (nota de crédito) la llevan en el
+ * comprobante. Espeja `ncf_sequences_vencimiento_e_check`.
+ */
+export function secuenciaExigeVencimiento(electronica: boolean, tipo: TipoSecuencia): boolean {
+  return electronica && tipo !== 'consumer' && tipo !== 'nota_credito';
+}
+
+/** El mayor número de secuencia que cabe en un e-NCF (10 dígitos). Espeja `ncf_sequences_rango_e_check`. */
+export const SECUENCIA_E_MAXIMA = 9_999_999_999;
 
 // ---------------------------------------------------------------------------
 // Panel de SellAlleS: configuración por empresa y resumen de la plataforma
