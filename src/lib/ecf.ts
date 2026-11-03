@@ -137,3 +137,66 @@ export function puedeReintentar(d: EcfDocumento): boolean {
 export function puedeReemitir(d: EcfDocumento): boolean {
   return d.estado === 'rechazado';
 }
+
+// ---------------------------------------------------------------------------
+// Perfil → Facturación fiscal: secuencias E, certificado y corte de la serie B
+// ---------------------------------------------------------------------------
+
+/** Los seis tipos de comprobante que acepta `ncf_sequences_tipo_check`. */
+export type TipoSecuencia = NcfType | 'nota_credito' | 'nota_debito';
+
+/**
+ * Prefijo de cada tipo en la serie E. Espeja `ncf_sequences_prefijo_e_check`:
+ * una secuencia electrónica con otro prefijo la rechaza la base.
+ */
+export const TIPO_PREFIX_E: Record<TipoSecuencia, string> = {
+  consumer: 'E32',
+  fiscal: 'E31',
+  nota_credito: 'E34',
+  nota_debito: 'E33',
+  regimen_especial: 'E44',
+  gubernamental: 'E45',
+};
+
+/** Prefijo y número como los arma `assign_ncf`: 10 dígitos en la serie E, 8 en la B. */
+export function formatearNcf(prefijo: string | null | undefined, numero: number, electronica: boolean): string {
+  return `${prefijo ?? ''}${String(numero).padStart(electronica ? 10 : 8, '0')}`;
+}
+
+/** AAAA-MM-DD -> DD/MM/AAAA sin pasar por Date: así la zona horaria no corre el día. */
+export function fechaDMA(fecha: string): string {
+  const [y, m, d] = fecha.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+/** Con cuántos días de margen se avisa que el certificado digital está por vencer. */
+export const CERTIFICADO_AVISO_DIAS = 30;
+
+const MS_POR_DIA = 24 * 60 * 60 * 1000;
+
+/**
+ * Días que faltan desde `hoy` hasta `vence` (ambas AAAA-MM-DD); negativo si ya
+ * venció, null si no hay fecha. Se calcula en UTC sobre las dos fechas, así que
+ * no depende de la zona horaria ni del horario de verano.
+ */
+export function diasParaVencer(vence: string | null | undefined, hoy: string): number | null {
+  if (!vence) return null;
+  const dias = (Date.parse(`${vence}T00:00:00Z`) - Date.parse(`${hoy}T00:00:00Z`)) / MS_POR_DIA;
+  return Number.isFinite(dias) ? Math.round(dias) : null;
+}
+
+/** ¿Faltan 30 días o menos (o ya venció)? Sin fecha no hay nada que avisar. */
+export function certificadoPorVencer(vence: string | null | undefined, hoy: string): boolean {
+  const dias = diasParaVencer(vence, hoy);
+  return dias !== null && dias <= CERTIFICADO_AVISO_DIAS;
+}
+
+/**
+ * Por qué ya no se puede cargar una secuencia B. Es el mismo texto del error
+ * que lanza `assign_ncf` desde la fecha de corte (con la fecha en DD/MM/AAAA);
+ * si no se pudo leer la fecha, se dice sin ella.
+ */
+export function avisoSerieB(corte: string | null | undefined): string {
+  const cuando = corte ? ` el ${fechaDMA(corte)}` : '';
+  return `La serie B dejó de ser válida${cuando}. Para emitir comprobantes hay que activar la facturación electrónica.`;
+}

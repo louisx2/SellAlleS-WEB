@@ -19,6 +19,12 @@ import {
   cuentaComoProblemaEcf,
   contarProblemasEcf,
   resultadoDeEcf,
+  TIPO_PREFIX_E,
+  formatearNcf,
+  fechaDMA,
+  diasParaVencer,
+  certificadoPorVencer,
+  avisoSerieB,
 } from '../../src/lib/ecf.ts';
 
 // Documento mínimo para armar casos.
@@ -221,4 +227,76 @@ test('resultadoDeEcf: lo que se le dice a quien reintenta, reemite o reimprime',
   assert.equal(resultadoDeEcf(undefined), 'desconocido');
   assert.equal(resultadoDeEcf(null), 'desconocido');
   assert.equal(resultadoDeEcf(doc({ estado: 'aceptado' })), 'desconocido');
+});
+
+test('TIPO_PREFIX_E: los seis prefijos que acepta ncf_sequences_prefijo_e_check, y ninguno más', () => {
+  assert.deepEqual(TIPO_PREFIX_E, {
+    consumer: 'E32',
+    fiscal: 'E31',
+    nota_credito: 'E34',
+    nota_debito: 'E33',
+    regimen_especial: 'E44',
+    gubernamental: 'E45',
+  });
+  // Cada prefijo es E + el tipo de ECF_NOMBRE: si uno se sale del catálogo, aquí se nota.
+  for (const prefijo of Object.values(TIPO_PREFIX_E)) {
+    assert.ok(ECF_NOMBRE[Number(prefijo.slice(1))], prefijo);
+  }
+});
+
+test('formatearNcf: 10 dígitos en la serie E, 8 en la B', () => {
+  assert.equal(formatearNcf('E32', 1, true), 'E320000000001');
+  assert.equal(formatearNcf('E31', 250, true), 'E310000000250');
+  assert.equal(formatearNcf('B02', 1, false), 'B0200000001');
+  assert.equal(formatearNcf('B01', 500, false), 'B0100000500');
+  // Lo que arma para una E es un e-NCF válido.
+  assert.equal(esEcf(formatearNcf('E34', 7, true)), true);
+  // Sin prefijo no sale "null" ni "undefined".
+  assert.equal(formatearNcf(null, 3, false), '00000003');
+  assert.equal(formatearNcf(undefined, 3, true), '0000000003');
+});
+
+test('fechaDMA: AAAA-MM-DD a DD/MM/AAAA sin correr el día', () => {
+  assert.equal(fechaDMA('2026-11-15'), '15/11/2026');
+  assert.equal(fechaDMA('2027-01-01'), '01/01/2027');
+});
+
+test('diasParaVencer: días de calendario entre hoy y el vencimiento', () => {
+  assert.equal(diasParaVencer('2026-11-30', '2026-11-30'), 0);
+  assert.equal(diasParaVencer('2026-12-30', '2026-11-30'), 30);
+  assert.equal(diasParaVencer('2026-12-01', '2026-11-30'), 1);
+  // Vencido: negativo.
+  assert.equal(diasParaVencer('2026-11-29', '2026-11-30'), -1);
+  // Cruza fin de año y año bisiesto.
+  assert.equal(diasParaVencer('2027-01-05', '2026-12-30'), 6);
+  assert.equal(diasParaVencer('2028-03-01', '2028-02-28'), 2);
+  // Sin fecha no hay cuenta.
+  assert.equal(diasParaVencer(null, '2026-11-30'), null);
+  assert.equal(diasParaVencer(undefined, '2026-11-30'), null);
+  assert.equal(diasParaVencer('', '2026-11-30'), null);
+});
+
+test('certificadoPorVencer: en rojo a 30 días o menos, vencido incluido', () => {
+  const hoy = '2026-11-30';
+  assert.equal(certificadoPorVencer('2027-06-01', hoy), false);
+  assert.equal(certificadoPorVencer('2026-12-31', hoy), false); // faltan 31
+  assert.equal(certificadoPorVencer('2026-12-30', hoy), true);  // faltan 30
+  assert.equal(certificadoPorVencer('2026-12-01', hoy), true);
+  assert.equal(certificadoPorVencer('2026-11-30', hoy), true);  // vence hoy
+  assert.equal(certificadoPorVencer('2026-10-01', hoy), true);  // ya venció
+  // Sin fecha (la empresa aún no tiene certificado cargado): nada que avisar.
+  assert.equal(certificadoPorVencer(null, hoy), false);
+  assert.equal(certificadoPorVencer(undefined, hoy), false);
+});
+
+test('avisoSerieB: el mismo texto del error de assign_ncf, con la fecha en DD/MM/AAAA', () => {
+  assert.equal(
+    avisoSerieB('2026-11-15'),
+    'La serie B dejó de ser válida el 15/11/2026. Para emitir comprobantes hay que activar la facturación electrónica.',
+  );
+  // Sin la fecha de corte, la misma frase sin fecha.
+  assert.equal(
+    avisoSerieB(null),
+    'La serie B dejó de ser válida. Para emitir comprobantes hay que activar la facturación electrónica.',
+  );
 });
