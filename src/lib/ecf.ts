@@ -2,7 +2,7 @@
 // React ni de Supabase, y solo `import type`: las pruebas
 // (`scripts/tests/ecf.test.mjs`) cargan este archivo directamente con Node,
 // que quita los tipos pero no resuelve imports de valores.
-import type { EcfDocumento, EcfEstado } from './types';
+import type { EcfDocumento, EcfEstado, NcfType } from './types';
 
 // Nombre del tipo de comprobante tal como sale en el ticket.
 export const ECF_NOMBRE: Record<number, string> = {
@@ -32,6 +32,18 @@ const ECF_NOMBRE_GENERICO = 'Comprobante Fiscal Electrónico';
 export function nombreDeEncf(ncf?: string | null): string {
   const tipo = tipoDeEncf(ncf);
   return (tipo === undefined ? undefined : ECF_NOMBRE[tipo]) ?? ECF_NOMBRE_GENERICO;
+}
+
+/**
+ * ¿Hay que impedir el cobro porque el comprobante electrónico no se podría
+ * armar? El E31, E44 y E45 identifican al comprador y exigen su RNC (9 dígitos)
+ * o cédula (11); sin ellos `assign_ncf` gastaría el número y el documento
+ * terminaría en error_datos. Solo aplica con e-CF: la serie B sigue como hoy
+ * (advertencia, sin bloquear).
+ */
+export function ecfFaltaRncCliente(ecfActiva: boolean, ncfType: NcfType, customerIdIsValid: boolean): boolean {
+  const exigeComprador = ncfType === 'fiscal' || ncfType === 'gubernamental' || ncfType === 'regimen_especial';
+  return ecfActiva && exigeComprador && !customerIdIsValid;
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   esEcf,
   tipoDeEncf,
   nombreDeEncf,
+  ecfFaltaRncCliente,
   documentoVigente,
   ecfEstadoEtiqueta,
   puedeReintentar,
@@ -75,6 +76,25 @@ test('nombreDeEncf: el nombre del tipo; uno genérico si no se conoce, nunca "un
   // No es e-NCF: tampoco rompe.
   assert.equal(nombreDeEncf('B0200000001'), 'Comprobante Fiscal Electrónico');
   assert.equal(nombreDeEncf(undefined), 'Comprobante Fiscal Electrónico');
+});
+
+test('ecfFaltaRncCliente: con e-CF, los tipos que identifican al comprador exigen RNC o cédula', () => {
+  for (const tipo of ['fiscal', 'gubernamental', 'regimen_especial']) {
+    assert.equal(ecfFaltaRncCliente(true, tipo, false), true, `${tipo} sin RNC bloquea`);
+    assert.equal(ecfFaltaRncCliente(true, tipo, true), false, `${tipo} con RNC pasa`);
+  }
+});
+
+test('ecfFaltaRncCliente: el consumo final no necesita RNC', () => {
+  assert.equal(ecfFaltaRncCliente(true, 'consumer', false), false);
+  assert.equal(ecfFaltaRncCliente(true, 'consumer', true), false);
+});
+
+test('ecfFaltaRncCliente: sin e-CF (serie B) nunca bloquea, solo se advierte', () => {
+  for (const tipo of ['consumer', 'fiscal', 'gubernamental', 'regimen_especial']) {
+    assert.equal(ecfFaltaRncCliente(false, tipo, false), false);
+    assert.equal(ecfFaltaRncCliente(false, tipo, true), false);
+  }
 });
 
 test('documentoVigente: ignora el reemplazado y toma el más reciente de los demás', () => {

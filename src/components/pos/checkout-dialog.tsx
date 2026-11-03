@@ -35,7 +35,7 @@ import { Switch } from '@/components/ui/switch';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { supabase } from '@/lib/supabase/client';
-import { esEcf } from '@/lib/ecf';
+import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
 import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
@@ -127,6 +127,9 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const ncfNeedsCustomerId = ncfType === 'fiscal' || ncfType === 'gubernamental' || ncfType === 'regimen_especial';
   const customerIdDigits = (activeCart?.selectedCustomer?.rnc ?? '').replace(/\D/g, '');
   const customerIdIsValid = customerIdDigits.length === 9 || customerIdDigits.length === 11;
+  // Con e-CF la falta de RNC sí bloquea el cobro: el número ya se habría gastado
+  // en un documento que no se puede armar. Con la serie B solo se advierte.
+  const ecfSinRncCliente = ecfFaltaRncCliente(ecfActiva, ncfType, customerIdIsValid);
 
 
   useEffect(() => {
@@ -316,6 +319,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     && (total - Number(amountPaid || 0)) > availableCredit;
 
   const confirmButtonAction = () => {
+    if (ecfSinRncCliente) return;
     if (paymentMethod === 'financing') {
       handleOpenFinancing();
     } else {
@@ -601,11 +605,20 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                     <p className="text-xs text-destructive">
                                         Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.{' '}
                                         {ecfActiva
-                                            ? 'Sin eso el comprobante electrónico no se puede enviar a la DGII.'
+                                            ? 'Sin eso no se puede cobrar con comprobante electrónico: elige otro tipo o un cliente con RNC o cédula.'
                                             : 'Sin eso el comprobante se emite, pero la venta no se podrá reportar en el 607.'}
                                     </p>
                                 )}
                             </div>
+                        )}
+
+                        {/* Sin secuencias E (o mientras cargan) el selector no sale, pero
+                            el tipo del cliente sigue valiendo: que el botón no se quede
+                            deshabilitado sin decir por qué. */}
+                        {ecfSinRncCliente && !hayComprobantes && (
+                            <p className="text-xs text-destructive">
+                                Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.
+                            </p>
                         )}
                     </div>
                 )}
@@ -683,7 +696,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={guardandoVenta}>
             Cancelar
           </Button>
-          <Button type="button" onClick={confirmButtonAction} disabled={guardandoVenta || isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid}>
+          <Button type="button" onClick={confirmButtonAction} disabled={guardandoVenta || isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid || ecfSinRncCliente}>
             {guardandoVenta ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
