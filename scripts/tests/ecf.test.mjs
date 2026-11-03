@@ -14,6 +14,8 @@ import {
   ecfEstadoEtiqueta,
   puedeReintentar,
   puedeReemitir,
+  ECF_ESTADOS_CON_PROBLEMA,
+  ecfConProblema,
 } from '../../src/lib/ecf.ts';
 
 // Documento mínimo para armar casos.
@@ -156,5 +158,20 @@ test('puedeReintentar: solo error_datos y sin_cupo', () => {
 test('puedeReemitir: solo rechazado', () => {
   for (const e of ESTADOS) {
     assert.equal(puedeReemitir(doc({ estado: e })), e === 'rechazado', e);
+  }
+});
+
+test('ecfConProblema: solo rechazado, error_datos y sin_cupo; sin estado no hay problema', () => {
+  for (const e of ESTADOS) {
+    assert.equal(ecfConProblema(e), ['rechazado', 'error_datos', 'sin_cupo'].includes(e), e);
+  }
+  assert.equal(ecfConProblema(undefined), false);
+  assert.equal(ecfConProblema(null), false);
+});
+
+test('ECF_ESTADOS_CON_PROBLEMA: los mismos que se pueden reintentar o reemitir', () => {
+  for (const e of ESTADOS) {
+    const resoluble = puedeReintentar(doc({ estado: e })) || puedeReemitir(doc({ estado: e }));
+    assert.equal(ECF_ESTADOS_CON_PROBLEMA.includes(e), resoluble, e);
   }
 });

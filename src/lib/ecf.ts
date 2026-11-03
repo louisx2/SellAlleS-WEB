@@ -76,6 +76,14 @@ export function ecfEstadoEtiqueta(e: EcfEstado): { texto: string; tono: 'ok' | '
   return ETIQUETAS[e];
 }
 
+/** Estados que el servidor no reintenta solo: los resuelve una persona (el aviso, el filtro de Movimientos y el ticket los comparten). */
+export const ECF_ESTADOS_CON_PROBLEMA: EcfEstado[] = ['rechazado', 'error_datos', 'sin_cupo'];
+
+/** ¿Está el comprobante en un estado que pide a una persona corregir algo? Sin estado (venta sin e-CF) no. */
+export function ecfConProblema(estado?: EcfEstado | null): boolean {
+  return !!estado && ECF_ESTADOS_CON_PROBLEMA.includes(estado);
+}
+
 /** Se vuelve a enviar tal cual: faltaba un dato que ya se corrigió, o faltaba cupo. */
 export function puedeReintentar(d: EcfDocumento): boolean {
   return d.estado === 'error_datos' || d.estado === 'sin_cupo';

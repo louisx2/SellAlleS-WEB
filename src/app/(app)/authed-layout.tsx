@@ -31,6 +31,7 @@ import { ProfileModal } from '@/components/profile/profile-modal';
 import { SupportDialog } from '@/components/support/support-dialog';
 import { useActualizacionDisponible, aplicarActualizacion, VERSION } from '@/lib/pwa-update';
 import { AvisoDeCuota } from '@/components/subscription/aviso-de-cuota';
+import { EcfProblemasBanner } from '@/components/ecf/ecf-problemas-banner';
 import { useMiCuenta } from '@/hooks/use-mi-cuenta';
 import { useComprobantesPendientes } from '@/hooks/use-comprobantes-pendientes';
 
@@ -237,6 +238,9 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   // El banner de "operando en otra empresa" solo se muestra a super admin.
   const hasTopBanner = (isImpersonating && isSuperAdmin) || isDemoCompany || isReadOnly;
   const showOperationalMenus = (!isSuperAdmin && !hasMultipleCompanies) || isImpersonating;
+  // Aviso de comprobantes electrónicos con problemas: solo para quien puede
+  // resolverlos (administrador de la empresa en la que opera) y si emite e-CF.
+  const verAvisoEcf = showOperationalMenus && !!appUser.isCompanyAdmin && profile.ecfActiva;
   const isManager = appUser?.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
   const isAdminOrManager = !isSuperAdmin && (userRole === 'admin' || isManager);
 
@@ -801,6 +805,9 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
           ) : (
             <>
               {verAvisoDeCuota && !isPosPage && pathname !== '/suscripcion' && <AvisoDeCuota cuenta={miCuenta} />}
+              {verAvisoEcf && !isPosPage && (
+                <EcfProblemasBanner companyId={appUser.impersonatedCompanyId || appUser.companyId} />
+              )}
               {children}
             </>
           )}

@@ -16,6 +16,7 @@ import { useSales } from '@/context/sales-provider';
 import { useProducts } from '@/context/product-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency } from '@/lib/utils';
+import { esEcf, tipoDeEncf } from '@/lib/ecf';
 import type { RefundMethod, Sale } from '@/lib/types';
 
 interface AnnulSaleDialogProps {
@@ -59,6 +60,16 @@ export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogPro
   );
   const [creditRefund, setCreditRefund] = useState<'return' | 'none'>(downPayment > 0 ? 'return' : 'none');
 
+  // Qué nota de crédito saldrá. Un e-CF lleva una E34; si la DGII lo rechazó,
+  // la venta se anula sin nota de crédito.
+  const avisoNota = !sale.ncf || !profile.ncfEnabled
+    ? ''
+    : !esEcf(sale.ncf)
+      ? ' Se emitirá una nota de crédito (B04) que referencia el NCF original: necesitas una secuencia B04 activa.'
+      : sale.ecf?.estado === 'rechazado'
+        ? ''
+        : ' Se emitirá una nota de crédito electrónica (E34) que referencia el e-NCF original.';
+
   const handleAnnul = async () => {
     setSaving(true);
     try {
@@ -73,10 +84,17 @@ export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogPro
       const abono = result.paymentsVoided > 0
         ? ` Se anuló el abono inicial de ${formatCurrency(result.paymentsVoided)}.`
         : '';
+      // La nota de crédito de un e-CF es una E34. Si no alcanzó a firmarse y
+      // enviarse (result.ecf vacío), el servidor la reintenta solo.
+      const notaElectronica = tipoDeEncf(result.ncf) === 34;
+      const notaCredito = notaElectronica
+        ? `Nota de crédito electrónica ${result.ncf} emitida por ${formatCurrency(result.total)}.`
+          + (result.ecf ? '' : ' Se enviará a la DGII en unos minutos.')
+        : `Nota de crédito ${result.ncf} emitida por ${formatCurrency(result.total)}.`;
       toast({
         title: 'Venta anulada',
         description: (result.ncf
-          ? `Nota de crédito ${result.ncf} emitida por ${formatCurrency(result.total)}.`
+          ? notaCredito
             + (sinDevolucion ? ' No se devolvió dinero.' : '')
           : `Venta anulada por ${formatCurrency(result.total)}. El inventario fue repuesto`
             + (sinDevolucion ? ', sin devolución de dinero.' : '.'))
@@ -116,9 +134,7 @@ export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogPro
                 Si la venta tiene abonos posteriores, anúlalos primero desde su detalle.
               </>
             )}
-            {sale.ncf && profile.ncfEnabled
-              ? ' Se emitirá una nota de crédito (B04) que referencia el NCF original: necesitas una secuencia B04 activa.'
-              : ''}
+            {avisoNota}
             {' '}Esta acción no se puede deshacer.
           </div>
 

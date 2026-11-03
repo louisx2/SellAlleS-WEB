@@ -4,7 +4,7 @@ import type { Sale } from '@/lib/types';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatLineQty } from '@/lib/line-format';
-import { esEcf, nombreDeEncf } from '@/lib/ecf';
+import { ecfConProblema, esEcf, nombreDeEncf } from '@/lib/ecf';
 import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
@@ -245,8 +245,13 @@ export function ReceiptBarcode({ sale, className }: ReceiptProps & { className?:
     }
   }, []);
 
+  // En un e-CF el único QR que vale es el de la DGII (ReceiptEcf): otro al lado
+  // se confunde con él y un lector podría tomar el equivocado. El código de
+  // barras sí se queda.
+  const omitir = esEcf(sale.ncf) && barcodeType === 'qr';
+
   useEffect(() => {
-    if (!showBarcode) return;
+    if (!showBarcode || omitir) return;
     let cancelado = false;
     (async () => {
       try {
@@ -273,9 +278,9 @@ export function ReceiptBarcode({ sale, className }: ReceiptProps & { className?:
     return () => {
       cancelado = true;
     };
-  }, [showBarcode, barcodeType, sale.id]);
+  }, [showBarcode, omitir, barcodeType, sale.id]);
 
-  if (!showBarcode || !src) return null;
+  if (!showBarcode || omitir || !src) return null;
 
   return (
     <div className={cn('flex flex-col items-center justify-center mt-6 pt-4 border-t border-dashed gap-1', className)}>
@@ -320,9 +325,16 @@ export function ReceiptEcf({ sale, className }: ReceiptProps & { className?: str
   if (!esEcf(sale.ncf)) return null;
 
   if (!qrUrl) {
+    // "En proceso" es lo que el servidor sigue intentando solo. Si el documento
+    // quedó rechazado, con error o sin cupo, esperar no lo arregla: alguien
+    // tiene que corregirlo, y el ticket no debe prometer que ya viene.
     return (
       <div className={cn('border-t border-dashed pt-3 text-center text-xs', className)}>
-        <p>Comprobante electrónico en proceso. Reimprima desde Movimientos para obtener el código QR.</p>
+        <p>
+          {ecfConProblema(sale.ecf?.estado)
+            ? 'Comprobante electrónico pendiente de corrección. Reimprima desde Movimientos cuando se haya corregido.'
+            : 'Comprobante electrónico en proceso. Reimprima desde Movimientos para obtener el código QR.'}
+        </p>
       </div>
     );
   }

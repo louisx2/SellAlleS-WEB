@@ -5,6 +5,7 @@ import type { Sale } from '@/lib/types';
 import { formatCurrency } from '@/lib/utils';
 import { SalesActions } from './sales-actions';
 import { Badge } from '../ui/badge';
+import { EcfEstadoBadge } from '@/components/ecf/ecf-estado-badge';
 import { cn } from '@/lib/utils';
 
 export const salesColumns: ColumnDef<Sale>[] = [
@@ -73,6 +74,17 @@ export const salesColumns: ColumnDef<Sale>[] = [
           {isCredit ? 'Pendiente' : 'Pagado'}
         </Badge>
       );
+    },
+  },
+  {
+    // Estado del e-CF ante la DGII. Vacía en las ventas que no lo llevan (serie B
+    // o sin comprobante). Es el documento vigente: lo trae el listado de ventas
+    // y se pone al día al recargar.
+    id: 'dgii',
+    header: 'DGII',
+    cell: ({ row }) => {
+      const ecf = row.original.ecf;
+      return ecf ? <EcfEstadoBadge estado={ecf.estado} /> : null;
     },
   },
   {

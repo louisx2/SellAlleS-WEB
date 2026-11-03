@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { Suspense, useState, useMemo, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/context/auth-provider';
 import { addDays, format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import type { DateRange } from 'react-day-picker';
-import { Calendar as CalendarIcon, Search } from 'lucide-react';
+import { AlertTriangle, Calendar as CalendarIcon, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
@@ -21,11 +22,31 @@ import { useBranches } from '@/context/branch-provider';
 import { SalesDataTable } from '@/components/sales/sales-data-table';
 import { salesColumns } from '@/components/sales/sales-columns';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { ecfConProblema } from '@/lib/ecf';
 
+// La página se exporta estática y useSearchParams necesita su Suspense.
 export default function SalesPage() {
+  return (
+    <Suspense>
+      <SalesContent />
+    </Suspense>
+  );
+}
+
+function SalesContent() {
   const { sales } = useSales();
   const { branches } = useBranches();
   const { appUser } = useAuth();
+  const router = useRouter();
+
+  // El filtro vive en la URL (?filtro=ecf-problemas) para que el aviso de
+  // comprobantes con problemas pueda llevar directo a la lista filtrada, aun
+  // estando ya en Movimientos.
+  const soloProblemasEcf = useSearchParams().get('filtro') === 'ecf-problemas';
+  const alternarProblemasEcf = () => router.replace(soloProblemasEcf ? '/sales' : '/sales?filtro=ecf-problemas');
+  // El botón sale solo si hay e-CF en la lista (o ya está puesto el filtro,
+  // para poder quitarlo): una empresa sin e-CF no ve nada nuevo.
+  const hayEcf = useMemo(() => sales.some((sale) => !!sale.ecf), [sales]);
 
   // Rol y sucursal desde el contexto (rol de la empresa activa), no de
   // localStorage: al cambiar de empresa el rol puede ser distinto.
@@ -75,8 +96,13 @@ export default function SalesPage() {
       );
     }
 
+    // Solo los e-CF que una persona tiene que resolver (rechazado, con error, sin cupo)
+    if (soloProblemasEcf) {
+      filtered = filtered.filter(sale => ecfConProblema(sale.ecf?.estado));
+    }
+
     return filtered;
-  }, [sales, selectedBranch, userRole, userBranch, date, searchTerm]);
+  }, [sales, selectedBranch, userRole, userBranch, date, searchTerm, soloProblemasEcf]);
 
   return (
     <div>
@@ -147,6 +173,17 @@ export default function SalesPage() {
           </Popover>
           {date && (
             <Button variant="ghost" onClick={() => setDate(undefined)}>Limpiar</Button>
+          )}
+          {(hayEcf || soloProblemasEcf) && (
+            <Button
+              variant={soloProblemasEcf ? 'default' : 'outline'}
+              aria-pressed={soloProblemasEcf}
+              onClick={alternarProblemasEcf}
+              className="w-full sm:w-auto"
+            >
+              <AlertTriangle className="mr-2 h-4 w-4" />
+              Con problemas e-CF
+            </Button>
           )}
       </div>
 
