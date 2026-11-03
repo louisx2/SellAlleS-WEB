@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Sale, PaymentMethod, PaymentResult, RefundMethod, FinancingDetails, RefinanceBaseMode, RefinanceLateFeeAction } from '@/lib/types';
+import type { Sale, PaymentMethod, PaymentResult, RefundMethod, FinancingDetails, RefinanceBaseMode, RefinanceLateFeeAction, EcfDocumento } from '@/lib/types';
 import type { InterestMode, PaymentFrequency } from '@/lib/frequency';
 import { supabase } from '@/lib/supabase/client';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
@@ -88,6 +88,8 @@ export type AnnulSaleResult = {
   refundMethod: RefundMethod;
   // Abono inicial anulado junto con una venta a crédito o financiada.
   paymentsVoided: number;
+  // E34 de la nota de crédito, si la empresa emite e-CF y alcanzó a emitirse.
+  ecf?: EcfDocumento;
 };
 
 export type AmendFinancingInput = {
@@ -126,7 +128,12 @@ export const resolveBranchId = async (branchName?: string): Promise<string | nul
   return data?.id ?? null;
 };
 
-const SALE_SELECT = '*, sale_items(*), customers(*), branches(name), financing_installments(*)';
+// El embed de e-CF va por el nombre de la FK: sin él, el día que ecf_documentos
+// gane otra relación con sales PostgREST lo tomaría por ambiguo (300) y nadie
+// vería sus ventas.
+const SALE_SELECT =
+  '*, sale_items(*), customers(*), branches(name), financing_installments(*), ' +
+  'ecf_documentos!ecf_documentos_sale_id_fkey(id, tipo_ecf, encf, estado, security_code, qr_url, signed_at, mensajes_dgii, reemplazado_por, created_at)';
 
 export function SalesProvider({ children }: { children: ReactNode }) {
   const { appUser } = useAuth();

@@ -39,6 +39,9 @@ export type Product = {
   stock: number;
   unit: UnitCode;
   tracksStock: boolean;
+  // Servicio (no mercancía): el e-CF lo marca con el indicador de servicio y no
+  // de bien. undefined = bien; solo se pregunta con el módulo de e-CF encendido.
+  esServicio?: boolean;
   locationId?: string;
   entryDate?: string;
   modificationDate?: string;
@@ -397,6 +400,39 @@ export type Refinancing = {
   createdAt: Date;
 };
 
+// Dónde va el e-CF en la DGII. Los reintenta el servidor solo, salvo
+// `rechazado`, `error_datos` y `sin_cupo`, que los resuelve una persona.
+export type EcfEstado =
+  | 'por_enviar'
+  | 'enviando'
+  | 'recibido'
+  | 'aceptado'
+  | 'aceptado_condicional'
+  | 'rechazado'
+  | 'error_datos'
+  | 'sin_cupo';
+
+// Observación que devuelve la DGII junto al estado (código y texto tal cual).
+export type EcfMensajeDgii = { codigo: number; valor: string };
+
+// Un comprobante electrónico (tabla `ecf_documentos`). Solo lo escribe el
+// servidor (Edge Function `ecf-emitir`); la app lo lee junto a la venta.
+export type EcfDocumento = {
+  id: string;
+  tipoEcf: number;            // 31, 32, 34, 44, 45 (nombres en src/lib/ecf.ts)
+  encf: string;               // E + tipo (2) + secuencia (10)
+  estado: EcfEstado;
+  securityCode?: string;
+  qrUrl?: string;
+  // Fecha de firma tal como la entrega MSeller (dd-mm-aaaa hh:mm:ss): se
+  // imprime igual en el ticket, así que no se convierte a Date.
+  signedAt?: string;
+  mensajesDgii: EcfMensajeDgii[];
+  // El documento nuevo, si este se rechazó y se volvió a emitir.
+  reemplazadoPor?: string;
+  createdAt: Date;
+};
+
 export type Sale = {
   id: string;
   items: CartItem[];
@@ -436,6 +472,9 @@ export type Sale = {
   // Venta anulada con nota de crédito (RPC annul_sale). La venta no se borra:
   // los reportes de ingresos la filtran y el 607 la reporta junto a su NC.
   cancelledAt?: Date;
+  // El e-CF vigente de la venta (el más reciente que nadie ha reemplazado).
+  // undefined = la venta no lleva comprobante electrónico.
+  ecf?: EcfDocumento;
 };
 
 // NCF anulado sin efecto (Formato 608): comprobante quemado por deterioro,
@@ -500,6 +539,9 @@ export type CompanyProfile = {
   // y el reporte Formato 606.
   isFormalized: boolean;
   ncfEnabled: boolean;
+  // La empresa emite e-CF de verdad (RPC ecf_activa: formalizada, con el módulo
+  // encendido y su configuración activa). Solo lectura: la calcula el servidor.
+  ecfActiva: boolean;
   socialMedia: {
     instagram: string;
     facebook: string;

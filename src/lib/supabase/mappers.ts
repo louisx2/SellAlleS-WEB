@@ -1,5 +1,6 @@
-import type { Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing } from '@/lib/types';
+import type { Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
+import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
 
 // ---------- Role ----------
@@ -50,6 +51,7 @@ export const rowToProduct = (r: any): Product => ({
   stock: Number(r.stock),
   unit: normalizeUnitCode(r.unit),
   tracksStock: r.tracks_stock ?? true,
+  esServicio: r.es_servicio ?? false,
   locationId: r.location_id ?? undefined,
   entryDate: r.entry_date ?? undefined,
   modificationDate: r.modification_date ?? undefined,
@@ -76,6 +78,9 @@ export const productToRow = (p: Partial<Product>) => ({
   stock: p.stock ?? 0,
   unit: p.unit ?? DEFAULT_UNIT_CODE,
   tracks_stock: p.tracksStock ?? true,
+  // Solo si quien llama lo aporta: la importación de inventario no lo conoce, y
+  // mandarlo como false apagaría el servicio de un producto que se actualiza.
+  ...(p.esServicio !== undefined ? { es_servicio: p.esServicio } : {}),
   location_id: p.locationId ?? null,
   entry_date: p.entryDate ?? null,
   modification_date: p.modificationDate ?? null,
@@ -312,9 +317,11 @@ export const expenseToRow = (e: Omit<Expense, 'id'>, branchUuid: string | null) 
 });
 
 // ---------- CompanyProfile ----------
-export const rowToCompanyProfile = (r: any): CompanyProfile => ({
+// `ecfActiva` no es una columna: la calcula la RPC ecf_activa y la aporta quien
+// carga el perfil. Sin ella (o si la RPC falla), la empresa no emite e-CF.
+export const rowToCompanyProfile = (r: any, ecfActiva = false): CompanyProfile => ({
   name: r.name ?? '', phone: r.phone ?? '', rnc: r.rnc ?? '', address: r.address ?? '',
-  isFormalized: !!r.is_formalized, ncfEnabled: !!r.ncf_enabled,
+  isFormalized: !!r.is_formalized, ncfEnabled: !!r.ncf_enabled, ecfActiva,
   socialMedia: { instagram: r.instagram ?? '', facebook: r.facebook ?? '' },
   email: r.email ?? '',
   logoUrl: r.logo_url ?? '', ticketLogoUrl: r.ticket_logo_url ?? '', receiptFooter: r.receipt_footer ?? '',
@@ -480,6 +487,23 @@ export const rowToPaymentResult = (r: any): PaymentResult => ({
   salesTouched: r.sales_touched != null ? Number(r.sales_touched) : undefined,
 });
 
+// ---------- e-CF (fila de ecf_documentos, sin request_json) ----------
+// Sirve igual para el embed de la venta y para lo que responde `ecf-emitir`.
+export const rowToEcfDocumento = (r: any): EcfDocumento => ({
+  id: r.id,
+  tipoEcf: Number(r.tipo_ecf),
+  encf: r.encf,
+  estado: r.estado,
+  securityCode: r.security_code ?? undefined,
+  qrUrl: r.qr_url ?? undefined,
+  signedAt: r.signed_at ?? undefined,
+  mensajesDgii: Array.isArray(r.mensajes_dgii)
+    ? r.mensajes_dgii.map((m: any) => ({ codigo: Number(m.codigo), valor: String(m.valor ?? '') }))
+    : [],
+  reemplazadoPor: r.reemplazado_por ?? undefined,
+  createdAt: new Date(r.created_at),
+});
+
 export const rowToSale = (r: any): Sale => ({
   id: r.id,
   items: (r.sale_items ?? []).map(rowToCartItem),
@@ -503,6 +527,9 @@ export const rowToSale = (r: any): Sale => ({
   quoteId: r.quote_id ?? undefined,
   couponId: r.coupon_id ?? undefined,
   cancelledAt: r.cancelled_at ? new Date(r.cancelled_at) : undefined,
+  // El embed trae todos los documentos de la venta (el rechazado y el que lo
+  // reemplazó): solo cuenta el vigente.
+  ecf: documentoVigente((r.ecf_documentos ?? []).map(rowToEcfDocumento)),
 });
 
 // ---------- NCF anulado (Formato 608) ----------

@@ -1,0 +1,60 @@
+// Lógica pura de la factura electrónica (e-CF) en la app. Sin dependencias de
+// React ni de Supabase, y solo `import type`: las pruebas
+// (`scripts/tests/ecf.test.mjs`) cargan este archivo directamente con Node,
+// que quita los tipos pero no resuelve imports de valores.
+import type { EcfDocumento, EcfEstado } from './types';
+
+// Nombre del tipo de comprobante tal como sale en el ticket.
+export const ECF_NOMBRE: Record<number, string> = {
+  31: 'Factura de Crédito Fiscal Electrónica',
+  32: 'Factura de Consumo Electrónica',
+  33: 'Nota de Débito Electrónica',
+  34: 'Nota de Crédito Electrónica',
+  44: 'Comprobante Electrónico para Regímenes Especiales',
+  45: 'Comprobante Electrónico Gubernamental',
+};
+
+/** ¿Es un e-NCF? E + tipo (2 dígitos) + secuencia (10): 13 caracteres. La serie B no lo es. */
+export function esEcf(ncf?: string | null): boolean {
+  return /^E\d{12}$/.test(ncf ?? '');
+}
+
+/**
+ * El documento que vale hoy: el más reciente que nadie ha reemplazado. Un
+ * documento rechazado que se vuelve a emitir queda con `reemplazadoPor`; el
+ * nuevo ocupa su lugar. No altera la lista que recibe.
+ */
+export function documentoVigente(docs: EcfDocumento[]): EcfDocumento | undefined {
+  let vigente: EcfDocumento | undefined;
+  for (const d of docs) {
+    if (d.reemplazadoPor) continue;
+    if (!vigente || d.createdAt.getTime() > vigente.createdAt.getTime()) vigente = d;
+  }
+  return vigente;
+}
+
+const ETIQUETAS: Record<EcfEstado, { texto: string; tono: 'ok' | 'espera' | 'error' }> = {
+  por_enviar:           { texto: 'Por enviar',                 tono: 'espera' },
+  enviando:             { texto: 'Por enviar',                 tono: 'espera' },
+  recibido:             { texto: 'En la DGII',                 tono: 'espera' },
+  aceptado:             { texto: 'Aceptado',                   tono: 'ok' },
+  aceptado_condicional: { texto: 'Aceptado con observaciones', tono: 'ok' },
+  rechazado:            { texto: 'Rechazado',                  tono: 'error' },
+  error_datos:          { texto: 'Con error',                  tono: 'error' },
+  sin_cupo:             { texto: 'Sin cupo',                   tono: 'error' },
+};
+
+/** Texto y tono (color) con que se muestra un estado. */
+export function ecfEstadoEtiqueta(e: EcfEstado): { texto: string; tono: 'ok' | 'espera' | 'error' } {
+  return ETIQUETAS[e];
+}
+
+/** Se vuelve a enviar tal cual: faltaba un dato que ya se corrigió, o faltaba cupo. */
+export function puedeReintentar(d: EcfDocumento): boolean {
+  return d.estado === 'error_datos' || d.estado === 'sin_cupo';
+}
+
+/** La DGII lo rechazó: no se corrige, se emite uno nuevo que lo reemplaza. */
+export function puedeReemitir(d: EcfDocumento): boolean {
+  return d.estado === 'rechazado';
+}

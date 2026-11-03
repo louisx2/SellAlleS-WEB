@@ -33,6 +33,7 @@ import { useSuppliers } from '@/context/supplier-provider';
 import { useCategories } from '@/context/category-provider';
 import { useLocations } from '@/context/location-provider';
 import { useAuth } from '@/context/auth-provider';
+import { useModules } from '@/context/modules-provider';
 import { supabase } from '@/lib/supabase/client';
 import { ProductImage, SUFIJO_THUMB } from '@/components/products/product-image';
 import { PresentationsEditor } from '@/components/products/presentations-editor';
@@ -80,6 +81,10 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const { categories } = useCategories();
   const { locations } = useLocations();
   const { appUser, setActiveBranch } = useAuth();
+  const { isModuleEnabled } = useModules();
+  // Solo se pregunta con el módulo de e-CF encendido; sin él, el formulario no
+  // toca el campo y el producto conserva lo que ya tenía.
+  const showEsServicio = isModuleEnabled('ecf');
 
   const isEditMode = !!product;
   // Aviso al crear: lo mismo ya tiene existencias en otra sucursal. Mientras
@@ -318,6 +323,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       stock: tracksStock ? normalizeQty(stockValue, unit) : 0,
       unit: tracksStock ? unit : DEFAULT_UNIT_CODE,
       tracksStock,
+      ...(showEsServicio ? { esServicio: formData.get('esServicio') === 'on' } : {}),
       locationId: (locationId && locationId !== 'none') ? locationId : undefined,
       wholesalePrice: tracksStock && formData.get('wholesalePrice') ? parseFloat(formData.get('wholesalePrice') as string) : undefined,
       wholesaleMinQuantity: !tracksStock || minQtyValue === undefined ? undefined : normalizeQty(minQtyValue, unit),
@@ -598,6 +604,21 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                 </label>
               </div>
             </div>
+
+            {showEsServicio && (
+            <div className="flex flex-col justify-center gap-2 md:col-span-2">
+              <Label htmlFor="esServicio" className="mb-1">Factura electrónica (e-CF)</Label>
+              <div className="flex items-center space-x-2 h-10">
+                <Checkbox id="esServicio" name="esServicio" defaultChecked={product?.esServicio} />
+                <label htmlFor="esServicio" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                  Es un servicio
+                </label>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Márcalo si lo que vendes no es mercancía: en el comprobante electrónico sale como servicio.
+              </p>
+            </div>
+            )}
 
             <div className="flex flex-col gap-2 md:col-span-2">
               <Label htmlFor="locationId">Ubicación</Label>
