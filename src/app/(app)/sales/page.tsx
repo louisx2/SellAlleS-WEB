@@ -22,7 +22,7 @@ import { useBranches } from '@/context/branch-provider';
 import { SalesDataTable } from '@/components/sales/sales-data-table';
 import { salesColumns } from '@/components/sales/sales-columns';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ecfConProblema } from '@/lib/ecf';
+import { cuentaComoProblemaEcf } from '@/lib/ecf';
 
 // La página se exporta estática y useSearchParams necesita su Suspense.
 export default function SalesPage() {
@@ -96,9 +96,10 @@ function SalesContent() {
       );
     }
 
-    // Solo los e-CF que una persona tiene que resolver (rechazado, con error, sin cupo)
+    // Solo los e-CF que una persona tiene que resolver (rechazado, con error, sin
+    // cupo). Una venta anulada con el comprobante rechazado ya no cuenta.
     if (soloProblemasEcf) {
-      filtered = filtered.filter(sale => ecfConProblema(sale.ecf?.estado));
+      filtered = filtered.filter(sale => cuentaComoProblemaEcf(sale.ecf?.estado, !!sale.cancelledAt));
     }
 
     return filtered;

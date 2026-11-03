@@ -84,6 +84,50 @@ export function ecfConProblema(estado?: EcfEstado | null): boolean {
   return !!estado && ECF_ESTADOS_CON_PROBLEMA.includes(estado);
 }
 
+/**
+ * ¿Es un problema que alguien tiene que resolver? Un comprobante con problemas
+ * cuya venta se anuló ya no: annul_sale anula un rechazado sin nota de crédito y
+ * deja el documento como estaba, y no queda nada que corregir. El aviso, el
+ * filtro de Movimientos y el detalle comparten este criterio.
+ */
+export function cuentaComoProblemaEcf(estado: EcfEstado | null | undefined, ventaAnulada: boolean): boolean {
+  return ecfConProblema(estado) && !ventaAnulada;
+}
+
+type VentaEmbebida = { cancelled_at?: string | null };
+
+/**
+ * Fila de ecf_documentos con su venta embebida: null en una nota de crédito (no
+ * tiene sale_id). El cliente de Supabase tipa un embed sin esquema como lista
+ * aunque sea muchos-a-uno, así que se acepta de las dos formas.
+ */
+export type FilaProblemaEcf = { estado: EcfEstado; sales?: VentaEmbebida | VentaEmbebida[] | null };
+
+/** Cuántas de estas filas son un problema por resolver (ver `cuentaComoProblemaEcf`). */
+export function contarProblemasEcf(filas: FilaProblemaEcf[]): number {
+  return filas.filter((f) => {
+    const venta = Array.isArray(f.sales) ? f.sales[0] : f.sales;
+    return cuentaComoProblemaEcf(f.estado, !!venta?.cancelled_at);
+  }).length;
+}
+
+export type ResultadoEcf = 'listo' | 'en_proceso' | 'con_problemas' | 'desconocido';
+
+/**
+ * Cómo quedó un comprobante después de reintentar, reemitir o reimprimir, para
+ * decirle a quien pulsó el botón lo que de verdad pasó: "se sigue enviando" solo
+ * vale mientras el servidor lo reintenta solo (por_enviar, enviando, recibido);
+ * un rechazado, con error o sin cupo no avanza hasta que alguien lo resuelva.
+ */
+export function resultadoDeEcf(doc?: EcfDocumento | null): ResultadoEcf {
+  if (!doc) return 'desconocido';
+  if (ecfConProblema(doc.estado)) return 'con_problemas';
+  if (doc.qrUrl) return 'listo';
+  return doc.estado === 'por_enviar' || doc.estado === 'enviando' || doc.estado === 'recibido'
+    ? 'en_proceso'
+    : 'desconocido';
+}
+
 /** Se vuelve a enviar tal cual: faltaba un dato que ya se corrigió, o faltaba cupo. */
 export function puedeReintentar(d: EcfDocumento): boolean {
   return d.estado === 'error_datos' || d.estado === 'sin_cupo';

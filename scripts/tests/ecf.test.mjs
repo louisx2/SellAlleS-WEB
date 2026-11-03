@@ -16,6 +16,9 @@ import {
   puedeReemitir,
   ECF_ESTADOS_CON_PROBLEMA,
   ecfConProblema,
+  cuentaComoProblemaEcf,
+  contarProblemasEcf,
+  resultadoDeEcf,
 } from '../../src/lib/ecf.ts';
 
 // Documento mínimo para armar casos.
@@ -174,4 +177,48 @@ test('ECF_ESTADOS_CON_PROBLEMA: los mismos que se pueden reintentar o reemitir',
     const resoluble = puedeReintentar(doc({ estado: e })) || puedeReemitir(doc({ estado: e }));
     assert.equal(ECF_ESTADOS_CON_PROBLEMA.includes(e), resoluble, e);
   }
+});
+
+test('cuentaComoProblemaEcf: un problema de una venta anulada ya no cuenta', () => {
+  for (const e of ESTADOS) {
+    assert.equal(cuentaComoProblemaEcf(e, false), ecfConProblema(e), e);
+    assert.equal(cuentaComoProblemaEcf(e, true), false, e);
+  }
+  assert.equal(cuentaComoProblemaEcf(undefined, false), false);
+});
+
+test('contarProblemasEcf: cuenta los problemas de ventas vigentes y de notas de crédito, no los de ventas anuladas', () => {
+  const filas = [
+    { estado: 'rechazado', sales: { cancelled_at: null } },                       // cuenta
+    { estado: 'error_datos', sales: { cancelled_at: undefined } },                // cuenta
+    { estado: 'sin_cupo', sales: null },                                          // nota de crédito: cuenta
+    { estado: 'sin_cupo' },                                                       // sin venta embebida: cuenta
+    { estado: 'rechazado', sales: { cancelled_at: '2026-11-20T10:00:00Z' } },     // venta anulada: no
+    { estado: 'rechazado', sales: [{ cancelled_at: '2026-11-20T10:00:00Z' }] },   // embed como lista: anulada, no
+    { estado: 'rechazado', sales: [{ cancelled_at: null }] },                     // embed como lista: cuenta
+    { estado: 'aceptado', sales: { cancelled_at: null } },                        // sin problema: no
+    { estado: 'por_enviar', sales: null },                                        // sin problema: no
+  ];
+  assert.equal(contarProblemasEcf(filas), 5);
+  assert.equal(contarProblemasEcf([]), 0);
+});
+
+test('resultadoDeEcf: lo que se le dice a quien reintenta, reemite o reimprime', () => {
+  // Con problemas manda sobre todo: un rechazado no avanza solo, aunque tenga QR.
+  for (const e of ['rechazado', 'error_datos', 'sin_cupo']) {
+    assert.equal(resultadoDeEcf(doc({ estado: e })), 'con_problemas', e);
+    assert.equal(resultadoDeEcf(doc({ estado: e, qrUrl: 'https://dgii.gov.do/qr' })), 'con_problemas', e);
+  }
+  // Con QR y sin problemas, listo.
+  for (const e of ['aceptado', 'aceptado_condicional', 'recibido']) {
+    assert.equal(resultadoDeEcf(doc({ estado: e, qrUrl: 'https://dgii.gov.do/qr' })), 'listo', e);
+  }
+  // Sin QR, 'se sigue enviando' solo mientras el servidor lo reintenta solo.
+  for (const e of ['por_enviar', 'enviando', 'recibido']) {
+    assert.equal(resultadoDeEcf(doc({ estado: e })), 'en_proceso', e);
+  }
+  // No se pudo leer, o aceptado sin QR: no se afirma nada.
+  assert.equal(resultadoDeEcf(undefined), 'desconocido');
+  assert.equal(resultadoDeEcf(null), 'desconocido');
+  assert.equal(resultadoDeEcf(doc({ estado: 'aceptado' })), 'desconocido');
 });

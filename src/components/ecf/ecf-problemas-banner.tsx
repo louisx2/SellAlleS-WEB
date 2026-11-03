@@ -3,8 +3,8 @@
 // Aviso para los administradores de una empresa con e-CF: hay comprobantes que la
 // DGII rechazó o que no salieron (error en los datos, sin cupo) y que el servidor
 // no reintenta solo. Cuenta los documentos vigentes (los que nadie ha reemplazado)
-// en esos estados y lleva a Movimientos ya filtrado. Quien lo monta decide a quién
-// se le muestra; aquí solo se cuenta.
+// en esos estados, sin los de una venta anulada, y lleva a Movimientos ya filtrado.
+// Quien lo monta decide a quién se le muestra; aquí solo se cuenta.
 //
 // Se vuelve a contar al volver a la pestaña, cada pocos minutos y cuando el
 // detalle de una venta avisa que reintentó o reemitió un comprobante.
@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { ECF_ESTADOS_CON_PROBLEMA } from '@/lib/ecf';
+import { contarProblemasEcf, ECF_ESTADOS_CON_PROBLEMA } from '@/lib/ecf';
 import { Button } from '@/components/ui/button';
 
 const EVENTO = 'sellalles:ecf-cambio';
@@ -30,14 +30,17 @@ export function EcfProblemasBanner({ companyId }: { companyId?: string }) {
   const contar = useCallback(async () => {
     if (!companyId) return;
     // La empresa se pide aparte de la RLS: un super admin dentro de una empresa
-    // vería, si no, los documentos de todas.
-    const { count, error } = await supabase
+    // vería, si no, los documentos de todas. Se trae la venta de cada uno (el
+    // embed es un left join: la nota de crédito, sin venta, viene con sales
+    // vacío) para dejar fuera los de ventas anuladas; solo se piden los estados
+    // con problemas, que son pocos.
+    const { data, error } = await supabase
       .from('ecf_documentos')
-      .select('id', { count: 'exact', head: true })
+      .select('id, estado, sales!ecf_documentos_sale_id_fkey(cancelled_at)')
       .eq('company_id', companyId)
       .is('reemplazado_por', null)
       .in('estado', ECF_ESTADOS_CON_PROBLEMA);
-    if (!error) setN(count ?? 0);
+    if (!error) setN(contarProblemasEcf(data ?? []));
   }, [companyId]);
 
   useEffect(() => {

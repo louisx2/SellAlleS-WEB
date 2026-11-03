@@ -32,7 +32,8 @@ import { avisarCambioDeEcf } from '@/components/ecf/ecf-problemas-banner';
 import { supabase } from '@/lib/supabase/client';
 import { rowToEcfDocumento } from '@/lib/supabase/mappers';
 import { emitirEcf } from '@/lib/ecf-client';
-import { ecfConProblema, esEcf, puedeReemitir, puedeReintentar } from '@/lib/ecf';
+import { cuentaComoProblemaEcf, ecfConProblema, esEcf, puedeReemitir, puedeReintentar, resultadoDeEcf } from '@/lib/ecf';
+import type { ResultadoEcf } from '@/lib/ecf';
 import { cn } from '@/lib/utils';
 import type { EcfDocumento, EcfEstado } from '@/lib/types';
 
@@ -52,6 +53,14 @@ const TITULO_ACCION_ECF: Record<AccionEcf, string> = {
   reintentar: 'Reintento enviado',
   reemitir: 'Comprobante reemitido',
   reimprimir: 'Comprobante actualizado',
+};
+
+// Lo que se le dice a quien pulsó la acción, según cómo quedó el comprobante.
+// 'con_problemas' tiene su propio aviso (destructivo) y no pasa por aquí.
+const DESCRIPCION_RESULTADO_ECF: Record<Exclude<ResultadoEcf, 'con_problemas'>, string> = {
+  listo: 'Ya tiene su código QR: puedes imprimirlo.',
+  en_proceso: 'Aún no tiene código QR. Se sigue enviando a la DGII; vuelve a revisar en unos minutos.',
+  desconocido: 'Revisa el estado del comprobante en esta pantalla.',
 };
 
 export default function SaleReceiptClient() {
@@ -252,20 +261,32 @@ export default function SaleReceiptClient() {
       } else if (accion === 'reemitir') {
         const { error } = await supabase.rpc('reemitir_ecf', { p_sale_id: sale.id });
         if (error) throw error;
-        // La venta tiene ahora otro e-NCF: se recarga para que el recibo lo muestre.
+        // La venta tiene ahora otro e-NCF: se suelta el documento anterior (el
+        // rechazado) para no verlo junto al número nuevo, y se recarga para que
+        // el recibo lo muestre.
+        setEcfFresco(undefined);
         await reload();
       }
       // null = no respondió a tiempo; el servidor sigue y lo reintenta solo.
       await emitirEcf({ saleId: sale.id });
       const nuevo = await cargarEcf();
-      setEcfFresco(nuevo);
+      if (nuevo) setEcfFresco(nuevo);
       avisarCambioDeEcf();
-      toast({
-        title: TITULO_ACCION_ECF[accion],
-        description: nuevo?.qrUrl
-          ? 'Ya tiene su código QR: puedes imprimirlo.'
-          : 'Aún no tiene código QR. Se sigue enviando a la DGII; vuelve a revisar en unos minutos.',
-      });
+      // Lo que se dice depende de cómo quedó, no de que la acción haya corrido:
+      // un comprobante que vuelve a fallar no se "sigue enviando", nadie lo reintenta solo.
+      const resultado = resultadoDeEcf(nuevo);
+      if (resultado === 'con_problemas') {
+        toast({
+          title: 'Comprobante con problemas',
+          description: 'Sigue con problemas: revisa el estado y los mensajes de la DGII.',
+          variant: 'destructive',
+        });
+      } else {
+        toast({
+          title: TITULO_ACCION_ECF[accion],
+          description: DESCRIPCION_RESULTADO_ECF[resultado],
+        });
+      }
     } catch (error: any) {
       toast({
         title: `No se pudo ${accion}`,
@@ -284,7 +305,11 @@ export default function SaleReceiptClient() {
   const verReintentar = puedeAdministrarEcf && !!ecf && puedeReintentar(ecf);
   // Una venta anulada ya no se reemite: la base lo rechaza.
   const verReemitir = puedeAdministrarEcf && !!ecf && puedeReemitir(ecf) && !sale.cancelledAt;
-  const verReimprimir = !!ecf && !ecf.qrUrl;
+  // Reimprimir trae el QR de lo que el servidor sigue enviando. Un rechazado, con
+  // error o sin cupo no avanza hasta que se reintente o se reemita, así que ahí no sirve.
+  const verReimprimir = !!ecf && !ecf.qrUrl && !ecfConProblema(ecf.estado);
+  // Una venta anulada con el comprobante rechazado ya no tiene nada que resolver.
+  const ecfPorResolver = !!ecf && cuentaComoProblemaEcf(ecf.estado, !!sale.cancelledAt);
 
   return (
     <div className="max-w-md mx-auto print:mx-0 print:max-w-full">
@@ -305,14 +330,14 @@ export default function SaleReceiptClient() {
         <div
           className={cn(
             'mb-4 rounded-md border p-3 text-sm print:hidden',
-            ecfConProblema(ecf.estado) && 'border-destructive/50 bg-destructive/5',
+            ecfPorResolver && 'border-destructive/50 bg-destructive/5',
           )}
         >
           <div className="flex items-center justify-between gap-2">
             <p className="font-semibold">Estado en la DGII</p>
             <EcfEstadoBadge estado={ecf.estado} />
           </div>
-          {PISTA_ECF[ecf.estado] && (
+          {ecfPorResolver && PISTA_ECF[ecf.estado] && (
             <p className="mt-2 text-xs text-muted-foreground">{PISTA_ECF[ecf.estado]}</p>
           )}
           {ecf.mensajesDgii.length > 0 && (
