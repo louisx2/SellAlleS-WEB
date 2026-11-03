@@ -145,13 +145,22 @@ export function armarEcf(d: DatosEcf): ResultadoArmado {
     if (!valido) return falla(`La línea "${l.nombre}" tiene una cantidad o un precio inválido.`);
   }
 
-  // Renglones y sumas brutas (los precios tal cual se cobran).
+  // Sumas brutas SIN redondear por línea (los precios tal cual se cobran), en
+  // el mismo orden que el carrito (cart-provider.tsx), para que los totales
+  // salgan igual que los que guardó la venta. Con cantidades decimales,
+  // redondear cada renglón y sumar daba centavos de más o de menos.
+  let brutoTotal = 0;
   let brutoGravado = 0;
   let brutoExento = 0;
   const items = d.lineas.map((l, i) => {
-    const monto = round2(l.cantidad * l.precio);
-    if (l.itbis) brutoGravado += monto;
-    else brutoExento += monto;
+    const bruto = l.precio * l.cantidad;
+    brutoTotal += bruto;
+    if (l.itbis) brutoGravado += bruto;
+    else brutoExento += bruto;
+    // Cada renglón sí va redondeado a 2 decimales (MontoItem). Por eso la suma
+    // de los MontoItem puede diferir unos centavos de Totales; la DGII lo
+    // tolera, pero se confirma en TesteCF.
+    const monto = round2(bruto);
     return {
       NumeroLinea: i + 1,
       IndicadorFacturacion: l.itbis ? 1 : 4,
@@ -163,21 +172,22 @@ export function armarEcf(d: DatosEcf): ResultadoArmado {
       MontoItem: monto,
     };
   });
-  brutoGravado = round2(brutoGravado);
-  brutoExento = round2(brutoExento);
 
   const hayGravado = d.lineas.some((l) => l.itbis);
   const hayExento = d.lineas.some((l) => !l.itbis);
 
   // Misma regla que el carrito (cart-provider.tsx): el ITBIS se calcula sobre
-  // el total gravado, no línea por línea.
+  // el total gravado sin redondear, no línea por línea; el subtotal y el total
+  // se derivan igual que allá y solo entonces se redondean para el JSON.
   const itbis = d.itbisIncluido
     ? round2((brutoGravado * ITBIS_TASA) / (1 + ITBIS_TASA))
     : round2(brutoGravado * ITBIS_TASA);
-  const baseGravada = d.itbisIncluido ? round2(brutoGravado - itbis) : brutoGravado;
-  const montoTotal = round2(baseGravada + itbis + brutoExento);
+  const baseGravada = round2(d.itbisIncluido ? brutoGravado - itbis : brutoGravado);
+  const montoExento = round2(brutoExento);
+  const montoTotal = round2(d.itbisIncluido ? brutoTotal : brutoTotal + itbis);
 
-  // Cuadre en centavos (restar decimales deja ruido: 168.01 - 168 > 0.01).
+  // Cuadre en centavos (restar decimales deja ruido: 168.01 - 168 > 0.01). Lo
+  // guardado también se lleva a centavos: la venta puede traer fracciones.
   const cuadra = (armado: number, guardado: number) => Math.abs(aCentavos(armado) - aCentavos(guardado)) <= 1;
   if (!cuadra(montoTotal, d.totalGuardado)) {
     return falla(`El total del e-CF (${montoTotal}) no cuadra con el total guardado (${d.totalGuardado}).`);
@@ -193,7 +203,7 @@ export function armarEcf(d: DatosEcf): ResultadoArmado {
     totales.MontoGravadoTotal = baseGravada;
     totales.MontoGravadoI1 = baseGravada;
   }
-  if (hayExento) totales.MontoExento = brutoExento;
+  if (hayExento) totales.MontoExento = montoExento;
   if (hayGravado) {
     totales.ITBIS1 = Math.round(ITBIS_TASA * 100);
     totales.TotalITBIS = itbis;

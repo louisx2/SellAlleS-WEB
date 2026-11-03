@@ -146,6 +146,85 @@ test('El ITBIS se calcula sobre el total gravado, no línea por línea', () => {
   assert.equal(ecf.Encabezado.Totales.MontoTotal, 1.06);
 });
 
+// Réplica de las fórmulas de cart-provider.tsx (sumas sin redondear por línea):
+// lo que el carrito guarda en sales.total y sales.itbis_amount.
+const redondear = (n) => Math.round(n * 100) / 100;
+const totalesDelCarrito = (lineas, incluido) => {
+  const bruto = lineas.reduce((acc, l) => acc + l.precio * l.cantidad, 0);
+  const gravada = lineas.reduce((acc, l) => (l.itbis ? acc + l.precio * l.cantidad : acc), 0);
+  const itbis = incluido
+    ? redondear((gravada * ITBIS_TASA) / (1 + ITBIS_TASA))
+    : redondear(gravada * ITBIS_TASA);
+  return { total: incluido ? bruto : bruto + itbis, itbis };
+};
+
+// Tres líneas con cantidades de 3 decimales; sumar los renglones ya redondeados
+// da 749.93 y el carrito guarda 749.9094099999999.
+const lineasDecimales = [
+  gravado('Tubo', 1.337, 42.48),
+  gravado('Cable', 2.054, 117.89),
+  gravado('Cuerda', 2.831, 118.89),
+];
+
+test('Cantidades decimales, ITBIS aparte: los totales son los que guarda el carrito', () => {
+  const { total, itbis } = totalesDelCarrito(lineasDecimales, false);
+  assert.equal(total, 749.9094099999999);
+  const ecf = armar({ lineas: lineasDecimales, totalGuardado: total, itbisGuardado: itbis });
+  const t = ecf.Encabezado.Totales;
+  assert.equal(t.MontoTotal, 749.91);
+  assert.equal(t.TotalITBIS, itbis);
+  assert.equal(t.TotalITBIS, 114.39);
+  assert.equal(t.TotalITBIS1, 114.39);
+  assert.equal(t.MontoGravadoTotal, 635.52);
+  // Cada renglón va redondeado; su suma (635.53) puede diferir de Totales.
+  assert.deepEqual(ecf.DetallesItems.Item.map((i) => i.MontoItem), [56.8, 242.15, 336.58]);
+});
+
+test('Cantidades decimales, ITBIS incluido: los totales son los que guarda el carrito', () => {
+  const { total, itbis } = totalesDelCarrito(lineasDecimales, true);
+  const ecf = armar({
+    itbisIncluido: true,
+    lineas: lineasDecimales,
+    totalGuardado: total,
+    itbisGuardado: itbis,
+  });
+  const t = ecf.Encabezado.Totales;
+  assert.equal(t.MontoTotal, 635.52);
+  assert.equal(t.TotalITBIS, 96.94);
+  assert.equal(t.MontoGravadoTotal, 538.58);
+});
+
+test('Cantidades decimales: lo guardado ya redondeado a centavos también cuadra', () => {
+  const ecf = armar({ lineas: lineasDecimales, totalGuardado: 749.91, itbisGuardado: 114.39 });
+  assert.equal(ecf.Encabezado.Totales.MontoTotal, 749.91);
+});
+
+test('Carritos con cantidades de 3 decimales siempre cuadran con lo que guarda el carrito', () => {
+  // Generador determinista (LCG) para que la prueba no sea intermitente.
+  let semilla = 20261102;
+  const azar = () => {
+    semilla = (semilla * 1664525 + 1013904223) % 4294967296;
+    return semilla / 4294967296;
+  };
+  let armados = 0;
+  for (let n = 0; n < 3000; n++) {
+    const cuantas = 1 + Math.floor(azar() * 10);
+    const lineas = [];
+    for (let i = 0; i < cuantas; i++) {
+      const cantidad = Math.round((0.1 + azar() * 9.9) * 1000) / 1000;
+      const precio = Math.round((1 + azar() * 499) * 100) / 100;
+      lineas.push({ nombre: `P${i}`, cantidad, precio, itbis: azar() < 0.7, servicio: false });
+    }
+    for (const incluido of [false, true]) {
+      const { total, itbis } = totalesDelCarrito(lineas, incluido);
+      const r = armarEcf(datos({ itbisIncluido: incluido, lineas, totalGuardado: total, itbisGuardado: itbis }));
+      assert.equal(r.ok, true, r.ok ? '' : `${r.error} ${JSON.stringify({ lineas, incluido })}`);
+      armados++;
+    }
+  }
+  assert.equal(armados, 6000);
+});
+
 test('Solo exentas: no lleva claves de monto gravado ni de ITBIS', () => {
   const ecf = armar({
     itbisIncluido: true,
