@@ -1706,9 +1706,14 @@ end $t$;
 -- Estado explícito de la sección: super admin; la demo formalizada, sin
 -- ncf_enabled, con el módulo `ecf` y su ecf_config en preparación (así las
 -- ventas de prueba no reciben e-NCF; se activa después de crearlas); sin
--- documentos, credenciales ni uso (tampoco la otra empresa, b463…, que queda con
--- su ecf_config en preparación para ver que las funciones solo trabajan con
--- empresas activas).
+-- documentos, credenciales ni uso. La otra empresa (b463…) con su ecf_config en
+-- preparación, para ver que las funciones solo trabajan con empresas activas.
+--
+-- Esta sección nunca borra ni cambia lo que ya exista en Vault (ni la
+-- service_role_key ni secretos de e-CF): solo agrega secretos nuevos de la demo
+-- (que el rollback quita) y, si ya hubiera de la demo, se detiene antes. Tampoco
+-- toca los documentos de empresas distintas a la demo y a la otra: las listas
+-- que se comprueban se limitan a los documentos de la prueba.
 select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
 update companies set is_formalized = true, ncf_enabled = false where id = '00000000-0000-0000-0000-0000000000aa';
 delete from company_modules where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
@@ -1719,17 +1724,16 @@ insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, 
 values ('00000000-0000-0000-0000-0000000000aa', 'preparacion', 'TesteCF', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
 insert into ecf_config (company_id, estado, rnc_emisor, razon_social, direccion)
 values ('b463d8b5-b589-4194-b0c3-2a912b58b7c9', 'preparacion', '202020202', 'Otra SRL', 'Calle 2')
-on conflict (company_id) do update set estado = 'preparacion';
+on conflict (company_id) do nothing;
 delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
 delete from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa';
-delete from ecf_uso where company_id in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9');
-delete from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/%';
--- Los pendientes de cualquier otra empresa (cuando las haya) se apartan, para
--- que las listas de abajo (qué se envía, qué se consulta, qué se despacha) sean
--- solo las de la prueba. Todo esto se revierte con el rollback.
-update ecf_documentos set estado = 'aceptado'
- where company_id not in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9')
-   and estado in ('por_enviar', 'enviando', 'recibido', 'sin_cupo');
+delete from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  if exists (select 1 from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/%') then
+    raise exception 'Task 4: ya hay secretos de e-CF de la demo en Vault; la prueba no toca secretos existentes y se detiene.';
+  end if;
+end $t$;
 select pg_temp.venta('00000000-0000-0000-0000-00000000eca0', '00000000-0000-0000-0000-0000000000aa',
                      '00000000-0000-0000-0000-0000000000b1');
 select pg_temp.venta('00000000-0000-0000-0000-00000000eca1', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9', null);
@@ -2000,7 +2004,7 @@ end $t$;
 select ecf_sumar_uso('00000000-0000-0000-0000-0000000000aa', 2, 1);
 select ecf_sumar_uso('00000000-0000-0000-0000-0000000000aa', 2, 1);
 do $t$
-declare u ecf_uso;
+declare u ecf_uso; antes int;
 begin
   if (select count(*) from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa') <> 1 then
     raise exception 'uso: dos sumas en el mismo mes debían dejar una sola fila';
@@ -2013,10 +2017,13 @@ begin
     raise exception 'uso: el periodo debía ser el día 1 del mes en UTC (%), quedó %',
       date_trunc('month', now() at time zone 'utc')::date, u.periodo;
   end if;
-  -- Otra empresa lleva su propia cuenta.
+  -- Otra empresa lleva su propia cuenta (se suma sobre lo que ya tuviera).
+  select coalesce(sum(requests), 0) into antes from ecf_uso
+   where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+     and periodo = date_trunc('month', now() at time zone 'utc')::date;
   perform ecf_sumar_uso('b463d8b5-b589-4194-b0c3-2a912b58b7c9', 7, 0);
   if (select requests from ecf_uso where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
-        and periodo = date_trunc('month', now() at time zone 'utc')::date) is distinct from 7
+        and periodo = date_trunc('month', now() at time zone 'utc')::date) is distinct from antes + 7
      or (select requests from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa') <> 4 then
     raise exception 'uso: cada empresa debía llevar su propia cuenta';
   end if;
@@ -2144,7 +2151,9 @@ begin
   select array_agg(u order by u) into esperado from unnest(array[
     '00000000-0000-0000-0000-00000000ecb1', '00000000-0000-0000-0000-00000000ecb4',
     '00000000-0000-0000-0000-00000000ecb6', '00000000-0000-0000-0000-00000000ecb8']::uuid[]) u;
-  select coalesce(array_agg(x order by x), '{}') into v from ecf_documentos_por_enviar() x;
+  select coalesce(array_agg(x order by x), '{}') into v from ecf_documentos_por_enviar() x
+   where x in (select id from ecf_documentos
+                where company_id in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'));
   if v is distinct from esperado then
     raise exception 'por enviar: debían salir b1, b4, b6 y b8, salieron %',
       (select array_agg(right(u::text, 4) order by u) from unnest(v) u);
@@ -2170,7 +2179,9 @@ begin
   end if;
 
   -- Llamarla otra vez da lo mismo (ya no hay nada que mover), y respeta el límite.
-  select coalesce(array_agg(x order by x), '{}') into v from ecf_documentos_por_enviar() x;
+  select coalesce(array_agg(x order by x), '{}') into v from ecf_documentos_por_enviar() x
+   where x in (select id from ecf_documentos
+                where company_id in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'));
   if v is distinct from esperado then
     raise exception 'por enviar: la segunda llamada debía dar los mismos cuatro';
   end if;
@@ -2178,30 +2189,33 @@ begin
     raise exception 'por enviar: con límite 2 debían salir 2';
   end if;
 end $t$;
-delete from ecf_documentos
- where company_id in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9')
-   and encf like 'E3200000091%';
+delete from ecf_documentos where id in (
+  '00000000-0000-0000-0000-00000000ecb1', '00000000-0000-0000-0000-00000000ecb2', '00000000-0000-0000-0000-00000000ecb3',
+  '00000000-0000-0000-0000-00000000ecb4', '00000000-0000-0000-0000-00000000ecb5', '00000000-0000-0000-0000-00000000ecb6',
+  '00000000-0000-0000-0000-00000000ecb7', '00000000-0000-0000-0000-00000000ecb8', '00000000-0000-0000-0000-00000000ecb9',
+  '00000000-0000-0000-0000-00000000ecba');
 
 -- Despacho a las Edge Functions (lo que hace el cron). En la transacción de la
--- prueba el pedido queda en la cola de pg_net y se va con el rollback. La llave
--- real de Vault se quita dentro de la transacción (también se revierte) para no
--- depender de ella: primero sin llave, luego con una de prueba.
+-- prueba el pedido queda en la cola de pg_net y se va con el rollback. Usa la
+-- service_role_key que ya está en Vault y nunca la borra ni la cambia (la
+-- llave no se compara a la vista: solo dentro de la sentencia). Si el proyecto
+-- no tuviera ninguna, agrega una de prueba (el rollback la quita). La rama de
+-- "falta la llave" (un `raise warning` y `return`, sin encolar nada) no se
+-- ejercita aquí porque exigiría quitar la llave real: se verifica leyendo
+-- ecf_disparar_envios y ecf_disparar_consultas.
 select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecc0', 9301, 'por_enviar');
 select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecc1', 9302, 'recibido');
-delete from vault.secrets where name = 'service_role_key';
 do $t$
-declare antes bigint := pg_temp.en_cola();
 begin
-  -- Sin la llave: avisa y no manda nada.
-  perform ecf_disparar_envios();
-  perform ecf_disparar_consultas();
-  if pg_temp.en_cola() <> antes then
-    raise exception 'despacho: sin service_role_key en Vault no debía encolar nada';
+  if not exists (select 1 from vault.decrypted_secrets where name = 'service_role_key') then
+    perform vault.create_secret('llave-de-prueba', 'service_role_key', 'solo para la prueba de ecf.sql');
   end if;
 end $t$;
-select vault.create_secret('llave-de-prueba', 'service_role_key', 'solo para la prueba de ecf.sql');
 do $t$
-declare antes bigint := pg_temp.en_cola(); q record;
+declare
+  antes bigint := pg_temp.en_cola();
+  q     record;
+  v_key text := (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key' limit 1);
 begin
   perform ecf_disparar_envios();
   if pg_temp.en_cola() <> antes + 1 then
@@ -2211,12 +2225,13 @@ begin
   if q.url is distinct from 'https://qwpjclqinruhtxgkrxwr.supabase.co/functions/v1/ecf-emitir' then
     raise exception 'despacho: la función de envíos debía llamar a ecf-emitir, llamó a %', q.url;
   end if;
-  if q.headers->>'Authorization' is distinct from 'Bearer llave-de-prueba'
+  if q.headers->>'Authorization' is distinct from 'Bearer ' || v_key
      or q.headers->>'Content-Type' is distinct from 'application/json' then
     raise exception 'despacho: debía mandar Authorization con la llave de Vault y Content-Type json';
   end if;
-  if q.body is distinct from '{"documentoIds": ["00000000-0000-0000-0000-00000000ecc0"]}'::jsonb then
-    raise exception 'despacho: el cuerpo debía traer solo el documento por enviar, trae %', q.body;
+  if jsonb_typeof(q.body->'documentoIds') is distinct from 'array'
+     or not (q.body->'documentoIds') @> '["00000000-0000-0000-0000-00000000ecc0"]'::jsonb then
+    raise exception 'despacho: el cuerpo debía traer el documento por enviar en documentoIds, trae %', q.body;
   end if;
 
   perform ecf_disparar_consultas();
@@ -2226,17 +2241,21 @@ begin
   select url, headers, convert_from(body, 'utf8')::jsonb as body into q from net.http_request_queue order by id desc limit 1;
   if q.url is distinct from 'https://qwpjclqinruhtxgkrxwr.supabase.co/functions/v1/ecf-estado'
      or q.body is distinct from '{}'::jsonb
-     or q.headers->>'Authorization' is distinct from 'Bearer llave-de-prueba' then
+     or q.headers->>'Authorization' is distinct from 'Bearer ' || v_key then
     raise exception 'despacho: la función de consultas debía llamar a ecf-estado con cuerpo {} y la llave, mandó % %', q.url, q.body;
   end if;
 
-  -- Sin nada pendiente no manda nada.
+  -- Sin nada pendiente no manda nada (solo se comprueba si en todo el sistema
+  -- no queda trabajo de otras empresas).
   update ecf_documentos set estado = 'aceptado' where id in
     ('00000000-0000-0000-0000-00000000ecc0', '00000000-0000-0000-0000-00000000ecc1');
-  perform ecf_disparar_envios();
-  perform ecf_disparar_consultas();
-  if pg_temp.en_cola() <> antes + 2 then
-    raise exception 'despacho: sin documentos pendientes no debía encolar nada';
+  if not exists (select 1 from ecf_documentos_por_enviar())
+     and not exists (select 1 from ecf_consultas_pendientes()) then
+    perform ecf_disparar_envios();
+    perform ecf_disparar_consultas();
+    if pg_temp.en_cola() <> antes + 2 then
+      raise exception 'despacho: sin documentos pendientes no debía encolar nada';
+    end if;
   end if;
 end $t$;
 
