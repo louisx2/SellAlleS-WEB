@@ -7,6 +7,7 @@
 --          <supabase/migrations/20261030140000_ecf_anulacion_reemision.sql>
 --          <supabase/migrations/20261030150000_ecf_servidor.sql>
 --          <supabase/migrations/20261030160000_ecf_avisos.sql>
+--          <supabase/migrations/20261030170000_ecf_admin.sql>
 --          <este archivo> rollback;
 --
 -- Pasa si el último resultado es `ok`; si una aserción falla, la llamada
@@ -2795,6 +2796,488 @@ begin
   perform ecf_avisos_diarios();
   if jsonb_typeof(_ecf_avisos_lineas()) is distinct from 'array' then
     raise exception 'service_role debía poder pedir las líneas del resumen';
+  end if;
+end $t$;
+reset role;
+
+-- == Task 9: administración (credenciales, estado y resumen) ==
+-- Estado explícito de la sección: super admin; la demo formalizada, con
+-- is_demo = true, sin ncf_enabled, con el módulo `ecf` encendido y su ecf_config
+-- completa en preparación (TesteCF, sin conexión probada ni activada); sin
+-- documentos, credenciales, secuencias ni uso; y una venta (…ece0) que respalda
+-- los documentos de la prueba. Los UUID de la sección: ece0 (venta), ece1–ece5
+-- (secuencias), ecf1–ecf9 (documentos).
+--
+-- Nunca cambia ni borra lo que ya haya en Vault: solo agrega los secretos de la
+-- demo para eCF (que el rollback quita) y, si ya hubiera, se detiene antes. Las
+-- credenciales de CerteCF se escriben directo en la tabla, sin Vault.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+update companies set is_formalized = true, ncf_enabled = false, is_demo = true
+ where id = '00000000-0000-0000-0000-0000000000aa';
+delete from company_modules where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'ecf', true);
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ncf_sequences where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa';
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
+values ('00000000-0000-0000-0000-0000000000aa', 'preparacion', 'TesteCF', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
+select pg_temp.venta('00000000-0000-0000-0000-00000000ece0', '00000000-0000-0000-0000-0000000000aa',
+                     '00000000-0000-0000-0000-0000000000b1');
+do $t$
+begin
+  if exists (select 1 from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/eCF/%') then
+    raise exception 'Task 9: ya hay secretos de e-CF de la demo para eCF en Vault; la prueba no toca secretos existentes y se detiene.';
+  end if;
+  if not (select is_demo from companies where id = '00000000-0000-0000-0000-0000000000aa') then
+    raise exception 'Task 9: el estado de partida debía tener la demo con is_demo = true';
+  end if;
+end $t$;
+
+-- Secuencia de la demo.
+create function pg_temp.seq_t9(p_id uuid, p_tipo text, p_prefix text, p_electronica boolean,
+                               p_activa boolean default true, p_actual bigint default 1,
+                               p_hasta bigint default 100, p_vence date default null) returns void
+language sql as $$
+  insert into ncf_sequences (id, company_id, tipo, prefix, range_from, range_to, current_val,
+                             electronica, active, expires_at)
+  values (p_id, '00000000-0000-0000-0000-0000000000aa', p_tipo, p_prefix, 1, p_hasta, p_actual,
+          p_electronica, p_activa, p_vence);
+$$;
+
+-- Documento de la demo (venta ece0): e-NCF E32 + 10 dígitos.
+create function pg_temp.doc_t9(p_id uuid, p_n int, p_estado text, p_reemplazado uuid default null) returns void
+language sql as $$
+  insert into ecf_documentos (id, company_id, sale_id, tipo_ecf, encf, ambiente, estado, reemplazado_por)
+  values (p_id, '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000ece0', 32,
+          'E32' || lpad(p_n::text, 10, '0'), 'TesteCF', p_estado, p_reemplazado);
+$$;
+
+create function pg_temp.cfg_t9() returns ecf_config language sql as $$
+  select * from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa'
+$$;
+
+-- Permisos: las tres del panel las ejecuta authenticated (no anon ni PUBLIC);
+-- los disparadores no los ejecuta nadie más que la base.
+do $t$
+declare f text;
+begin
+  foreach f in array array[
+    'public.ecf_cambiar_estado(uuid,text)',
+    'public.ecf_credenciales_guardadas(uuid)',
+    'public.ecf_resumen_plataforma()'] loop
+    if has_function_privilege('anon', f, 'execute') then
+      raise exception 'Task 9: % no debía ser ejecutable por anon', f;
+    end if;
+    if not has_function_privilege('authenticated', f, 'execute') then
+      raise exception 'Task 9: % debía ser ejecutable por authenticated (el panel la llama)', f;
+    end if;
+    if (select proacl is null from pg_proc where oid = f::regprocedure)
+       or exists (select 1 from pg_proc p cross join lateral aclexplode(p.proacl) a
+                   where p.oid = f::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+      raise exception 'Task 9: % no debía ser ejecutable por PUBLIC', f;
+    end if;
+    if not coalesce((select prosecdef and proconfig @> array['search_path=public']
+                       from pg_proc where oid = f::regprocedure), false) then
+      raise exception 'Task 9: % debía ser security definer con search_path = public', f;
+    end if;
+  end loop;
+
+  foreach f in array array[
+    'public.ecf_config_ambiente_cambia()',
+    'public.ecf_credenciales_cambian()'] loop
+    if has_function_privilege('anon', f, 'execute') or has_function_privilege('authenticated', f, 'execute') then
+      raise exception 'Task 9: % no debía ser ejecutable por anon ni authenticated', f;
+    end if;
+    if (select proacl is null from pg_proc where oid = f::regprocedure)
+       or exists (select 1 from pg_proc p cross join lateral aclexplode(p.proacl) a
+                   where p.oid = f::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+      raise exception 'Task 9: % no debía ser ejecutable por PUBLIC', f;
+    end if;
+  end loop;
+end $t$;
+
+-- ecf_cambiar_estado: cada requisito para pasar a activa, en el orden en que se
+-- piden. Cada intento que falla deja la empresa en preparación.
+-- 1. Formalizada.
+update companies set is_formalized = false where id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'La empresa no está formalizada.');
+end $t$;
+update companies set is_formalized = true where id = '00000000-0000-0000-0000-0000000000aa';
+
+-- 2. Módulo encendido: ni apagado ni ausente.
+update company_modules set enabled = false
+ where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'El módulo de facturación electrónica está apagado.');
+end $t$;
+delete from company_modules
+ where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'El módulo de facturación electrónica está apagado.');
+end $t$;
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'ecf', true);
+
+-- 3. Datos del emisor: RNC, razón social y dirección, y que exista la configuración.
+update ecf_config set rnc_emisor = null where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'Faltan datos del emisor (RNC, razón social o dirección).');
+end $t$;
+update ecf_config set rnc_emisor = '101010101', razon_social = '   '
+ where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'Faltan datos del emisor (RNC, razón social o dirección).');
+end $t$;
+update ecf_config set razon_social = 'Demo SRL', direccion = ''
+ where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'Faltan datos del emisor (RNC, razón social o dirección).');
+end $t$;
+update ecf_config set direccion = 'Calle 1, Santo Domingo' where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'Faltan datos del emisor (RNC, razón social o dirección).');
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'suspendida')$q$,
+    'La empresa no tiene configuración de e-CF.');
+end $t$;
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
+values ('00000000-0000-0000-0000-0000000000aa', 'preparacion', 'TesteCF', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
+
+-- 4. Conexión probada.
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'La conexión con el proveedor no se ha probado.');
+end $t$;
+update ecf_config set conexion_probada_at = now() where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+-- 5. Una secuencia E32 vigente. Ninguna de estas lo es: la serie B, una E32
+-- inactiva, una agotada, una vencida ayer y una E31.
+select pg_temp.seq_t9('00000000-0000-0000-0000-00000000ece1', 'consumer', 'B02', false);
+select pg_temp.seq_t9('00000000-0000-0000-0000-00000000ece2', 'consumer', 'E32', true, false);
+select pg_temp.seq_t9('00000000-0000-0000-0000-00000000ece3', 'consumer', 'E32', true, true, 101, 100);
+select pg_temp.seq_t9('00000000-0000-0000-0000-00000000ece4', 'consumer', 'E32', true, true, 1, 100,
+                      company_today('00000000-0000-0000-0000-0000000000aa') - 1);
+select pg_temp.seq_t9('00000000-0000-0000-0000-00000000ece5', 'fiscal', 'E31', true);
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'No hay una secuencia E32 vigente.');
+end $t$;
+-- Vence hoy: todavía vale (igual que en assign_ncf).
+update ncf_sequences set expires_at = company_today('00000000-0000-0000-0000-0000000000aa')
+ where id = '00000000-0000-0000-0000-00000000ece4';
+
+-- 6. Ambiente de pruebas: solo la demo. Cambiar el ambiente borra la prueba de
+-- conexión, así que se vuelve a marcar.
+update companies set is_demo = false where id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  if (select is_demo from companies where id = '00000000-0000-0000-0000-0000000000aa') then
+    raise exception 'Task 9: no se pudo poner is_demo = false en la demo para la prueba';
+  end if;
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'Solo la empresa demo puede activarse en un ambiente de pruebas.');
+end $t$;
+update ecf_config set ambiente = 'CerteCF' where company_id = '00000000-0000-0000-0000-0000000000aa';
+update ecf_config set conexion_probada_at = now() where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'Solo la empresa demo puede activarse en un ambiente de pruebas.');
+  if (pg_temp.cfg_t9()).estado is distinct from 'preparacion' then
+    raise exception 'Task 9: los intentos que fallan no debían cambiar el estado, quedó en %', (pg_temp.cfg_t9()).estado;
+  end if;
+end $t$;
+
+-- Una empresa real en producción sí puede activarse: todo listo y ambiente eCF.
+update ecf_config set ambiente = 'eCF' where company_id = '00000000-0000-0000-0000-0000000000aa';
+update ecf_config set conexion_probada_at = now() where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+declare c ecf_config;
+begin
+  perform ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa');
+  c := pg_temp.cfg_t9();
+  if c.estado is distinct from 'activa' or c.activada_at is null
+     or ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'Task 9: una empresa no demo en eCF con todo listo debía quedar activa con activada_at, quedó (%, %)',
+      c.estado, c.activada_at;
+  end if;
+  perform ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'preparacion');
+  if (pg_temp.cfg_t9()).estado is distinct from 'preparacion' then
+    raise exception 'Task 9: volver a preparación debía funcionar sin pedir nada';
+  end if;
+end $t$;
+
+-- La demo, de nuevo con is_demo y en TesteCF, lista para activar.
+update companies set is_demo = true where id = '00000000-0000-0000-0000-0000000000aa';
+update ecf_config set ambiente = 'TesteCF', activada_at = null where company_id = '00000000-0000-0000-0000-0000000000aa';
+update ecf_config set conexion_probada_at = now() where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+-- Quién puede: un admin normal de otra empresa no, aunque todo esté listo; anon
+-- tampoco. Nada cambia.
+select pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
+set local role authenticated;
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'Solo el administrador de la plataforma puede cambiar el estado de la facturación electrónica.');
+  perform pg_temp.debe_fallar($q$select ecf_credenciales_guardadas('00000000-0000-0000-0000-0000000000aa')$q$,
+    'Solo el administrador de la plataforma puede ver las credenciales de e-CF guardadas.');
+  perform pg_temp.debe_fallar($q$select * from ecf_resumen_plataforma()$q$,
+    'Solo el administrador de la plataforma puede ver el resumen de e-CF.');
+end $t$;
+reset role;
+set local role anon;
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$, '%permission denied%');
+  perform pg_temp.debe_fallar($q$select ecf_credenciales_guardadas('00000000-0000-0000-0000-0000000000aa')$q$, '%permission denied%');
+  perform pg_temp.debe_fallar($q$select * from ecf_resumen_plataforma()$q$, '%permission denied%');
+end $t$;
+reset role;
+do $t$
+begin
+  if (pg_temp.cfg_t9()).estado is distinct from 'preparacion' or (pg_temp.cfg_t9()).activada_at is not null then
+    raise exception 'Task 9: quien no es super admin no podía cambiar el estado';
+  end if;
+end $t$;
+
+-- El super admin, con la sesión real (authenticated), activa la demo en TesteCF.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa');
+reset role;
+do $t$
+declare c ecf_config;
+begin
+  c := pg_temp.cfg_t9();
+  if c.estado is distinct from 'activa' or c.activada_at is null or c.ambiente is distinct from 'TesteCF'
+     or ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from true then
+    raise exception 'Task 9: la demo en TesteCF con todo listo debía quedar activa con activada_at, quedó (%, %, %)',
+      c.estado, c.ambiente, c.activada_at;
+  end if;
+end $t$;
+
+-- Estado ya activa: pedirlo otra vez no cambia nada (ni activada_at).
+update ecf_config set activada_at = now() - interval '1 day' where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+declare antes timestamptz := (pg_temp.cfg_t9()).activada_at;
+begin
+  perform ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa');
+  if (pg_temp.cfg_t9()).activada_at is distinct from antes then
+    raise exception 'Task 9: pedir activa estando activa no debía mover activada_at';
+  end if;
+
+  -- Suspender: sin pedir nada y conservando activada_at.
+  perform ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'suspendida');
+  if (pg_temp.cfg_t9()).estado is distinct from 'suspendida' or (pg_temp.cfg_t9()).activada_at is distinct from antes
+     or ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from false then
+    raise exception 'Task 9: suspender debía dejar la empresa suspendida, sin e-CF activo y con su activada_at';
+  end if;
+
+  -- Reactivar vuelve a pedir todo: sin módulo no pasa.
+  update company_modules set enabled = false
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa')$q$,
+    'El módulo de facturación electrónica está apagado.');
+  update company_modules set enabled = true
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+
+  -- Con todo listo reactiva y pone la fecha de la nueva activación.
+  perform ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'activa');
+  if (pg_temp.cfg_t9()).estado is distinct from 'activa' or (pg_temp.cfg_t9()).activada_at <= antes then
+    raise exception 'Task 9: reactivar debía dejarla activa con una activada_at más reciente que la anterior';
+  end if;
+end $t$;
+
+-- Estados y empresas que no existen.
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'pausada')$q$,
+    'El estado de e-CF no es válido: pausada.');
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', null)$q$,
+    'El estado de e-CF no es válido: vacío.');
+  perform pg_temp.debe_fallar($q$select ecf_cambiar_estado(gen_random_uuid(), 'activa')$q$,
+    'La empresa no existe.');
+end $t$;
+
+-- La prueba de conexión vale para lo que se probó: ambiente y credenciales.
+update ecf_config set estado = 'preparacion' where company_id = '00000000-0000-0000-0000-0000000000aa';
+select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF',
+                                'ecf+t9@sellalles.com', 'clave-t9', 'key-t9');
+insert into ecf_credenciales (company_id, ambiente, email)
+values ('00000000-0000-0000-0000-0000000000aa', 'CerteCF', 'ecf+cert@sellalles.com');
+do $t$
+declare c text := '00000000-0000-0000-0000-0000000000aa';
+begin
+  -- La empresa está en TesteCF y esta marca es de TesteCF: guardar credenciales
+  -- de otros ambientes no la toca.
+  update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
+  perform ecf_guardar_credenciales(c::uuid, 'eCF', 'ecf+t9@sellalles.com', 'clave-t9', 'key-t9');
+  update ecf_credenciales set email = 'ecf+cert2@sellalles.com' where company_id = c::uuid and ambiente = 'CerteCF';
+  if (pg_temp.cfg_t9()).conexion_probada_at is null then
+    raise exception 'Task 9: guardar credenciales de otro ambiente no debía borrar la prueba de conexión';
+  end if;
+
+  -- Cambiar el ambiente de la empresa la borra; dejarlo igual, no.
+  update ecf_config set ambiente = 'TesteCF', plan = 'basico' where company_id = c::uuid;
+  if (pg_temp.cfg_t9()).conexion_probada_at is null then
+    raise exception 'Task 9: dejar el mismo ambiente y cambiar otra columna no debía borrar la prueba de conexión';
+  end if;
+  update ecf_config set ambiente = 'eCF' where company_id = c::uuid;
+  if (pg_temp.cfg_t9()).conexion_probada_at is not null then
+    raise exception 'Task 9: cambiar el ambiente de la empresa debía borrar la prueba de conexión';
+  end if;
+
+  -- Con la empresa en eCF: guardar la sesión no borra la marca; guardar otras
+  -- credenciales de eCF sí (también si solo cambia el correo).
+  update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
+  perform ecf_guardar_sesion(c::uuid, 'eCF', 'tok-t9', now() + interval '1 hour', 'ref-t9', 'sub-t9');
+  if (pg_temp.cfg_t9()).conexion_probada_at is null then
+    raise exception 'Task 9: guardar la sesión no debía borrar la prueba de conexión';
+  end if;
+  perform ecf_guardar_credenciales(c::uuid, 'eCF', 'ecf+t9@sellalles.com', 'clave-t9-nueva', 'key-t9');
+  if (pg_temp.cfg_t9()).conexion_probada_at is not null then
+    raise exception 'Task 9: guardar otras credenciales del ambiente en uso debía borrar la prueba de conexión';
+  end if;
+  update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
+  update ecf_credenciales set email = 'ecf+otro@sellalles.com' where company_id = c::uuid and ambiente = 'eCF';
+  if (pg_temp.cfg_t9()).conexion_probada_at is not null then
+    raise exception 'Task 9: cambiar el correo de las credenciales del ambiente en uso debía borrar la prueba de conexión';
+  end if;
+  update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
+  update ecf_credenciales set id_token = 'otro-token' where company_id = c::uuid and ambiente = 'eCF';
+  if (pg_temp.cfg_t9()).conexion_probada_at is null then
+    raise exception 'Task 9: cambiar solo el token de la sesión no debía borrar la prueba de conexión';
+  end if;
+
+  -- De vuelta a TesteCF (la demo se prueba en pruebas), ya con la conexión probada.
+  update ecf_config set ambiente = 'TesteCF' where company_id = c::uuid;
+  update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
+end $t$;
+
+-- ecf_credenciales_guardadas: el super admin, con la sesión real, ve los
+-- ambientes, el correo y la fecha; nunca un secreto.
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+declare
+  c   text := '00000000-0000-0000-0000-0000000000aa';
+  r   jsonb;
+  n   int;
+  llaves text[];
+begin
+  select count(*), jsonb_agg(to_jsonb(g) order by g.ambiente) into n, r from ecf_credenciales_guardadas(c::uuid) g;
+  if n <> 2 or (select array_agg(x ->> 'ambiente' order by x ->> 'ambiente') from jsonb_array_elements(r) x)
+               is distinct from array['CerteCF', 'eCF'] then
+    raise exception 'Task 9: debía listar CerteCF y eCF, listó %', r;
+  end if;
+  if (r -> 0 ->> 'email') is distinct from 'ecf+cert2@sellalles.com'
+     or (r -> 1 ->> 'email') is distinct from 'ecf+otro@sellalles.com'
+     or (r -> 0 ->> 'updated_at') is null or (r -> 1 ->> 'updated_at') is null then
+    raise exception 'Task 9: cada ambiente debía traer su correo y su fecha, trae %', r;
+  end if;
+  select array_agg(k order by k) into llaves from jsonb_object_keys(r -> 0) k;
+  if llaves is distinct from array['ambiente', 'email', 'updated_at'] then
+    raise exception 'Task 9: solo debía devolver ambiente, email y updated_at, devuelve %', llaves;
+  end if;
+  if r::text like '%clave-t9%' or r::text like '%key-t9%' or r::text like '%tok-t9%' or r::text like '%ref-t9%' then
+    raise exception 'Task 9: la lista no podía llevar secretos';
+  end if;
+  if (select count(*) from ecf_credenciales_guardadas(gen_random_uuid())) <> 0 then
+    raise exception 'Task 9: una empresa sin credenciales debía dar una lista vacía';
+  end if;
+end $t$;
+reset role;
+
+-- ecf_resumen_plataforma, con la demo activa en TesteCF y sin uso ni documentos.
+update ecf_config set estado = 'activa', plan = 'gratis', certificado_vence = null
+ where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+declare
+  r record;
+begin
+  if (select count(*) from ecf_resumen_plataforma() x where x.company_id = '00000000-0000-0000-0000-0000000000aa') <> 1 then
+    raise exception 'Task 9: el resumen debía traer una sola fila de la demo';
+  end if;
+  select * into r from ecf_resumen_plataforma() x where x.company_id = '00000000-0000-0000-0000-0000000000aa';
+  if r.empresa is distinct from (select name from companies where id = '00000000-0000-0000-0000-0000000000aa')
+     or (r.estado, r.ambiente, r.plan, r.cupo_comprobantes, r.cupo_requests)
+        is distinct from ('activa', 'TesteCF', 'gratis', 250, 1000)
+     or (r.comprobantes, r.requests, r.pendientes, r.problemas) is distinct from (0, 0, 0, 0)
+     or r.certificado_vence is not null then
+    raise exception 'Task 9: la demo sin uso ni documentos debía salir con ceros y su configuración, sale %', to_jsonb(r);
+  end if;
+end $t$;
+reset role;
+
+-- Documentos de la demo:
+--   ecf1 por_enviar, ecf2 enviando, ecf3 recibido, ecf9 por_enviar (el reemplazo de ecf8)
+--                                                                    -> 4 pendientes
+--   ecf4 aceptado, ecf5 aceptado_condicional                         -> no cuentan
+--   ecf6 rechazado, ecf7 error_datos, ecfa sin_cupo                  -> 3 problemas
+--   ecf8 rechazado, ya reemplazado por ecf9                          -> no es problema
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf9', 910009, 'por_enviar');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf1', 910001, 'por_enviar');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf2', 910002, 'enviando');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf3', 910003, 'recibido');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf4', 910004, 'aceptado');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf5', 910005, 'aceptado_condicional');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf6', 910006, 'rechazado');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf7', 910007, 'error_datos');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecfa', 910010, 'sin_cupo');
+select pg_temp.doc_t9('00000000-0000-0000-0000-00000000ecf8', 910008, 'rechazado',
+                      '00000000-0000-0000-0000-00000000ecf9');
+-- Uso: el mes en curso cuenta; el anterior, no.
+insert into ecf_uso (company_id, periodo, comprobantes, requests)
+values ('00000000-0000-0000-0000-0000000000aa', date_trunc('month', now() at time zone 'utc')::date, 7, 11),
+       ('00000000-0000-0000-0000-0000000000aa', (date_trunc('month', now() at time zone 'utc') - interval '1 month')::date, 99, 98);
+update ecf_config set plan = 'basico', cupo_comprobantes = 1000, cupo_requests = 5000,
+                      certificado_vence = date '2027-05-01'
+ where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+declare
+  r record;
+begin
+  select * into r from ecf_resumen_plataforma() x where x.company_id = '00000000-0000-0000-0000-0000000000aa';
+  if (r.estado, r.ambiente, r.plan, r.cupo_comprobantes, r.cupo_requests)
+        is distinct from ('activa', 'TesteCF', 'basico', 1000, 5000)
+     or r.certificado_vence is distinct from date '2027-05-01' then
+    raise exception 'Task 9: el resumen debía traer el plan, el cupo y el certificado de la demo, trae %', to_jsonb(r);
+  end if;
+  if (r.comprobantes, r.requests) is distinct from (7, 11) then
+    raise exception 'Task 9: el resumen debía traer solo el uso del mes en curso (7 y 11), trae % y %',
+      r.comprobantes, r.requests;
+  end if;
+  if r.pendientes is distinct from 4 then
+    raise exception 'Task 9: debían ser 4 pendientes (por enviar x2, enviando y recibido), son %', r.pendientes;
+  end if;
+  if r.problemas is distinct from 3 then
+    raise exception 'Task 9: debían ser 3 problemas (rechazado, error de datos y sin cupo; el reemitido no cuenta), son %',
+      r.problemas;
   end if;
 end $t$;
 reset role;
