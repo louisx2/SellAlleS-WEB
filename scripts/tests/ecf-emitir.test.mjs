@@ -9,7 +9,10 @@ import assert from 'node:assert/strict';
 
 import {
   emitirDocumento,
+  emitirLote,
   completarDocumento,
+  cortaElLote,
+  credencialesRechazadas,
   ErrorDatosEcf,
 } from '../../supabase/functions/_shared/ecf/emitir.ts';
 import {
@@ -125,8 +128,9 @@ function armar({ intentos = 1, respuestas = [], datos: d = datos(), cred = crede
     guardarSesion: async (empresa, ambiente, sesion) => {
       reg.guardarSesion.push({ empresa, ambiente, sesion });
     },
-    registrar: async (id, cambio) => {
-      reg.registrar.push({ id, cambio });
+    registrar: async (id, cambio, intentosReserva) => {
+      reg.registrar.push({ id, cambio, intentos: intentosReserva });
+      return true;
     },
     sumarUso: async (empresa, requests, comprobantes) => {
       reg.sumarUso.push([empresa, requests, comprobantes]);
@@ -330,6 +334,43 @@ test('si la consulta encuentra un rechazo, lo registra con los mensajes y no ree
   assert.equal(r.error, 'El campo MontoGravadoTotal no cuadra');
 });
 
+test('reintento: si MSeller ya lo tiene vale lo suyo aunque los datos ya no armen (se consulta antes de armar)', async () => {
+  // R32: la venta pudo cambiar después del primer envío (un total editado);
+  // armar primero lo dejaría en error_datos aunque la DGII ya lo tenga.
+  const { deps, reg, f } = armar({
+    intentos: 2,
+    datos: datos({ totalGuardado: 120 }),
+    respuestas: [res(200, { status: 'Aceptado', securityCode: 'fWCZCV', qr_url: RESPUESTA_ENVIO.qr_url })],
+  });
+  const r = await emitirDocumento(DOC_ID, deps);
+
+  assert.equal(r.estado, 'aceptado');
+  assert.equal(f.envios().length, 0);
+  assert.equal(reg.cargarDatos.length, 0, 'ni siquiera se arma: MSeller ya lo tiene');
+  const c = unico(reg);
+  assert.equal(c.estado, 'aceptado');
+  assert.equal(c.qr_url, RESPUESTA_ENVIO.qr_url);
+  assert.deepEqual(reg.sumarUso, [[EMPRESA, 1, 1]]);
+});
+
+test('reintento: si MSeller no lo tiene y los datos no arman, error_datos sin enviar', async () => {
+  const { deps, reg, f } = armar({
+    intentos: 2,
+    datos: datos({ totalGuardado: 120 }),
+    respuestas: [res(404, 'no')],
+  });
+  const r = await emitirDocumento(DOC_ID, deps);
+
+  assert.deepEqual(
+    f.llamadas.map((l) => l.metodo),
+    ['GET'],
+    'primero la consulta; con el descuadre no se envía nada',
+  );
+  assert.equal(r.estado, 'error_datos');
+  assert.match(unico(reg).ultimo_error, /no cuadra/);
+  assert.deepEqual(reg.sumarUso, [[EMPRESA, 1, 0]], 'la consulta respondió: un request');
+});
+
 test('si la consulta falla por red, vuelve a por_enviar y no envía a ciegas', async () => {
   const { deps, reg, f } = armar({ intentos: 2, respuestas: [new TypeError('fetch failed')] });
   const r = await emitirDocumento(DOC_ID, deps);
@@ -402,7 +443,39 @@ test('si el login con la contraseña falla, queda por_enviar (no error_datos)', 
   assert.equal(c.estado, 'por_enviar');
   assert.ok(c.proximo_intento_at);
   assert.equal(r.estado, 'por_enviar');
+  // El lote sabe que fue MSeller rechazando la cuenta al iniciar sesión.
+  assert.deepEqual(r.fallo, { tipo: 'auth', enLogin: true });
+  assert.equal(credencialesRechazadas(r), true);
   sinSecretos(reg, r);
+});
+
+test('el resultado dice qué falló: 5xx, acceso con la sesión ya abierta, red', async () => {
+  const cinco = armar({ respuestas: [res(503, 'caído')] });
+  const r5 = await emitirDocumento(DOC_ID, cinco.deps);
+  assert.deepEqual(r5.fallo, { tipo: 'servidor', enLogin: false });
+  assert.equal(cortaElLote(r5), true);
+  assert.equal(credencialesRechazadas(r5), false);
+
+  // 401 al enviar, login nuevo que sí entra y otro 401: el acceso falló, pero no el login.
+  const api = armar({
+    respuestas: [res(401, 'no'), res(200, { idToken: ID_TOKEN_NUEVO, refreshToken: REFRESH }), res(401, 'no')],
+  });
+  const ra = await emitirDocumento(DOC_ID, api.deps);
+  assert.deepEqual(ra.fallo, { tipo: 'auth', enLogin: false });
+  assert.equal(cortaElLote(ra), true);
+  assert.equal(credencialesRechazadas(ra), false);
+
+  const red = armar({ respuestas: [new TypeError('fetch failed')] });
+  const rr = await emitirDocumento(DOC_ID, red.deps);
+  assert.deepEqual(rr.fallo, { tipo: 'red', enLogin: false });
+  assert.equal(cortaElLote(rr), false, 'sin respuesta no se corta: puede ser un corte de este worker');
+
+  // Un error de datos no dice nada de la empresa.
+  const datos400 = armar({ respuestas: [res(400, 'campo inválido')] });
+  const rd = await emitirDocumento(DOC_ID, datos400.deps);
+  assert.equal(rd.estado, 'error_datos');
+  assert.equal(rd.fallo, undefined);
+  assert.equal(cortaElLote(rd), false);
 });
 
 test('429 deja sin_cupo', async () => {
@@ -418,7 +491,18 @@ test('429 deja sin_cupo', async () => {
   assert.equal(c.reservado_hasta, null);
   assert.equal(r.estado, 'sin_cupo');
   assert.equal(r.encf, ENCF);
-  assert.deepEqual(reg.sumarUso, [[EMPRESA, 1, 0]], 'respondió 429: un request, ningún comprobante');
+  // I6: MSeller no atendió la llamada; contarla como request gastaría cupo que no se gastó.
+  assert.deepEqual(reg.sumarUso, [], 'un 429 no cuenta como request ni como comprobante');
+});
+
+test('un 429 en la consulta previa tampoco cuenta como request', async () => {
+  const { deps, reg, f } = armar({ intentos: 2, respuestas: [res(429, 'Too Many Requests')] });
+  const r = await emitirDocumento(DOC_ID, deps);
+
+  assert.equal(f.consultas().length, 1);
+  assert.equal(f.envios().length, 0);
+  assert.equal(r.estado, 'sin_cupo');
+  assert.deepEqual(reg.sumarUso, []);
 });
 
 test('400 deja error_datos con el mensaje', async () => {
@@ -656,6 +740,193 @@ test('un 400 que repite un secreto no lo guarda ni en ultimo_error ni en el resu
 
   assert.equal(unico(reg).estado, 'error_datos');
   sinSecretos(reg, r);
+});
+
+// ---------------------------------------------------------------------------
+// La reserva: cada registro va con los intentos de este envío (R32)
+// ---------------------------------------------------------------------------
+
+test('el registro va condicionado a los intentos de la reserva', async () => {
+  const { deps, reg } = armar({ intentos: 3, respuestas: [res(404, 'no'), res(200, RESPUESTA_ENVIO)] });
+  await emitirDocumento(DOC_ID, deps);
+  assert.equal(reg.registrar.length, 1);
+  assert.equal(reg.registrar[0].intentos, 3);
+});
+
+test('si otro worker tomó la reserva, no se pisa nada y el comprobante no se cuenta aquí', async () => {
+  // La reserva venció mientras MSeller contestaba: el documento ya tiene más
+  // intentos y el otro worker (que consulta antes de enviar) lo registra y lo cuenta.
+  const { deps, reg, f } = armar({
+    respuestas: [res(200, RESPUESTA_ENVIO)],
+    over: {
+      registrar: async (id, cambio, intentosReserva) => {
+        reg.registrar.push({ id, cambio, intentos: intentosReserva });
+        return false;
+      },
+    },
+  });
+  const r = await emitirDocumento(DOC_ID, deps);
+
+  assert.deepEqual(r, { estado: 'reserva_perdida', encf: ENCF });
+  assert.equal(f.envios().length, 1);
+  assert.equal(reg.registrar.length, 1, 'un solo intento de registrar: no se sigue escribiendo');
+  assert.deepEqual(reg.sumarUso, [[EMPRESA, 1, 0]], 'el request se gastó; el comprobante lo cuenta quien tiene la reserva');
+});
+
+test('con la reserva perdida un fallo tampoco se registra dos veces', async () => {
+  const { deps, reg } = armar({
+    respuestas: [new TypeError('fetch failed')],
+    over: {
+      registrar: async (id, cambio) => {
+        reg.registrar.push({ id, cambio });
+        return false;
+      },
+    },
+  });
+  const r = await emitirDocumento(DOC_ID, deps);
+  assert.equal(r.estado, 'reserva_perdida');
+  assert.equal(reg.registrar.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// emitirLote: el lote del cron corta por empresa (I6)
+// ---------------------------------------------------------------------------
+
+const A = '00000000-0000-0000-0000-0000000000a1';
+const B = '00000000-0000-0000-0000-0000000000b2';
+const docLote = (id, companyId, ambiente = 'TesteCF') => ({ id, companyId, ambiente });
+
+const LOGIN_RECHAZADO = { estado: 'por_enviar', error: 'MSeller rechazó la autenticación (401)', fallo: { tipo: 'auth', enLogin: true } };
+const CAIDO = { estado: 'por_enviar', error: 'MSeller respondió 503', fallo: { tipo: 'servidor', enLogin: false } };
+const OK = { estado: 'recibido' };
+
+// Dependencias del lote: `resultados` dice qué devuelve cada id (por omisión, recibido).
+function armarLote(resultados = {}, over = {}) {
+  const reg = { emitidos: [], pospuestos: [], errores: [] };
+  const deps = {
+    emitir: async (id) => {
+      reg.emitidos.push(id);
+      const r = resultados[id] ?? OK;
+      if (r instanceof Error) throw r;
+      return r;
+    },
+    posponerPorCredenciales: async (companyId, ambiente) => {
+      reg.pospuestos.push([companyId, ambiente]);
+    },
+    registrarError: (t) => reg.errores.push(t),
+    ...over,
+  };
+  return { deps, reg };
+}
+
+test('lote: si MSeller rechaza el login de una empresa, lo demás de ella ni se reserva y se pospone', async () => {
+  const docs = [docLote('a1', A), docLote('b1', B), docLote('a2', A), docLote('a3', A), docLote('b2', B)];
+  const { deps, reg } = armarLote({ a1: LOGIN_RECHAZADO });
+  const r = await emitirLote(docs, 1, deps);
+
+  assert.deepEqual(reg.emitidos, ['a1', 'b1', 'b2'], 'a2 y a3 no se intentan (ni se reservan)');
+  assert.deepEqual(reg.pospuestos, [[A, 'TesteCF']]);
+  assert.deepEqual(r, { procesados: 3, saltados: 2 });
+  assert.deepEqual(reg.errores, []);
+});
+
+test('lote: un 5xx de MSeller corta la empresa sin posponer (no es la contraseña)', async () => {
+  const docs = [docLote('a1', A), docLote('a2', A), docLote('b1', B)];
+  const { deps, reg } = armarLote({ a1: CAIDO });
+  const r = await emitirLote(docs, 1, deps);
+
+  assert.deepEqual(reg.emitidos, ['a1', 'b1']);
+  assert.deepEqual(reg.pospuestos, []);
+  assert.deepEqual(r, { procesados: 2, saltados: 1 });
+});
+
+test('lote: el corte es por empresa y ambiente', async () => {
+  const docs = [docLote('a1', A, 'TesteCF'), docLote('a2', A, 'eCF'), docLote('a3', A, 'TesteCF')];
+  const { deps, reg } = armarLote({ a1: LOGIN_RECHAZADO });
+  await emitirLote(docs, 1, deps);
+  assert.deepEqual(reg.emitidos, ['a1', 'a2'], 'la misma empresa en otro ambiente tiene otra cuenta');
+});
+
+test('lote: datos, cupo, red, ocupado y reserva perdida no cortan', async () => {
+  const docs = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6'].map((id) => docLote(id, A));
+  const { deps, reg } = armarLote({
+    a1: { estado: 'error_datos', error: 'campo inválido' },
+    a2: { estado: 'sin_cupo', error: 'cupo' },
+    a3: { estado: 'por_enviar', error: 'Sin respuesta de MSeller', fallo: { tipo: 'red', enLogin: false } },
+    a4: { estado: 'ocupado' },
+    a5: { estado: 'reserva_perdida' },
+  });
+  const r = await emitirLote(docs, 1, deps);
+  assert.deepEqual(reg.emitidos, ['a1', 'a2', 'a3', 'a4', 'a5', 'a6']);
+  assert.deepEqual(r, { procesados: 4, saltados: 0 }, 'ocupado y reserva perdida no cuentan como procesados');
+});
+
+test('lote: un documento que lanza se registra y no frena a los demás', async () => {
+  const docs = [docLote('a1', A), docLote('a2', A)];
+  const { deps, reg } = armarLote({ a1: new Error('base caída') });
+  const r = await emitirLote(docs, 1, deps);
+  assert.deepEqual(reg.emitidos, ['a1', 'a2']);
+  assert.equal(reg.errores.length, 1);
+  assert.match(reg.errores[0], /a1.*base caída/);
+  assert.deepEqual(r, { procesados: 1, saltados: 0 });
+});
+
+test('lote: si posponer falla, se registra y el lote sigue', async () => {
+  const docs = [docLote('a1', A), docLote('b1', B)];
+  const { deps, reg } = armarLote(
+    { a1: LOGIN_RECHAZADO },
+    {
+      posponerPorCredenciales: async () => {
+        throw new Error('la base no contestó');
+      },
+    },
+  );
+  const r = await emitirLote(docs, 1, deps);
+  assert.deepEqual(reg.emitidos, ['a1', 'b1']);
+  assert.equal(reg.errores.length, 1);
+  assert.deepEqual(r, { procesados: 2, saltados: 0 });
+});
+
+test('lote en paralelo: lo que ya iba en camino también se pospone; lo que no empezó, se salta', async () => {
+  // Dos a la vez: a1 y a2 salen juntos y los dos vuelven con el login rechazado;
+  // a3 y a4 todavía no habían empezado.
+  let soltar;
+  const espera = new Promise((r) => (soltar = r));
+  const { deps, reg } = armarLote(
+    {},
+    {
+      emitir: async (id) => {
+        reg.emitidos.push(id);
+        await espera;
+        return LOGIN_RECHAZADO;
+      },
+    },
+  );
+  const p = emitirLote(['a1', 'a2', 'a3', 'a4'].map((id) => docLote(id, A)), 2, deps);
+  soltar();
+  const r = await p;
+  assert.deepEqual(reg.emitidos, ['a1', 'a2']);
+  assert.deepEqual(reg.pospuestos, [[A, 'TesteCF'], [A, 'TesteCF']]);
+  assert.deepEqual(r, { procesados: 2, saltados: 2 });
+});
+
+test('lote vacío o sin trabajadores no hace nada', async () => {
+  const { deps, reg } = armarLote();
+  assert.deepEqual(await emitirLote([], 5, deps), { procesados: 0, saltados: 0 });
+  assert.deepEqual(reg.emitidos, []);
+});
+
+test('lote de punta a punta: el login rechazado de emitirDocumento corta su empresa', async () => {
+  // emitirDocumento de verdad, con un login que MSeller rechaza (401 en la autenticación).
+  const { deps } = armar({
+    cred: credenciales({ idToken: null, idTokenVence: null, refreshToken: null }),
+    respuestas: [res(401, { message: 'Incorrect username or password.' })],
+  });
+  const { deps: lote, reg } = armarLote({}, { emitir: (id) => emitirDocumento(id, deps) });
+  const r = await emitirLote([docLote('a1', EMPRESA), docLote('a2', EMPRESA)], 1, lote);
+
+  assert.deepEqual(reg.pospuestos, [[EMPRESA, 'TesteCF']]);
+  assert.deepEqual(r, { procesados: 1, saltados: 1 });
 });
 
 // ---------------------------------------------------------------------------

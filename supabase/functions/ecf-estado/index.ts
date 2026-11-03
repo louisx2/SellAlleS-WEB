@@ -95,6 +95,19 @@ function crearDeps(admin: Cliente): DepsEstado {
       if (error) throw new Error(`No se pudo guardar el estado del documento: ${error.message}`);
     },
 
+    marcarConsultados: async (companyId, ambiente, encfs, cuando) => {
+      // MSeller contestó el lote con un error: solo la marca de consulta, para
+      // que la próxima espere el intervalo del plan. Lo que ya cambió de estado no se toca.
+      const { error } = await admin
+        .from('ecf_documentos')
+        .update({ ultima_consulta_at: cuando, updated_at: new Date().toISOString() })
+        .eq('company_id', companyId)
+        .eq('ambiente', ambiente)
+        .in('encf', encfs)
+        .eq('estado', 'recibido');
+      if (error) throw new Error(`No se pudo marcar la consulta: ${error.message}`);
+    },
+
     sumarUso: (companyId, requests, comprobantes) => sumarUso(admin, companyId, requests, comprobantes),
 
     avisarSinCupo: async (companyId) => {

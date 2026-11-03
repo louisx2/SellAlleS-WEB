@@ -21,6 +21,10 @@
 //   * Lo que MSeller no conoce o no devuelve no cambia nada (queda un aviso).
 //   * Un 429 avisa a SellAlleS y sigue con la otra empresa; cualquier otro fallo
 //     de una empresa se registra y tampoco frena a las demás.
+//   * Si MSeller contestó con un error (un 429, un 5xx, un rechazo del acceso),
+//     los e-NCF del lote igual reciben `ultima_consulta_at`: la siguiente
+//     consulta espera el intervalo del plan en vez de insistir en cada pasada.
+//     Sin respuesta (red) no se marcan.
 //   * Los secretos no se escriben en ningún registro.
 
 import { nuevaConexion, textoDeMensajes } from './emitir.ts';
@@ -66,6 +70,11 @@ export interface DepsEstado {
    * documento que siga `recibido`: el estado de otro lo cambió alguien más.
    */
   actualizar(companyId: string, encf: string, cambio: CambioConsulta): Promise<void>;
+  /**
+   * Pone `ultima_consulta_at = cuando` a esos e-NCF (los que sigan `recibido`)
+   * sin tocar nada más: MSeller contestó el lote con un error.
+   */
+  marcarConsultados(companyId: string, ambiente: Ambiente, encfs: string[], cuando: string): Promise<void>;
   sumarUso(companyId: string, requests: number, comprobantes: number): Promise<void>;
   avisarSinCupo(companyId: string): Promise<void>;
   fetch: typeof fetch;
@@ -78,6 +87,11 @@ const MAX_LOTE = 100;
 const MAX_ERROR = 300;
 
 const mensajeDe = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/** ¿Contestó MSeller (con lo que sea), o ni siquiera hubo respuesta HTTP? */
+export function huboRespuesta(e: unknown): boolean {
+  return e instanceof MsellerError && e.tipo !== 'red';
+}
 
 /** El cambio de un documento que MSeller devolvió con un estado distinto de `recibido`. */
 function cambioDeEstado(remoto: EstadoRemoto, ahora: string): CambioConsulta {
@@ -126,6 +140,13 @@ export async function consultarPendientes(deps: DepsEstado): Promise<{ empresas:
       consultadas.add(g.companyId);
       cambios += await guardarResultados(g, encfs, remotos, deps);
     } catch (e) {
+      if (huboRespuesta(e)) {
+        try {
+          await deps.marcarConsultados(g.companyId, g.ambiente, encfs, deps.ahora().toISOString());
+        } catch (m) {
+          console.error('ecf-estado: no se pudo marcar la consulta de', g.companyId, mensajeDe(m).slice(0, MAX_ERROR));
+        }
+      }
       if (e instanceof MsellerError && e.tipo === 'cupo') {
         // MSeller dejó de atender por falta de cupo: no es un error del
         // documento. Se avisa (una vez por mes) y se sigue con la otra empresa.

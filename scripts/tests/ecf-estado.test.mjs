@@ -76,7 +76,14 @@ const encf = (n) => `E32${String(n).padStart(10, '0')}`;
 
 // Dependencias falsas que anotan cada llamada. `over` pisa lo que la prueba necesita.
 function armar({ grupos = [], respuestas = [], cred = credenciales(), over = {} } = {}) {
-  const reg = { leerCredenciales: [], guardarSesion: [], actualizar: [], sumarUso: [], avisarSinCupo: [] };
+  const reg = {
+    leerCredenciales: [],
+    guardarSesion: [],
+    actualizar: [],
+    marcarConsultados: [],
+    sumarUso: [],
+    avisarSinCupo: [],
+  };
   const f = fetchFalso(...respuestas);
   const deps = {
     pendientes: async () => grupos,
@@ -89,6 +96,9 @@ function armar({ grupos = [], respuestas = [], cred = credenciales(), over = {} 
     },
     actualizar: async (empresa, e, cambio) => {
       reg.actualizar.push({ empresa, encf: e, cambio });
+    },
+    marcarConsultados: async (empresa, ambiente, encfs, cuando) => {
+      reg.marcarConsultados.push({ empresa, ambiente, encfs, cuando });
     },
     sumarUso: async (empresa, requests, comprobantes) => {
       reg.sumarUso.push([empresa, requests, comprobantes]);
@@ -343,9 +353,69 @@ test('429 avisa y sigue con la otra empresa', async () => {
   assert.deepEqual(reg.avisarSinCupo, [EMPRESA]);
   assert.equal(f.lotes().length, 2, 'la segunda empresa se consulta igual');
   assert.deepEqual(reg.actualizar.map((a) => [a.empresa, a.encf]), [[OTRA, encf(2)]]);
-  // El 429 es una respuesta de MSeller: gasta un request en la primera empresa.
-  assert.deepEqual(reg.sumarUso, [[EMPRESA, 1, 0], [OTRA, 1, 0]]);
+  // I6: el 429 no es una llamada atendida, no gasta request.
+  assert.deepEqual(reg.sumarUso, [[OTRA, 1, 0]]);
+  // Pero MSeller contestó: el lote queda marcado y espera el intervalo del plan.
+  assert.deepEqual(reg.marcarConsultados, [
+    { empresa: EMPRESA, ambiente: 'TesteCF', encfs: [encf(1)], cuando: AHORA.toISOString() },
+  ]);
   assert.equal(errores.length, 0, 'el 429 no es un error: ya se avisó');
+});
+
+test('un 5xx o un acceso rechazado marcan la consulta; la red no', async () => {
+  // 500 en el lote.
+  const cinco = armar({ grupos: [grupo(EMPRESA, [encf(1), encf(2)])], respuestas: [res(500, 'caído')] });
+  await conConsola(() => consultarPendientes(cinco.deps));
+  assert.deepEqual(cinco.reg.marcarConsultados, [
+    { empresa: EMPRESA, ambiente: 'TesteCF', encfs: [encf(1), encf(2)], cuando: AHORA.toISOString() },
+  ]);
+  assert.deepEqual(cinco.reg.actualizar, [], 'no se inventa ningún estado');
+  assert.deepEqual(cinco.reg.sumarUso, [[EMPRESA, 1, 0]], 'un 5xx sí es una respuesta: cuenta');
+
+  // El login con la contraseña rechazado.
+  const login = armar({
+    cred: credenciales({ idToken: null, idTokenVence: null, refreshToken: null }),
+    grupos: [grupo(EMPRESA, [encf(1)], { ambiente: 'eCF' })],
+    respuestas: [res(401, 'Incorrect username or password.')],
+  });
+  await conConsola(() => consultarPendientes(login.deps));
+  assert.deepEqual(login.reg.marcarConsultados.map((m) => [m.empresa, m.ambiente, m.encfs]), [[EMPRESA, 'eCF', [encf(1)]]]);
+  assert.deepEqual(login.reg.sumarUso, [], 'la autenticación no gasta cupo');
+
+  // Sin respuesta: no se sabe si MSeller está ahí; se vuelve a intentar en la próxima pasada.
+  const red = armar({ grupos: [grupo(EMPRESA, [encf(1)])], respuestas: [new TypeError('fetch failed')] });
+  await conConsola(() => consultarPendientes(red.deps));
+  assert.deepEqual(red.reg.marcarConsultados, []);
+
+  // Sin credenciales tampoco hubo respuesta de MSeller.
+  const sinCred = armar({
+    grupos: [grupo(EMPRESA, [encf(1)])],
+    over: {
+      leerCredenciales: async () => {
+        throw new Error('sin credenciales');
+      },
+    },
+  });
+  await conConsola(() => consultarPendientes(sinCred.deps));
+  assert.deepEqual(sinCred.reg.marcarConsultados, []);
+});
+
+test('si marcar la consulta falla, se registra y se sigue con la otra empresa', async () => {
+  const { deps, reg } = armar({
+    grupos: [grupo(EMPRESA, [encf(1)]), grupo(OTRA, [encf(2)])],
+    respuestas: [res(503, 'x'), lote(item(encf(2), 'Aceptado'))],
+    over: {
+      marcarConsultados: async () => {
+        throw new Error('la base no contestó');
+      },
+    },
+  });
+  const { errores } = await conConsola(async () => {
+    assert.deepEqual(await consultarPendientes(deps), { empresas: 1, cambios: 1 });
+  });
+  assert.deepEqual(reg.actualizar.map((a) => a.empresa), [OTRA]);
+  // Uno por la marca que no se pudo poner y otro por la consulta que falló.
+  assert.equal(errores.length, 2);
 });
 
 test('si avisar del cupo falla, igual se sigue con la otra empresa', async () => {

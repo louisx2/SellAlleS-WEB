@@ -5,7 +5,10 @@
 //   * { saleId }          el punto de venta, al guardar la venta;
 //   * { creditNoteId }    el punto de venta, al anular (nota de crédito E34);
 //   * { documentoIds }    el cron de la base (ecf_disparar_envios), solo con la
-//                         service role key. Reintenta lo que quedó sin enviar.
+//                         service role key. Reintenta lo que quedó sin enviar;
+//                         si MSeller deja de atender a una empresa (acceso
+//                         rechazado o error suyo), lo demás de ella espera a la
+//                         próxima vuelta (emitirLote).
 //
 // Qué hace: valida quién llama, busca el documento vigente de esa venta o nota,
 // y deja que `emitirDocumento` (módulo puro, con pruebas) lo reserve, lo arme
@@ -21,8 +24,8 @@ import { lineasDesdeItems } from '../_shared/ecf/armar.ts';
 import type { DatosEcf, TipoEcf } from '../_shared/ecf/armar.ts';
 import { datosEcf, vencimientoDeSecuencia } from '../_shared/ecf/datos.ts';
 import type { FilaSecuencia } from '../_shared/ecf/datos.ts';
-import { completarDocumento, emitirDocumento, ErrorDatosEcf } from '../_shared/ecf/emitir.ts';
-import type { CambioDocumento, DepsEmision, DocReservado } from '../_shared/ecf/emitir.ts';
+import { completarDocumento, emitirDocumento, emitirLote, ErrorDatosEcf } from '../_shared/ecf/emitir.ts';
+import type { CambioDocumento, DepsEmision, DocLote, DocReservado } from '../_shared/ecf/emitir.ts';
 import type { Ambiente } from '../_shared/ecf/mseller.ts';
 import { guardarSesion, leerCredenciales, sumarUso } from '../_shared/ecf/rpc.ts';
 
@@ -306,28 +309,38 @@ function crearDeps(admin: Cliente): DepsEmision {
 
     guardarSesion: (companyId, ambiente, s) => guardarSesion(admin, companyId, ambiente, s),
 
-    registrar: async (id, cambio: CambioDocumento) => {
-      const { data, error } = await admin
+    registrar: async (id, cambio: CambioDocumento, intentos?: number) => {
+      // Con `intentos`, solo si la reserva sigue siendo de este intento: si
+      // venció y otro worker la tomó, el documento ya tiene más intentos y lo
+      // que él guarde no se pisa.
+      let consulta = admin
         .from('ecf_documentos')
         .update({ ...cambio, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select('company_id');
+        .eq('id', id);
+      if (intentos !== undefined) consulta = consulta.eq('intentos', intentos);
+      const { data, error } = await consulta.select('company_id');
       if (error) throw new Error(`No se pudo guardar el resultado del documento: ${error.message}`);
+      const filas = (data ?? []) as Array<{ company_id: string }>;
+      if (filas.length === 0) {
+        if (intentos !== undefined) {
+          console.error('ecf-emitir: otro envío tomó la reserva del documento; no se guarda este resultado:', id);
+        }
+        return false;
+      }
 
       // MSeller contestó 429: aviso urgente a SellAlleS (la base manda uno solo
       // por empresa y mes). De mejor esfuerzo: si falla, el documento ya quedó
       // registrado `sin_cupo` y eso no se deshace.
       if (cambio.estado === 'sin_cupo') {
-        const companyId = (data as Array<{ company_id: string }> | null)?.[0]?.company_id;
-        if (companyId) {
-          try {
-            const { error: avisoErr } = await admin.rpc('ecf_avisar_sin_cupo', { p_company: companyId });
-            if (avisoErr) console.error('ecf-emitir: no se pudo avisar de la falta de cupo:', avisoErr.message);
-          } catch (e) {
-            console.error('ecf-emitir: no se pudo avisar de la falta de cupo:', mensajeDe(e));
-          }
+        const companyId = filas[0].company_id;
+        try {
+          const { error: avisoErr } = await admin.rpc('ecf_avisar_sin_cupo', { p_company: companyId });
+          if (avisoErr) console.error('ecf-emitir: no se pudo avisar de la falta de cupo:', avisoErr.message);
+        } catch (e) {
+          console.error('ecf-emitir: no se pudo avisar de la falta de cupo:', mensajeDe(e));
         }
       }
+      return true;
     },
 
     sumarUso: (companyId, requests, comprobantes) => sumarUso(admin, companyId, requests, comprobantes),
@@ -335,18 +348,6 @@ function crearDeps(admin: Cliente): DepsEmision {
     fetch,
     ahora: () => new Date(),
   };
-}
-
-/** Corre `tarea` sobre cada elemento, con a lo sumo `limite` a la vez. */
-async function enParalelo<T>(items: T[], limite: number, tarea: (x: T) => Promise<void>) {
-  let siguiente = 0;
-  const trabajadores = Array.from({ length: Math.min(limite, items.length) }, async () => {
-    while (siguiente < items.length) {
-      const x = items[siguiente++];
-      await tarea(x);
-    }
-  });
-  await Promise.all(trabajadores);
 }
 
 // ---------------------------------------------------------------------------
@@ -393,18 +394,29 @@ Deno.serve(async (req) => {
       if (ids.length === 0 || ids.length !== documentoIds.length || ids.length > MAX_DOCUMENTOS) {
         return json(400, { error: `documentoIds debe traer entre 1 y ${MAX_DOCUMENTOS} identificadores válidos.` });
       }
-      let procesados = 0;
-      await enParalelo(ids, EN_PARALELO, async (id) => {
-        try {
-          const r = await emitirDocumento(id, deps);
-          if (r.estado !== 'ocupado') procesados++;
-        } catch (e) {
-          // Un documento que no se pudo guardar no frena a los demás: queda
-          // `enviando` y el cron lo retoma cuando venza su reserva.
-          console.error('ecf-emitir: falló un documento del lote:', id, mensajeDe(e));
-        }
+      // De qué empresa y ambiente es cada uno, antes de reservar: si MSeller deja
+      // de atender a una empresa, lo que falta de ella ni se reserva.
+      const filasLote = await filas<{ id: string; company_id: string; ambiente: string }>(
+        admin.from('ecf_documentos').select('id, company_id, ambiente').in('id', ids),
+        'los documentos del lote',
+      );
+      const porId = new Map(filasLote.map((f) => [f.id, f]));
+      const docs: DocLote[] = ids.flatMap((id) => {
+        const f = porId.get(id);
+        return f ? [{ id, companyId: f.company_id, ambiente: f.ambiente as Ambiente }] : [];
       });
-      return json(200, { procesados });
+      const r = await emitirLote(docs, EN_PARALELO, {
+        emitir: (id) => emitirDocumento(id, deps),
+        posponerPorCredenciales: async (companyId, ambiente) => {
+          const { error } = await admin.rpc('ecf_posponer_por_credenciales', {
+            p_company: companyId,
+            p_ambiente: ambiente,
+          });
+          if (error) throw new Error(error.message);
+        },
+        registrarError: (texto) => console.error(texto),
+      });
+      return json(200, r);
     }
 
     // --- Una venta o una nota de crédito -----------------------------------

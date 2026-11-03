@@ -15,13 +15,17 @@
 //     (timeout, 5xx, el proceso murió), el siguiente consulta antes de enviar.
 //     `ecf_reservar_documento` cuenta cada reserva, así que `intentos > 1` es
 //     justo esa señal.
+//   * La consulta previa va antes de armar el comprobante: si MSeller ya lo
+//     tiene, vale lo suyo aunque los datos hayan cambiado después.
+//   * Cada registro va condicionado a la reserva (`intentos`): si otro worker
+//     la tomó, no se pisa lo que él guarde.
 //   * Los secretos (contraseña, API key, tokens) no se devuelven, no se escriben
 //     en `ultimo_error` ni en `request_json`.
 
 import { armarEcf } from './armar.ts';
 import type { DatosEcf } from './armar.ts';
 import { consultar, enviar, MsellerError, proximoIntento, sesionVigente } from './mseller.ts';
-import type { Ambiente, Credenciales, EstadoRemoto, Sesion } from './mseller.ts';
+import type { Ambiente, Credenciales, EstadoRemoto, Sesion, TipoFallo } from './mseller.ts';
 
 export interface DocReservado {
   id: string;
@@ -55,19 +59,27 @@ export interface DepsEmision {
   cargarDatos(doc: DocReservado): Promise<DatosEcf>;
   leerCredenciales(companyId: string, a: Ambiente): Promise<Credenciales>;
   guardarSesion(companyId: string, a: Ambiente, s: Sesion): Promise<void>;
-  registrar(id: string, cambio: CambioDocumento): Promise<void>;
+  /**
+   * Guarda el cambio. Con `intentos`, solo si el documento sigue con ese número
+   * de intentos (la reserva es de quien lo llama) y devuelve false si no tocó
+   * ninguna fila: otro worker tomó la reserva. Sin `intentos` lo guarda siempre.
+   */
+  registrar(id: string, cambio: CambioDocumento, intentos?: number): Promise<boolean>;
   sumarUso(companyId: string, requests: number, comprobantes: number): Promise<void>;
   fetch: typeof fetch;
   ahora(): Date;
 }
 
 export interface ResultadoEmision {
+  /** El estado en que quedó; 'ocupado' si no se pudo reservar, 'reserva_perdida' si otro la tomó a mitad. */
   estado: string;
   encf?: string;
   qrUrl?: string;
   securityCode?: string;
   signedAt?: string;
   error?: string;
+  /** Qué falló al hablar con MSeller (solo si quedó por_enviar por eso): lo usa el lote para cortar. */
+  fallo?: { tipo: TipoFallo; enLogin: boolean };
 }
 
 /**
@@ -112,12 +124,22 @@ export interface Conexion {
   ocultar(texto: string): string;
 }
 
+/**
+ * Un fallo al iniciar sesión (no al usar la sesión). Sigue siendo un
+ * MsellerError: lo que mira `tipo` lo trata igual; el lote además sabe que fue
+ * MSeller rechazando la cuenta y no un documento.
+ */
+export class FalloDeLogin extends MsellerError {
+  constructor(tipo: TipoFallo, mensaje: string, status?: number) {
+    super(tipo, mensaje, status);
+  }
+}
+
 /** Un fallo al iniciar sesión es del acceso, no del comprobante: nunca `datos` ni `cupo`. */
 function comoFalloDeAcceso(e: unknown): unknown {
-  if (e instanceof MsellerError && (e.tipo === 'datos' || e.tipo === 'cupo' || e.tipo === 'no_encontrado')) {
-    return new MsellerError('auth', e.message, e.status);
-  }
-  return e;
+  if (!(e instanceof MsellerError)) return e;
+  const tipo: TipoFallo = e.tipo === 'datos' || e.tipo === 'cupo' || e.tipo === 'no_encontrado' ? 'auth' : e.tipo;
+  return new FalloDeLogin(tipo, e.message, e.status);
 }
 
 /** También la usa el seguimiento de estados (estado.ts): la misma sesión, el mismo conteo de requests. */
@@ -149,8 +171,9 @@ export function nuevaConexion(
       requests++;
       return r;
     } catch (e) {
-      // Sin respuesta HTTP (red) o con una de autenticación no se gasta cupo.
-      if (e instanceof MsellerError && e.tipo !== 'red' && e.tipo !== 'auth') requests++;
+      // Sin respuesta HTTP (red), con una de autenticación o con un 429 (MSeller
+      // no atendió la llamada por falta de cupo) no se gasta cupo.
+      if (e instanceof MsellerError && e.tipo !== 'red' && e.tipo !== 'auth' && e.tipo !== 'cupo') requests++;
       throw e;
     }
   };
@@ -197,6 +220,10 @@ export function textoDeMensajes(mensajes: EstadoRemoto['mensajes'], respaldo: st
  * ni de datos: los registra y los devuelve en el resultado. Solo lanza si no
  * puede guardar lo que MSeller ya recibió (queda `enviando`, y el siguiente
  * intento consulta antes de enviar, así que no se duplica).
+ *
+ * Si al registrar resulta que otro worker tomó la reserva (la reserva venció y
+ * el documento ya tiene más intentos), no escribe nada más y devuelve
+ * 'reserva_perdida': lo que pase con el documento lo registra ese otro.
  */
 export async function emitirDocumento(id: string, deps: DepsEmision): Promise<ResultadoEmision> {
   const doc = await deps.reservar(id);
@@ -208,11 +235,29 @@ export async function emitirDocumento(id: string, deps: DepsEmision): Promise<Re
   // Verdadero en cuanto MSeller dio señales de tener el documento.
   let yaRespondio = false;
 
-  // Toda salida de `enviando` pone la fecha del cambio y suelta la reserva.
+  const conectar = async (): Promise<Conexion> => {
+    if (!conexion) conexion = nuevaConexion(await deps.leerCredenciales(doc.companyId, doc.ambiente), doc, deps);
+    return conexion;
+  };
+
+  // Toda salida de `enviando` pone la fecha del cambio y suelta la reserva, si
+  // la reserva sigue siendo de este intento.
   const cerrar = async (cambio: CambioDocumento, resultado: ResultadoEmision): Promise<ResultadoEmision> => {
     const cuando = deps.ahora().toISOString();
-    await deps.registrar(doc.id, sinVacios({ ...cambio, estado_at: cuando, reservado_hasta: null }));
+    const aplicado = await deps.registrar(
+      doc.id,
+      sinVacios({ ...cambio, estado_at: cuando, reservado_hasta: null }),
+      doc.intentos,
+    );
+    if (aplicado === false) return { estado: 'reserva_perdida', encf: doc.encf };
     return sinVacios({ ...resultado, encf: doc.encf });
+  };
+
+  // Lo recibió MSeller y quedó registrado: se cuenta el comprobante. Si la
+  // reserva se perdió no: el otro worker consulta antes de enviar y lo cuenta él.
+  const contar = (r: ResultadoEmision): ResultadoEmision => {
+    comprobantes = r.estado === 'reserva_perdida' ? 0 : 1;
+    return r;
   };
 
   const fallar = (e: unknown): Promise<ResultadoEmision> => {
@@ -237,25 +282,21 @@ export async function emitirDocumento(id: string, deps: DepsEmision): Promise<Re
         proximo_intento_at: proximoIntento(doc.intentos, deps.ahora()).toISOString(),
         ultimo_error: mensaje,
       },
-      { estado: 'por_enviar', error: mensaje },
+      {
+        estado: 'por_enviar',
+        error: mensaje,
+        fallo: e instanceof MsellerError ? { tipo: e.tipo, enLogin: e instanceof FalloDeLogin } : undefined,
+      },
     );
   };
 
   try {
-    const armado = armarEcf(await deps.cargarDatos(doc));
-    if (!armado.ok) {
-      return await cerrar(
-        { estado: 'error_datos', ultimo_error: armado.error },
-        { estado: 'error_datos', error: armado.error },
-      );
-    }
-
-    const c = nuevaConexion(await deps.leerCredenciales(doc.companyId, doc.ambiente), doc, deps);
-    conexion = c;
-
     // Un intento anterior pudo llegar a MSeller sin que viéramos la respuesta.
-    // Si ya lo tiene se guarda lo suyo; solo si no lo conoce se envía.
+    // Si ya lo tiene se guarda lo suyo (antes de armar: lo que MSeller tiene
+    // vale aunque los datos hayan cambiado después); solo si no lo conoce se
+    // arma y se envía.
     if (doc.intentos > 1) {
+      const c = await conectar();
       const remoto = await c.llamar((s) => consultar(doc.ambiente, s, c.apiKey, doc.encf, deps.fetch));
       if (remoto && remoto.estado !== 'no_encontrado') {
         yaRespondio = true;
@@ -286,11 +327,19 @@ export async function emitirDocumento(id: string, deps: DepsEmision): Promise<Re
           },
         );
         // Nadie lo había contado: el envío anterior no vio respuesta.
-        comprobantes = 1;
-        return resultado;
+        return contar(resultado);
       }
     }
 
+    const armado = armarEcf(await deps.cargarDatos(doc));
+    if (!armado.ok) {
+      return await cerrar(
+        { estado: 'error_datos', ultimo_error: armado.error },
+        { estado: 'error_datos', error: armado.error },
+      );
+    }
+
+    const c = await conectar();
     jsonEnviado = armado.json;
     const resp = await c.llamar((s) => enviar(doc.ambiente, s, c.apiKey, armado.json, deps.fetch));
     yaRespondio = true;
@@ -310,8 +359,7 @@ export async function emitirDocumento(id: string, deps: DepsEmision): Promise<Re
       },
       { estado: 'recibido', qrUrl: resp.qrUrl, securityCode: resp.securityCode, signedAt: resp.signedDate },
     );
-    comprobantes = 1;
-    return resultado;
+    return contar(resultado);
   } catch (e) {
     // MSeller ya tiene el documento y no pudimos guardarlo: no se pisa el estado
     // con otro intento; el próximo (con la reserva vencida) consulta primero.
@@ -328,6 +376,96 @@ export async function emitirDocumento(id: string, deps: DepsEmision): Promise<Re
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Lote del cron: cortar por empresa cuando MSeller no la atiende
+// ---------------------------------------------------------------------------
+
+/**
+ * ¿Este fallo dice que los demás documentos de la empresa en ese ambiente
+ * fallarían igual? MSeller no aceptó el acceso (`auth`, al iniciar sesión o
+ * con la sesión recién abierta) o respondió con un error suyo (`servidor`, 5xx).
+ */
+export function cortaElLote(r: ResultadoEmision): boolean {
+  return r.fallo?.tipo === 'auth' || r.fallo?.tipo === 'servidor';
+}
+
+/** MSeller rechazó el inicio de sesión: la cuenta de la empresa no sirve hasta que se corrija. */
+export function credencialesRechazadas(r: ResultadoEmision): boolean {
+  return r.fallo?.tipo === 'auth' && r.fallo.enLogin;
+}
+
+export interface DocLote {
+  id: string;
+  companyId: string;
+  ambiente: Ambiente;
+}
+
+export interface DepsLote {
+  emitir(id: string): Promise<ResultadoEmision>;
+  /** Pospone 30 minutos lo que espera de esa empresa y ambiente (ecf_posponer_por_credenciales). */
+  posponerPorCredenciales(companyId: string, ambiente: Ambiente): Promise<void>;
+  /** Una línea para el registro de la función (ya sin secretos). */
+  registrarError(texto: string): void;
+}
+
+export interface ResultadoLote {
+  /** Los que se reservaron y terminaron (ni ocupados ni con la reserva perdida). */
+  procesados: number;
+  /** Los que no se intentaron porque su empresa ya falló en esta vuelta. */
+  saltados: number;
+}
+
+const mensajeDe = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+/**
+ * Emite los documentos del lote, a lo sumo `enParalelo` a la vez. En cuanto uno
+ * de una empresa falla por acceso o por un error de MSeller, los que faltan de
+ * esa empresa y ambiente ni se reservan en esta vuelta (se quedan como están y
+ * el cron los vuelve a pedir). Si MSeller rechazó el inicio de sesión, además
+ * se pospone lo que espera de esa empresa: insistir con la misma contraseña
+ * puede bloquear la cuenta. Un documento que lanza no frena a los demás.
+ */
+export async function emitirLote(docs: DocLote[], enParalelo: number, deps: DepsLote): Promise<ResultadoLote> {
+  const cortadas = new Set<string>();
+  const clave = (d: DocLote) => `${d.companyId}|${d.ambiente}`;
+  let procesados = 0;
+  let saltados = 0;
+  let siguiente = 0;
+
+  const trabajador = async () => {
+    while (siguiente < docs.length) {
+      const d = docs[siguiente++];
+      if (cortadas.has(clave(d))) {
+        saltados++;
+        continue;
+      }
+      let r: ResultadoEmision;
+      try {
+        r = await deps.emitir(d.id);
+      } catch (e) {
+        // No se pudo guardar el resultado: queda `enviando` y el cron lo
+        // retoma cuando venza su reserva.
+        deps.registrarError(`ecf-emitir: falló un documento del lote: ${d.id} ${mensajeDe(e)}`);
+        continue;
+      }
+      if (r.estado !== 'ocupado' && r.estado !== 'reserva_perdida') procesados++;
+      if (cortaElLote(r)) cortadas.add(clave(d));
+      // Cada vez (no solo la primera): un documento que ya estaba en camino
+      // cuando se cortó también vuelve con su espera corta y hay que posponerlo.
+      if (credencialesRechazadas(r)) {
+        try {
+          await deps.posponerPorCredenciales(d.companyId, d.ambiente);
+        } catch (e) {
+          deps.registrarError(`ecf-emitir: no se pudo posponer lo de la empresa ${d.companyId}: ${mensajeDe(e)}`);
+        }
+      }
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.max(0, Math.min(enParalelo, docs.length)) }, trabajador));
+  return { procesados, saltados };
 }
 
 // ---------------------------------------------------------------------------
