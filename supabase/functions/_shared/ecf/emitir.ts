@@ -32,7 +32,11 @@ export interface DocReservado {
 }
 
 export interface CambioDocumento {
-  estado: string;
+  /**
+   * El estado nuevo. Se omite cuando el cambio no lo toca (completar el QR): el
+   * seguimiento de estados lo cambia en paralelo y no hay que pisarlo.
+   */
+  estado?: string;
   security_code?: string;
   qr_url?: string;
   signed_at?: string;
@@ -95,9 +99,9 @@ function sinVacios<T extends object>(o: T): T {
 // Conexión con MSeller: sesión, 401 y cuenta de requests
 // ---------------------------------------------------------------------------
 
-type DepsConexion = Pick<DepsEmision, 'guardarSesion' | 'fetch' | 'ahora'>;
+export type DepsConexion = Pick<DepsEmision, 'guardarSesion' | 'fetch' | 'ahora'>;
 
-interface Conexion {
+export interface Conexion {
   apiKey: string;
   /** Los secretos conocidos hasta ahora (crece al abrir sesión). */
   secretos: Array<string | null>;
@@ -116,7 +120,8 @@ function comoFalloDeAcceso(e: unknown): unknown {
   return e;
 }
 
-function nuevaConexion(
+/** También la usa el seguimiento de estados (estado.ts): la misma sesión, el mismo conteo de requests. */
+export function nuevaConexion(
   cred: Credenciales,
   doc: { companyId: string; ambiente: Ambiente },
   deps: DepsConexion,
@@ -181,7 +186,7 @@ function nuevaConexion(
 // ---------------------------------------------------------------------------
 
 /** Texto de los mensajes de la DGII, o el de respaldo si no hay. */
-function textoDeMensajes(mensajes: EstadoRemoto['mensajes'], respaldo: string): string {
+export function textoDeMensajes(mensajes: EstadoRemoto['mensajes'], respaldo: string): string {
   const texto = mensajes.map((m) => m.valor).join('; ');
   return (texto || respaldo).slice(0, MAX_ERROR);
 }
@@ -334,8 +339,6 @@ export interface DocCompletable {
   companyId: string;
   encf: string;
   ambiente: Ambiente;
-  /** Estado actual: no cambia, de eso se ocupa el seguimiento de estados. */
-  estado: string;
 }
 
 export type DepsCompletar = Pick<
@@ -348,6 +351,10 @@ export type DepsCompletar = Pick<
  * envío con un 2xx incompleto): consulta una vez y, si MSeller ya tiene el
  * código, el QR o la fecha de firma, los guarda. Nunca reenvía y es de mejor
  * esfuerzo: si algo falla devuelve false y el documento queda como estaba.
+ *
+ * Nunca escribe el `estado`: el seguimiento de estados (ecf-estado) lo puede
+ * cambiar mientras esta consulta está en el aire, y devolver el que se leyó
+ * antes pisaría un `aceptado` o un `rechazado` recién guardado.
  */
 export async function completarDocumento(doc: DocCompletable, deps: DepsCompletar): Promise<boolean> {
   let conexion: Conexion | undefined;
@@ -361,7 +368,6 @@ export async function completarDocumento(doc: DocCompletable, deps: DepsCompleta
     await deps.registrar(
       doc.id,
       sinVacios({
-        estado: doc.estado,
         security_code: remoto.securityCode,
         qr_url: remoto.qrUrl,
         signed_at: remoto.signedDate,

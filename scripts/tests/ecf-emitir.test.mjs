@@ -692,7 +692,7 @@ test('completarDocumento llena código, QR y fecha de firma si MSeller ya los ti
   assert.equal(f.consultas().length, 1);
   assert.equal(f.envios().length, 0, 'solo consulta: nunca reenvía');
   const c = unico(reg);
-  assert.equal(c.estado, 'recibido', 'el estado no cambia: de eso se ocupa el seguimiento');
+  assert.ok(!('estado' in c), 'no escribe el estado: de eso se ocupa el seguimiento');
   assert.equal(c.security_code, 'fWCZCV');
   assert.equal(c.qr_url, RESPUESTA_ENVIO.qr_url);
   assert.equal(c.signed_at, '30-10-2026 08:00:01');
@@ -700,6 +700,23 @@ test('completarDocumento llena código, QR y fecha de firma si MSeller ya los ti
   assert.ok(!('estado_at' in c), 'el estado no cambió: no se toca estado_at');
   assert.deepEqual(reg.sumarUso, [[EMPRESA, 1, 0]]);
   assert.equal(reg.reservar.length, 0, 'no reserva ni cuenta intento');
+});
+
+test('completarDocumento no pisa el estado que el seguimiento pudo cambiar mientras consultaba (R16)', async () => {
+  // El documento se leyó 'recibido'; mientras MSeller contestaba, ecf-estado lo
+  // pasó a 'aceptado'. Lo que se escribe no puede llevar ningún estado, sea
+  // cual sea el que se leyó antes.
+  for (const leido of ['recibido', 'aceptado', 'aceptado_condicional']) {
+    const { deps, reg } = depsConsulta([
+      res(200, { status: 'Aceptado', securityCode: 'fWCZCV', qr_url: RESPUESTA_ENVIO.qr_url }),
+    ]);
+    assert.equal(await completarDocumento(docVigente({ estado: leido }), deps), true);
+    const c = unico(reg);
+    assert.ok(!('estado' in c), `no escribe estado (se leyó ${leido})`);
+    assert.ok(!('estado_at' in c));
+    assert.equal(c.security_code, 'fWCZCV');
+    assert.equal(c.qr_url, RESPUESTA_ENVIO.qr_url);
+  }
 });
 
 test('completarDocumento no escribe nada si MSeller tampoco los tiene', async () => {

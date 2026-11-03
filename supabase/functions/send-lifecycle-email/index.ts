@@ -52,11 +52,12 @@ type Template =
   | 'cuota-vencida'
   | 'pago-rechazado'
   | 'comprobante-recibido'
-  | 'resumen-cobros';
+  | 'resumen-cobros'
+  | 'ecf-avisos';
 
 // Plantillas que recibe el super admin, no una empresa: no llevan el bloque
 // de "contáctanos" de soporte, que sería escribirse a sí mismo.
-const PARA_LA_PLATAFORMA: Template[] = ['comprobante-recibido', 'resumen-cobros'];
+const PARA_LA_PLATAFORMA: Template[] = ['comprobante-recibido', 'resumen-cobros', 'ecf-avisos'];
 
 // Dirección de la app para los botones de los correos. Sin ella los correos
 // salen sin botón y dicen dónde está cada cosa en palabras.
@@ -320,6 +321,22 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto, 
       };
     }
 
+    case 'ecf-avisos': {
+      // Avisos de la facturación electrónica para SellAlleS (falta de cupo,
+      // resumen diario). El asunto y la lista los arma la base: aquí solo se
+      // pintan. Nunca llevan secretos.
+      const titulo = String(vars.titulo ?? '').trim() || 'Avisos de e-CF';
+      const lineas = (Array.isArray(vars.lineas) ? vars.lineas : [])
+        .map((l) => String(l ?? '').trim())
+        .filter(Boolean);
+      return {
+        subject: titulo,
+        text: `${titulo}\n\n${lineas.map((l) => `- ${l}`).join('\n')}`,
+        html: envolver(titulo, `
+          <ul style="padding-left:20px;margin:16px 0;">${lineas.map((l) => `<li style="margin:0 0 10px 0;">${esc(l)}</li>`).join('')}</ul>`, c),
+      };
+    }
+
     case 'recibo-suscripcion': {
       // Con la factura adjunta el correo se presenta como factura; sin ella
       // (el adjunto falló o lo llama alguien que no lo manda) sigue siendo el
@@ -385,7 +402,7 @@ Deno.serve(async (req) => {
     const validas: Template[] = [
       'bienvenida', 'prueba-por-vencer', 'prueba-vencida', 'cuenta-activada',
       'recibo-suscripcion', 'cobro-por-vencer', 'cuota-vencida', 'pago-rechazado',
-      'comprobante-recibido', 'resumen-cobros',
+      'comprobante-recibido', 'resumen-cobros', 'ecf-avisos',
     ];
     if (!template || !validas.includes(template)) return json(400, { error: 'Plantilla no reconocida.' });
     if (!to || !to.includes('@')) return json(400, { error: 'Destinatario inválido.' });

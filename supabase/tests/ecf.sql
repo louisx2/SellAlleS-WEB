@@ -6,6 +6,7 @@
 --          <supabase/migrations/20261030130000_ecf_asignacion.sql>
 --          <supabase/migrations/20261030140000_ecf_anulacion_reemision.sql>
 --          <supabase/migrations/20261030150000_ecf_servidor.sql>
+--          <supabase/migrations/20261030160000_ecf_avisos.sql>
 --          <este archivo> rollback;
 --
 -- Pasa si el último resultado es `ok`; si una aserción falla, la llamada
@@ -2352,6 +2353,448 @@ do $t$
 begin
   if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'password') is distinct from 'clave-w' then
     raise exception 'service_role debía poder leer las credenciales';
+  end if;
+end $t$;
+reset role;
+
+-- == Task 8: estado ante la DGII y avisos a SellAlleS ==
+-- Estado explícito de la sección: super admin; la demo formalizada, sin
+-- ncf_enabled, con el módulo `ecf` y su ecf_config activa (plan gratis: 250
+-- comprobantes y 1,000 requests al mes, sin certificado); sin documentos ni
+-- uso; una venta (…ecd0) que respalda los documentos de la prueba; y
+-- platform_settings.support_email con un correo de prueba (solo dentro de la
+-- transacción, que se revierte).
+--
+-- Nunca cambia ni borra lo que ya haya en Vault: si falta la service_role_key
+-- solo agrega una de prueba. No toca a las empresas reales: los avisos de la
+-- demo se reconocen por su nombre, y "sin nada que avisar no envía" solo se
+-- afirma si en todo el sistema no hay otros avisos. Los correos se miran en
+-- net.http_request_queue filtrando por la URL de send-lifecycle-email y por
+-- template = 'ecf-avisos' (no por "la última fila").
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+update companies set is_formalized = true, ncf_enabled = false where id = '00000000-0000-0000-0000-0000000000aa';
+delete from company_modules where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'ecf', true);
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa';
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
+values ('00000000-0000-0000-0000-0000000000aa', 'preparacion', 'TesteCF', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
+select pg_temp.venta('00000000-0000-0000-0000-00000000ecd0', '00000000-0000-0000-0000-0000000000aa',
+                     '00000000-0000-0000-0000-0000000000b1');
+update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
+update platform_settings set support_email = 'soporte-prueba@sellalles.test';
+do $t$
+begin
+  if not exists (select 1 from vault.decrypted_secrets where name = 'service_role_key') then
+    perform vault.create_secret('llave-de-prueba', 'service_role_key', 'solo para la prueba de ecf.sql');
+  end if;
+end $t$;
+
+-- Los correos ecf-avisos que hay en la cola de pg_net, con su URL y sus
+-- encabezados. El cuerpo solo se lee si es de send-lifecycle-email.
+create function pg_temp.correos_ecf() returns table (id bigint, url text, headers jsonb, b jsonb)
+language sql as $$
+  select q.id, q.url, q.headers, q.b
+    from (select r.id, r.url, r.headers,
+                 case when r.url like '%/functions/v1/send-lifecycle-email%'
+                      then convert_from(r.body, 'utf8')::jsonb end as b
+            from net.http_request_queue r) q
+   where q.b ->> 'template' = 'ecf-avisos'
+$$;
+
+-- Los de la demo: su nombre sale en el correo.
+create function pg_temp.correos_demo() returns table (id bigint, url text, headers jsonb, b jsonb)
+language sql as $$
+  select c.id, c.url, c.headers, c.b from pg_temp.correos_ecf() c
+   where position((select name from companies where id = '00000000-0000-0000-0000-0000000000aa') in c.b::text) > 0
+$$;
+
+-- Las líneas del resumen que hablan de la demo y empiezan con el prefijo.
+create function pg_temp.lineas_demo(p_prefijo text) returns text[] language sql as $$
+  select coalesce(array_agg(t.l order by t.l), '{}')
+    from jsonb_array_elements_text(public._ecf_avisos_lineas()) as t(l)
+   where t.l like p_prefijo || '%'
+     and position((select name from companies where id = '00000000-0000-0000-0000-0000000000aa') in t.l) > 0
+$$;
+
+-- Cambia el uso del mes de la demo y dice cuántas líneas de cupo salen.
+create function pg_temp.cupo_demo(p_comprobantes int, p_requests int) returns int language plpgsql as $$
+begin
+  update ecf_uso set comprobantes = p_comprobantes, requests = p_requests
+   where company_id = '00000000-0000-0000-0000-0000000000aa'
+     and periodo = date_trunc('month', now() at time zone 'utc')::date;
+  return cardinality(pg_temp.lineas_demo('Cupo:'));
+end $$;
+
+-- Documento de la demo (venta ecd0): e-NCF E32 + 10 dígitos; creado y con el
+-- estado puesto hace p_hace.
+create function pg_temp.doc_t8(p_id uuid, p_n int, p_estado text, p_hace interval default interval '0') returns void
+language sql as $$
+  insert into ecf_documentos (id, company_id, sale_id, tipo_ecf, encf, ambiente, estado, created_at, estado_at)
+  values (p_id, '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000ecd0', 32,
+          'E32' || lpad(p_n::text, 10, '0'), 'TesteCF', p_estado, now() - p_hace, now() - p_hace);
+$$;
+
+-- Sin uso, sin documentos y sin certificado la demo no tiene nada que avisar.
+do $t$
+declare antes bigint;
+begin
+  if cardinality(pg_temp.lineas_demo('')) <> 0 then
+    raise exception 'Task 8: la demo sin uso, sin documentos y sin certificado no debía tener avisos, tiene %',
+      pg_temp.lineas_demo('');
+  end if;
+  if jsonb_array_length(public._ecf_avisos_lineas()) = 0 then
+    antes := (select count(*) from pg_temp.correos_ecf());
+    perform ecf_avisos_diarios();
+    if (select count(*) from pg_temp.correos_ecf()) <> antes then
+      raise exception 'Task 8: sin nada que avisar, ecf_avisos_diarios no debía encolar ningún correo';
+    end if;
+  else
+    raise notice 'Task 8: otras empresas tienen avisos; no se afirma que, sin nada, el resumen no se envía';
+  end if;
+end $t$;
+
+-- La demo al 85% de su cupo de comprobantes: el resumen diario sale con una
+-- sola línea de cupo, en un solo correo para SellAlleS.
+insert into ecf_uso (company_id, periodo, comprobantes, requests)
+values ('00000000-0000-0000-0000-0000000000aa', date_trunc('month', now() at time zone 'utc')::date, 213, 10);
+do $t$
+declare
+  l     text[] := pg_temp.lineas_demo('Cupo:');
+  antes bigint := (select count(*) from pg_temp.correos_ecf());
+  q     record;
+begin
+  if cardinality(l) <> 1
+     or strpos(l[1], '213 de 250 comprobantes (85%)') = 0
+     or strpos(l[1], '10 de 1000 requests (1%)') = 0 then
+    raise exception 'Task 8: al 85%% del cupo de comprobantes debía salir una línea de cupo con los dos usos, sale %', l;
+  end if;
+
+  perform ecf_avisos_diarios();
+  if (select count(*) from pg_temp.correos_ecf()) <> antes + 1 then
+    raise exception 'Task 8: ecf_avisos_diarios con la demo al 85%% debía encolar un solo correo ecf-avisos';
+  end if;
+  select * into q from pg_temp.correos_demo() order by id desc limit 1;
+
+  if q.url is distinct from 'https://qwpjclqinruhtxgkrxwr.supabase.co/functions/v1/send-lifecycle-email'
+     or q.headers ->> 'Authorization' is distinct from
+        'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key' limit 1) then
+    raise exception 'Task 8: el resumen debía llamar a send-lifecycle-email con la llave de Vault, llamó a % ', q.url;
+  end if;
+  if q.b ->> 'to' is distinct from 'soporte-prueba@sellalles.test'
+     or jsonb_typeof(q.b -> 'companyId') is distinct from 'null'
+     or q.b ->> 'dedupeKey' is distinct from 'ecf-avisos-' || current_date::text then
+    raise exception 'Task 8: el resumen debía ir a support_email, sin empresa y con la clave ecf-avisos-<fecha>, trae %',
+      q.b - 'vars';
+  end if;
+  if (select array_agg(k order by k) from jsonb_object_keys(q.b) k)
+       is distinct from array['companyId', 'dedupeKey', 'template', 'to', 'vars']
+     or (select array_agg(k order by k) from jsonb_object_keys(q.b -> 'vars') k)
+       is distinct from array['lineas', 'titulo'] then
+    raise exception 'Task 8: el correo solo debía llevar titulo y lineas en vars, trae %', q.b;
+  end if;
+  if q.b -> 'vars' ->> 'titulo' is distinct from 'Avisos de e-CF del ' || to_char(current_date, 'DD/MM/YYYY')
+     or jsonb_typeof(q.b -> 'vars' -> 'lineas') is distinct from 'array'
+     or not ((q.b -> 'vars' -> 'lineas') @> to_jsonb(l[1])) then
+    raise exception 'Task 8: el asunto o las líneas del resumen no son los esperados: %', q.b -> 'vars';
+  end if;
+  -- Ningún secreto de la demo (las contraseñas de la sección Task 4 empiezan con "clave-").
+  if q.b::text like '%clave-%' or q.b::text like '%key-y%' then
+    raise exception 'Task 8: el correo no podía llevar secretos';
+  end if;
+end $t$;
+
+-- El umbral es 80% de cualquiera de los dos cupos, solo del mes en curso.
+do $t$
+declare
+  v_mes date := date_trunc('month', now() at time zone 'utc')::date;
+begin
+  if pg_temp.cupo_demo(199, 799) <> 0 then
+    raise exception 'Task 8: al 79.6%% y al 79.9%% no debía avisar';
+  end if;
+  if pg_temp.cupo_demo(200, 0) <> 1 then
+    raise exception 'Task 8: justo al 80%% de comprobantes debía avisar';
+  end if;
+  if pg_temp.cupo_demo(0, 800) <> 1 then
+    raise exception 'Task 8: justo al 80%% de requests debía avisar';
+  end if;
+  if pg_temp.cupo_demo(250, 1000) <> 1 then
+    raise exception 'Task 8: al 100%% debía avisar';
+  end if;
+  if pg_temp.cupo_demo(0, 0) <> 0 then
+    raise exception 'Task 8: sin uso no debía avisar';
+  end if;
+
+  -- Un cupo en cero no se puede medir: no avisa, ni con uso.
+  update ecf_config set cupo_comprobantes = 0, cupo_requests = 0
+   where company_id = '00000000-0000-0000-0000-0000000000aa';
+  if pg_temp.cupo_demo(5, 5) <> 0 then
+    raise exception 'Task 8: con el cupo en cero no debía avisar';
+  end if;
+  update ecf_config set cupo_comprobantes = 250, cupo_requests = 1000
+   where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+  -- El 100% del mes pasado ya no cuenta.
+  perform pg_temp.cupo_demo(250, 1000);
+  update ecf_uso set periodo = (v_mes - interval '1 month')::date
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and periodo = v_mes;
+  if cardinality(pg_temp.lineas_demo('Cupo:')) <> 0 then
+    raise exception 'Task 8: el uso de un mes anterior no debía avisar';
+  end if;
+  update ecf_uso set periodo = v_mes, comprobantes = 213, requests = 10
+   where company_id = '00000000-0000-0000-0000-0000000000aa';
+end $t$;
+
+-- Documentos con problema en las últimas 24 horas.
+--   ecd1 rechazado ahora                 ecd5 rechazado ahora, ya reemplazado por ecd6
+--   ecd2 error_datos hace 2 h            ecd6 por_enviar (el reemplazo)
+--   ecd3 sin_cupo hace 23 h              ecd7 aceptado
+--   ecd4 rechazado hace 3 días (viejo)   ecd8 creado hace 3 días, rechazado hace 1 hora
+select pg_temp.doc_t8('00000000-0000-0000-0000-00000000ecd1', 880001, 'rechazado');
+select pg_temp.doc_t8('00000000-0000-0000-0000-00000000ecd2', 880002, 'error_datos', interval '2 hours');
+select pg_temp.doc_t8('00000000-0000-0000-0000-00000000ecd3', 880003, 'sin_cupo', interval '23 hours');
+select pg_temp.doc_t8('00000000-0000-0000-0000-00000000ecd4', 880004, 'rechazado', interval '3 days');
+select pg_temp.doc_t8('00000000-0000-0000-0000-00000000ecd6', 880006, 'por_enviar');
+select pg_temp.doc_t8('00000000-0000-0000-0000-00000000ecd5', 880005, 'rechazado');
+update ecf_documentos set reemplazado_por = '00000000-0000-0000-0000-00000000ecd6'
+ where id = '00000000-0000-0000-0000-00000000ecd5';
+select pg_temp.doc_t8('00000000-0000-0000-0000-00000000ecd7', 880007, 'aceptado');
+select pg_temp.doc_t8('00000000-0000-0000-0000-00000000ecd8', 880008, 'rechazado', interval '3 days');
+update ecf_documentos set estado_at = now() - interval '1 hour'
+ where id = '00000000-0000-0000-0000-00000000ecd8';
+do $t$
+declare
+  l  text[] := pg_temp.lineas_demo('Documentos:');
+  e  text;
+begin
+  if cardinality(l) <> 1
+     or strpos(l[1], ': 2 rechazados, 1 con error de datos, 1 sin cupo (') = 0 then
+    raise exception 'Task 8: debían salir 2 rechazados, 1 con error de datos y 1 sin cupo, sale %', l;
+  end if;
+  foreach e in array array['E320000880001', 'E320000880002', 'E320000880003', 'E320000880008'] loop
+    if strpos(l[1], e) = 0 then
+      raise exception 'Task 8: la línea de documentos debía nombrar el %, sale %', e, l;
+    end if;
+  end loop;
+  foreach e in array array['E320000880004', 'E320000880005', 'E320000880006', 'E320000880007'] loop
+    if strpos(l[1], e) > 0 then
+      raise exception 'Task 8: la línea de documentos no debía nombrar el % (viejo, reemplazado, por enviar o aceptado), sale %', e, l;
+    end if;
+  end loop;
+  if strpos(l[1], ' y otros') > 0 then
+    raise exception 'Task 8: con 4 documentos no debía decir "y otros", sale %', l;
+  end if;
+
+  -- En singular.
+  update ecf_documentos set estado = 'aceptado'
+   where id in ('00000000-0000-0000-0000-00000000ecd2', '00000000-0000-0000-0000-00000000ecd3',
+                '00000000-0000-0000-0000-00000000ecd8');
+  l := pg_temp.lineas_demo('Documentos:');
+  if cardinality(l) <> 1 or strpos(l[1], ': 1 rechazado (E320000880001)') = 0 then
+    raise exception 'Task 8: con un solo rechazado debía decir "1 rechazado (E320000880001)", sale %', l;
+  end if;
+  update ecf_documentos set estado = 'error_datos' where id = '00000000-0000-0000-0000-00000000ecd2';
+  update ecf_documentos set estado = 'sin_cupo' where id = '00000000-0000-0000-0000-00000000ecd3';
+  update ecf_documentos set estado = 'rechazado' where id = '00000000-0000-0000-0000-00000000ecd8';
+
+  -- Con más de cinco documentos se nombran cinco y el resto va como "y otros".
+  insert into ecf_documentos (id, company_id, sale_id, tipo_ecf, encf, ambiente, estado, created_at, estado_at)
+  select gen_random_uuid(), '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000ecd0',
+         32, 'E32' || lpad((990000 + g)::text, 10, '0'), 'TesteCF', 'sin_cupo', now(), now()
+    from generate_series(1, 6) g;
+  l := pg_temp.lineas_demo('Documentos:');
+  if cardinality(l) <> 1 or strpos(l[1], ' y otros)') = 0 or strpos(l[1], ': 2 rechazados, 1 con error de datos, 7 sin cupo (') = 0 then
+    raise exception 'Task 8: con 10 documentos debían salir las cuentas completas y "y otros", sale %', l;
+  end if;
+  delete from ecf_documentos
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and encf like 'E320000990%';
+end $t$;
+
+-- Certificados que vencen en 30 días o menos (o que ya vencieron).
+do $t$
+declare
+  c text := '00000000-0000-0000-0000-0000000000aa';
+  l text[];
+begin
+  if cardinality(pg_temp.lineas_demo('Certificado:')) <> 0 then
+    raise exception 'Task 8: sin fecha de vencimiento no debía haber aviso de certificado';
+  end if;
+
+  update ecf_config set certificado_vence = current_date + 31 where company_id = c::uuid;
+  if cardinality(pg_temp.lineas_demo('Certificado:')) <> 0 then
+    raise exception 'Task 8: a 31 días del vencimiento no debía avisar';
+  end if;
+
+  update ecf_config set certificado_vence = current_date + 30 where company_id = c::uuid;
+  l := pg_temp.lineas_demo('Certificado:');
+  if cardinality(l) <> 1 or strpos(l[1], 'vence el ' || to_char(current_date + 30, 'DD/MM/YYYY') || ' (en 30 días)') = 0 then
+    raise exception 'Task 8: a 30 días del vencimiento debía avisar, sale %', l;
+  end if;
+
+  update ecf_config set certificado_vence = current_date + 1 where company_id = c::uuid;
+  l := pg_temp.lineas_demo('Certificado:');
+  if cardinality(l) <> 1 or strpos(l[1], '(en 1 día)') = 0 then
+    raise exception 'Task 8: a un día del vencimiento debía decir "en 1 día", sale %', l;
+  end if;
+
+  update ecf_config set certificado_vence = current_date where company_id = c::uuid;
+  l := pg_temp.lineas_demo('Certificado:');
+  if cardinality(l) <> 1 or strpos(l[1], 'vence hoy') = 0 then
+    raise exception 'Task 8: el día del vencimiento debía decir "vence hoy", sale %', l;
+  end if;
+
+  update ecf_config set certificado_vence = current_date - 5 where company_id = c::uuid;
+  l := pg_temp.lineas_demo('Certificado:');
+  if cardinality(l) <> 1 or strpos(l[1], 'venció el ' || to_char(current_date - 5, 'DD/MM/YYYY')) = 0 then
+    raise exception 'Task 8: un certificado vencido debía avisar "venció el", sale %', l;
+  end if;
+
+  update ecf_config set certificado_vence = null where company_id = c::uuid;
+end $t$;
+
+-- Todo junto: un solo correo con las tres clases de aviso, en ese orden.
+update ecf_config set certificado_vence = current_date + 10
+ where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+declare
+  antes   bigint := (select count(*) from pg_temp.correos_ecf());
+  q       record;
+  v_orden text[];
+begin
+  perform ecf_avisos_diarios();
+  if (select count(*) from pg_temp.correos_ecf()) <> antes + 1 then
+    raise exception 'Task 8: aunque haya cupo, documentos y certificado, el resumen debía ser un solo correo';
+  end if;
+  select * into q from pg_temp.correos_demo() order by id desc limit 1;
+  select array_agg(left(t.l, 4) order by t.n) into v_orden
+    from jsonb_array_elements_text(q.b -> 'vars' -> 'lineas') with ordinality as t(l, n)
+   where position((select name from companies where id = '00000000-0000-0000-0000-0000000000aa') in t.l) > 0;
+  if v_orden is distinct from array['Cupo', 'Docu', 'Cert'] then
+    raise exception 'Task 8: el resumen debía traer cupo, documentos y certificado de la demo, en ese orden, trae %', v_orden;
+  end if;
+end $t$;
+
+-- Sin correo de soporte no se manda nada (la tabla no admite uno en blanco: o es
+-- un correo válido o es nulo).
+do $t$
+declare
+  antes bigint := (select count(*) from pg_temp.correos_ecf());
+begin
+  update platform_settings set support_email = null;
+  perform ecf_avisos_diarios();
+  perform ecf_avisar_sin_cupo('00000000-0000-0000-0000-0000000000aa');
+  update platform_settings set support_email = 'soporte-prueba@sellalles.test';
+  if (select count(*) from pg_temp.correos_ecf()) <> antes then
+    raise exception 'Task 8: sin support_email no debía encolarse ningún correo';
+  end if;
+end $t$;
+
+-- Sin cupo: aviso urgente de una empresa, con su clave de un correo por mes.
+do $t$
+declare
+  antes bigint := (select count(*) from pg_temp.correos_ecf());
+  n     text := (select name from companies where id = '00000000-0000-0000-0000-0000000000aa');
+  q     record;
+begin
+  perform ecf_avisar_sin_cupo('00000000-0000-0000-0000-0000000000aa');
+  if (select count(*) from pg_temp.correos_ecf()) <> antes + 1 then
+    raise exception 'Task 8: ecf_avisar_sin_cupo debía encolar un correo ecf-avisos';
+  end if;
+  select * into q from pg_temp.correos_demo() where b ->> 'dedupeKey' like 'ecf-sin-cupo-%' order by id desc limit 1;
+
+  if q.url is distinct from 'https://qwpjclqinruhtxgkrxwr.supabase.co/functions/v1/send-lifecycle-email'
+     or q.headers ->> 'Authorization' is distinct from
+        'Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name = 'service_role_key' limit 1) then
+    raise exception 'Task 8: el aviso de falta de cupo debía llamar a send-lifecycle-email con la llave de Vault';
+  end if;
+  if q.b ->> 'to' is distinct from 'soporte-prueba@sellalles.test'
+     or q.b ->> 'companyId' is distinct from '00000000-0000-0000-0000-0000000000aa'
+     or q.b ->> 'dedupeKey' is distinct from
+        'ecf-sin-cupo-00000000-0000-0000-0000-0000000000aa-' || to_char(now() at time zone 'utc', 'YYYYMM') then
+    raise exception 'Task 8: el aviso debía ir a support_email, con la empresa y la clave ecf-sin-cupo-<empresa>-<AAAAMM>, trae %',
+      q.b - 'vars';
+  end if;
+  if (select array_agg(k order by k) from jsonb_object_keys(q.b -> 'vars') k)
+       is distinct from array['lineas', 'titulo']
+     or position(n in q.b -> 'vars' ->> 'titulo') = 0
+     or jsonb_typeof(q.b -> 'vars' -> 'lineas') is distinct from 'array'
+     or jsonb_array_length(q.b -> 'vars' -> 'lineas') < 2
+     or position('213 de 250 comprobantes' in (q.b -> 'vars' -> 'lineas')::text) = 0
+     or position('10 de 1000 requests' in (q.b -> 'vars' -> 'lineas')::text) = 0 then
+    raise exception 'Task 8: el aviso de falta de cupo debía nombrar la empresa y su uso del mes, trae %', q.b -> 'vars';
+  end if;
+  if q.b::text like '%clave-%' or q.b::text like '%key-y%' then
+    raise exception 'Task 8: el aviso no podía llevar secretos';
+  end if;
+
+  -- Una empresa que no existe no rompe el aviso.
+  perform ecf_avisar_sin_cupo(gen_random_uuid());
+end $t$;
+
+-- Cron: el resumen diario a las 12:00 UTC.
+do $t$
+begin
+  if (select count(*) from cron.job where jobname = 'ecf-avisos') <> 1
+     or (select schedule from cron.job where jobname = 'ecf-avisos') is distinct from '0 12 * * *'
+     or (select command from cron.job where jobname = 'ecf-avisos') is distinct from 'select public.ecf_avisos_diarios()'
+     or not (select active from cron.job where jobname = 'ecf-avisos') then
+    raise exception 'cron: debía existir la tarea ecf-avisos, activa, a las 12:00 con la función del resumen';
+  end if;
+end $t$;
+
+-- Permisos: del servidor, como las demás.
+do $t$
+declare f text;
+begin
+  foreach f in array array[
+    'public.ecf_avisar_sin_cupo(uuid)',
+    'public._ecf_avisos_lineas()',
+    'public.ecf_avisos_diarios()'] loop
+    if has_function_privilege('anon', f, 'execute') or has_function_privilege('authenticated', f, 'execute') then
+      raise exception '% no debía ser ejecutable por anon ni authenticated', f;
+    end if;
+    if not has_function_privilege('service_role', f, 'execute') then
+      raise exception '% debía ser ejecutable por service_role', f;
+    end if;
+    if (select proacl is null from pg_proc where oid = f::regprocedure)
+       or exists (select 1 from pg_proc p cross join lateral aclexplode(p.proacl) a
+                   where p.oid = f::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+      raise exception '% no debía ser ejecutable por PUBLIC', f;
+    end if;
+    if not coalesce((select prosecdef and proconfig @> array['search_path=public']
+                       from pg_proc where oid = f::regprocedure), false) then
+      raise exception '% debía ser security definer con search_path = public', f;
+    end if;
+  end loop;
+end $t$;
+
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+set local role authenticated;
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_avisar_sin_cupo('00000000-0000-0000-0000-0000000000aa')$q$, '%permission denied%');
+  perform pg_temp.debe_fallar($q$select ecf_avisos_diarios()$q$, '%permission denied%');
+  perform pg_temp.debe_fallar($q$select _ecf_avisos_lineas()$q$, '%permission denied%');
+end $t$;
+reset role;
+set local role anon;
+do $t$
+begin
+  perform pg_temp.debe_fallar($q$select ecf_avisos_diarios()$q$, '%permission denied%');
+  perform pg_temp.debe_fallar($q$select ecf_avisar_sin_cupo('00000000-0000-0000-0000-0000000000aa')$q$, '%permission denied%');
+end $t$;
+reset role;
+
+-- service_role sí puede (es quien las llama; el cron corre como postgres).
+set local role service_role;
+do $t$
+begin
+  perform ecf_avisar_sin_cupo('00000000-0000-0000-0000-0000000000aa');
+  perform ecf_avisos_diarios();
+  if jsonb_typeof(_ecf_avisos_lineas()) is distinct from 'array' then
+    raise exception 'service_role debía poder pedir las líneas del resumen';
   end if;
 end $t$;
 reset role;

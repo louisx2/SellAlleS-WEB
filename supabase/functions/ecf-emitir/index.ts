@@ -338,11 +338,27 @@ function crearDeps(admin: Cliente): DepsEmision {
     },
 
     registrar: async (id, cambio: CambioDocumento) => {
-      const { error } = await admin
+      const { data, error } = await admin
         .from('ecf_documentos')
         .update({ ...cambio, updated_at: new Date().toISOString() })
-        .eq('id', id);
+        .eq('id', id)
+        .select('company_id');
       if (error) throw new Error(`No se pudo guardar el resultado del documento: ${error.message}`);
+
+      // MSeller contestó 429: aviso urgente a SellAlleS (la base manda uno solo
+      // por empresa y mes). De mejor esfuerzo: si falla, el documento ya quedó
+      // registrado `sin_cupo` y eso no se deshace.
+      if (cambio.estado === 'sin_cupo') {
+        const companyId = (data as Array<{ company_id: string }> | null)?.[0]?.company_id;
+        if (companyId) {
+          try {
+            const { error: avisoErr } = await admin.rpc('ecf_avisar_sin_cupo', { p_company: companyId });
+            if (avisoErr) console.error('ecf-emitir: no se pudo avisar de la falta de cupo:', avisoErr.message);
+          } catch (e) {
+            console.error('ecf-emitir: no se pudo avisar de la falta de cupo:', mensajeDe(e));
+          }
+        }
+      }
     },
 
     sumarUso: async (companyId, requests, comprobantes) => {
@@ -482,7 +498,6 @@ Deno.serve(async (req) => {
             companyId: documento.company_id,
             encf: documento.encf,
             ambiente: documento.ambiente as Ambiente,
-            estado: documento.estado,
           },
           deps,
         );
