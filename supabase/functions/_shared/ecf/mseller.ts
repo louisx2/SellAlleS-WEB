@@ -64,6 +64,8 @@ export interface EstadoRemoto {
   securityCode?: string;
   qrUrl?: string;
   internalTrackId?: string;
+  // Fecha de firma (dd-mm-aaaa hh:mm:ss) si la consulta la trae; igual que en el envío.
+  signedDate?: string;
 }
 
 export const MSELLER_BASE = 'https://ecf.api.mseller.app';
@@ -355,9 +357,11 @@ function estadoDesde(ecf: string, status: string, d: Json): EstadoRemoto {
   const securityCode = texto(d.securityCode);
   const qrUrl = texto(d.qr_url);
   const internalTrackId = texto(d.internalTrackId);
+  const signedDate = texto(d.signedDate);
   if (securityCode) r.securityCode = securityCode;
   if (qrUrl) r.qrUrl = qrUrl;
   if (internalTrackId) r.internalTrackId = internalTrackId;
+  if (signedDate) r.signedDate = signedDate;
   return r;
 }
 

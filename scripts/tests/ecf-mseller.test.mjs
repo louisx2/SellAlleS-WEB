@@ -397,6 +397,20 @@ test('consultar arma la URL con ?ecf= y mapea la respuesta', async () => {
   });
 });
 
+test('consultar trae la fecha de firma si MSeller la manda, y no la inventa si no', async () => {
+  const con = await consultar(
+    'TesteCF',
+    sesion(),
+    API_KEY,
+    'E310000000008',
+    fetchFalso(res(200, { status: 'En Cola', signedDate: '14-05-2025 02:57:33' })),
+  );
+  assert.equal(con.signedDate, '14-05-2025 02:57:33');
+
+  const sin = await consultar('TesteCF', sesion(), API_KEY, 'E310000000008', fetchFalso(res(200, { status: 'En Cola' })));
+  assert.ok(!('signedDate' in sin));
+});
+
 test('consultar trae los mensajes de un rechazo', async () => {
   const f = fetchFalso(
     res(200, {

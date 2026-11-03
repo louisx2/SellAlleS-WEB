@@ -1,0 +1,384 @@
+// Emisión de un e-CF a MSeller (orquestador puro: todo lo que toca el mundo
+// entra por `DepsEmision`, así las pruebas lo reemplazan por dependencias falsas
+// en memoria y nunca se llama a MSeller ni a la base de datos).
+//
+// Lo comparten la Edge Function `ecf-emitir` (Deno) y las pruebas de `npm test`
+// (Node), que lo cargan quitando los tipos: por eso solo usa sintaxis borrable
+// (nada de enum, namespace ni parameter properties), sin APIs de Node ni de Deno
+// y con imports `.ts`.
+//
+// Reglas que sostienen todo el archivo:
+//   * Un 2xx de MSeller significa que recibió el documento: NUNCA se reenvía lo
+//     que ya respondió. Si la respuesta vino incompleta se registra `recibido` y
+//     la consulta lo completa después.
+//   * Si un intento anterior pudo llegar a MSeller sin que viéramos la respuesta
+//     (timeout, 5xx, el proceso murió), el siguiente consulta antes de enviar.
+//     `ecf_reservar_documento` cuenta cada reserva, así que `intentos > 1` es
+//     justo esa señal.
+//   * Los secretos (contraseña, API key, tokens) no se devuelven, no se escriben
+//     en `ultimo_error` ni en `request_json`.
+
+import { armarEcf } from './armar.ts';
+import type { DatosEcf } from './armar.ts';
+import { consultar, enviar, MsellerError, proximoIntento, sesionVigente } from './mseller.ts';
+import type { Ambiente, Credenciales, EstadoRemoto, Sesion } from './mseller.ts';
+
+export interface DocReservado {
+  id: string;
+  companyId: string;
+  encf: string;
+  ambiente: Ambiente;
+  intentos: number;
+}
+
+export interface CambioDocumento {
+  estado: string;
+  security_code?: string;
+  qr_url?: string;
+  signed_at?: string;
+  internal_track_id?: string;
+  request_json?: unknown;
+  ultimo_error?: string | null;
+  proximo_intento_at?: string;
+  enviado_at?: string;
+  estado_at?: string;
+  mensajes_dgii?: unknown;
+  reservado_hasta?: null;
+}
+
+export interface DepsEmision {
+  reservar(id: string): Promise<DocReservado | null>;
+  cargarDatos(doc: DocReservado): Promise<DatosEcf>;
+  leerCredenciales(companyId: string, a: Ambiente): Promise<Credenciales>;
+  guardarSesion(companyId: string, a: Ambiente, s: Sesion): Promise<void>;
+  registrar(id: string, cambio: CambioDocumento): Promise<void>;
+  sumarUso(companyId: string, requests: number, comprobantes: number): Promise<void>;
+  fetch: typeof fetch;
+  ahora(): Date;
+}
+
+export interface ResultadoEmision {
+  estado: string;
+  encf?: string;
+  qrUrl?: string;
+  securityCode?: string;
+  signedAt?: string;
+  error?: string;
+}
+
+/**
+ * Un dato del comprobante que falta o está mal y que reintentar no arregla (la
+ * venta ya no existe, la empresa no tiene configuración de e-CF...). `cargarDatos`
+ * la lanza y el documento queda en `error_datos`. Cualquier otro error al cargar
+ * (la base no contestó) se reintenta.
+ */
+export class ErrorDatosEcf extends Error {
+  constructor(mensaje: string) {
+    super(mensaje);
+    this.name = 'ErrorDatosEcf';
+  }
+}
+
+const MAX_ERROR = 500;
+const MIN_SECRETO = 4;
+
+/** Quita las claves vacías (`undefined` y '') para que la fila conserve null en esos campos. */
+function sinVacios<T extends object>(o: T): T {
+  const r: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (v !== undefined && v !== '') r[k] = v;
+  }
+  return r as T;
+}
+
+// ---------------------------------------------------------------------------
+// Conexión con MSeller: sesión, 401 y cuenta de requests
+// ---------------------------------------------------------------------------
+
+type DepsConexion = Pick<DepsEmision, 'guardarSesion' | 'fetch' | 'ahora'>;
+
+interface Conexion {
+  apiKey: string;
+  /** Los secretos conocidos hasta ahora (crece al abrir sesión). */
+  secretos: Array<string | null>;
+  /** Hace la llamada con la sesión vigente; ante un 401 inicia sesión de nuevo y reintenta una vez. */
+  llamar<T>(f: (s: Sesion) => Promise<T>): Promise<T>;
+  /** Llamadas que MSeller atendió y gastan cupo (una respuesta de autenticación no cuenta). */
+  requests(): number;
+  ocultar(texto: string): string;
+}
+
+/** Un fallo al iniciar sesión es del acceso, no del comprobante: nunca `datos` ni `cupo`. */
+function comoFalloDeAcceso(e: unknown): unknown {
+  if (e instanceof MsellerError && (e.tipo === 'datos' || e.tipo === 'cupo' || e.tipo === 'no_encontrado')) {
+    return new MsellerError('auth', e.message, e.status);
+  }
+  return e;
+}
+
+function nuevaConexion(
+  cred: Credenciales,
+  doc: { companyId: string; ambiente: Ambiente },
+  deps: DepsConexion,
+): Conexion {
+  const secretos: Array<string | null> = [cred.password, cred.apiKey, cred.refreshToken, cred.idToken];
+  let requests = 0;
+  let sesion: Sesion | null = null;
+
+  const abrir = async (c: Credenciales): Promise<Sesion> => {
+    let abierta: { sesion: Sesion; nueva: boolean };
+    try {
+      abierta = await sesionVigente(c, doc.ambiente, deps.fetch, deps.ahora());
+    } catch (e) {
+      throw comoFalloDeAcceso(e);
+    }
+    // Antes de guardarla: si guardar falla, el mensaje no puede dejar salir los tokens nuevos.
+    secretos.push(abierta.sesion.idToken, abierta.sesion.refreshToken);
+    if (abierta.nueva) await deps.guardarSesion(doc.companyId, doc.ambiente, abierta.sesion);
+    return abierta.sesion;
+  };
+
+  const intento = async <T>(f: (s: Sesion) => Promise<T>, s: Sesion): Promise<T> => {
+    try {
+      const r = await f(s);
+      requests++;
+      return r;
+    } catch (e) {
+      // Sin respuesta HTTP (red) o con una de autenticación no se gasta cupo.
+      if (e instanceof MsellerError && e.tipo !== 'red' && e.tipo !== 'auth') requests++;
+      throw e;
+    }
+  };
+
+  return {
+    apiKey: cred.apiKey,
+    secretos,
+    requests: () => requests,
+    ocultar: (texto) => {
+      let r = texto;
+      for (const s of secretos) {
+        if (s && s.length >= MIN_SECRETO) r = r.split(s).join('***');
+      }
+      return r;
+    },
+    llamar: async <T>(f: (s: Sesion) => Promise<T>): Promise<T> => {
+      if (!sesion) sesion = await abrir(cred);
+      try {
+        return await intento(f, sesion);
+      } catch (e) {
+        if (!(e instanceof MsellerError && e.tipo === 'auth')) throw e;
+        // Sin idToken, sin vencimiento y sin refreshToken no queda nada que
+        // reutilizar ni renovar: sesionVigente inicia sesión con la contraseña.
+        sesion = await abrir({ ...cred, idToken: null, idTokenVence: null, refreshToken: null });
+        return await intento(f, sesion);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Emisión
+// ---------------------------------------------------------------------------
+
+/** Texto de los mensajes de la DGII, o el de respaldo si no hay. */
+function textoDeMensajes(mensajes: EstadoRemoto['mensajes'], respaldo: string): string {
+  const texto = mensajes.map((m) => m.valor).join('; ');
+  return (texto || respaldo).slice(0, MAX_ERROR);
+}
+
+/**
+ * Manda a MSeller el documento `id` (que está en `por_enviar` o con una reserva
+ * vencida) y deja registrado lo que pasó. No lanza por fallos de MSeller, de red
+ * ni de datos: los registra y los devuelve en el resultado. Solo lanza si no
+ * puede guardar lo que MSeller ya recibió (queda `enviando`, y el siguiente
+ * intento consulta antes de enviar, así que no se duplica).
+ */
+export async function emitirDocumento(id: string, deps: DepsEmision): Promise<ResultadoEmision> {
+  const doc = await deps.reservar(id);
+  if (!doc) return { estado: 'ocupado' };
+
+  let conexion: Conexion | undefined;
+  let jsonEnviado: unknown;
+  let comprobantes = 0;
+  // Verdadero en cuanto MSeller dio señales de tener el documento.
+  let yaRespondio = false;
+
+  // Toda salida de `enviando` pone la fecha del cambio y suelta la reserva.
+  const cerrar = async (cambio: CambioDocumento, resultado: ResultadoEmision): Promise<ResultadoEmision> => {
+    const cuando = deps.ahora().toISOString();
+    await deps.registrar(doc.id, sinVacios({ ...cambio, estado_at: cuando, reservado_hasta: null }));
+    return sinVacios({ ...resultado, encf: doc.encf });
+  };
+
+  const fallar = (e: unknown): Promise<ResultadoEmision> => {
+    const crudo = e instanceof Error ? e.message : String(e);
+    const mensaje = (conexion ? conexion.ocultar(crudo) : crudo).slice(0, MAX_ERROR);
+
+    if (e instanceof MsellerError && e.tipo === 'cupo') {
+      return cerrar({ estado: 'sin_cupo', ultimo_error: mensaje }, { estado: 'sin_cupo', error: mensaje });
+    }
+    if (e instanceof ErrorDatosEcf || (e instanceof MsellerError && e.tipo === 'datos')) {
+      return cerrar(
+        // Para soporte: lo que MSeller no aceptó (si el rechazo fue al enviar).
+        { estado: 'error_datos', ultimo_error: mensaje, request_json: jsonEnviado },
+        { estado: 'error_datos', error: mensaje },
+      );
+    }
+    // Red, servidor, autenticación que no se arregló, o un error nuestro: se
+    // vuelve a intentar con espera escalonada.
+    return cerrar(
+      {
+        estado: 'por_enviar',
+        proximo_intento_at: proximoIntento(doc.intentos, deps.ahora()).toISOString(),
+        ultimo_error: mensaje,
+      },
+      { estado: 'por_enviar', error: mensaje },
+    );
+  };
+
+  try {
+    const armado = armarEcf(await deps.cargarDatos(doc));
+    if (!armado.ok) {
+      return await cerrar(
+        { estado: 'error_datos', ultimo_error: armado.error },
+        { estado: 'error_datos', error: armado.error },
+      );
+    }
+
+    const c = nuevaConexion(await deps.leerCredenciales(doc.companyId, doc.ambiente), doc, deps);
+    conexion = c;
+
+    // Un intento anterior pudo llegar a MSeller sin que viéramos la respuesta.
+    // Si ya lo tiene se guarda lo suyo; solo si no lo conoce se envía.
+    if (doc.intentos > 1) {
+      const remoto = await c.llamar((s) => consultar(doc.ambiente, s, c.apiKey, doc.encf, deps.fetch));
+      if (remoto && remoto.estado !== 'no_encontrado') {
+        yaRespondio = true;
+        const falla =
+          remoto.estado === 'rechazado'
+            ? textoDeMensajes(remoto.mensajes, 'La DGII rechazó el comprobante.')
+            : remoto.estado === 'error_datos'
+              ? textoDeMensajes(remoto.mensajes, 'MSeller respondió con un error o con un estado que no se reconoce.')
+              : null;
+        const resultado = await cerrar(
+          {
+            estado: remoto.estado,
+            security_code: remoto.securityCode,
+            qr_url: remoto.qrUrl,
+            signed_at: remoto.signedDate,
+            internal_track_id: remoto.internalTrackId,
+            mensajes_dgii: remoto.mensajes,
+            ultimo_error: falla,
+            // No sabemos cuándo llegó de verdad; esta es la hora en que se confirma.
+            enviado_at: deps.ahora().toISOString(),
+          },
+          {
+            estado: remoto.estado,
+            qrUrl: remoto.qrUrl,
+            securityCode: remoto.securityCode,
+            signedAt: remoto.signedDate,
+            error: falla ?? undefined,
+          },
+        );
+        // Nadie lo había contado: el envío anterior no vio respuesta.
+        comprobantes = 1;
+        return resultado;
+      }
+    }
+
+    jsonEnviado = armado.json;
+    const resp = await c.llamar((s) => enviar(doc.ambiente, s, c.apiKey, armado.json, deps.fetch));
+    yaRespondio = true;
+
+    // Si MSeller contestó 2xx sin código o sin QR, esos campos quedan vacíos y
+    // la consulta los llena después: reenviar duplicaría el comprobante.
+    const resultado = await cerrar(
+      {
+        estado: 'recibido',
+        security_code: resp.securityCode,
+        qr_url: resp.qrUrl,
+        signed_at: resp.signedDate,
+        internal_track_id: resp.internalTrackId,
+        request_json: armado.json,
+        ultimo_error: null,
+        enviado_at: deps.ahora().toISOString(),
+      },
+      { estado: 'recibido', qrUrl: resp.qrUrl, securityCode: resp.securityCode, signedAt: resp.signedDate },
+    );
+    comprobantes = 1;
+    return resultado;
+  } catch (e) {
+    // MSeller ya tiene el documento y no pudimos guardarlo: no se pisa el estado
+    // con otro intento; el próximo (con la reserva vencida) consulta primero.
+    if (yaRespondio) throw e;
+    return await fallar(e);
+  } finally {
+    // Contar es contabilidad: si falla no deshace lo que ya se hizo.
+    const requests = conexion ? conexion.requests() : 0;
+    if (requests > 0 || comprobantes > 0) {
+      try {
+        await deps.sumarUso(doc.companyId, requests, comprobantes);
+      } catch {
+        // se ignora a propósito
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Completar un documento ya recibido
+// ---------------------------------------------------------------------------
+
+export interface DocCompletable {
+  id: string;
+  companyId: string;
+  encf: string;
+  ambiente: Ambiente;
+  /** Estado actual: no cambia, de eso se ocupa el seguimiento de estados. */
+  estado: string;
+}
+
+export type DepsCompletar = Pick<
+  DepsEmision,
+  'leerCredenciales' | 'guardarSesion' | 'registrar' | 'sumarUso' | 'fetch' | 'ahora'
+>;
+
+/**
+ * Un documento `recibido` o aceptado al que le faltó el QR (MSeller contestó el
+ * envío con un 2xx incompleto): consulta una vez y, si MSeller ya tiene el
+ * código, el QR o la fecha de firma, los guarda. Nunca reenvía y es de mejor
+ * esfuerzo: si algo falla devuelve false y el documento queda como estaba.
+ */
+export async function completarDocumento(doc: DocCompletable, deps: DepsCompletar): Promise<boolean> {
+  let conexion: Conexion | undefined;
+  try {
+    const c = nuevaConexion(await deps.leerCredenciales(doc.companyId, doc.ambiente), doc, deps);
+    conexion = c;
+
+    const remoto = await c.llamar((s) => consultar(doc.ambiente, s, c.apiKey, doc.encf, deps.fetch));
+    if (!remoto || !(remoto.securityCode || remoto.qrUrl || remoto.signedDate)) return false;
+
+    await deps.registrar(
+      doc.id,
+      sinVacios({
+        estado: doc.estado,
+        security_code: remoto.securityCode,
+        qr_url: remoto.qrUrl,
+        signed_at: remoto.signedDate,
+        internal_track_id: remoto.internalTrackId,
+      }),
+    );
+    return true;
+  } catch {
+    return false;
+  } finally {
+    const requests = conexion ? conexion.requests() : 0;
+    if (requests > 0) {
+      try {
+        await deps.sumarUso(doc.companyId, requests, 0);
+      } catch {
+        // se ignora a propósito
+      }
+    }
+  }
+}
