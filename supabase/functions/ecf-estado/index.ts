@@ -18,7 +18,8 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { consultarPendientes } from '../_shared/ecf/estado.ts';
 import type { CambioConsulta, DepsEstado, GrupoPendiente } from '../_shared/ecf/estado.ts';
-import type { Ambiente, Credenciales, Sesion } from '../_shared/ecf/mseller.ts';
+import type { Ambiente } from '../_shared/ecf/mseller.ts';
+import { guardarSesion, leerCredenciales, sumarUso } from '../_shared/ecf/rpc.ts';
 
 function json(status: number, obj: unknown) {
   return new Response(JSON.stringify(obj), {
@@ -78,41 +79,9 @@ function crearDeps(admin: Cliente): DepsEstado {
       return grupos;
     },
 
-    leerCredenciales: async (companyId, ambiente) => {
-      const { data, error } = await admin.rpc('ecf_leer_credenciales', {
-        p_company: companyId,
-        p_ambiente: ambiente,
-      });
-      // Los mensajes de aquí no incluyen lo leído: van al registro.
-      if (error) throw new Error(`No se pudieron leer las credenciales de MSeller: ${error.message}`);
-      if (!data) throw new Error(`La empresa no tiene credenciales de MSeller guardadas para ${ambiente}.`);
-      const c = data as Record<string, string | null>;
-      if (!c.email || !c.password || !c.api_key) {
-        throw new Error(`Las credenciales de MSeller de ${ambiente} están incompletas.`);
-      }
-      const cred: Credenciales = {
-        email: c.email,
-        password: c.password,
-        apiKey: c.api_key,
-        refreshToken: c.refresh_token ?? null,
-        sub: c.sub ?? null,
-        idToken: c.id_token ?? null,
-        idTokenVence: c.id_token_vence ?? null,
-      };
-      return cred;
-    },
+    leerCredenciales: (companyId, ambiente) => leerCredenciales(admin, companyId, ambiente),
 
-    guardarSesion: async (companyId, ambiente, s: Sesion) => {
-      const { error } = await admin.rpc('ecf_guardar_sesion', {
-        p_company: companyId,
-        p_ambiente: ambiente,
-        p_id_token: s.idToken,
-        p_id_token_vence: s.idTokenVence,
-        p_refresh_token: s.refreshToken,
-        p_sub: s.sub,
-      });
-      if (error) throw new Error(`No se pudo guardar la sesión de MSeller: ${error.message}`);
-    },
+    guardarSesion: (companyId, ambiente, s) => guardarSesion(admin, companyId, ambiente, s),
 
     actualizar: async (companyId, encf, cambio: CambioConsulta) => {
       // Solo si el documento sigue `recibido`: si otro ya le cambió el estado,
@@ -126,14 +95,7 @@ function crearDeps(admin: Cliente): DepsEstado {
       if (error) throw new Error(`No se pudo guardar el estado del documento: ${error.message}`);
     },
 
-    sumarUso: async (companyId, requests, comprobantes) => {
-      const { error } = await admin.rpc('ecf_sumar_uso', {
-        p_company: companyId,
-        p_requests: requests,
-        p_comprobantes: comprobantes,
-      });
-      if (error) throw new Error(`No se pudo sumar el uso del plan: ${error.message}`);
-    },
+    sumarUso: (companyId, requests, comprobantes) => sumarUso(admin, companyId, requests, comprobantes),
 
     avisarSinCupo: async (companyId) => {
       const { error } = await admin.rpc('ecf_avisar_sin_cupo', { p_company: companyId });
