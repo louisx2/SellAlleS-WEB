@@ -8,6 +8,7 @@
 --          <supabase/migrations/20261030150000_ecf_servidor.sql>
 --          <supabase/migrations/20261030160000_ecf_avisos.sql>
 --          <supabase/migrations/20261030170000_ecf_admin.sql>
+--          <supabase/migrations/20261030180000_ecf_ajustes_revision_final.sql>
 --          <este archivo> rollback;
 --
 -- Pasa si el último resultado es `ok`; si una aserción falla, la llamada
@@ -20,6 +21,12 @@
 -- Las pruebas corren como `postgres` (que se salta la RLS); las secciones de
 -- permisos cambian a `authenticated` con `set local role` para probar de
 -- verdad las políticas y los `grant`.
+--
+-- Nunca escribe filas de una empresa real ni toca credenciales o secretos que
+-- ya existan: la "otra empresa" y todas las credenciales (con sus secretos de
+-- Vault) son de empresas de prueba que se crean aquí mismo y se van con el
+-- rollback. Así la suite sigue pasando cuando la demo tenga sus credenciales
+-- reales de TesteCF.
 
 select set_config('request.jwt.claims', '{"sub":"92381752-13b2-4f43-8b09-612647754599","role":"authenticated"}', true);
 
@@ -52,6 +59,44 @@ language sql as $$
                      payment_method, payment_status, amount_paid)
   values (p_id, p_company, p_branch, 100, 0, 100, 'transfer', 'paid', 100);
 $$;
+
+-- Empresas de prueba (el rollback las quita):
+--   …ec0a  la "otra empresa" de las pruebas de RLS y de las funciones del servidor;
+--   …ec0b  credenciales de Task 1 (solo la tabla, sin Vault);
+--   …ec0c  credenciales y secretos de Vault de Task 4;
+--   …ec0d  credenciales y secretos de Vault de Task 9;
+--   …ec0e  credenciales y secretos de Vault de la revisión final.
+insert into companies (id, name) values
+  ('00000000-0000-0000-0000-00000000ec0a', 'Prueba e-CF: otra empresa'),
+  ('00000000-0000-0000-0000-00000000ec0b', 'Prueba e-CF: credenciales T1'),
+  ('00000000-0000-0000-0000-00000000ec0c', 'Prueba e-CF: credenciales T4'),
+  ('00000000-0000-0000-0000-00000000ec0d', 'Prueba e-CF: credenciales T9'),
+  ('00000000-0000-0000-0000-00000000ec0e', 'Prueba e-CF: credenciales RF');
+
+-- Cajero o administrador de la demo: usa el perfil cc56c633… (admin de otra
+-- empresa) agregándole una membresía en la demo con ese rol y cambiando su
+-- empresa activa. Deja los claims de esa persona; melany_fuera_de_demo() deshace
+-- todo y devuelve los del super admin.
+create function pg_temp.melany_en_demo(p_rol text) returns void language plpgsql as $$
+begin
+  perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+  delete from profile_companies
+   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = '00000000-0000-0000-0000-0000000000aa';
+  insert into profile_companies (profile_id, company_id, role)
+  values ('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566', '00000000-0000-0000-0000-0000000000aa', p_rol::user_role);
+  update profiles set company_id = '00000000-0000-0000-0000-0000000000aa'
+   where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
+  perform pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
+end $$;
+
+create function pg_temp.melany_fuera_de_demo() returns void language plpgsql as $$
+begin
+  perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+  update profiles set company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+   where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
+  delete from profile_companies
+   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = '00000000-0000-0000-0000-0000000000aa';
+end $$;
 
 -- == Task 1: esquema base, módulo y RLS ==
 -- Estado explícito de la sección: super admin de la demo (que es del equipo de
@@ -222,19 +267,20 @@ begin
 end $t$;
 
 -- ecf_credenciales: una fila por empresa y ambiente, con el correo obligatorio.
+-- En la empresa de prueba …ec0b, no en la demo (que puede tener las suyas).
 do $t$
 begin
   insert into ecf_credenciales (company_id, ambiente, email)
-  values ('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'demo-teste@example.com');
+  values ('00000000-0000-0000-0000-00000000ec0b', 'TesteCF', 'demo-teste@example.com');
   insert into ecf_credenciales (company_id, ambiente, email)
-  values ('00000000-0000-0000-0000-0000000000aa', 'CerteCF', 'demo-certe@example.com');
+  values ('00000000-0000-0000-0000-00000000ec0b', 'CerteCF', 'demo-certe@example.com');
   perform pg_temp.debe_fallar(
     $q$insert into ecf_credenciales (company_id, ambiente, email)
-       values ('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'otro@example.com')$q$,
+       values ('00000000-0000-0000-0000-00000000ec0b', 'TesteCF', 'otro@example.com')$q$,
     '%duplicate key%');
   perform pg_temp.debe_fallar(
     $q$insert into ecf_credenciales (company_id, ambiente, email)
-       values ('00000000-0000-0000-0000-0000000000aa', 'eCF', null)$q$,
+       values ('00000000-0000-0000-0000-00000000ec0b', 'eCF', null)$q$,
     '%null value%email%');
 end $t$;
 
@@ -263,12 +309,14 @@ begin
     '%ncf_sequences_prefijo_e_check%');
 
   -- Las seis combinaciones válidas, y las B de siempre (electronica = false).
+  -- Todas menos E32 y E34 llevan vencimiento (lo prueba la revisión final).
   for t in
     select * from (values ('consumer', 'E32'), ('fiscal', 'E31'), ('nota_credito', 'E34'),
                           ('nota_debito', 'E33'), ('regimen_especial', 'E44'), ('gubernamental', 'E45')) v(tipo, prefix)
   loop
-    insert into ncf_sequences (company_id, tipo, prefix, range_from, range_to, current_val, electronica)
-    values ('00000000-0000-0000-0000-0000000000aa', t.tipo, t.prefix, 1, 10, 1, true);
+    insert into ncf_sequences (company_id, tipo, prefix, range_from, range_to, current_val, electronica, expires_at)
+    values ('00000000-0000-0000-0000-0000000000aa', t.tipo, t.prefix, 1, 10, 1, true,
+            case when t.prefix not in ('E32', 'E34') then current_date + 365 end);
   end loop;
   if (select electronica from ncf_sequences where id = '00000000-0000-0000-0000-00000000ec10') is distinct from false then
     raise exception 'ncf_sequences: electronica debía ser false por omisión';
@@ -401,10 +449,18 @@ begin
     '%violates foreign key%');
 end $t$;
 
--- Índices: por venta, por nota de crédito y el parcial de los que aún no terminan.
+-- Índices: por venta, por nota de crédito, por sucursal, por reemplazo y el
+-- parcial de los que aún no terminan (con los sin cupo, que el worker revisa).
 do $t$
-declare def text;
+declare def text; col text;
 begin
+  foreach col in array array['branch_id', 'reemplazado_por'] loop
+    select indexdef into def from pg_indexes
+     where schemaname = 'public' and tablename = 'ecf_documentos' and indexname = 'ecf_documentos_' || col || '_idx';
+    if def is null or def not like '%(' || col || ')%' then
+      raise exception 'falta el índice de ecf_documentos por %: %', col, def;
+    end if;
+  end loop;
   select indexdef into def from pg_indexes
    where schemaname = 'public' and tablename = 'ecf_documentos' and indexname = 'ecf_documentos_sale_id_idx';
   if def is null or def not like '%(sale_id)%' then
@@ -417,9 +473,9 @@ begin
   end if;
   select indexdef into def from pg_indexes
    where schemaname = 'public' and tablename = 'ecf_documentos' and indexname = 'ecf_documentos_pendientes_idx';
-  if def is null or def not like '%(estado)%' or def not like '%WHERE%por_enviar%enviando%recibido%'
-     or def like '%aceptado%' or def like '%rechazado%' then
-    raise exception 'el índice parcial de ecf_documentos debía ser por estado solo para por_enviar, enviando y recibido: %', def;
+  if def is null or def not like '%(estado)%' or def not like '%WHERE%por_enviar%enviando%recibido%sin_cupo%'
+     or def like '%aceptado%' or def like '%rechazado%' or def like '%error_datos%' then
+    raise exception 'el índice parcial de ecf_documentos debía ser por estado solo para por_enviar, enviando, recibido y sin_cupo: %', def;
   end if;
 end $t$;
 
@@ -532,12 +588,15 @@ begin
 end $t$;
 
 -- RLS: tres actores sobre dos empresas.
---   * super admin (equipo de la plataforma): ve y cambia todo, menos credenciales.
---   * cc56c633…, admin normal de la empresa b463…: solo lo suyo, y de solo lectura.
--- Datos: configuración, uso, documento y credenciales de la demo ya existen
--- (secciones de arriba); se agregan los de la empresa del admin normal.
+--   * super admin (equipo de la plataforma): ve todo y cambia los datos de
+--     ecf_config (no su estado ni sus marcas), menos credenciales.
+--   * cc56c633…, como administradora de la demo sin ser super admin
+--     (pg_temp.melany_en_demo): solo lo suyo, y de solo lectura.
+--   * la otra empresa es la de prueba …ec0a (ninguna empresa real).
+-- Datos: configuración, uso, documentos y ventas de la demo ya existen
+-- (secciones de arriba); se agregan los de la otra empresa.
 do $t$
-declare otra uuid := 'b463d8b5-b589-4194-b0c3-2a912b58b7c9';
+declare otra uuid := '00000000-0000-0000-0000-00000000ec0a';
 begin
   insert into ecf_config (company_id, rnc_emisor, razon_social, direccion)
   values (otra, '202020202', 'Otra SRL', 'Calle 2');
@@ -550,7 +609,7 @@ end $t$;
 -- Super admin, ya como `authenticated`.
 set local role authenticated;
 do $t$
-declare otra uuid := 'b463d8b5-b589-4194-b0c3-2a912b58b7c9';
+declare otra uuid := '00000000-0000-0000-0000-00000000ec0a';
 begin
   if (select count(*) from ecf_config where company_id in ('00000000-0000-0000-0000-0000000000aa', otra)) <> 2 then
     raise exception 'RLS: el super admin debía ver la ecf_config de las dos empresas';
@@ -564,7 +623,7 @@ begin
   if (select count(*) from ecf_documentos where company_id = otra) <> 1 then
     raise exception 'RLS: el super admin debía ver el documento de la otra empresa';
   end if;
-  -- Puede escribir en ecf_config, no en el resto.
+  -- Puede escribir los datos de ecf_config, no el resto.
   update ecf_config set nombre_comercial = 'Demo' where company_id = '00000000-0000-0000-0000-0000000000aa';
   if (select nombre_comercial from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa') is distinct from 'Demo' then
     raise exception 'RLS: el super admin debía poder actualizar ecf_config';
@@ -583,62 +642,79 @@ begin
 end $t$;
 reset role;
 
--- Admin normal de otra empresa.
-select pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
+-- Administradora de la demo, sin ser super admin.
+select pg_temp.melany_en_demo('admin');
 set local role authenticated;
 do $t$
-declare otra uuid := 'b463d8b5-b589-4194-b0c3-2a912b58b7c9';
+declare
+  demo  uuid := '00000000-0000-0000-0000-0000000000aa';
+  otra  uuid := '00000000-0000-0000-0000-00000000ec0a';
+  plan0 text;
 begin
-  -- Con la demo: nada.
-  if (select count(*) from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa') <> 0 then
-    raise exception 'RLS: un admin de otra empresa no debía ver la ecf_config de la demo';
+  if is_super_admin() or not is_company_admin() then
+    raise exception 'RLS: la persona de prueba debía ser administradora de la demo sin ser super admin';
   end if;
-  if (select count(*) from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa') <> 0 then
-    raise exception 'RLS: un admin de otra empresa no debía ver los documentos de la demo';
+
+  -- Con la otra empresa: nada.
+  if (select count(*) from ecf_config where company_id = otra) <> 0 then
+    raise exception 'RLS: una admin de otra empresa no debía ver la ecf_config de la otra';
+  end if;
+  if (select count(*) from ecf_documentos where company_id = otra) <> 0 then
+    raise exception 'RLS: una admin de otra empresa no debía ver los documentos de la otra';
   end if;
   if (select count(*) from ecf_uso) <> 0 then
-    raise exception 'RLS: ecf_uso es solo del super admin, el admin normal vio filas';
+    raise exception 'RLS: ecf_uso es solo del super admin, la admin normal vio filas';
   end if;
   perform pg_temp.debe_fallar($q$select * from ecf_credenciales$q$, '%permission denied%');
   perform pg_temp.debe_fallar($q$select email from ecf_credenciales$q$, '%permission denied%');
 
   -- Con lo suyo: lee, no escribe.
-  if (select count(*) from ecf_config where company_id = otra) <> 1 then
-    raise exception 'RLS: el admin debía ver la ecf_config de su empresa';
+  if (select count(*) from ecf_config where company_id = demo) <> 1 then
+    raise exception 'RLS: la admin debía ver la ecf_config de su empresa';
   end if;
-  if (select count(*) from ecf_documentos where company_id = otra) <> 1 then
-    raise exception 'RLS: el admin debía ver el documento de la venta de su empresa';
+  if (select count(*) from ecf_documentos where company_id = demo) = 0 then
+    raise exception 'RLS: la admin debía ver los documentos de las ventas de su empresa';
   end if;
-  update ecf_config set estado = 'activa', plan = 'empresa' where company_id = otra;
-  if (select estado from ecf_config where company_id = otra) <> 'preparacion' then
-    raise exception 'RLS: el admin normal no debía poder cambiar su ecf_config';
+  -- El estado ni siquiera es una columna que authenticated pueda escribir.
+  perform pg_temp.debe_fallar(
+    $q$update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa'$q$,
+    '%permission denied%');
+  -- Las de datos sí, pero la RLS solo deja al super admin.
+  select plan into plan0 from ecf_config where company_id = demo;
+  update ecf_config set plan = case when plan0 = 'gratis' then 'basico' else 'gratis' end where company_id = demo;
+  if (select plan from ecf_config where company_id = demo) is distinct from plan0 then
+    raise exception 'RLS: la admin normal no debía poder cambiar su ecf_config';
   end if;
-  delete from ecf_config where company_id = otra;
-  if (select count(*) from ecf_config where company_id = otra) <> 1 then
-    raise exception 'RLS: el admin normal no debía poder borrar su ecf_config';
+  delete from ecf_config where company_id = demo;
+  if (select count(*) from ecf_config where company_id = demo) <> 1 then
+    raise exception 'RLS: la admin normal no debía poder borrar su ecf_config';
   end if;
   perform pg_temp.debe_fallar(
     $q$insert into ecf_config (company_id, rnc_emisor, razon_social, direccion)
-       values ('00000000-0000-0000-0000-0000000000aa', '303030303', 'Intento', 'Calle 3')$q$,
+       values ('00000000-0000-0000-0000-00000000ec0b', '303030303', 'Intento', 'Calle 3')$q$,
     '%row-level security%');
   perform pg_temp.debe_fallar(
     $q$insert into ecf_documentos (company_id, sale_id, tipo_ecf, encf, ambiente)
-       values ('b463d8b5-b589-4194-b0c3-2a912b58b7c9', '00000000-0000-0000-0000-00000000ec03', 32, 'E320000000098', 'TesteCF')$q$,
+       values ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000ec01', 32, 'E320000000098', 'TesteCF')$q$,
     '%permission denied%');
 
   -- ecf_activa se puede preguntar: da solo un booleano.
-  if ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from false then
+  if ecf_activa(demo) is distinct from false then
     raise exception 'ecf_activa: la demo está suspendida, debía dar false';
   end if;
 end $t$;
 reset role;
+select pg_temp.melany_fuera_de_demo();
 
 -- Vuelve el super admin: nada de lo anterior debió cambiar los datos.
-select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
 do $t$
 begin
-  if (select estado from ecf_config where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9') <> 'preparacion' then
-    raise exception 'la ecf_config de la otra empresa cambió pese a la RLS';
+  if (select estado from ecf_config where company_id = '00000000-0000-0000-0000-00000000ec0a') <> 'preparacion'
+     or (select estado from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa') <> 'suspendida' then
+    raise exception 'una ecf_config cambió pese a la RLS';
+  end if;
+  if exists (select 1 from ecf_config where company_id = '00000000-0000-0000-0000-00000000ec0b') then
+    raise exception 'la admin normal no debía poder crear una ecf_config';
   end if;
 end $t$;
 
@@ -654,12 +730,15 @@ language sql as $$
           p_requested, p_type::ncf_type, p_created);
 $$;
 
--- Secuencia de la demo; arranca en p_desde.
+-- Secuencia de la demo; arranca en p_desde. Las E que no son E32 ni E34 llevan
+-- vencimiento (dentro de un año si no se dice otro).
 create function pg_temp.secuencia(p_tipo text, p_prefix text, p_electronica boolean,
                                   p_desde bigint default 1, p_hasta bigint default 100) returns void
 language sql as $$
-  insert into ncf_sequences (company_id, tipo, prefix, range_from, range_to, current_val, electronica)
-  values ('00000000-0000-0000-0000-0000000000aa', p_tipo, p_prefix, p_desde, p_hasta, p_desde, p_electronica);
+  insert into ncf_sequences (company_id, tipo, prefix, range_from, range_to, current_val, electronica, expires_at)
+  values ('00000000-0000-0000-0000-0000000000aa', p_tipo, p_prefix, p_desde, p_hasta, p_desde, p_electronica,
+          case when p_electronica and p_prefix not in ('E32', 'E34')
+               then company_today('00000000-0000-0000-0000-0000000000aa') + 365 end);
 $$;
 
 -- Próximo número de la secuencia de la demo con ese prefijo.
@@ -752,10 +831,15 @@ begin
   end if;
 end $t$;
 
--- El documento lleva el ambiente de ecf_config.
+-- El documento lleva el ambiente de ecf_config. Con la empresa activa el
+-- ambiente no se cambia: se pasa a preparación, se cambia y se vuelve a activar.
+update ecf_config set estado = 'preparacion' where company_id = '00000000-0000-0000-0000-0000000000aa';
 update ecf_config set ambiente = 'CerteCF' where company_id = '00000000-0000-0000-0000-0000000000aa';
+update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
 select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec42', false);
+update ecf_config set estado = 'preparacion' where company_id = '00000000-0000-0000-0000-0000000000aa';
 update ecf_config set ambiente = 'TesteCF' where company_id = '00000000-0000-0000-0000-0000000000aa';
+update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
 do $t$
 begin
   if (select ambiente from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec42') is distinct from 'CerteCF' then
@@ -892,24 +976,31 @@ begin
   end if;
 end $t$;
 
--- Una venta que ya trae NCF no se toca. Si es un e-NCF entra a la bandeja
--- (tipo_ecf sale de sus dos dígitos); una B no.
+-- Una venta que ya trae una B no se toca (y no entra a la bandeja). Una que
+-- trae un e-NCF escrito se rechaza (I3): no sale de ninguna secuencia y la
+-- bandeja lo mandaría a la DGII. El e-NCF solo lo asigna el sistema.
 insert into sales (id, company_id, branch_id, subtotal, itbis_amount, total, payment_method, payment_status, amount_paid, ncf)
 values ('00000000-0000-0000-0000-00000000ec57', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
-        100, 0, 100, 'transfer', 'paid', 100, 'B0100000009'),
-       ('00000000-0000-0000-0000-00000000ec58', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
-        100, 0, 100, 'transfer', 'paid', 100, 'E450000000007');
+        100, 0, 100, 'transfer', 'paid', 100, 'B0100000009');
 do $t$
-declare d ecf_documentos;
+declare e text;
 begin
   if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec57') is distinct from 'B0100000009'
      or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec57') <> 0 then
     raise exception 'e-CF: una venta con B ya asignada debía quedar igual y sin documento';
   end if;
-  select * into d from ecf_documentos where sale_id = '00000000-0000-0000-0000-00000000ec58';
-  if (d.tipo_ecf, d.encf, d.estado) is distinct from (45::smallint, 'E450000000007', 'por_enviar') then
-    raise exception 'e-CF: una venta con E450000000007 debía crear su documento tipo 45, dio % % %',
-      d.tipo_ecf, d.encf, d.estado;
+  -- Bien formado, mal formado o de cualquier tipo: si empieza por E, no.
+  foreach e in array array['E450000000007', 'E320000000001', 'E31', 'Exyz'] loop
+    perform pg_temp.debe_fallar(
+      format($q$insert into sales (id, company_id, branch_id, subtotal, itbis_amount, total,
+                                   payment_method, payment_status, amount_paid, ncf)
+                values ('00000000-0000-0000-0000-00000000ec58', '00000000-0000-0000-0000-0000000000aa',
+                        '00000000-0000-0000-0000-0000000000b1', 100, 0, 100, 'transfer', 'paid', 100, %L)$q$, e),
+      'El número de comprobante electrónico lo asigna el sistema.');
+  end loop;
+  if exists (select 1 from sales where id = '00000000-0000-0000-0000-00000000ec58')
+     or exists (select 1 from ecf_documentos where encf = 'E450000000007') then
+    raise exception 'e-CF: la venta con un e-NCF escrito no debía guardarse ni entrar a la bandeja';
   end if;
 end $t$;
 
@@ -1160,30 +1251,7 @@ create function pg_temp.doc_vigente(p_sale uuid) returns uuid language sql secur
    order by created_at desc limit 1
 $$;
 
--- Cajero o administrador de la demo: usa el perfil cc56c633… (admin de otra
--- empresa) agregándole una membresía en la demo con ese rol y cambiando su
--- empresa activa. Deja los claims de esa persona; melany_fuera_de_demo() deshace
--- todo y devuelve los del super admin.
-create function pg_temp.melany_en_demo(p_rol text) returns void language plpgsql as $$
-begin
-  perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
-  delete from profile_companies
-   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = '00000000-0000-0000-0000-0000000000aa';
-  insert into profile_companies (profile_id, company_id, role)
-  values ('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566', '00000000-0000-0000-0000-0000000000aa', p_rol::user_role);
-  update profiles set company_id = '00000000-0000-0000-0000-0000000000aa'
-   where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
-  perform pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
-end $$;
-
-create function pg_temp.melany_fuera_de_demo() returns void language plpgsql as $$
-begin
-  perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
-  update profiles set company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
-   where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
-  delete from profile_companies
-   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and company_id = '00000000-0000-0000-0000-0000000000aa';
-end $$;
+-- (pg_temp.melany_en_demo y melany_fuera_de_demo están al principio del archivo.)
 
 do $t$
 begin
@@ -1708,14 +1776,15 @@ end $t$;
 -- Estado explícito de la sección: super admin; la demo formalizada, sin
 -- ncf_enabled, con el módulo `ecf` y su ecf_config en preparación (así las
 -- ventas de prueba no reciben e-NCF; se activa después de crearlas); sin
--- documentos, credenciales ni uso. La otra empresa (b463…) con su ecf_config en
+-- documentos ni uso. La otra empresa (la de prueba …ec0a) con su ecf_config en
 -- preparación, para ver que las funciones solo trabajan con empresas activas.
 --
--- Esta sección nunca borra ni cambia lo que ya exista en Vault (ni la
--- service_role_key ni secretos de e-CF): solo agrega secretos nuevos de la demo
--- (que el rollback quita) y, si ya hubiera de la demo, se detiene antes. Tampoco
--- toca los documentos de empresas distintas a la demo y a la otra: las listas
--- que se comprueban se limitan a los documentos de la prueba.
+-- Las credenciales son de la empresa de prueba …ec0c (creada al principio, sin
+-- credenciales ni secretos): esta sección nunca lee, cambia ni borra las de la
+-- demo ni ningún secreto que ya exista en Vault (tampoco la service_role_key).
+-- Los secretos que agrega se van con el rollback. Tampoco toca los documentos
+-- de empresas distintas a la demo y a la otra: las listas que se comprueban se
+-- limitan a los documentos de la prueba.
 select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
 update companies set is_formalized = true, ncf_enabled = false where id = '00000000-0000-0000-0000-0000000000aa';
 delete from company_modules where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
@@ -1725,20 +1794,20 @@ delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa'
 insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
 values ('00000000-0000-0000-0000-0000000000aa', 'preparacion', 'TesteCF', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
 insert into ecf_config (company_id, estado, rnc_emisor, razon_social, direccion)
-values ('b463d8b5-b589-4194-b0c3-2a912b58b7c9', 'preparacion', '202020202', 'Otra SRL', 'Calle 2')
-on conflict (company_id) do nothing;
+values ('00000000-0000-0000-0000-00000000ec0a', 'preparacion', '202020202', 'Otra SRL', 'Calle 2')
+on conflict (company_id) do update set estado = excluded.estado;
 delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
-delete from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa';
 delete from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa';
 do $t$
 begin
-  if exists (select 1 from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/%') then
-    raise exception 'Task 4: ya hay secretos de e-CF de la demo en Vault; la prueba no toca secretos existentes y se detiene.';
+  if exists (select 1 from ecf_credenciales where company_id = '00000000-0000-0000-0000-00000000ec0c')
+     or exists (select 1 from vault.secrets where name like 'ecf/00000000-0000-0000-0000-00000000ec0c/%') then
+    raise exception 'Task 4: la empresa de prueba …ec0c debía empezar sin credenciales ni secretos';
   end if;
 end $t$;
 select pg_temp.venta('00000000-0000-0000-0000-00000000eca0', '00000000-0000-0000-0000-0000000000aa',
                      '00000000-0000-0000-0000-0000000000b1');
-select pg_temp.venta('00000000-0000-0000-0000-00000000eca1', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9', null);
+select pg_temp.venta('00000000-0000-0000-0000-00000000eca1', '00000000-0000-0000-0000-00000000ec0a', null);
 update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
 
 -- Documento de la demo (venta eca0) por defecto, creado hace una hora para que
@@ -1775,19 +1844,19 @@ begin
   if ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from true then
     raise exception 'Task 4: el estado de partida debía tener e-CF activo en la demo';
   end if;
-  if ecf_activa('b463d8b5-b589-4194-b0c3-2a912b58b7c9') is distinct from false then
+  if ecf_activa('00000000-0000-0000-0000-00000000ec0a') is distinct from false then
     raise exception 'Task 4: el estado de partida debía tener la otra empresa sin e-CF activo';
   end if;
 end $t$;
 
 -- Guardar las credenciales: la contraseña y la api key van a Vault; la tabla
 -- solo apunta a ellas.
-select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF',
+select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF',
                                 'ecf+demo@sellalles.com', 'clave-x', 'key-y');
 do $t$
-declare c jsonb; n text := 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/';
+declare c jsonb; n text := 'ecf/00000000-0000-0000-0000-00000000ec0c/TesteCF/';
 begin
-  c := ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+  c := ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF');
   if (c->>'email', c->>'password', c->>'api_key') is distinct from ('ecf+demo@sellalles.com', 'clave-x', 'key-y') then
     raise exception 'credenciales: la lectura no devolvió el correo, la contraseña y la api key guardados';
   end if;
@@ -1807,9 +1876,9 @@ begin
      or (select count(*) from vault.secrets where name = n || 'api_key') <> 1 then
     raise exception 'credenciales: debía haber un secreto de contraseña y uno de api key en Vault';
   end if;
-  if (select password_secret_id from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF')
+  if (select password_secret_id from ecf_credenciales where company_id = '00000000-0000-0000-0000-00000000ec0c' and ambiente = 'TesteCF')
        is distinct from (select id from vault.secrets where name = n || 'password')
-     or (select api_key_secret_id from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF')
+     or (select api_key_secret_id from ecf_credenciales where company_id = '00000000-0000-0000-0000-00000000ec0c' and ambiente = 'TesteCF')
        is distinct from (select id from vault.secrets where name = n || 'api_key') then
     raise exception 'credenciales: la tabla debía apuntar a los secretos de Vault';
   end if;
@@ -1817,16 +1886,16 @@ begin
 end $t$;
 
 -- Guardar otra vez no crea secretos nuevos: se actualiza el que ya hay.
-select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF',
+select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF',
                                 'ecf+demo@sellalles.com', 'clave-z', 'key-y');
 do $t$
-declare n text := 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/';
+declare n text := 'ecf/00000000-0000-0000-0000-00000000ec0c/TesteCF/';
 begin
-  if ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'password' is distinct from 'clave-z' then
+  if ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF')->>'password' is distinct from 'clave-z' then
     raise exception 'credenciales: al guardar otra vez la lectura debía dar la contraseña nueva';
   end if;
   if (select count(*) from vault.secrets where name = n || 'password') <> 1
-     or (select count(*) from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/%') <> 2 then
+     or (select count(*) from vault.secrets where name like 'ecf/00000000-0000-0000-0000-00000000ec0c/%') <> 2 then
     raise exception 'credenciales: guardar dos veces debía dejar un solo secreto por nombre';
   end if;
   if (select id::text from vault.secrets where name = n || 'password') is distinct from current_setting('ecf.t4_pass_id') then
@@ -1835,19 +1904,19 @@ begin
 end $t$;
 
 -- Cada ambiente tiene sus propios secretos.
-select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'CerteCF',
+select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'CerteCF',
                                 'ecf+certe@sellalles.com', 'clave-certe', 'key-certe');
 do $t$
 begin
-  if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'CerteCF')->>'password') is distinct from 'clave-certe'
-     or (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'password') is distinct from 'clave-z' then
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'CerteCF')->>'password') is distinct from 'clave-certe'
+     or (ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF')->>'password') is distinct from 'clave-z' then
     raise exception 'credenciales: los dos ambientes debían guardarse por separado';
   end if;
-  if (select count(*) from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/%') <> 4 then
+  if (select count(*) from vault.secrets where name like 'ecf/00000000-0000-0000-0000-00000000ec0c/%') <> 4 then
     raise exception 'credenciales: dos ambientes debían tener cuatro secretos';
   end if;
   -- Sin credenciales guardadas no hay nada que leer.
-  if ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF') is not null then
+  if ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'eCF') is not null then
     raise exception 'credenciales: sin fila guardada la lectura debía dar null';
   end if;
 end $t$;
@@ -1856,26 +1925,26 @@ end $t$;
 do $t$
 begin
   perform pg_temp.debe_fallar(
-    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'produccion', 'a@b.com', 'x', 'y')$q$,
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'produccion', 'a@b.com', 'x', 'y')$q$,
     '%ambiente%');
   perform pg_temp.debe_fallar(
-    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF', 'a@b.com', '', 'y')$q$,
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'eCF', 'a@b.com', '', 'y')$q$,
     '%Faltan%');
   perform pg_temp.debe_fallar(
-    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF', 'a@b.com', 'x', null)$q$,
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'eCF', 'a@b.com', 'x', null)$q$,
     '%Faltan%');
   perform pg_temp.debe_fallar(
-    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF', '  ', 'x', 'y')$q$,
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'eCF', '  ', 'x', 'y')$q$,
     '%Faltan%');
-  if exists (select 1 from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/eCF/%') then
+  if exists (select 1 from vault.secrets where name like 'ecf/00000000-0000-0000-0000-00000000ec0c/eCF/%') then
     raise exception 'credenciales: un guardado rechazado no debía dejar secretos';
   end if;
 end $t$;
 
 -- La sesión: el idToken, su vencimiento, el refresh token (en Vault) y el sub.
-select ecf_guardar_sesion('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'tok', now() + interval '1 hour', 'ref', 'sub-1');
+select ecf_guardar_sesion('00000000-0000-0000-0000-00000000ec0c', 'TesteCF', 'tok', now() + interval '1 hour', 'ref', 'sub-1');
 do $t$
-declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF');
 begin
   if (c->>'id_token', c->>'refresh_token', c->>'sub') is distinct from ('tok', 'ref', 'sub-1')
      or (c->>'id_token_vence')::timestamptz is distinct from now() + interval '1 hour' then
@@ -1887,16 +1956,16 @@ begin
   if exists (select 1 from ecf_credenciales t where t::text ~ '[(,"]ref[,")]') then
     raise exception 'sesión: el refresh token quedó escrito en ecf_credenciales';
   end if;
-  if (select count(*) from vault.secrets where name = 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/refresh_token') <> 1 then
+  if (select count(*) from vault.secrets where name = 'ecf/00000000-0000-0000-0000-00000000ec0c/TesteCF/refresh_token') <> 1 then
     raise exception 'sesión: el refresh token debía quedar en Vault';
   end if;
 end $t$;
 
 -- Con refresh token null se conserva el que había (y el sub, que MSeller no
 -- repite al renovar el idToken).
-select ecf_guardar_sesion('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'tok2', now() + interval '2 hours', null, null);
+select ecf_guardar_sesion('00000000-0000-0000-0000-00000000ec0c', 'TesteCF', 'tok2', now() + interval '2 hours', null, null);
 do $t$
-declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF');
 begin
   if (c->>'id_token', c->>'refresh_token', c->>'sub') is distinct from ('tok2', 'ref', 'sub-1')
      or (c->>'id_token_vence')::timestamptz is distinct from now() + interval '2 hours' then
@@ -1905,29 +1974,29 @@ begin
 end $t$;
 
 -- Con uno nuevo se reemplaza, en el mismo secreto.
-select ecf_guardar_sesion('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'tok3', now() + interval '3 hours', 'ref2', 'sub-1');
+select ecf_guardar_sesion('00000000-0000-0000-0000-00000000ec0c', 'TesteCF', 'tok3', now() + interval '3 hours', 'ref2', 'sub-1');
 do $t$
 begin
-  if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'refresh_token') is distinct from 'ref2'
-     or (select count(*) from vault.secrets where name = 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/refresh_token') <> 1 then
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF')->>'refresh_token') is distinct from 'ref2'
+     or (select count(*) from vault.secrets where name = 'ecf/00000000-0000-0000-0000-00000000ec0c/TesteCF/refresh_token') <> 1 then
     raise exception 'sesión: un refresh token nuevo debía reemplazar al anterior en un solo secreto';
   end if;
   -- La otra cuenta no se enteró.
-  if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'CerteCF')->>'id_token') is not null then
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'CerteCF')->>'id_token') is not null then
     raise exception 'sesión: la sesión de TesteCF no debía aparecer en CerteCF';
   end if;
   -- Sin credenciales guardadas no hay a dónde escribir la sesión.
   perform pg_temp.debe_fallar(
-    $q$select ecf_guardar_sesion('00000000-0000-0000-0000-0000000000aa', 'eCF', 't', now(), 'r', 's')$q$,
+    $q$select ecf_guardar_sesion('00000000-0000-0000-0000-00000000ec0c', 'eCF', 't', now(), 'r', 's')$q$,
     '%No hay credenciales%');
 end $t$;
 
 -- Cambiar la cuenta (nuevas credenciales) borra la sesión: idToken, sub y el
 -- refresh token, también de Vault.
-select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF',
+select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF',
                                 'ecf+demo2@sellalles.com', 'clave-w', 'key-y');
 do $t$
-declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+declare c jsonb := ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF');
 begin
   if (c->>'email', c->>'password') is distinct from ('ecf+demo2@sellalles.com', 'clave-w') then
     raise exception 'credenciales: al cambiar de cuenta debía leerse el correo y la contraseña nuevos';
@@ -1937,9 +2006,9 @@ begin
     raise exception 'credenciales: al cambiar de cuenta la sesión debía borrarse: %', c - 'password' - 'api_key';
   end if;
   if exists (select 1 from ecf_credenciales
-              where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF'
+              where company_id = '00000000-0000-0000-0000-00000000ec0c' and ambiente = 'TesteCF'
                 and refresh_token_secret_id is not null)
-     or exists (select 1 from vault.secrets where name = 'ecf/00000000-0000-0000-0000-0000000000aa/TesteCF/refresh_token') then
+     or exists (select 1 from vault.secrets where name = 'ecf/00000000-0000-0000-0000-00000000ec0c/TesteCF/refresh_token') then
     raise exception 'credenciales: al cambiar de cuenta el refresh token debía desaparecer también de Vault';
   end if;
 end $t$;
@@ -2021,10 +2090,10 @@ begin
   end if;
   -- Otra empresa lleva su propia cuenta (se suma sobre lo que ya tuviera).
   select coalesce(sum(requests), 0) into antes from ecf_uso
-   where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+   where company_id = '00000000-0000-0000-0000-00000000ec0a'
      and periodo = date_trunc('month', now() at time zone 'utc')::date;
-  perform ecf_sumar_uso('b463d8b5-b589-4194-b0c3-2a912b58b7c9', 7, 0);
-  if (select requests from ecf_uso where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'
+  perform ecf_sumar_uso('00000000-0000-0000-0000-00000000ec0a', 7, 0);
+  if (select requests from ecf_uso where company_id = '00000000-0000-0000-0000-00000000ec0a'
         and periodo = date_trunc('month', now() at time zone 'utc')::date) is distinct from antes + 7
      or (select requests from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa') <> 4 then
     raise exception 'uso: cada empresa debía llevar su propia cuenta';
@@ -2055,7 +2124,7 @@ begin
        is distinct from array['E320000009013'] then
     raise exception 'consultas: CerteCF debía traer su e-NCF recibido';
   end if;
-  if exists (select 1 from ecf_consultas_pendientes() where company_id = 'b463d8b5-b589-4194-b0c3-2a912b58b7c9') then
+  if exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-00000000ec0a') then
     raise exception 'consultas: una empresa sin documentos recibidos no debía salir';
   end if;
 
@@ -2065,8 +2134,9 @@ begin
   if exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF') then
     raise exception 'consultas: con una consulta reciente en el lote, TesteCF no debía salir';
   end if;
-  if not exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'CerteCF') then
-    raise exception 'consultas: CerteCF no se consultó y debía seguir saliendo';
+  -- El intervalo es de la empresa (su último lote), no de cada ambiente (I6).
+  if exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'CerteCF') then
+    raise exception 'consultas: la empresa acaba de consultar: CerteCF también debía esperar';
   end if;
   -- Pasada la hora del plan gratis (60 minutos) vuelve a salir.
   update ecf_documentos set ultima_consulta_at = now() - interval '61 minutes' where id = '00000000-0000-0000-0000-00000000eca6';
@@ -2140,9 +2210,9 @@ update ecf_documentos
    set estado_at = greatest(date_trunc('month', now() at time zone 'utc') at time zone 'utc', now() - interval '1 hour')
  where id = '00000000-0000-0000-0000-00000000ecb8';
 select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecb9', 9109, 'por_enviar', 'TesteCF',
-                      'b463d8b5-b589-4194-b0c3-2a912b58b7c9', '00000000-0000-0000-0000-00000000eca1');
+                      '00000000-0000-0000-0000-00000000ec0a', '00000000-0000-0000-0000-00000000eca1');
 select pg_temp.doc_t4('00000000-0000-0000-0000-00000000ecba', 9110, 'sin_cupo', 'TesteCF',
-                      'b463d8b5-b589-4194-b0c3-2a912b58b7c9', '00000000-0000-0000-0000-00000000eca1');
+                      '00000000-0000-0000-0000-00000000ec0a', '00000000-0000-0000-0000-00000000eca1');
 update ecf_documentos
    set estado_at = (date_trunc('month', now() at time zone 'utc') at time zone 'utc') - interval '1 day'
  where id = '00000000-0000-0000-0000-00000000ecba';
@@ -2155,7 +2225,7 @@ begin
     '00000000-0000-0000-0000-00000000ecb6', '00000000-0000-0000-0000-00000000ecb8']::uuid[]) u;
   select coalesce(array_agg(x order by x), '{}') into v from ecf_documentos_por_enviar() x
    where x in (select id from ecf_documentos
-                where company_id in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'));
+                where company_id in ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000ec0a'));
   if v is distinct from esperado then
     raise exception 'por enviar: debían salir b1, b4, b6 y b8, salieron %',
       (select array_agg(right(u::text, 4) order by u) from unnest(v) u);
@@ -2183,7 +2253,7 @@ begin
   -- Llamarla otra vez da lo mismo (ya no hay nada que mover), y respeta el límite.
   select coalesce(array_agg(x order by x), '{}') into v from ecf_documentos_por_enviar() x
    where x in (select id from ecf_documentos
-                where company_id in ('00000000-0000-0000-0000-0000000000aa', 'b463d8b5-b589-4194-b0c3-2a912b58b7c9'));
+                where company_id in ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000ec0a'));
   if v is distinct from esperado then
     raise exception 'por enviar: la segunda llamada debía dar los mismos cuatro';
   end if;
@@ -2325,10 +2395,10 @@ set local role authenticated;
 do $t$
 begin
   perform pg_temp.debe_fallar(
-    $q$select ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')$q$,
+    $q$select ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF')$q$,
     '%permission denied%');
   perform pg_temp.debe_fallar(
-    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF', 'a@b.com', 'x', 'y')$q$,
+    $q$select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF', 'a@b.com', 'x', 'y')$q$,
     '%permission denied%');
   perform pg_temp.debe_fallar(
     $q$select ecf_reservar_documento('00000000-0000-0000-0000-00000000ecc0')$q$,
@@ -2343,7 +2413,7 @@ set local role anon;
 do $t$
 begin
   perform pg_temp.debe_fallar(
-    $q$select ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')$q$,
+    $q$select ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF')$q$,
     '%permission denied%');
 end $t$;
 reset role;
@@ -2352,7 +2422,7 @@ reset role;
 set local role service_role;
 do $t$
 begin
-  if (ecf_leer_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')->>'password') is distinct from 'clave-w' then
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0c', 'TesteCF')->>'password') is distinct from 'clave-w' then
     raise exception 'service_role debía poder leer las credenciales';
   end if;
 end $t$;
@@ -2804,12 +2874,13 @@ reset role;
 -- Estado explícito de la sección: super admin; la demo formalizada, con
 -- is_demo = true, sin ncf_enabled, con el módulo `ecf` encendido y su ecf_config
 -- completa en preparación (TesteCF, sin conexión probada ni activada); sin
--- documentos, credenciales, secuencias ni uso; y una venta (…ece0) que respalda
--- los documentos de la prueba. Los UUID de la sección: ece0 (venta), ece1–ece5
+-- documentos, secuencias ni uso; y una venta (…ece0) que respalda los
+-- documentos de la prueba. Los UUID de la sección: ece0 (venta), ece1–ece5
 -- (secuencias), ecf1–ecf9 (documentos).
 --
--- Nunca cambia ni borra lo que ya haya en Vault: solo agrega los secretos de la
--- demo para eCF (que el rollback quita) y, si ya hubiera, se detiene antes. Las
+-- Las pruebas de credenciales son de la empresa de prueba …ec0d (creada al
+-- principio): nunca lee, cambia ni borra las de la demo ni ningún secreto que ya
+-- exista en Vault. Los secretos que agrega se van con el rollback; las
 -- credenciales de CerteCF se escriben directo en la tabla, sin Vault.
 select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
 update companies set is_formalized = true, ncf_enabled = false, is_demo = true
@@ -2819,7 +2890,6 @@ insert into company_modules (company_id, module_key, enabled)
 values ('00000000-0000-0000-0000-0000000000aa', 'ecf', true);
 delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
 delete from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa';
-delete from ecf_credenciales where company_id = '00000000-0000-0000-0000-0000000000aa';
 delete from ncf_sequences where company_id = '00000000-0000-0000-0000-0000000000aa';
 delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa';
 insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
@@ -2828,15 +2898,13 @@ select pg_temp.venta('00000000-0000-0000-0000-00000000ece0', '00000000-0000-0000
                      '00000000-0000-0000-0000-0000000000b1');
 do $t$
 begin
-  if exists (select 1 from vault.secrets where name like 'ecf/00000000-0000-0000-0000-0000000000aa/eCF/%') then
-    raise exception 'Task 9: ya hay secretos de e-CF de la demo para eCF en Vault; la prueba no toca secretos existentes y se detiene.';
-  end if;
   if not (select is_demo from companies where id = '00000000-0000-0000-0000-0000000000aa') then
     raise exception 'Task 9: el estado de partida debía tener la demo con is_demo = true';
   end if;
 end $t$;
 
--- Secuencia de la demo.
+-- Secuencia de la demo. Sin p_vence, las E que no son E32 ni E34 vencen en 2099
+-- (la base no las acepta sin vencimiento).
 create function pg_temp.seq_t9(p_id uuid, p_tipo text, p_prefix text, p_electronica boolean,
                                p_activa boolean default true, p_actual bigint default 1,
                                p_hasta bigint default 100, p_vence date default null) returns void
@@ -2844,7 +2912,8 @@ language sql as $$
   insert into ncf_sequences (id, company_id, tipo, prefix, range_from, range_to, current_val,
                              electronica, active, expires_at)
   values (p_id, '00000000-0000-0000-0000-0000000000aa', p_tipo, p_prefix, 1, p_hasta, p_actual,
-          p_electronica, p_activa, p_vence);
+          p_electronica, p_activa,
+          coalesce(p_vence, case when p_electronica and p_prefix not in ('E32', 'E34') then date '2099-12-31' end));
 $$;
 
 -- Documento de la demo (venta ece0): e-NCF E32 + 10 dígitos.
@@ -3120,31 +3189,36 @@ begin
     'La empresa no existe.');
 end $t$;
 
--- La prueba de conexión vale para lo que se probó: ambiente y credenciales.
-update ecf_config set estado = 'preparacion' where company_id = '00000000-0000-0000-0000-0000000000aa';
-select ecf_guardar_credenciales('00000000-0000-0000-0000-0000000000aa', 'eCF',
+-- La prueba de conexión vale para lo que se probó: ambiente y credenciales. En
+-- la empresa de prueba …ec0d, con su propia ecf_config en preparación (TesteCF).
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
+values ('00000000-0000-0000-0000-00000000ec0d', 'preparacion', 'TesteCF', '303030303', 'Credenciales SRL', 'Calle 3');
+create function pg_temp.probada_t9() returns timestamptz language sql as $$
+  select conexion_probada_at from ecf_config where company_id = '00000000-0000-0000-0000-00000000ec0d'
+$$;
+select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0d', 'eCF',
                                 'ecf+t9@sellalles.com', 'clave-t9', 'key-t9');
 insert into ecf_credenciales (company_id, ambiente, email)
-values ('00000000-0000-0000-0000-0000000000aa', 'CerteCF', 'ecf+cert@sellalles.com');
+values ('00000000-0000-0000-0000-00000000ec0d', 'CerteCF', 'ecf+cert@sellalles.com');
 do $t$
-declare c text := '00000000-0000-0000-0000-0000000000aa';
+declare c text := '00000000-0000-0000-0000-00000000ec0d';
 begin
   -- La empresa está en TesteCF y esta marca es de TesteCF: guardar credenciales
   -- de otros ambientes no la toca.
   update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
   perform ecf_guardar_credenciales(c::uuid, 'eCF', 'ecf+t9@sellalles.com', 'clave-t9', 'key-t9');
   update ecf_credenciales set email = 'ecf+cert2@sellalles.com' where company_id = c::uuid and ambiente = 'CerteCF';
-  if (pg_temp.cfg_t9()).conexion_probada_at is null then
+  if pg_temp.probada_t9() is null then
     raise exception 'Task 9: guardar credenciales de otro ambiente no debía borrar la prueba de conexión';
   end if;
 
   -- Cambiar el ambiente de la empresa la borra; dejarlo igual, no.
   update ecf_config set ambiente = 'TesteCF', plan = 'basico' where company_id = c::uuid;
-  if (pg_temp.cfg_t9()).conexion_probada_at is null then
+  if pg_temp.probada_t9() is null then
     raise exception 'Task 9: dejar el mismo ambiente y cambiar otra columna no debía borrar la prueba de conexión';
   end if;
   update ecf_config set ambiente = 'eCF' where company_id = c::uuid;
-  if (pg_temp.cfg_t9()).conexion_probada_at is not null then
+  if pg_temp.probada_t9() is not null then
     raise exception 'Task 9: cambiar el ambiente de la empresa debía borrar la prueba de conexión';
   end if;
 
@@ -3152,25 +3226,25 @@ begin
   -- credenciales de eCF sí (también si solo cambia el correo).
   update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
   perform ecf_guardar_sesion(c::uuid, 'eCF', 'tok-t9', now() + interval '1 hour', 'ref-t9', 'sub-t9');
-  if (pg_temp.cfg_t9()).conexion_probada_at is null then
+  if pg_temp.probada_t9() is null then
     raise exception 'Task 9: guardar la sesión no debía borrar la prueba de conexión';
   end if;
   perform ecf_guardar_credenciales(c::uuid, 'eCF', 'ecf+t9@sellalles.com', 'clave-t9-nueva', 'key-t9');
-  if (pg_temp.cfg_t9()).conexion_probada_at is not null then
+  if pg_temp.probada_t9() is not null then
     raise exception 'Task 9: guardar otras credenciales del ambiente en uso debía borrar la prueba de conexión';
   end if;
   update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
   update ecf_credenciales set email = 'ecf+otro@sellalles.com' where company_id = c::uuid and ambiente = 'eCF';
-  if (pg_temp.cfg_t9()).conexion_probada_at is not null then
+  if pg_temp.probada_t9() is not null then
     raise exception 'Task 9: cambiar el correo de las credenciales del ambiente en uso debía borrar la prueba de conexión';
   end if;
   update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
   update ecf_credenciales set id_token = 'otro-token' where company_id = c::uuid and ambiente = 'eCF';
-  if (pg_temp.cfg_t9()).conexion_probada_at is null then
+  if pg_temp.probada_t9() is null then
     raise exception 'Task 9: cambiar solo el token de la sesión no debía borrar la prueba de conexión';
   end if;
 
-  -- De vuelta a TesteCF (la demo se prueba en pruebas), ya con la conexión probada.
+  -- De vuelta a TesteCF, ya con la conexión probada.
   update ecf_config set ambiente = 'TesteCF' where company_id = c::uuid;
   update ecf_config set conexion_probada_at = now() where company_id = c::uuid;
 end $t$;
@@ -3181,7 +3255,7 @@ select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
 set local role authenticated;
 do $t$
 declare
-  c   text := '00000000-0000-0000-0000-0000000000aa';
+  c   text := '00000000-0000-0000-0000-00000000ec0d';
   r   jsonb;
   n   int;
   llaves text[];
@@ -3281,5 +3355,567 @@ begin
   end if;
 end $t$;
 reset role;
+
+-- == Revisión final: 20261030180000_ecf_ajustes_revision_final.sql ==
+-- Estado explícito de la sección: super admin; la demo formalizada, sin
+-- ncf_enabled, con el módulo `ecf` y su ecf_config activa en TesteCF; sin
+-- documentos, uso ni secuencias propias; la sucursal b1 sin RNC; dos ventas sin
+-- NCF (…ec9a, …ec9b) que respaldan los documentos de la prueba (se crean con el
+-- e-CF en preparación, para que no reciban e-NCF). La otra empresa es …ec0a
+-- (su venta …ec99); las credenciales, de …ec0e (su venta …ec9c).
+-- UUID de la sección: ec99 y ec9a–ec9e (ventas), ec5a–ec5f (secuencias), ec1a–ec1c,
+-- ec24–ec2b y ec6a–ec6f, ec7a–ec7f (documentos).
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+update companies set is_formalized = true, ncf_enabled = false where id = '00000000-0000-0000-0000-0000000000aa';
+update branches set rnc = null where id = '00000000-0000-0000-0000-0000000000b1';
+delete from company_modules where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'ecf', true);
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_uso where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ncf_sequences where company_id = '00000000-0000-0000-0000-0000000000aa';
+delete from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa';
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion)
+values ('00000000-0000-0000-0000-0000000000aa', 'preparacion', 'TesteCF', '101010101', 'Demo SRL', 'Calle 1, Santo Domingo');
+select pg_temp.venta('00000000-0000-0000-0000-00000000ec9a', '00000000-0000-0000-0000-0000000000aa',
+                     '00000000-0000-0000-0000-0000000000b1');
+select pg_temp.venta('00000000-0000-0000-0000-00000000ec9b', '00000000-0000-0000-0000-0000000000aa',
+                     '00000000-0000-0000-0000-0000000000b1');
+select pg_temp.venta('00000000-0000-0000-0000-00000000ec9c', '00000000-0000-0000-0000-00000000ec0e', null);
+select pg_temp.venta('00000000-0000-0000-0000-00000000ec99', '00000000-0000-0000-0000-00000000ec0a', null);
+update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
+do $t$
+begin
+  if ecf_activa('00000000-0000-0000-0000-0000000000aa') is distinct from true
+     or pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec9a') is not null then
+    raise exception 'Revisión final: el estado de partida debía tener e-CF activo y las ventas de apoyo sin NCF';
+  end if;
+end $t$;
+
+-- Documento de la prueba: estado, cuándo se creó, cuándo se envió y cuándo se
+-- consultó (hace cuánto; null = nunca), de la demo y su venta …ec9a salvo que se diga otra.
+create function pg_temp.doc_rf(p_id uuid, p_n int, p_estado text,
+                               p_creado interval default interval '1 hour',
+                               p_enviado interval default null,
+                               p_consultado interval default null,
+                               p_company uuid default '00000000-0000-0000-0000-0000000000aa',
+                               p_ambiente text default 'TesteCF',
+                               p_sale uuid default '00000000-0000-0000-0000-00000000ec9a') returns void
+language sql as $$
+  insert into ecf_documentos (id, company_id, sale_id, tipo_ecf, encf, ambiente, estado,
+                              created_at, estado_at, enviado_at, ultima_consulta_at)
+  values (p_id, p_company, p_sale, 32, 'E32' || lpad(p_n::text, 10, '0'), p_ambiente, p_estado,
+          now() - p_creado, now() - p_creado, now() - p_enviado, now() - p_consultado);
+$$;
+
+-- I1: con la empresa activa no se cambia el ambiente; en preparación o
+-- suspendida sí, y la prueba de conexión se borra.
+do $t$
+declare demo uuid := '00000000-0000-0000-0000-0000000000aa'; e text;
+begin
+  perform pg_temp.debe_fallar(
+    $q$update ecf_config set ambiente = 'eCF' where company_id = '00000000-0000-0000-0000-0000000000aa'$q$,
+    'Pasa la empresa a preparación antes de cambiar el ambiente.');
+  -- Tampoco en la misma sentencia que la saca de activa: cuenta el estado que tenía.
+  perform pg_temp.debe_fallar(
+    $q$update ecf_config set estado = 'preparacion', ambiente = 'eCF' where company_id = '00000000-0000-0000-0000-0000000000aa'$q$,
+    'Pasa la empresa a preparación antes de cambiar el ambiente.');
+  -- Repetir el mismo ambiente no es cambiarlo.
+  update ecf_config set ambiente = 'TesteCF', plan = 'basico' where company_id = demo;
+  if (select plan from ecf_config where company_id = demo) <> 'basico'
+     or (select estado from ecf_config where company_id = demo) <> 'activa' then
+    raise exception 'I1: con el mismo ambiente, cambiar otra columna de una empresa activa debía funcionar';
+  end if;
+  foreach e in array array['preparacion', 'suspendida'] loop
+    update ecf_config set estado = e, conexion_probada_at = now() where company_id = demo;
+    update ecf_config set ambiente = 'CerteCF' where company_id = demo;
+    if (select ambiente from ecf_config where company_id = demo) <> 'CerteCF'
+       or (select conexion_probada_at from ecf_config where company_id = demo) is not null then
+      raise exception 'I1: en % el ambiente debía cambiar y borrar la prueba de conexión', e;
+    end if;
+    update ecf_config set ambiente = 'TesteCF' where company_id = demo;
+  end loop;
+  update ecf_config set estado = 'activa', plan = 'gratis' where company_id = demo;
+end $t$;
+
+-- I1: desde la API (authenticated), aun el super admin, solo se escriben los
+-- datos de ecf_config. El estado y las marcas los cambian las funciones; el
+-- updated_at, el disparador; company_id solo se escribe al crear la fila.
+insert into ecf_config (company_id, rnc_emisor, razon_social, direccion, updated_at)
+values ('00000000-0000-0000-0000-00000000ec0e', '404040404', 'Prueba SRL', 'Calle 4', '2020-01-01');
+do $t$
+declare c text;
+begin
+  foreach c in array array['estado', 'conexion_probada_at', 'activada_at', 'updated_at', 'company_id'] loop
+    if has_column_privilege('authenticated', 'public.ecf_config', c, 'update') then
+      raise exception 'I1: authenticated no debía poder escribir ecf_config.%', c;
+    end if;
+  end loop;
+  foreach c in array array['rnc_emisor', 'razon_social', 'nombre_comercial', 'direccion', 'ambiente', 'plan',
+                           'cupo_comprobantes', 'cupo_requests', 'minutos_entre_consultas', 'certificado_vence'] loop
+    if not has_column_privilege('authenticated', 'public.ecf_config', c, 'update')
+       or not has_column_privilege('authenticated', 'public.ecf_config', c, 'insert') then
+      raise exception 'I1: authenticated debía poder escribir ecf_config.%', c;
+    end if;
+  end loop;
+  if not has_column_privilege('authenticated', 'public.ecf_config', 'company_id', 'insert')
+     or has_column_privilege('authenticated', 'public.ecf_config', 'estado', 'insert') then
+    raise exception 'I1: al crear la fila authenticated debía escribir company_id y no el estado';
+  end if;
+end $t$;
+set local role authenticated;
+do $t$
+declare c text;
+begin
+  foreach c in array array['estado', 'conexion_probada_at', 'activada_at', 'company_id'] loop
+    perform pg_temp.debe_fallar(
+      format($q$update ecf_config set %I = %s where company_id = '00000000-0000-0000-0000-0000000000aa'$q$, c,
+             case c when 'estado' then quote_literal('preparacion')
+                    when 'company_id' then quote_literal('00000000-0000-0000-0000-00000000ec0b')
+                    else 'now()' end),
+      '%permission denied%');
+  end loop;
+
+  -- Lo que guarda el panel (ecf-config-dialog): un update con las columnas de datos.
+  update ecf_config
+     set rnc_emisor = '404040404', razon_social = 'Prueba SRL', nombre_comercial = 'Prueba', direccion = 'Calle 4',
+         ambiente = 'CerteCF', plan = 'basico', cupo_comprobantes = 1000, cupo_requests = 5000,
+         minutos_entre_consultas = 30, certificado_vence = date '2027-01-01'
+   where company_id = '00000000-0000-0000-0000-00000000ec0e';
+  if (select (plan, ambiente, nombre_comercial, certificado_vence) from ecf_config
+       where company_id = '00000000-0000-0000-0000-00000000ec0e')
+     is distinct from ('basico'::text, 'CerteCF'::text, 'Prueba'::text, date '2027-01-01') then
+    raise exception 'I1: el super admin debía poder guardar los datos de ecf_config';
+  end if;
+  if (select updated_at from ecf_config where company_id = '00000000-0000-0000-0000-00000000ec0e') is distinct from now() then
+    raise exception 'I1: el disparador debía seguir poniendo updated_at al guardar desde la API';
+  end if;
+
+  -- Y al crear la fila, un insert con company_id y los datos; el estado sale por omisión.
+  insert into ecf_config (company_id, rnc_emisor, razon_social, nombre_comercial, direccion, ambiente, plan,
+                          cupo_comprobantes, cupo_requests, minutos_entre_consultas, certificado_vence)
+  values ('00000000-0000-0000-0000-00000000ec0b', '505050505', 'Nueva SRL', null, 'Calle 5', 'TesteCF', 'gratis',
+          250, 1000, 60, null);
+  if (select estado from ecf_config where company_id = '00000000-0000-0000-0000-00000000ec0b') is distinct from 'preparacion' then
+    raise exception 'I1: la fila creada desde la API debía empezar en preparación';
+  end if;
+  perform pg_temp.debe_fallar(
+    $q$insert into ecf_config (company_id, estado, rnc_emisor, razon_social, direccion)
+       values ('00000000-0000-0000-0000-00000000ec0d', 'activa', '606060606', 'Intento', 'Calle 6')$q$,
+    '%permission denied%');
+  -- El upsert de PostgREST reescribe cada columna que manda, company_id incluido:
+  -- por eso el panel hace insert o update y no upsert.
+  perform pg_temp.debe_fallar(
+    $q$insert into ecf_config (company_id, rnc_emisor, razon_social, direccion)
+       values ('00000000-0000-0000-0000-00000000ec0e', '404040404', 'Prueba SRL', 'Calle 4')
+       on conflict (company_id) do update
+         set company_id = excluded.company_id, rnc_emisor = excluded.rnc_emisor,
+             razon_social = excluded.razon_social, direccion = excluded.direccion$q$,
+    '%permission denied%');
+
+  -- El estado sí cambia con ecf_cambiar_estado (security definer).
+  perform ecf_cambiar_estado('00000000-0000-0000-0000-0000000000aa', 'suspendida');
+  if (select estado from ecf_config where company_id = '00000000-0000-0000-0000-0000000000aa') <> 'suspendida' then
+    raise exception 'I1: ecf_cambiar_estado debía poder cambiar el estado';
+  end if;
+end $t$;
+reset role;
+update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
+
+-- I3: el e-NCF de una venta guardada no se cambia ni se escribe a mano. …ec9d
+-- recibe un E32 del sistema; …ec9e trae una B (de antes del e-CF).
+select pg_temp.secuencia('consumer', 'E32', true, 8000, 8100);
+select pg_temp.venta_ncf('00000000-0000-0000-0000-00000000ec9d', false);
+select pg_temp.venta_b('00000000-0000-0000-0000-00000000ec9e', 'B0200000077');
+do $t$
+declare e text; ncf0 text := pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec9d');
+begin
+  if ncf0 is distinct from 'E320000008000' or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec9d') <> 1 then
+    raise exception 'I3: la venta debía recibir E320000008000 del sistema, dio %', ncf0;
+  end if;
+  -- e-NCF -> otro e-NCF, -> una B o -> nada.
+  foreach e in array array['''E320000008099''', '''B0200000001''', 'null'] loop
+    perform pg_temp.debe_fallar(
+      format($q$update sales set ncf = %s where id = '00000000-0000-0000-0000-00000000ec9d'$q$, e),
+      'El número de comprobante electrónico lo asigna el sistema.');
+  end loop;
+  -- B -> e-NCF, y sin NCF -> e-NCF.
+  perform pg_temp.debe_fallar(
+    $q$update sales set ncf = 'E320000008098' where id = '00000000-0000-0000-0000-00000000ec9e'$q$,
+    'El número de comprobante electrónico lo asigna el sistema.');
+  perform pg_temp.debe_fallar(
+    $q$update sales set ncf = 'E320000008097' where id = '00000000-0000-0000-0000-00000000ec9a'$q$,
+    'El número de comprobante electrónico lo asigna el sistema.');
+  -- Lo demás de la venta se sigue cambiando, y repetir el mismo NCF no es cambiarlo.
+  update sales set ncf = ncf, amount_paid = amount_paid where id = '00000000-0000-0000-0000-00000000ec9d';
+  -- Una B se corrige como hoy.
+  update sales set ncf = 'B0200000078' where id = '00000000-0000-0000-0000-00000000ec9e';
+  if pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec9d') is distinct from ncf0
+     or pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec9e') is distinct from 'B0200000078'
+     or pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec9a') is not null then
+    raise exception 'I3: los cambios rechazados no debían tocar las ventas; la B sí debía cambiar';
+  end if;
+  -- Fuera de reemitir_ecf la marca está apagada.
+  if coalesce(current_setting('sellalles.reemitiendo_ecf', true), '') = 'on' then
+    raise exception 'I3: la marca de reemisión no debía estar encendida';
+  end if;
+end $t$;
+
+-- Tampoco desde la API (la RLS de sales deja escribir la venta; el disparador no).
+set local role authenticated;
+do $t$
+begin
+  perform pg_temp.debe_fallar(
+    $q$update sales set ncf = 'E320000008095' where id = '00000000-0000-0000-0000-00000000ec9d'$q$,
+    'El número de comprobante electrónico lo asigna el sistema.');
+  perform pg_temp.debe_fallar(
+    $q$insert into sales (id, company_id, branch_id, subtotal, itbis_amount, total, payment_method,
+                          payment_status, amount_paid, ncf)
+       values ('00000000-0000-0000-0000-00000000ec9f', '00000000-0000-0000-0000-0000000000aa',
+               '00000000-0000-0000-0000-0000000000b1', 100, 0, 100, 'transfer', 'paid', 100, 'E320000008094')$q$,
+    'El número de comprobante electrónico lo asigna el sistema.');
+end $t$;
+reset role;
+
+-- reemitir_ecf sigue cambiando el e-NCF (con su marca), y la marca no queda
+-- encendida después.
+update ecf_documentos set estado = 'rechazado' where sale_id = '00000000-0000-0000-0000-00000000ec9d';
+set local role authenticated;
+do $t$
+declare r jsonb;
+begin
+  r := reemitir_ecf('00000000-0000-0000-0000-00000000ec9d');
+  perform set_config('ecf.rf_reemision', r::text, true);
+end $t$;
+reset role;
+do $t$
+declare r jsonb := current_setting('ecf.rf_reemision')::jsonb;
+begin
+  if (r->>'encf') is distinct from 'E320000008001'
+     or pg_temp.ncf_de('00000000-0000-0000-0000-00000000ec9d') is distinct from 'E320000008001'
+     or pg_temp.docs_de('00000000-0000-0000-0000-00000000ec9d') <> 2 then
+    raise exception 'I3: reemitir_ecf debía seguir poniendo el e-NCF nuevo en la venta, dio %', r;
+  end if;
+  if coalesce(current_setting('sellalles.reemitiendo_ecf', true), '') = 'on' then
+    raise exception 'I3: reemitir_ecf debía apagar su marca al terminar';
+  end if;
+  perform pg_temp.debe_fallar(
+    $q$update sales set ncf = 'E320000008093' where id = '00000000-0000-0000-0000-00000000ec9d'$q$,
+    'El número de comprobante electrónico lo asigna el sistema.');
+end $t$;
+
+-- I3: el disparador nuevo es solo de la base.
+do $t$
+declare f text := 'public.ecf_proteger_ncf_venta()';
+begin
+  if has_function_privilege('anon', f, 'execute') or has_function_privilege('authenticated', f, 'execute')
+     or exists (select 1 from pg_proc p cross join lateral aclexplode(p.proacl) a
+                 where p.oid = f::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+    raise exception 'I3: ecf_proteger_ncf_venta no debía ser ejecutable por PUBLIC, anon ni authenticated';
+  end if;
+  if not exists (select 1 from pg_trigger
+                  where tgrelid = 'public.sales'::regclass and tgname = 'trg_ecf_proteger_ncf'
+                    and tgfoid = f::regprocedure and not tgisinternal
+                    and tgtype & 2 = 2      -- BEFORE
+                    and tgtype & 16 = 16    -- UPDATE
+                    and tgattr::text <> '') then
+    raise exception 'I3: faltaba el disparador BEFORE UPDATE OF ncf en sales';
+  end if;
+end $t$;
+
+-- I4: las secuencias E31, E33, E44 y E45 llevan vencimiento; E32, E34 y las B
+-- no lo necesitan. El rango E cabe en 10 dígitos.
+do $t$
+declare p record;
+begin
+  for p in
+    select * from (values ('fiscal', 'E31', '00000000-0000-0000-0000-00000000ec5a'::uuid),
+                          ('nota_debito', 'E33', '00000000-0000-0000-0000-00000000ec5b'::uuid),
+                          ('regimen_especial', 'E44', '00000000-0000-0000-0000-00000000ec5c'::uuid),
+                          ('gubernamental', 'E45', '00000000-0000-0000-0000-00000000ec5d'::uuid)) v(tipo, prefix, id)
+  loop
+    perform pg_temp.debe_fallar(
+      format($q$insert into ncf_sequences (company_id, tipo, prefix, range_from, range_to, current_val, electronica)
+                values ('00000000-0000-0000-0000-0000000000aa', %L, %L, 1, 10, 1, true)$q$, p.tipo, p.prefix),
+      '%ncf_sequences_vencimiento_e_check%');
+    insert into ncf_sequences (id, company_id, tipo, prefix, range_from, range_to, current_val, electronica, expires_at)
+    values (p.id, '00000000-0000-0000-0000-0000000000aa', p.tipo, p.prefix, 1, 10, 1, true, current_date + 30);
+    -- Quitarle el vencimiento después tampoco.
+    perform pg_temp.debe_fallar(
+      format($q$update ncf_sequences set expires_at = null where id = %L$q$, p.id),
+      '%ncf_sequences_vencimiento_e_check%');
+  end loop;
+  insert into ncf_sequences (id, company_id, tipo, prefix, range_from, range_to, current_val, electronica)
+  values ('00000000-0000-0000-0000-00000000ec5e', '00000000-0000-0000-0000-0000000000aa', 'nota_credito', 'E34', 1, 10, 1, true);
+  insert into ncf_sequences (id, company_id, tipo, prefix, range_from, range_to, current_val, electronica)
+  values ('00000000-0000-0000-0000-00000000ec5f', '00000000-0000-0000-0000-0000000000aa', 'fiscal', 'B01', 1, 10, 1, false);
+
+  perform pg_temp.debe_fallar(
+    $q$insert into ncf_sequences (company_id, tipo, prefix, range_from, range_to, current_val, electronica)
+       values ('00000000-0000-0000-0000-0000000000aa', 'consumer', 'E32', 9999999990, 10000000000, 9999999990, true)$q$,
+    '%ncf_sequences_rango_e_check%');
+  perform pg_temp.debe_fallar(
+    $q$update ncf_sequences set range_to = 10000000000 where id = '00000000-0000-0000-0000-00000000ec5e'$q$,
+    '%ncf_sequences_rango_e_check%');
+  update ncf_sequences set range_to = 9999999999 where id = '00000000-0000-0000-0000-00000000ec5e';
+  -- La serie B no tiene ese tope.
+  update ncf_sequences set range_to = 10000000000 where id = '00000000-0000-0000-0000-00000000ec5f';
+
+  delete from ncf_sequences where id in (
+    '00000000-0000-0000-0000-00000000ec5a', '00000000-0000-0000-0000-00000000ec5b', '00000000-0000-0000-0000-00000000ec5c',
+    '00000000-0000-0000-0000-00000000ec5d', '00000000-0000-0000-0000-00000000ec5e', '00000000-0000-0000-0000-00000000ec5f');
+end $t$;
+
+-- I5: solo se reserva (y se envía) el documento de una empresa con e-CF activo.
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec6a', 960001, 'por_enviar');
+update ecf_documentos set proximo_intento_at = now() - interval '1 minute'
+ where id = '00000000-0000-0000-0000-00000000ec6a';
+do $t$
+declare e text; d uuid := '00000000-0000-0000-0000-00000000ec6a';
+begin
+  foreach e in array array['suspendida', 'preparacion'] loop
+    update ecf_config set estado = e where company_id = '00000000-0000-0000-0000-0000000000aa';
+    if pg_temp.reservar(d) is distinct from '0:-:-' or pg_temp.estado_de(d) <> 'por_enviar' then
+      raise exception 'I5: con la empresa % el documento por enviar no debía reservarse', e;
+    end if;
+    -- Ni un enviando con la reserva vencida.
+    update ecf_documentos set estado = 'enviando', reservado_hasta = now() - interval '1 minute' where id = d;
+    if pg_temp.reservar(d) is distinct from '0:-:-' or pg_temp.estado_de(d) <> 'enviando' then
+      raise exception 'I5: con la empresa % un enviando vencido no debía reservarse', e;
+    end if;
+    update ecf_documentos set estado = 'por_enviar', reservado_hasta = null where id = d;
+  end loop;
+
+  -- Activa pero con el módulo apagado: tampoco.
+  update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-0000000000aa';
+  update company_modules set enabled = false
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+  if pg_temp.reservar(d) is distinct from '0:-:-' then
+    raise exception 'I5: con el módulo apagado el documento no debía reservarse';
+  end if;
+  update company_modules set enabled = true
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'ecf';
+
+  -- Activa: sí, y es el primer intento (los rechazos de arriba no contaron).
+  if pg_temp.reservar(d) is distinct from '1:1:enviando' then
+    raise exception 'I5: con la empresa activa debía reservarse en el primer intento';
+  end if;
+end $t$;
+
+-- I6: consultas pendientes. Lo que lleva más de 72 horas sin respuesta ya no se
+-- pide; cada lote empieza por lo nunca consultado y luego por lo consultado
+-- hace más tiempo; el intervalo se mide desde el último lote de la empresa.
+--   ec6b recibido, creado hace 100 h y enviado hace 71 h        -> sí (cuenta el envío)
+--   ec6c recibido, creado hace 73 h, sin fecha de envío          -> no
+--   ec6d recibido, creado hace 80 h y enviado hace 73 h          -> no
+--   ec6e recibido, creado hace 1 h, nunca consultado             -> sí, después de ec6b
+--   ec6f recibido, creado hace 2 h, consultado hace 3 h          -> sí, al final
+--   ec7a aceptado, consultado hace 3 h (no se pide; solo cuenta para el intervalo)
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec6b', 960011, 'recibido', interval '100 hours', interval '71 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec6c', 960012, 'recibido', interval '73 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec6d', 960013, 'recibido', interval '80 hours', interval '73 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec6e', 960014, 'recibido', interval '1 hour');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec6f', 960015, 'recibido', interval '2 hours', null, interval '3 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec7a', 960016, 'aceptado', interval '5 hours', interval '5 hours', interval '3 hours');
+do $t$
+declare e text[];
+begin
+  select encfs into e from ecf_consultas_pendientes()
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and ambiente = 'TesteCF';
+  if e is distinct from array['E320000960011', 'E320000960014', 'E320000960015'] then
+    raise exception 'I6: el lote debía traer ec6b, ec6e y ec6f en ese orden (sin los de más de 72 horas), trae %', e;
+  end if;
+
+  -- Un documento que ya no está recibido también marca el último lote de la empresa.
+  update ecf_documentos set ultima_consulta_at = now() - interval '10 minutes'
+   where id = '00000000-0000-0000-0000-00000000ec7a';
+  if exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa') then
+    raise exception 'I6: la empresa consultó hace 10 minutos (aunque ese documento ya se aceptó): no debía salir';
+  end if;
+  update ecf_documentos set ultima_consulta_at = now() - interval '61 minutes'
+   where id = '00000000-0000-0000-0000-00000000ec7a';
+  if not exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa') then
+    raise exception 'I6: pasado el intervalo del plan la empresa debía volver a salir';
+  end if;
+
+  -- Solo lo de más de 72 horas: la empresa no sale.
+  delete from ecf_documentos where id in ('00000000-0000-0000-0000-00000000ec6b', '00000000-0000-0000-0000-00000000ec6e',
+                                          '00000000-0000-0000-0000-00000000ec6f');
+  if exists (select 1 from ecf_consultas_pendientes() where company_id = '00000000-0000-0000-0000-0000000000aa') then
+    raise exception 'I6: con solo recibidos de más de 72 horas la empresa no debía salir';
+  end if;
+end $t$;
+
+-- I6: MSeller rechazó las credenciales: lo que espera de esa empresa y ambiente
+-- se pospone 30 minutos con el motivo (sin nada de la cuenta); lo demás, no.
+--   ec7b por enviar, TesteCF   -> se pospone       ec7c por enviar, CerteCF  -> no
+--   ec7d recibido, TesteCF     -> no               ec7e por enviar de la otra empresa -> no
+delete from ecf_documentos where company_id = '00000000-0000-0000-0000-0000000000aa';
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec7b', 960021, 'por_enviar');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec7c', 960022, 'por_enviar', p_ambiente => 'CerteCF');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec7d', 960023, 'recibido');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec7e', 960024, 'por_enviar',
+                      p_company => '00000000-0000-0000-0000-00000000ec0a',
+                      p_sale => '00000000-0000-0000-0000-00000000ec99');
+update ecf_documentos set proximo_intento_at = now() - interval '1 minute', ultimo_error = null
+ where id in ('00000000-0000-0000-0000-00000000ec7b', '00000000-0000-0000-0000-00000000ec7c',
+              '00000000-0000-0000-0000-00000000ec7d', '00000000-0000-0000-0000-00000000ec7e');
+set local role service_role;
+select ecf_posponer_por_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF');
+reset role;
+do $t$
+declare d ecf_documentos;
+begin
+  select * into d from ecf_documentos where id = '00000000-0000-0000-0000-00000000ec7b';
+  if d.proximo_intento_at is distinct from now() + interval '30 minutes'
+     or d.ultimo_error is distinct from 'MSeller rechazó las credenciales de la empresa.'
+     or d.estado <> 'por_enviar' then
+    raise exception 'I6: el por enviar de la empresa debía posponerse 30 minutos con el motivo, quedó % %',
+      d.proximo_intento_at, d.ultimo_error;
+  end if;
+  if exists (select 1 from ecf_documentos
+              where id in ('00000000-0000-0000-0000-00000000ec7c', '00000000-0000-0000-0000-00000000ec7d',
+                           '00000000-0000-0000-0000-00000000ec7e')
+                and (proximo_intento_at <> now() - interval '1 minute' or ultimo_error is not null)) then
+    raise exception 'I6: posponer debía tocar solo los por enviar de esa empresa y ese ambiente';
+  end if;
+end $t$;
+
+-- I6: con credenciales nuevas lo pospuesto vuelve a la fila enseguida (empresa
+-- de prueba …ec0e). Solo lo por enviar de ese ambiente.
+--   ec1a por enviar, TesteCF, pospuesto -> ahora   ec1b por enviar, CerteCF -> no
+--   ec1c recibido, TesteCF              -> no
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec1a', 960031, 'por_enviar',
+                      p_company => '00000000-0000-0000-0000-00000000ec0e', p_sale => '00000000-0000-0000-0000-00000000ec9c');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec1b', 960032, 'por_enviar', p_ambiente => 'CerteCF',
+                      p_company => '00000000-0000-0000-0000-00000000ec0e', p_sale => '00000000-0000-0000-0000-00000000ec9c');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec1c', 960033, 'recibido',
+                      p_company => '00000000-0000-0000-0000-00000000ec0e', p_sale => '00000000-0000-0000-0000-00000000ec9c');
+update ecf_documentos set proximo_intento_at = now() + interval '30 minutes'
+ where company_id = '00000000-0000-0000-0000-00000000ec0e';
+set local role service_role;
+select ecf_guardar_credenciales('00000000-0000-0000-0000-00000000ec0e', 'TesteCF',
+                                'ecf+rf@sellalles.com', 'clave-rf', 'key-rf');
+reset role;
+do $t$
+begin
+  if (select proximo_intento_at from ecf_documentos where id = '00000000-0000-0000-0000-00000000ec1a') is distinct from now() then
+    raise exception 'I6: guardar credenciales nuevas debía devolver a la fila lo que esperaba en ese ambiente';
+  end if;
+  if exists (select 1 from ecf_documentos
+              where id in ('00000000-0000-0000-0000-00000000ec1b', '00000000-0000-0000-0000-00000000ec1c')
+                and proximo_intento_at is distinct from now() + interval '30 minutes') then
+    raise exception 'I6: guardar credenciales solo debía tocar lo por enviar de ese ambiente';
+  end if;
+  if (ecf_leer_credenciales('00000000-0000-0000-0000-00000000ec0e', 'TesteCF') ->> 'password') is distinct from 'clave-rf' then
+    raise exception 'I6: las credenciales debían guardarse igual que siempre';
+  end if;
+end $t$;
+
+-- I6: posponer es del servidor, como las demás.
+do $t$
+declare f text := 'public.ecf_posponer_por_credenciales(uuid,text)';
+begin
+  if has_function_privilege('anon', f, 'execute') or has_function_privilege('authenticated', f, 'execute') then
+    raise exception 'I6: % no debía ser ejecutable por anon ni authenticated', f;
+  end if;
+  if not has_function_privilege('service_role', f, 'execute') then
+    raise exception 'I6: % debía ser ejecutable por service_role', f;
+  end if;
+  if exists (select 1 from pg_proc p cross join lateral aclexplode(p.proacl) a
+              where p.oid = f::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+    raise exception 'I6: % no debía ser ejecutable por PUBLIC', f;
+  end if;
+  if not coalesce((select prosecdef and proconfig @> array['search_path=public']
+                     from pg_proc where oid = f::regprocedure), false) then
+    raise exception 'I6: % debía ser security definer con search_path = public', f;
+  end if;
+end $t$;
+set local role authenticated;
+do $t$
+begin
+  perform pg_temp.debe_fallar(
+    $q$select ecf_posponer_por_credenciales('00000000-0000-0000-0000-0000000000aa', 'TesteCF')$q$,
+    '%permission denied%');
+end $t$;
+reset role;
+
+-- I7: el resumen diario avisa, por empresa, de lo atascado. Sin la exclusión de
+-- reemplazado_por: un reemplazo atascado también se avisa.
+--   ec24 por enviar hace 7 h         ec27 recibido, enviado hace 49 h
+--   ec25 enviando hace 7 h           ec28 recibido sin fecha de envío, creado hace 50 h
+--   ec26 por enviar hace 5 h (no)    ec29 recibido, enviado hace 47 h (no)
+--   ec2a por enviar hace 8 h, con reemplazado_por puesto
+--   ec2b por enviar hace 7 h, de la otra empresa (aunque no tenga e-CF activo)
+delete from ecf_documentos where company_id in ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000ec0a');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec24', 970001, 'por_enviar', interval '7 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec25', 970002, 'enviando', interval '7 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec26', 970003, 'por_enviar', interval '5 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec27', 970004, 'recibido', interval '60 hours', interval '49 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec28', 970005, 'recibido', interval '50 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec29', 970006, 'recibido', interval '60 hours', interval '47 hours');
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec2a', 970007, 'por_enviar', interval '8 hours');
+update ecf_documentos set reemplazado_por = '00000000-0000-0000-0000-00000000ec26'
+ where id = '00000000-0000-0000-0000-00000000ec2a';
+select pg_temp.doc_rf('00000000-0000-0000-0000-00000000ec2b', 970008, 'por_enviar', interval '7 hours',
+                      p_company => '00000000-0000-0000-0000-00000000ec0a', p_sale => '00000000-0000-0000-0000-00000000ec99');
+do $t$
+declare
+  n     text := (select name from companies where id = '00000000-0000-0000-0000-0000000000aa');
+  l     text[] := pg_temp.lineas_demo('Documentos:');
+  todas jsonb := public._ecf_avisos_lineas();
+  antes bigint := (select count(*) from pg_temp.correos_ecf());
+  q     record;
+begin
+  if l is distinct from array[
+       'Documentos: ' || n || ': 2 comprobantes sin respuesta de la DGII desde hace más de 48 horas.',
+       'Documentos: ' || n || ': 3 comprobantes sin enviar desde hace más de 6 horas.'] then
+    raise exception 'I7: debían salir los 3 sin enviar y los 2 sin respuesta de la demo, sale %', l;
+  end if;
+  if not todas @> to_jsonb(array['Documentos: Prueba e-CF: otra empresa: 1 comprobante sin enviar desde hace más de 6 horas.']) then
+    raise exception 'I7: la otra empresa debía tener su línea (en singular), las líneas son %', todas;
+  end if;
+
+  -- Van en el correo del día.
+  perform ecf_avisos_diarios();
+  if (select count(*) from pg_temp.correos_ecf()) <> antes + 1 then
+    raise exception 'I7: lo atascado debía salir en el resumen diario';
+  end if;
+  select * into q from pg_temp.correos_demo() order by id desc limit 1;
+  if not ((q.b -> 'vars' -> 'lineas') @> to_jsonb(l)) then
+    raise exception 'I7: el correo debía traer las líneas de lo atascado, trae %', q.b -> 'vars';
+  end if;
+
+  -- Lo que ya no está atascado deja de avisarse.
+  update ecf_documentos set estado = 'aceptado'
+   where id in ('00000000-0000-0000-0000-00000000ec24', '00000000-0000-0000-0000-00000000ec25',
+                '00000000-0000-0000-0000-00000000ec27', '00000000-0000-0000-0000-00000000ec28');
+  if pg_temp.lineas_demo('Documentos:') is distinct from array[
+       'Documentos: ' || n || ': 1 comprobante sin enviar desde hace más de 6 horas.'] then
+    raise exception 'I7: solo debía quedar el reemplazo atascado (en singular), sale %', pg_temp.lineas_demo('Documentos:');
+  end if;
+end $t$;
+
+-- Ajustes sueltos: annul_sale lee el documento vigente con `for share`, y la
+-- service role tiene sus permisos explícitos sobre las cuatro tablas.
+do $t$
+declare t text;
+begin
+  if pg_get_functiondef('public.annul_sale(uuid,text,text)'::regprocedure)
+     !~ 'reemplazado_por is null\s+order by d\.created_at desc\s+limit 1\s+for share' then
+    raise exception 'annul_sale debía leer el documento vigente con for share';
+  end if;
+  foreach t in array array['ecf_config', 'ecf_credenciales', 'ecf_documentos', 'ecf_uso'] loop
+    if (select count(distinct a.privilege_type)
+          from pg_class c cross join lateral aclexplode(c.relacl) a
+         where c.oid = ('public.' || t)::regclass
+           and a.grantee = 'service_role'::regrole
+           and a.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')) <> 4 then
+      raise exception 'service_role debía tener select, insert, update y delete en %', t;
+    end if;
+  end loop;
+end $t$;
 
 select 'ok';
