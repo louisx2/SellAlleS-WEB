@@ -3561,13 +3561,18 @@ begin
   end if;
 end $t$;
 
--- Tampoco desde la API (la RLS de sales deja escribir la venta; el disparador no).
+-- Tampoco desde la API. Hoy el rol authenticated solo tiene SELECT e INSERT en
+-- sales (no UPDATE): la venta cambia únicamente por funciones security definer,
+-- y un UPDATE directo ya muere en el permiso de la tabla. Si algún día se le
+-- diera UPDATE a authenticated, el disparador es el que debe pararlo.
 set local role authenticated;
 do $t$
 begin
   perform pg_temp.debe_fallar(
     $q$update sales set ncf = 'E320000008095' where id = '00000000-0000-0000-0000-00000000ec9d'$q$,
-    'El número de comprobante electrónico lo asigna el sistema.');
+    case when has_table_privilege('authenticated', 'public.sales', 'UPDATE')
+         then 'El número de comprobante electrónico lo asigna el sistema.'
+         else '%permission denied%' end);
   perform pg_temp.debe_fallar(
     $q$insert into sales (id, company_id, branch_id, subtotal, itbis_amount, total, payment_method,
                           payment_status, amount_paid, ncf)
