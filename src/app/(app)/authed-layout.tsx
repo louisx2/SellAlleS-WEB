@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -615,6 +615,16 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/correos')} tooltip="Correos enviados por la plataforma">
                     <Mail />
                     <span className="group-data-[collapsible=icon]:hidden">Correos</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            )}
+            {isSuperAdmin && (
+              <SidebarMenuItem>
+                <Link href="/admin/facturacion-electronica" passHref>
+                  <SidebarMenuButton isActive={pathname.startsWith('/admin/facturacion-electronica')} tooltip="Facturación electrónica de las empresas">
+                    <FileCheck />
+                    <span className="group-data-[collapsible=icon]:hidden">Facturación electrónica</span>
                   </SidebarMenuButton>
                 </Link>
               </SidebarMenuItem>

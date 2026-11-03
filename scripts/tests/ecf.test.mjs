@@ -25,7 +25,12 @@ import {
   diasParaVencer,
   certificadoPorVencer,
   avisoSerieB,
+  porcentajeDeUso,
+  cupoPorAgotarse,
+  mayorUsoDeCupo,
+  CUPO_AVISO_PCT,
 } from '../../src/lib/ecf.ts';
+import { PLANES_MSELLER } from '../../src/lib/ecf-planes.ts';
 
 // Documento mínimo para armar casos.
 const doc = (over = {}) => ({
@@ -299,4 +304,59 @@ test('avisoSerieB: el mismo texto del error de assign_ncf, con la fecha en DD/MM
     avisoSerieB(null),
     'La serie B dejó de ser válida. Para emitir comprobantes hay que activar la facturación electrónica.',
   );
+});
+
+test('PLANES_MSELLER: cupos de cada plan y minutos entre consultas', () => {
+  assert.deepEqual(PLANES_MSELLER.emprende, { nombre: 'Emprende', comprobantes: 500, requests: 2000, minutos: 30 });
+  // El plan gratis consulta cada hora; los de pago, cada 30 minutos.
+  assert.equal(PLANES_MSELLER.gratis.minutos, 60);
+  for (const plan of ['emprende', 'basico', 'negocio', 'avanzado', 'empresa']) {
+    assert.equal(PLANES_MSELLER[plan].minutos, 30, plan);
+  }
+  // Los seis planes que acepta ecf_config_plan_check, con los cupos de MSeller.
+  assert.deepEqual(
+    Object.entries(PLANES_MSELLER).map(([k, p]) => [k, p.comprobantes, p.requests]),
+    [
+      ['gratis', 250, 1000],
+      ['emprende', 500, 2000],
+      ['basico', 1000, 4000],
+      ['negocio', 2500, 10000],
+      ['avanzado', 6000, 24000],
+      ['empresa', 10000, 100000],
+    ],
+  );
+});
+
+test('porcentajeDeUso: uso sobre el cupo, sin redondear y sin dividir entre cero', () => {
+  assert.equal(porcentajeDeUso(0, 250), 0);
+  assert.equal(porcentajeDeUso(200, 250), 80);
+  assert.equal(porcentajeDeUso(250, 250), 100);
+  assert.equal(porcentajeDeUso(300, 250), 120); // pasado del cupo
+  assert.ok(Math.abs(porcentajeDeUso(199, 250) - 79.6) < 1e-9);
+  // Cupo en 0: con uso está agotado, sin uso no hay nada que avisar.
+  assert.equal(porcentajeDeUso(1, 0), 100);
+  assert.equal(porcentajeDeUso(0, 0), 0);
+});
+
+test('cupoPorAgotarse: rojo desde el 80 %, ni un poco antes', () => {
+  assert.equal(cupoPorAgotarse(CUPO_AVISO_PCT), true);
+  assert.equal(cupoPorAgotarse(80), true);
+  assert.equal(cupoPorAgotarse(79.99), false);
+  assert.equal(cupoPorAgotarse(porcentajeDeUso(199, 250)), false); // 79,6 %
+  assert.equal(cupoPorAgotarse(porcentajeDeUso(200, 250)), true);   // 80 %
+});
+
+test('mayorUsoDeCupo: manda el más lleno de los dos cupos', () => {
+  // Comprobantes al 10 %, requests al 90 %: el resumen ordena por el 90.
+  assert.equal(mayorUsoDeCupo(25, 250, 900, 1000), 90);
+  // Al revés.
+  assert.equal(mayorUsoDeCupo(225, 250, 100, 1000), 90);
+  assert.equal(mayorUsoDeCupo(0, 250, 0, 1000), 0);
+  // Ordenar por él deja arriba a la empresa más apretada.
+  const filas = [
+    { e: 'A', u: mayorUsoDeCupo(10, 250, 100, 1000) },
+    { e: 'B', u: mayorUsoDeCupo(240, 250, 100, 1000) },
+    { e: 'C', u: mayorUsoDeCupo(10, 250, 850, 1000) },
+  ];
+  assert.deepEqual(filas.sort((a, b) => b.u - a.u).map((f) => f.e), ['B', 'C', 'A']);
 });

@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import {
   Building2, Store, Pencil, Boxes, LogIn, ChevronDown, ChevronRight, Search, Filter,
-  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt, Shield,
+  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt, Shield, FileCheck,
 } from 'lucide-react';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, type BusinessType } from '@/lib/business-types';
@@ -31,6 +31,7 @@ interface CompaniesDataTableProps {
   loading: boolean;
   onEditCompany: (c: Company) => void;
   onModulesCompany: (c: Company) => void;
+  onEcfCompany?: (c: Company) => void;
   onEnterCompany: (c: Company) => void;
   onEnterBranch: (companyId: string, companyName: string, branchId: string, branchName: string) => void;
   onEditBranch: (b: { id: string; name: string; location: string; companyId: string }) => void;
@@ -88,6 +89,7 @@ export function CompaniesDataTable({
   loading,
   onEditCompany,
   onModulesCompany,
+  onEcfCompany,
   onEnterCompany,
   onEnterBranch,
   onEditBranch,
@@ -386,6 +388,11 @@ export function CompaniesDataTable({
                             <DropdownMenuItem onClick={() => onModulesCompany(c)}>
                               <Boxes className="mr-2 h-4 w-4" /> Módulos
                             </DropdownMenuItem>
+                            {onEcfCompany && (
+                              <DropdownMenuItem onClick={() => onEcfCompany(c)}>
+                                <FileCheck className="mr-2 h-4 w-4" /> Facturación electrónica
+                              </DropdownMenuItem>
+                            )}
                             {onAddBranch && (
                               <DropdownMenuItem onClick={() => onAddBranch(c)}>
                                 <PlusCircle className="mr-2 h-4 w-4" /> Agregar sucursal

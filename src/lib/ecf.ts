@@ -200,3 +200,54 @@ export function avisoSerieB(corte: string | null | undefined): string {
   const cuando = corte ? ` el ${fechaDMA(corte)}` : '';
   return `La serie B dejó de ser válida${cuando}. Para emitir comprobantes hay que activar la facturación electrónica.`;
 }
+
+// ---------------------------------------------------------------------------
+// Panel de SellAlleS: configuración por empresa y resumen de la plataforma
+// ---------------------------------------------------------------------------
+
+/** Los tres entornos de MSeller: `https://ecf.api.mseller.app/{TesteCF|CerteCF|eCF}`. */
+export type AmbienteEcf = 'TesteCF' | 'CerteCF' | 'eCF';
+
+export const ECF_AMBIENTES: AmbienteEcf[] = ['TesteCF', 'CerteCF', 'eCF'];
+
+export const ECF_AMBIENTE_NOMBRE: Record<AmbienteEcf, string> = {
+  TesteCF: 'Pruebas',
+  CerteCF: 'Certificación',
+  eCF: 'Producción',
+};
+
+/** Estado de `ecf_config.estado`: solo cambia con `ecf_cambiar_estado`. */
+export type EstadoEcfConfig = 'preparacion' | 'activa' | 'suspendida';
+
+export const ECF_ESTADO_CONFIG_NOMBRE: Record<EstadoEcfConfig, string> = {
+  preparacion: 'En preparación',
+  activa: 'Activa',
+  suspendida: 'Suspendida',
+};
+
+/** Desde qué % del cupo mensual el resumen lo pone en rojo. */
+export const CUPO_AVISO_PCT = 80;
+
+/**
+ * % del cupo que lleva usado (sin redondear: 79,6 % no es 80 %). Un cupo en 0
+ * no deja usar nada: con uso está agotado, sin uso no hay nada que avisar.
+ */
+export function porcentajeDeUso(usado: number, cupo: number): number {
+  if (!(cupo > 0)) return usado > 0 ? 100 : 0;
+  return (usado / cupo) * 100;
+}
+
+/** El mayor % de uso entre los dos cupos de la empresa (comprobantes y requests); con él se ordena el resumen. */
+export function mayorUsoDeCupo(
+  comprobantes: number,
+  cupoComprobantes: number,
+  requests: number,
+  cupoRequests: number,
+): number {
+  return Math.max(porcentajeDeUso(comprobantes, cupoComprobantes), porcentajeDeUso(requests, cupoRequests));
+}
+
+/** ¿Ya va por el 80 % del cupo o más? */
+export function cupoPorAgotarse(pct: number): boolean {
+  return pct >= CUPO_AVISO_PCT;
+}
