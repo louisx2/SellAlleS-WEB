@@ -3923,4 +3923,85 @@ begin
   end loop;
 end $t$;
 
+-- == R37: tope por empresa y ambiente en la cola de envíos ==
+-- Estado explícito de la sección: super admin; dos empresas de prueba formalizadas,
+-- con el módulo `ecf` y su ecf_config activa en TesteCF: …ecee (A, la "caída") y
+-- …ecef (B). Cada una con una venta de apoyo sin NCF (…ecde, …ecdf). Los documentos
+-- de A son los más viejos de todos (hace 30 días) y los de B más nuevos. Las
+-- aserciones filtran por estas dos empresas.
+-- UUID de la sección: ecee–ecef (empresas), ecde–ecdf (ventas).
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+insert into companies (id, name) values
+  ('00000000-0000-0000-0000-00000000ecee', 'Prueba e-CF: cola A'),
+  ('00000000-0000-0000-0000-00000000ecef', 'Prueba e-CF: cola B');
+update companies set is_formalized = true
+ where id in ('00000000-0000-0000-0000-00000000ecee', '00000000-0000-0000-0000-00000000ecef');
+insert into company_modules (company_id, module_key, enabled) values
+  ('00000000-0000-0000-0000-00000000ecee', 'ecf', true),
+  ('00000000-0000-0000-0000-00000000ecef', 'ecf', true);
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion) values
+  ('00000000-0000-0000-0000-00000000ecee', 'preparacion', 'TesteCF', '505050505', 'Cola A SRL', 'Calle 5'),
+  ('00000000-0000-0000-0000-00000000ecef', 'preparacion', 'TesteCF', '606060606', 'Cola B SRL', 'Calle 6');
+select pg_temp.venta('00000000-0000-0000-0000-00000000ecde', '00000000-0000-0000-0000-00000000ecee', null);
+select pg_temp.venta('00000000-0000-0000-0000-00000000ecdf', '00000000-0000-0000-0000-00000000ecef', null);
+update ecf_config set estado = 'activa'
+ where company_id in ('00000000-0000-0000-0000-00000000ecee', '00000000-0000-0000-0000-00000000ecef');
+-- A: 15 por_enviar vencidos, los n = 1..15 en orden de antigüedad; B: 3 más nuevos.
+insert into ecf_documentos (company_id, sale_id, tipo_ecf, encf, ambiente, estado, created_at, estado_at)
+select '00000000-0000-0000-0000-00000000ecee', '00000000-0000-0000-0000-00000000ecde', 32,
+       'E32' || lpad(n::text, 10, '0'), 'TesteCF', 'por_enviar',
+       now() - interval '30 days' + n * interval '1 minute', now() - interval '30 days'
+  from generate_series(1, 15) n;
+insert into ecf_documentos (company_id, sale_id, tipo_ecf, encf, ambiente, estado, created_at, estado_at)
+select '00000000-0000-0000-0000-00000000ecef', '00000000-0000-0000-0000-00000000ecdf', 32,
+       'E32' || lpad(n::text, 10, '0'), 'TesteCF', 'por_enviar',
+       now() - interval '20 days' + n * interval '1 minute', now() - interval '20 days'
+  from generate_series(1, 3) n;
+
+-- Los ids que devuelve la cola para estas dos empresas, en el orden de la cola.
+create function pg_temp.cola_r37(p_limite int) returns uuid[]
+language sql as $$
+  select coalesce(array_agg(q.id order by d.created_at, d.id), '{}')
+    from public.ecf_documentos_por_enviar(p_limite) q(id)
+    join public.ecf_documentos d on d.id = q.id
+   where d.company_id in ('00000000-0000-0000-0000-00000000ecee', '00000000-0000-0000-0000-00000000ecef')
+$$;
+
+do $t$
+declare
+  a uuid := '00000000-0000-0000-0000-00000000ecee';
+  b uuid := '00000000-0000-0000-0000-00000000ecef';
+  v_ids uuid[]; v_viejos_a uuid[]; v_b uuid[];
+begin
+  select array_agg(id order by created_at) into v_viejos_a from (
+    select id, created_at from ecf_documentos where company_id = a order by created_at limit 10) x;
+  select array_agg(id order by created_at) into v_b from ecf_documentos where company_id = b;
+
+  -- Tope de 10 por empresa: de A los 10 más viejos y los 3 de B.
+  v_ids := pg_temp.cola_r37(50);
+  if cardinality(v_ids) <> 13
+     or (select count(*) from ecf_documentos where id = any (v_ids) and company_id = a) <> 10
+     or not (v_viejos_a <@ v_ids) or not (v_b <@ v_ids) then
+    raise exception 'R37: con 15 de A y 3 de B la cola debía dar los 10 más viejos de A y los 3 de B; dio % (A: %)',
+      cardinality(v_ids), (select count(*) from ecf_documentos where id = any (v_ids) and company_id = a);
+  end if;
+
+  -- El límite global sigue aplicándose, por created_at: solo salen de los 10 más viejos de A.
+  v_ids := pg_temp.cola_r37(5);
+  if cardinality(v_ids) <> 5 or not (v_ids <@ v_viejos_a) then
+    raise exception 'R37: con p_limite 5 debían salir 5 de los 10 más viejos de A; salieron % (¿%?)',
+      cardinality(v_ids), v_ids;
+  end if;
+
+  -- El tope es por ambiente: A con 13 en TesteCF y 2 en eCF da 10 + 2.
+  update ecf_documentos set ambiente = 'eCF'
+   where company_id = a and encf in ('E320000000014', 'E320000000015');
+  v_ids := pg_temp.cola_r37(50);
+  if cardinality(v_ids) <> 15
+     or (select count(*) from ecf_documentos where id = any (v_ids) and company_id = a and ambiente = 'TesteCF') <> 10
+     or (select count(*) from ecf_documentos where id = any (v_ids) and company_id = a and ambiente = 'eCF') <> 2 then
+    raise exception 'R37: el tope debía ser por ambiente (10 TesteCF + 2 eCF de A y 3 de B); dio % en total', cardinality(v_ids);
+  end if;
+end $t$;
+
 select 'ok';

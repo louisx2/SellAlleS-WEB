@@ -766,3 +766,58 @@ $function$;
 grant select, insert, update, delete
   on public.ecf_config, public.ecf_credenciales, public.ecf_documentos, public.ecf_uso
   to service_role;
+
+-- R37: una empresa caída no acapara la cola de envíos. emitirLote salta los
+-- documentos de una empresa cuyo lote cortó (falla de login o 5xx) sin reservarlos
+-- ni mover su próximo intento; si la cola tomara los 50 más viejos de todas, una
+-- empresa con 50 o más elegibles que sigue fallando la ocuparía entera en cada
+-- pasada del cron y los reintentos de las demás esperarían mientras dure la caída.
+-- Por eso cada pasada devuelve como máximo 10 documentos (los más viejos) por
+-- empresa y ambiente, y el límite global se aplica sobre ese conjunto. Todo lo
+-- demás es igual que en 20261030150000_ecf_servidor.sql.
+create or replace function public.ecf_documentos_por_enviar(p_limite int default 50)
+returns setof uuid
+language plpgsql
+volatile
+security definer
+set search_path = public
+as $$
+declare
+  v_mes timestamptz := date_trunc('month', now() at time zone 'utc') at time zone 'utc';
+  -- Tope de documentos por empresa y ambiente en cada pasada.
+  c_tope_por_empresa constant int := 10;
+begin
+  update public.ecf_documentos d
+     set estado             = 'por_enviar',
+         proximo_intento_at = now(),
+         estado_at          = now(),
+         updated_at         = now()
+    from public.ecf_config c
+   where c.company_id = d.company_id
+     and d.estado = 'sin_cupo'
+     and public.ecf_activa(d.company_id)
+     and (coalesce(d.estado_at, d.created_at) < v_mes
+          or coalesce(d.estado_at, d.created_at) < c.updated_at);
+
+  return query
+  select e.id
+    from (
+      select d.id, d.created_at,
+             row_number() over (partition by d.company_id, d.ambiente
+                                order by d.created_at, d.id) as pos
+        from public.ecf_documentos d
+       where public.ecf_activa(d.company_id)
+         and ((d.estado = 'por_enviar'
+               and d.proximo_intento_at <= now()
+               and d.created_at < now() - interval '1 minute')
+              or (d.estado = 'enviando'
+                  and coalesce(d.reservado_hasta, '-infinity') <= now()))
+    ) e
+   where e.pos <= c_tope_por_empresa
+   order by e.created_at, e.id
+   limit p_limite;
+end;
+$$;
+
+revoke execute on function public.ecf_documentos_por_enviar(int) from public, anon, authenticated;
+grant execute on function public.ecf_documentos_por_enviar(int) to service_role;
