@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { PlusCircle, ArrowRight, ArrowLeft } from 'lucide-react';
 import { CompanyModulesDialog } from '@/components/admin/company-modules-dialog';
+import { EcfConfigDialog } from '@/components/admin/ecf-config-dialog';
 import { CompaniesDataTable } from '@/components/admin/companies-data-table';
 import { DeleteConfirmDialog } from '@/components/admin/delete-confirm-dialog';
 import { ManageCompanyUsersDialog } from '@/components/admin/manage-company-users-dialog';
@@ -91,6 +92,7 @@ export default function CompaniesManagementPage() {
   };
 
   const [modulesFor, setModulesFor] = useState<Company | null>(null);
+  const [ecfFor, setEcfFor] = useState<Company | null>(null);
   const [editingBranch, setEditingBranch] = useState<{ id: string; name: string; location: string; companyId: string } | null>(null);
   const [statusTarget, setStatusTarget] = useState<Company | null>(null);
   const [deleteCompanyTarget, setDeleteCompanyTarget] = useState<Company | null>(null);
@@ -175,6 +177,23 @@ export default function CompaniesManagementPage() {
   // se vuelve a disparar solo. `appUser` como dependencia sobraba: se recreaba
   // en cada refresco de sesión y repetía la consulta sin que nada cambiara.
   useEffect(() => { if (esSuperAdmin || hasMultipleCompanies) load(); }, [load, esSuperAdmin, hasMultipleCompanies]);
+
+  // /admin/empresas?ecf=<id>: llega del resumen de Facturación electrónica y abre
+  // la configuración de esa empresa en cuanto carga el listado.
+  const ecfPendiente = useRef<string | null>(null);
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get('ecf');
+    if (!id) return;
+    ecfPendiente.current = id;
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
+  useEffect(() => {
+    const id = ecfPendiente.current;
+    if (!id || loading || !esSuperAdmin) return;
+    ecfPendiente.current = null;
+    const empresa = companies.find((c) => c.id === id);
+    if (empresa) setEcfFor(empresa);
+  }, [loading, companies, esSuperAdmin]);
 
   const canAccess = appUser?.isSuperAdmin || hasMultipleCompanies;
   if (!canAccess) {
@@ -687,6 +706,7 @@ export default function CompaniesManagementPage() {
         loading={loading}
         onEditCompany={openEdit}
         onModulesCompany={setModulesFor}
+        onEcfCompany={setEcfFor}
         onToggleStatus={setStatusTarget}
         onEnterCompany={(c) => setImpersonatedCompany(c.id, c.name)}
         onEnterBranch={(cId, cName, bId, bName) => {
@@ -1140,6 +1160,13 @@ export default function CompaniesManagementPage() {
         companyName={modulesFor?.name ?? ''}
         open={modulesFor !== null}
         onOpenChange={(o) => { if (!o) setModulesFor(null); }}
+      />
+
+      <EcfConfigDialog
+        companyId={ecfFor?.id ?? null}
+        companyName={ecfFor?.name ?? ''}
+        open={ecfFor !== null}
+        onOpenChange={(o) => { if (!o) setEcfFor(null); }}
       />
 
       <Dialog open={editingBranch !== null} onOpenChange={(o) => { if (!o) setEditingBranch(null); }}>

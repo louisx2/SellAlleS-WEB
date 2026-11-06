@@ -1,13 +1,15 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Sale, PaymentMethod, PaymentResult, RefundMethod, FinancingDetails, RefinanceBaseMode, RefinanceLateFeeAction } from '@/lib/types';
+import type { Sale, PaymentMethod, PaymentResult, RefundMethod, FinancingDetails, RefinanceBaseMode, RefinanceLateFeeAction, EcfDocumento } from '@/lib/types';
 import type { InterestMode, PaymentFrequency } from '@/lib/frequency';
 import { supabase } from '@/lib/supabase/client';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import { rowToSale, saleToRow, rowToPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
 import { useSharing } from '@/context/sharing-provider';
+import { emitirEcf } from '@/lib/ecf-client';
+import { esEcf, tipoDeEncf } from '@/lib/ecf';
 
 interface SalesContextType {
   sales: Sale[];
@@ -88,6 +90,8 @@ export type AnnulSaleResult = {
   refundMethod: RefundMethod;
   // Abono inicial anulado junto con una venta a crédito o financiada.
   paymentsVoided: number;
+  // E34 de la nota de crédito, si la empresa emite e-CF y alcanzó a emitirse.
+  ecf?: EcfDocumento;
 };
 
 export type AmendFinancingInput = {
@@ -126,7 +130,12 @@ export const resolveBranchId = async (branchName?: string): Promise<string | nul
   return data?.id ?? null;
 };
 
-const SALE_SELECT = '*, sale_items(*), customers(*), branches(name), financing_installments(*)';
+// El embed de e-CF va por el nombre de la FK: sin él, el día que ecf_documentos
+// gane otra relación con sales PostgREST lo tomaría por ambiguo (300) y nadie
+// vería sus ventas.
+const SALE_SELECT =
+  '*, sale_items(*), customers(*), branches(name), financing_installments(*), ' +
+  'ecf_documentos!ecf_documentos_sale_id_fkey(id, tipo_ecf, encf, estado, security_code, qr_url, signed_at, mensajes_dgii, reemplazado_por, created_at)';
 
 export function SalesProvider({ children }: { children: ReactNode }) {
   const { appUser } = useAuth();
@@ -239,6 +248,12 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       });
       if (couponError) console.error('No se pudo canjear el cupón:', couponError.message);
     }
+    // Con e-CF el trigger ya dejó el documento en la bandeja; aquí se le pide al
+    // servidor que lo firme y lo mande para que el ticket salga con el QR.
+    // emitirEcf no lanza y se rinde a los 10 s: si devuelve null la venta sigue
+    // y el ticket dice "en proceso" (el servidor lo reintenta solo).
+    let ecf: EcfDocumento | undefined;
+    if (esEcf(sale.ncf)) ecf = (await emitirEcf({ saleId: sale.id })) ?? undefined;
     await load();
     // Venta tal como quedó en la base (id y NCF reales) para el recibo.
     return {
@@ -246,6 +261,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       id: sale.id,
       ncf: sale.ncf ?? undefined,
       createdAt: new Date(sale.created_at),
+      ecf,
     };
   };
 
@@ -325,6 +341,11 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       p_refund_method: refundMethod ?? null,
     });
     if (error) throw error;
+    // La nota de crédito de una venta e-CF es un E34 y se firma y se envía igual
+    // que la venta. Si no alcanza a emitirse, la anulación ya está hecha: el
+    // servidor reintenta el documento.
+    let ecf: EcfDocumento | undefined;
+    if (tipoDeEncf(data.ncf) === 34) ecf = (await emitirEcf({ creditNoteId: data.credit_note_id })) ?? undefined;
     await load();
     return {
       creditNoteId: data.credit_note_id,
@@ -333,6 +354,7 @@ export function SalesProvider({ children }: { children: ReactNode }) {
       total: Number(data.total ?? 0),
       refundMethod: data.refund_method,
       paymentsVoided: Number(data.payments_voided ?? 0),
+      ecf,
     };
   };
 

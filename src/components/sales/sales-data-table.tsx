@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type {
   ColumnDef,
   SortingState,
@@ -36,6 +36,10 @@ export function SalesDataTable<TData, TValue>({
   const [sorting, setSorting] = useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
 
+  // La columna DGII solo se muestra si alguna venta de la lista lleva e-CF: en
+  // una empresa que no lo usa sería una columna vacía.
+  const hayEcf = useMemo(() => data.some((row) => !!(row as { ecf?: unknown }).ecf), [data]);
+
   const table = useReactTable({
     data,
     columns,
@@ -48,6 +52,7 @@ export function SalesDataTable<TData, TValue>({
     state: {
       sorting,
       columnFilters,
+      columnVisibility: { dgii: hayEcf },
     },
     initialState: {
       pagination: {
@@ -93,7 +98,7 @@ export function SalesDataTable<TData, TValue>({
             ))
           ) : (
             <TableRow>
-              <TableCell colSpan={columns.length} className="h-24 text-center">
+              <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center">
                 No hay resultados.
               </TableCell>
             </TableRow>

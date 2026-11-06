@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -31,6 +31,7 @@ import { ProfileModal } from '@/components/profile/profile-modal';
 import { SupportDialog } from '@/components/support/support-dialog';
 import { useActualizacionDisponible, aplicarActualizacion, VERSION } from '@/lib/pwa-update';
 import { AvisoDeCuota } from '@/components/subscription/aviso-de-cuota';
+import { EcfProblemasBanner } from '@/components/ecf/ecf-problemas-banner';
 import { useMiCuenta } from '@/hooks/use-mi-cuenta';
 import { useComprobantesPendientes } from '@/hooks/use-comprobantes-pendientes';
 
@@ -237,6 +238,9 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   // El banner de "operando en otra empresa" solo se muestra a super admin.
   const hasTopBanner = (isImpersonating && isSuperAdmin) || isDemoCompany || isReadOnly;
   const showOperationalMenus = (!isSuperAdmin && !hasMultipleCompanies) || isImpersonating;
+  // Aviso de comprobantes electrónicos con problemas: solo para quien puede
+  // resolverlos (administrador de la empresa en la que opera) y si emite e-CF.
+  const verAvisoEcf = showOperationalMenus && !!appUser.isCompanyAdmin && profile.ecfActiva;
   const isManager = appUser?.customRoles?.some(r => r.name.toLowerCase().includes('gerente'));
   const isAdminOrManager = !isSuperAdmin && (userRole === 'admin' || isManager);
 
@@ -617,6 +621,16 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
             )}
             {isSuperAdmin && (
               <SidebarMenuItem>
+                <Link href="/admin/facturacion-electronica" passHref>
+                  <SidebarMenuButton isActive={pathname.startsWith('/admin/facturacion-electronica')} tooltip="Facturación electrónica de las empresas">
+                    <FileCheck />
+                    <span className="group-data-[collapsible=icon]:hidden">Facturación electrónica</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            )}
+            {isSuperAdmin && (
+              <SidebarMenuItem>
                 <Link href="/admin/plataforma" passHref>
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/plataforma')} tooltip="Configuración de la Plataforma">
                     <Settings />
@@ -801,6 +815,9 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
           ) : (
             <>
               {verAvisoDeCuota && !isPosPage && pathname !== '/suscripcion' && <AvisoDeCuota cuenta={miCuenta} />}
+              {verAvisoEcf && !isPosPage && (
+                <EcfProblemasBanner companyId={appUser.impersonatedCompanyId || appUser.companyId} />
+              )}
               {children}
             </>
           )}

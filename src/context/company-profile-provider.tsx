@@ -12,7 +12,7 @@ interface CompanyProfileContextType {
 
 const EMPTY: CompanyProfile = {
   name: 'SellAlleS', phone: '', rnc: '', address: '',
-  isFormalized: false, ncfEnabled: false,
+  isFormalized: false, ncfEnabled: false, ecfActiva: false,
   socialMedia: { instagram: '', facebook: '' }, email: '', logoUrl: '', ticketLogoUrl: '', receiptFooter: '',
   ticketNameDisplay: 'company', headerNameDisplay: 'company', ticketSocialDisplay: 'company', linkSlug: '',
   // Los mismos defaults que las columnas en la base: mora fija del 5% por cuota
@@ -48,10 +48,16 @@ export function CompanyProfileProvider({ children }: { children: ReactNode }) {
     }
 
     (async () => {
-      const { data } = await supabase.from('companies').select('*').eq('id', targetCompanyId).maybeSingle();
+      // ecf_activa no es una columna: la decide el servidor (formalizada, módulo
+      // encendido y e-CF activo). Si la consulta falla, la empresa sigue
+      // vendiendo con NCF de la serie B como hasta ahora.
+      const [{ data }, { data: ecfActiva, error: ecfError }] = await Promise.all([
+        supabase.from('companies').select('*').eq('id', targetCompanyId).maybeSingle(),
+        supabase.rpc('ecf_activa', { p_company: targetCompanyId }),
+      ]);
       if (data) {
         setCompanyId(data.id);
-        setProfile(rowToCompanyProfile(data));
+        setProfile(rowToCompanyProfile(data, !ecfError && ecfActiva === true));
       } else {
         setProfile(EMPTY);
         setCompanyId(null);

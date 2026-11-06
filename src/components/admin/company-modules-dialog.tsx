@@ -28,14 +28,18 @@ export function CompanyModulesDialog({ companyId, companyName, open, onOpenChang
   const [state, setState] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<ModuleKey | null>(null);
+  // La facturación electrónica es solo para empresas formalizadas. Se lee aquí
+  // y no del listado: el listado puede traer la empresa como estaba al cargar.
+  const [formalizada, setFormalizada] = useState(false);
 
   const load = useCallback(async () => {
     if (!companyId) return;
     setLoading(true);
-    const { data } = await supabase
-      .from('company_modules')
-      .select('module_key, enabled')
-      .eq('company_id', companyId);
+    const [{ data }, { data: empresa }] = await Promise.all([
+      supabase.from('company_modules').select('module_key, enabled').eq('company_id', companyId),
+      supabase.from('companies').select('is_formalized').eq('id', companyId).maybeSingle(),
+    ]);
+    setFormalizada(!!empresa?.is_formalized);
     const overrides = new Map((data ?? []).map((r) => [r.module_key, r.enabled]));
     const next: Record<string, boolean> = {};
     for (const mod of APP_MODULES) {
@@ -100,22 +104,34 @@ export function CompanyModulesDialog({ companyId, companyName, open, onOpenChang
           </div>
         ) : (
           <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-2">
-            {APP_MODULES.map((mod) => (
-              <div key={mod.key} className="flex items-center justify-between rounded-lg border p-3">
-                <div className="pr-4">
-                  <p className="text-sm font-medium flex items-center gap-2">
-                    {mod.label}
-                    {mod.comingSoon && <Badge variant="secondary" className="text-[10px]">Próximamente</Badge>}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{mod.description}</p>
+            {APP_MODULES.map((mod) => {
+              const encendido = state[mod.key] ?? mod.defaultEnabled;
+              // El e-CF no se enciende en una empresa sin formalizar. Si ya estaba
+              // encendido sí se deja apagar: deshabilitarlo del todo lo dejaría
+              // trabado en una empresa que perdió la formalización.
+              const soloFormalizadas = mod.key === 'ecf' && !formalizada;
+              return (
+                <div key={mod.key} className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="pr-4">
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      {mod.label}
+                      {mod.comingSoon && <Badge variant="secondary" className="text-[10px]">Próximamente</Badge>}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{mod.description}</p>
+                    {soloFormalizadas && (
+                      <p className="mt-1 text-xs font-medium text-amber-600 dark:text-amber-400">
+                        Solo para empresas formalizadas.
+                      </p>
+                    )}
+                  </div>
+                  <Switch
+                    checked={encendido}
+                    disabled={savingKey === mod.key || (soloFormalizadas && !encendido)}
+                    onCheckedChange={(v) => toggle(mod.key, v)}
+                  />
                 </div>
-                <Switch
-                  checked={state[mod.key] ?? mod.defaultEnabled}
-                  disabled={savingKey === mod.key}
-                  onCheckedChange={(v) => toggle(mod.key, v)}
-                />
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

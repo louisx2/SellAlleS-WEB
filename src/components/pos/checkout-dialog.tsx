@@ -34,6 +34,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useNcfAvailability } from '@/hooks/use-ncf-availability';
+import { supabase } from '@/lib/supabase/client';
+import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
 import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
@@ -83,24 +85,51 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const { profile: companyProfile } = useCompanyProfile();
   const [ncfRequested, setNcfRequested] = useState(false);
   const [ncfType, setNcfType] = useState<NcfType>('consumer');
-  const NCF_TIPO_LABEL: Record<NcfType, string> = {
-    consumer: 'Consumidor Final (B02)',
-    fiscal: 'Crédito Fiscal (B01)',
-    gubernamental: 'Gubernamental (B15)',
-    regimen_especial: 'Régimen Especial (B14)',
-  };
+  // Con e-CF activo no hay venta sin comprobante: no se pide, se elige el tipo.
+  // El servidor lo exige igual (set_sale_ncf), esto solo lo refleja en pantalla.
+  const ecfActiva = !!companyProfile?.ecfActiva;
+  const ncfPedido = ecfActiva || ncfRequested;
+  const NCF_TIPO_LABEL: Record<NcfType, string> = ecfActiva
+    ? {
+        consumer: 'Consumidor Final (E32)',
+        fiscal: 'Crédito Fiscal (E31)',
+        gubernamental: 'Gubernamental (E45)',
+        regimen_especial: 'Régimen Especial (E44)',
+      }
+    : {
+        consumer: 'Consumidor Final (B02)',
+        fiscal: 'Crédito Fiscal (B01)',
+        gubernamental: 'Gubernamental (B15)',
+        regimen_especial: 'Régimen Especial (B14)',
+      };
+  // Desde la fecha de corte la serie B ya no se emite (la base la rechaza): sin
+  // e-CF la casilla de NCF desaparece. Si la consulta falla se deja como hoy.
+  const companyId = appUser?.impersonatedCompanyId || appUser?.companyId;
+  const [ncfBVigente, setNcfBVigente] = useState(true);
+  useEffect(() => {
+    if (!isOpen || ecfActiva || !companyProfile?.ncfEnabled || !companyId) return;
+    let cancelado = false;
+    supabase.rpc('ncf_b_vigente', { p_company: companyId }).then(({ data, error }) => {
+      if (!cancelado) setNcfBVigente(error ? true : data !== false);
+    });
+    return () => { cancelado = true; };
+  }, [isOpen, ecfActiva, companyProfile?.ncfEnabled, companyId]);
   // Sin formalización ni emisión activa la base devuelve NULL igual: no tiene
   // sentido ofrecer el comprobante en el cobro.
-  const ncfEmitible = !!companyProfile?.ncfEnabled;
+  const ncfEmitible = ecfActiva || (!!companyProfile?.ncfEnabled && ncfBVigente);
   // Solo se ofrecen los tipos que tienen secuencia utilizable: ofrecer uno sin
-  // rango autorizado sería mandar al cajero a un error al confirmar.
-  const { tiposDisponibles } = useNcfAvailability(ncfEmitible && isOpen);
+  // rango autorizado sería mandar al cajero a un error al confirmar. Con e-CF
+  // cuentan las secuencias E; sin él, las B.
+  const { tiposDisponibles } = useNcfAvailability(ncfEmitible && isOpen, ecfActiva);
   const hayComprobantes = (tiposDisponibles?.length ?? 0) > 0;
   // B01/B15/B14 identifican al comprador ante DGII: sin RNC o cédula válida la
   // venta queda fuera del 607 (misma regla que classify607 en dgii-607.ts).
   const ncfNeedsCustomerId = ncfType === 'fiscal' || ncfType === 'gubernamental' || ncfType === 'regimen_especial';
   const customerIdDigits = (activeCart?.selectedCustomer?.rnc ?? '').replace(/\D/g, '');
   const customerIdIsValid = customerIdDigits.length === 9 || customerIdDigits.length === 11;
+  // Con e-CF la falta de RNC sí bloquea el cobro: el número ya se habría gastado
+  // en un documento que no se puede armar. Con la serie B solo se advierte.
+  const ecfSinRncCliente = ecfFaltaRncCliente(ecfActiva, ncfType, customerIdIsValid);
 
 
   useEffect(() => {
@@ -206,8 +235,10 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       notes: saleNotes,
       userName: appUser.name,
       userEmail: appUser.email,
-      ncfRequested: ncfEmitible && hayComprobantes && ncfRequested,
-      ncfType: ncfEmitible && hayComprobantes && ncfRequested ? ncfType : undefined,
+      // Con e-CF siempre va el tipo, aunque la lista de secuencias no haya cargado
+      // o venga vacía: si no hay con qué emitirlo, el servidor lo dice con claridad.
+      ncfRequested: ecfActiva || (ncfEmitible && hayComprobantes && ncfRequested),
+      ncfType: ecfActiva || (ncfEmitible && hayComprobantes && ncfRequested) ? ncfType : undefined,
     });
 
     try {
@@ -231,7 +262,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
 
       toast({
         title: '¡Venta completada!',
-        description: `Venta registrada con éxito${savedSale.ncf ? ` — NCF ${savedSale.ncf}` : ''}.`,
+        description: `Venta registrada con éxito${savedSale.ncf ? ` — ${esEcf(savedSale.ncf) ? 'e-NCF' : 'NCF'} ${savedSale.ncf}` : ''}.`,
       });
     } catch (e: any) {
       console.error('Error al registrar la venta:', e);
@@ -288,6 +319,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     && (total - Number(amountPaid || 0)) > availableCredit;
 
   const confirmButtonAction = () => {
+    if (ecfSinRncCliente) return;
     if (paymentMethod === 'financing') {
       handleOpenFinancing();
     } else {
@@ -530,21 +562,25 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
 
                 {ncfEmitible && (
                     <div className="rounded-lg border p-3 space-y-3">
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <p className="text-sm font-medium">Comprobante fiscal (NCF)</p>
-                                <p className="text-xs text-muted-foreground">
-                                    Actívalo solo si el cliente pide comprobante: cada uno consume un
-                                    número autorizado por DGII.
-                                </p>
+                        {ecfActiva ? (
+                            <p className="text-sm font-medium">Comprobante electrónico</p>
+                        ) : (
+                            <div className="flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-sm font-medium">Comprobante fiscal (NCF)</p>
+                                    <p className="text-xs text-muted-foreground">
+                                        Actívalo solo si el cliente pide comprobante: cada uno consume un
+                                        número autorizado por DGII.
+                                    </p>
+                                </div>
+                                <Switch
+                                    checked={ncfRequested}
+                                    onCheckedChange={setNcfRequested}
+                                    disabled={!hayComprobantes}
+                                    aria-label="Emitir comprobante fiscal"
+                                />
                             </div>
-                            <Switch
-                                checked={ncfRequested}
-                                onCheckedChange={setNcfRequested}
-                                disabled={!hayComprobantes}
-                                aria-label="Emitir comprobante fiscal"
-                            />
-                        </div>
+                        )}
 
                         {tiposDisponibles !== null && !hayComprobantes && (
                             <p className="text-xs text-destructive">
@@ -554,7 +590,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                             </p>
                         )}
 
-                        {ncfRequested && hayComprobantes && (
+                        {ncfPedido && hayComprobantes && (
                             <div className="space-y-2">
                                 <Label htmlFor="ncf-type" className="text-xs">Tipo de comprobante</Label>
                                 <Select value={ncfType} onValueChange={(v: NcfType) => setNcfType(v)}>
@@ -567,11 +603,22 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                 </Select>
                                 {ncfNeedsCustomerId && !customerIdIsValid && (
                                     <p className="text-xs text-destructive">
-                                        Este tipo exige RNC (9 dígitos) o cédula (11) del cliente. Sin eso el
-                                        comprobante se emite, pero la venta no se podrá reportar en el 607.
+                                        Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.{' '}
+                                        {ecfActiva
+                                            ? 'Sin eso no se puede cobrar con comprobante electrónico: elige otro tipo o un cliente con RNC o cédula.'
+                                            : 'Sin eso el comprobante se emite, pero la venta no se podrá reportar en el 607.'}
                                     </p>
                                 )}
                             </div>
+                        )}
+
+                        {/* Sin secuencias E (o mientras cargan) el selector no sale, pero
+                            el tipo del cliente sigue valiendo: que el botón no se quede
+                            deshabilitado sin decir por qué. */}
+                        {ecfSinRncCliente && !hayComprobantes && (
+                            <p className="text-xs text-destructive">
+                                Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.
+                            </p>
                         )}
                     </div>
                 )}
@@ -649,7 +696,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={guardandoVenta}>
             Cancelar
           </Button>
-          <Button type="button" onClick={confirmButtonAction} disabled={guardandoVenta || isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid}>
+          <Button type="button" onClick={confirmButtonAction} disabled={guardandoVenta || isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid || ecfSinRncCliente}>
             {guardandoVenta ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

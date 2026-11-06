@@ -20,7 +20,8 @@ export type ModuleKey =
   | 'loyalty'
   | 'customer-portal'
   | 'caja'
-  | 'quick-sales';
+  | 'quick-sales'
+  | 'ecf';
 
 export interface AppModule {
   key: ModuleKey;
@@ -49,6 +50,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'customer-portal', label: 'Portal de Clientes ("Mi Estado de Cuenta")', description: 'Permite a los clientes de esta empresa consultar sus préstamos y compras a crédito en /mi-prestamo con cédula y PIN.', defaultEnabled: false },
   { key: 'caja',       label: 'Caja',               description: 'Control de efectivo por sucursal: apertura, cierre y movimientos. Al activarlo, no se puede cobrar en efectivo sin una caja abierta.', defaultEnabled: false },
   { key: 'quick-sales', label: 'Ventas Rápidas',    description: 'Vender en el POS artículos que no están en el inventario, con descripción o como monto libre.', defaultEnabled: true },
+  { key: 'ecf',        label: 'Facturación Electrónica (e-CF)', description: 'Comprobantes fiscales electrónicos ante la DGII. Solo para empresas formalizadas; SellAlleS hace el alta.', defaultEnabled: false },
 ];
 
 /** Ruta → módulo que la gobierna. Las rutas que no aparecen aquí son núcleo
