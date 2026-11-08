@@ -269,3 +269,41 @@ export function mayorUsoDeCupo(
 export function cupoPorAgotarse(pct: number): boolean {
   return pct >= CUPO_AVISO_PCT;
 }
+
+/** Atributo que ReceiptEcf pone en su bloque: "cargando" mientras dibuja el QR,
+ *  "listo" cuando ya está, "error" si no se pudo. */
+export const ECF_QR_ATRIBUTO = 'data-ecf-qr';
+
+/** El QR del ticket se dibuja después de montar el recibo (la librería se
+ *  importa al vuelo). Si el PDF o la impresión salen antes, salen sin QR. Esto
+ *  espera a que ningún QR siga "cargando" dentro de `raiz`, como mucho
+ *  `limiteMs`: pasado ese tiempo se sigue igual, porque un ticket sin QR es
+ *  mejor que uno que no sale. Devuelve si alcanzó a estar listo. */
+export async function esperarQrEcf(
+  raiz: Pick<ParentNode, 'querySelector'> | null | undefined,
+  limiteMs = 3000,
+  cadaMs = 50,
+): Promise<boolean> {
+  if (!raiz) return true;
+  const selector = `[${ECF_QR_ATRIBUTO}="cargando"]`;
+  const inicio = Date.now();
+  while (raiz.querySelector(selector)) {
+    if (Date.now() - inicio >= limiteMs) return false;
+    await new Promise((listo) => setTimeout(listo, cadaMs));
+  }
+  return true;
+}
+
+/** Qué nota de crédito sale al anular una venta, para avisarlo antes. Sigue la
+ *  misma regla que `annul_sale`: depende del comprobante de la venta, no de
+ *  `companies.ncf_enabled` (una empresa con e-CF puede tenerlo apagado, y una
+ *  que apagó los NCF sigue anulando sus ventas con B con una B04). Un e-CF
+ *  rechazado se anula sin nota: la DGII nunca lo aceptó. */
+export function avisoNotaAlAnular(ncf: string | null | undefined, estadoEcf: EcfEstado | null | undefined): string {
+  if (!ncf) return '';
+  if (!esEcf(ncf)) {
+    return ' Se emitirá una nota de crédito (B04) que referencia el NCF original: necesitas una secuencia B04 activa.';
+  }
+  if (estadoEcf === 'rechazado') return '';
+  return ' Se emitirá una nota de crédito electrónica (E34) que referencia el e-NCF original.';
+}

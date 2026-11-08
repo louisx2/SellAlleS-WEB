@@ -31,6 +31,9 @@ import {
   cupoPorAgotarse,
   mayorUsoDeCupo,
   CUPO_AVISO_PCT,
+  ECF_QR_ATRIBUTO,
+  esperarQrEcf,
+  avisoNotaAlAnular,
 } from '../../src/lib/ecf.ts';
 import { PLANES_MSELLER } from '../../src/lib/ecf-planes.ts';
 
@@ -385,4 +388,54 @@ test('mayorUsoDeCupo: manda el más lleno de los dos cupos', () => {
     { e: 'C', u: mayorUsoDeCupo(10, 250, 850, 1000) },
   ];
   assert.deepEqual(filas.sort((a, b) => b.u - a.u).map((f) => f.e), ['B', 'C', 'A']);
+});
+
+// Raíz falsa: responde al selector del QR pendiente mientras le queden vueltas.
+const raizConQrPendiente = (vueltas) => {
+  const vistos = [];
+  return {
+    vistos,
+    querySelector(sel) {
+      vistos.push(sel);
+      return vueltas-- > 0 ? {} : null;
+    },
+  };
+};
+
+test('esperarQrEcf: sin QR pendiente sigue al instante', async () => {
+  const raiz = raizConQrPendiente(0);
+  assert.equal(await esperarQrEcf(raiz, 1000, 1), true);
+  // Busca exactamente el atributo que pone ReceiptEcf mientras dibuja el QR.
+  assert.deepEqual(raiz.vistos, [`[${ECF_QR_ATRIBUTO}="cargando"]`]);
+});
+
+test('esperarQrEcf: espera a que el QR termine de dibujarse', async () => {
+  const raiz = raizConQrPendiente(3);
+  assert.equal(await esperarQrEcf(raiz, 1000, 1), true);
+  assert.equal(raiz.vistos.length, 4);
+});
+
+test('esperarQrEcf: no se queda colgado si el QR nunca llega', async () => {
+  const raiz = raizConQrPendiente(Infinity);
+  const inicio = Date.now();
+  assert.equal(await esperarQrEcf(raiz, 30, 5), false);
+  assert.ok(Date.now() - inicio < 500);
+});
+
+test('esperarQrEcf: sin raíz no espera', async () => {
+  assert.equal(await esperarQrEcf(null, 1000, 1), true);
+  assert.equal(await esperarQrEcf(undefined, 1000, 1), true);
+});
+
+test('avisoNotaAlAnular: sigue al NCF de la venta, como annul_sale', () => {
+  // Sin comprobante no hay nota de crédito.
+  assert.equal(avisoNotaAlAnular(null, undefined), '');
+  assert.equal(avisoNotaAlAnular('', undefined), '');
+  // Venta con B: B04, aunque la empresa haya apagado los NCF después.
+  assert.match(avisoNotaAlAnular('B0200000012', undefined), /B04/);
+  // e-CF: E34, aunque companies.ncf_enabled esté apagado (el e-CF no depende de él).
+  assert.match(avisoNotaAlAnular('E320000000012', 'aceptado'), /E34/);
+  assert.match(avisoNotaAlAnular('E310000000012', 'recibido'), /E34/);
+  // Rechazado: la DGII nunca lo aceptó y se anula sin nota.
+  assert.equal(avisoNotaAlAnular('E320000000012', 'rechazado'), '');
 });

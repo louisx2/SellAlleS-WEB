@@ -468,6 +468,26 @@ export async function emitirLote(docs: DocLote[], enParalelo: number, deps: Deps
   return { procesados, saltados };
 }
 
+/**
+ * El punto de venta manda una sola venta o nota. Si MSeller rechazó el inicio
+ * de sesión, igual que en el lote se pospone lo que espera de la empresa, y la
+ * base marca la cuenta: los documentos que nazcan en los próximos 30 minutos ya
+ * salen pospuestos, así que vender no vuelve a probar la contraseña con cada
+ * venta (insistir puede bloquear la cuenta). A diferencia del lote, un error al
+ * guardar el resultado sube: el punto de venta responde 500 y el cron lo retoma.
+ */
+export async function emitirUno(d: DocLote, deps: DepsLote): Promise<ResultadoEmision> {
+  const r = await deps.emitir(d.id);
+  if (credencialesRechazadas(r)) {
+    try {
+      await deps.posponerPorCredenciales(d.companyId, d.ambiente);
+    } catch (e) {
+      deps.registrarError(`ecf-emitir: no se pudo posponer lo de la empresa ${d.companyId}: ${mensajeDe(e)}`);
+    }
+  }
+  return r;
+}
+
 // ---------------------------------------------------------------------------
 // Completar un documento ya recibido
 // ---------------------------------------------------------------------------

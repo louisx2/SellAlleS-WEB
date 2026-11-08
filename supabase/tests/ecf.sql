@@ -9,6 +9,7 @@
 --          <supabase/migrations/20261030160000_ecf_avisos.sql>
 --          <supabase/migrations/20261030170000_ecf_admin.sql>
 --          <supabase/migrations/20261030180000_ecf_ajustes_revision_final.sql>
+--          <supabase/migrations/20261107120000_ecf_credenciales_rechazadas.sql>
 --          <este archivo> rollback;
 --
 -- Pasa si el último resultado es `ok`; si una aserción falla, la llamada
@@ -4001,6 +4002,102 @@ begin
      or (select count(*) from ecf_documentos where id = any (v_ids) and company_id = a and ambiente = 'TesteCF') <> 10
      or (select count(*) from ecf_documentos where id = any (v_ids) and company_id = a and ambiente = 'eCF') <> 2 then
     raise exception 'R37: el tope debía ser por ambiente (10 TesteCF + 2 eCF de A y 3 de B); dio % en total', cardinality(v_ids);
+  end if;
+end $t$;
+
+-- == Credenciales rechazadas: lo que nace mientras tanto, nace pospuesto ==
+-- Estado explícito de la sección: super admin; una empresa de prueba formalizada
+-- (…ecca) con el módulo `ecf`, su ecf_config activa en TesteCF, una venta de
+-- apoyo sin NCF (…eccb) y una fila de credenciales SIN secretos (los ids de
+-- Vault en null: la sección nunca lee ni escribe Vault). Todo se va con el
+-- rollback. Dentro de la transacción now() no cambia: "en 30 minutos" es exacto.
+-- UUID de la sección: ecca (empresa), eccb (venta).
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+insert into companies (id, name) values ('00000000-0000-0000-0000-00000000ecca', 'Prueba e-CF: credenciales rechazadas');
+update companies set is_formalized = true where id = '00000000-0000-0000-0000-00000000ecca';
+insert into company_modules (company_id, module_key, enabled) values ('00000000-0000-0000-0000-00000000ecca', 'ecf', true);
+insert into ecf_config (company_id, estado, ambiente, rnc_emisor, razon_social, direccion) values
+  ('00000000-0000-0000-0000-00000000ecca', 'preparacion', 'TesteCF', '707070707', 'Rechazada SRL', 'Calle 7');
+select pg_temp.venta('00000000-0000-0000-0000-00000000eccb', '00000000-0000-0000-0000-00000000ecca', null);
+update ecf_config set estado = 'activa' where company_id = '00000000-0000-0000-0000-00000000ecca';
+insert into ecf_credenciales (company_id, ambiente, email) values
+  ('00000000-0000-0000-0000-00000000ecca', 'TesteCF', 'rechazada@prueba.test');
+
+-- Inserta un documento por enviar de la venta de apoyo y devuelve su id.
+create function pg_temp.doc_rechazo(p_encf text, p_ambiente text) returns uuid
+language sql as $$
+  insert into ecf_documentos (company_id, sale_id, tipo_ecf, encf, ambiente, estado)
+  values ('00000000-0000-0000-0000-00000000ecca', '00000000-0000-0000-0000-00000000eccb', 32,
+          p_encf, p_ambiente, 'por_enviar')
+  returning id
+$$;
+
+do $t$
+declare
+  c uuid := '00000000-0000-0000-0000-00000000ecca';
+  v_antes uuid; v_nuevo uuid; v_otro uuid; v_despues uuid;
+  v_hasta timestamptz;
+begin
+  -- Sin marca, un documento nuevo sale ya.
+  v_antes := pg_temp.doc_rechazo('E320000000101', 'TesteCF');
+  if (select proximo_intento_at from ecf_documentos where id = v_antes) > now() then
+    raise exception 'Rechazo: sin marca, un documento nuevo no debía nacer pospuesto';
+  end if;
+
+  -- MSeller rechazó el login: se marca la cuenta y se pospone lo que espera.
+  perform ecf_posponer_por_credenciales(c, 'TesteCF');
+  select rechazadas_hasta into v_hasta from ecf_credenciales where company_id = c and ambiente = 'TesteCF';
+  if v_hasta is distinct from now() + interval '30 minutes' then
+    raise exception 'Rechazo: la cuenta debía quedar marcada hasta dentro de 30 minutos; quedó %', v_hasta;
+  end if;
+  if (select proximo_intento_at from ecf_documentos where id = v_antes) <> now() + interval '30 minutes' then
+    raise exception 'Rechazo: lo que ya esperaba debía posponerse 30 minutos';
+  end if;
+
+  -- Lo que nace con la marca nace pospuesto hasta ella, con el motivo, y la
+  -- reserva del punto de venta no lo toma.
+  v_nuevo := pg_temp.doc_rechazo('E320000000102', 'TesteCF');
+  if (select proximo_intento_at from ecf_documentos where id = v_nuevo) <> v_hasta
+     or (select ultimo_error from ecf_documentos where id = v_nuevo) is distinct from 'MSeller rechazó las credenciales de la empresa.' then
+    raise exception 'Rechazo: un documento nuevo debía nacer pospuesto hasta % y con el motivo', v_hasta;
+  end if;
+  if exists (select 1 from ecf_reservar_documento(v_nuevo)) then
+    raise exception 'Rechazo: la reserva no debía tomar un documento pospuesto por credenciales';
+  end if;
+
+  -- La marca es por ambiente: en otro ambiente nace normal.
+  v_otro := pg_temp.doc_rechazo('E320000000103', 'eCF');
+  if (select proximo_intento_at from ecf_documentos where id = v_otro) > now() then
+    raise exception 'Rechazo: la marca de TesteCF no debía posponer un documento de eCF';
+  end if;
+
+  -- Volver a posponer no la borra (no cambia ni las credenciales ni la sesión).
+  perform ecf_posponer_por_credenciales(c, 'TesteCF');
+  if (select rechazadas_hasta from ecf_credenciales where company_id = c and ambiente = 'TesteCF') is null then
+    raise exception 'Rechazo: posponer otra vez no debía borrar la marca';
+  end if;
+
+  -- Una sesión nueva (MSeller aceptó la cuenta) borra la marca.
+  update ecf_credenciales set id_token = 'sesion-de-prueba', id_token_vence = now() + interval '1 hour'
+   where company_id = c and ambiente = 'TesteCF';
+  if (select rechazadas_hasta from ecf_credenciales where company_id = c and ambiente = 'TesteCF') is not null then
+    raise exception 'Rechazo: una sesión nueva debía borrar la marca';
+  end if;
+
+  -- Credenciales nuevas también la borran.
+  perform ecf_posponer_por_credenciales(c, 'TesteCF');
+  update ecf_credenciales set email = 'otra@prueba.test' where company_id = c and ambiente = 'TesteCF';
+  if (select rechazadas_hasta from ecf_credenciales where company_id = c and ambiente = 'TesteCF') is not null then
+    raise exception 'Rechazo: cambiar las credenciales debía borrar la marca';
+  end if;
+
+  -- Una marca vencida ya no pospone.
+  perform ecf_posponer_por_credenciales(c, 'TesteCF');
+  update ecf_credenciales set rechazadas_hasta = now() - interval '1 minute'
+   where company_id = c and ambiente = 'TesteCF';
+  v_despues := pg_temp.doc_rechazo('E320000000104', 'TesteCF');
+  if (select proximo_intento_at from ecf_documentos where id = v_despues) > now() then
+    raise exception 'Rechazo: una marca vencida no debía posponer un documento nuevo';
   end if;
 end $t$;
 

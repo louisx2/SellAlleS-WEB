@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import {
   emitirDocumento,
   emitirLote,
+  emitirUno,
   completarDocumento,
   cortaElLote,
   credencialesRechazadas,
@@ -1165,4 +1166,55 @@ test('sumarDias y diasEntre cruzan mes, año y bisiesto', () => {
   assert.equal(diasEntre('2027-12-31', '2028-01-01'), 1);
   assert.equal(diasEntre('2028-02-28', '2028-03-01'), 2);
   assert.equal(diasEntre('2026-11-05', '2026-11-01'), -4);
+});
+
+// ---------------------------------------------------------------------------
+// emitirUno: el punto de venta manda una sola venta o nota
+// ---------------------------------------------------------------------------
+
+test('uno: si MSeller rechaza el login, se pospone lo de la empresa como en el lote', async () => {
+  const { deps, reg } = armarLote({ a1: LOGIN_RECHAZADO });
+  const r = await emitirUno(docLote('a1', A), deps);
+
+  assert.equal(r, LOGIN_RECHAZADO);
+  assert.deepEqual(reg.emitidos, ['a1']);
+  assert.deepEqual(reg.pospuestos, [[A, 'TesteCF']]);
+  assert.deepEqual(reg.errores, []);
+});
+
+test('uno: lo que no es el login rechazado no pospone nada', async () => {
+  const conSesion = { estado: 'por_enviar', error: 'MSeller rechazó la autenticación (401)', fallo: { tipo: 'auth', enLogin: false } };
+  for (const resultado of [OK, CAIDO, conSesion, { estado: 'ocupado' }, { estado: 'error_datos', error: 'x' }]) {
+    const { deps, reg } = armarLote({ a1: resultado });
+    assert.equal(await emitirUno(docLote('a1', A), deps), resultado);
+    assert.deepEqual(reg.pospuestos, [], `no pospone con ${resultado.estado}`);
+  }
+});
+
+test('uno: si posponer falla, se registra y la venta igual responde', async () => {
+  const { deps, reg } = armarLote(
+    { a1: LOGIN_RECHAZADO },
+    { posponerPorCredenciales: async () => { throw new Error('la base no contestó'); } },
+  );
+  assert.equal(await emitirUno(docLote('a1', A), deps), LOGIN_RECHAZADO);
+  assert.equal(reg.errores.length, 1);
+  assert.match(reg.errores[0], /no se pudo posponer/);
+});
+
+test('uno: si no se pudo guardar el resultado, el error sube (el punto de venta responde 500)', async () => {
+  const { deps, reg } = armarLote({ a1: new Error('no se pudo registrar') });
+  await assert.rejects(() => emitirUno(docLote('a1', A), deps), /no se pudo registrar/);
+  assert.deepEqual(reg.pospuestos, []);
+});
+
+test('uno de punta a punta: el login rechazado de emitirDocumento pospone su empresa', async () => {
+  const { deps } = armar({
+    cred: credenciales({ idToken: null, idTokenVence: null, refreshToken: null }),
+    respuestas: [res(401, { message: 'Incorrect username or password.' })],
+  });
+  const { deps: uno, reg } = armarLote({}, { emitir: (id) => emitirDocumento(id, deps) });
+  const r = await emitirUno(docLote('a1', EMPRESA), uno);
+
+  assert.equal(r.estado, 'por_enviar');
+  assert.deepEqual(reg.pospuestos, [[EMPRESA, 'TesteCF']]);
 });

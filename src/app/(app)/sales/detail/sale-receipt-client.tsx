@@ -32,7 +32,7 @@ import { avisarCambioDeEcf } from '@/components/ecf/ecf-problemas-banner';
 import { supabase } from '@/lib/supabase/client';
 import { rowToEcfDocumento } from '@/lib/supabase/mappers';
 import { emitirEcf } from '@/lib/ecf-client';
-import { cuentaComoProblemaEcf, ecfConProblema, esEcf, puedeReemitir, puedeReintentar, resultadoDeEcf } from '@/lib/ecf';
+import { cuentaComoProblemaEcf, ecfConProblema, esEcf, esperarQrEcf, puedeReemitir, puedeReintentar, resultadoDeEcf } from '@/lib/ecf';
 import type { ResultadoEcf } from '@/lib/ecf';
 import { cn } from '@/lib/utils';
 import type { EcfDocumento, EcfEstado } from '@/lib/types';
@@ -125,6 +125,9 @@ export default function SaleReceiptClient() {
 
   const handlePrint = useReactToPrint({
     content: () => receiptRef.current,
+    // El QR del e-CF se dibuja después de montar el recibo: imprimir enseguida
+    // lo dejaba fuera del ticket.
+    onBeforeGetContent: () => esperarQrEcf(receiptRef.current),
   });
 
   if (!sale) {

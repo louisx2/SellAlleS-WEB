@@ -24,8 +24,8 @@ import { lineasDesdeItems } from '../_shared/ecf/armar.ts';
 import type { DatosEcf, TipoEcf } from '../_shared/ecf/armar.ts';
 import { datosEcf, vencimientoDeSecuencia } from '../_shared/ecf/datos.ts';
 import type { FilaSecuencia } from '../_shared/ecf/datos.ts';
-import { completarDocumento, emitirDocumento, emitirLote, ErrorDatosEcf } from '../_shared/ecf/emitir.ts';
-import type { CambioDocumento, DepsEmision, DocLote, DocReservado } from '../_shared/ecf/emitir.ts';
+import { completarDocumento, emitirDocumento, emitirLote, emitirUno, ErrorDatosEcf } from '../_shared/ecf/emitir.ts';
+import type { CambioDocumento, DepsEmision, DepsLote, DocLote, DocReservado } from '../_shared/ecf/emitir.ts';
 import type { Ambiente } from '../_shared/ecf/mseller.ts';
 import { guardarSesion, leerCredenciales, sumarUso } from '../_shared/ecf/rpc.ts';
 
@@ -386,6 +386,19 @@ Deno.serve(async (req) => {
     }
 
     const deps = crearDeps(admin);
+    // Lo mismo para el lote y para una sola venta: si MSeller rechaza el inicio
+    // de sesión, se pospone lo de la empresa y la base marca la cuenta.
+    const depsLote: DepsLote = {
+      emitir: (id) => emitirDocumento(id, deps),
+      posponerPorCredenciales: async (companyId, ambiente) => {
+        const { error } = await admin.rpc('ecf_posponer_por_credenciales', {
+          p_company: companyId,
+          p_ambiente: ambiente,
+        });
+        if (error) throw new Error(error.message);
+      },
+      registrarError: (texto) => console.error(texto),
+    };
 
     // --- Lote del cron: solo la service role --------------------------------
     if (documentoIds) {
@@ -405,17 +418,7 @@ Deno.serve(async (req) => {
         const f = porId.get(id);
         return f ? [{ id, companyId: f.company_id, ambiente: f.ambiente as Ambiente }] : [];
       });
-      const r = await emitirLote(docs, EN_PARALELO, {
-        emitir: (id) => emitirDocumento(id, deps),
-        posponerPorCredenciales: async (companyId, ambiente) => {
-          const { error } = await admin.rpc('ecf_posponer_por_credenciales', {
-            p_company: companyId,
-            p_ambiente: ambiente,
-          });
-          if (error) throw new Error(error.message);
-        },
-        registrarError: (texto) => console.error(texto),
-      });
+      const r = await emitirLote(docs, EN_PARALELO, depsLote);
       return json(200, r);
     }
 
@@ -477,9 +480,13 @@ Deno.serve(async (req) => {
         );
       }
     } else if (POR_EMITIR.includes(documento.estado)) {
-      // Si otro lo está enviando, o aún no toca el reintento, devuelve 'ocupado'
+      // Si otro lo está enviando, o aún no toca el reintento (también si las
+      // credenciales de la empresa se rechazaron hace poco), devuelve 'ocupado'
       // y se responde con el documento como esté.
-      await emitirDocumento(documento.id, deps);
+      await emitirUno(
+        { id: documento.id, companyId: documento.company_id, ambiente: documento.ambiente as Ambiente },
+        depsLote,
+      );
     }
     // rechazado, error_datos, sin_cupo: se devuelven como están (los reintenta una persona).
 

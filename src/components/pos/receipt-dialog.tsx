@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Loader2, Download, Send, Copy, Link as LinkIcon } from 'lucide-react';
 import { ReceiptBarcode, ReceiptContent, ReceiptEcf, ReceiptHeader, ReceiptItems, ReceiptTotals } from './receipt-content';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
+import { esperarQrEcf } from '@/lib/ecf';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   shareSalePdfLinkViaWhatsApp,
@@ -65,6 +66,9 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
 
   const handlePrint = useReactToPrint({
     content: () => printRef.current,
+    // El QR del e-CF se dibuja después de abrir el recibo: imprimir enseguida
+    // lo dejaba fuera del ticket.
+    onBeforeGetContent: () => esperarQrEcf(printRef.current),
   });
 
   if (!sale) return null;

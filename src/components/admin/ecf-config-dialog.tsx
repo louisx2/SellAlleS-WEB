@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/context/auth-provider';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, cabeceraImpersonacionHorneada } from '@/lib/supabase/client';
 import { administrarEcf } from '@/lib/ecf-client';
 import { PLANES_MSELLER, type PlanMseller } from '@/lib/ecf-planes';
 import {
@@ -116,8 +116,10 @@ export function EcfConfigDialog({ companyId, companyName, open, onOpenChange }: 
   const { appUser } = useAuth();
   // Las funciones de la base comprueban is_super_admin(), que es falso mientras
   // el super admin está dentro de una empresa. Sin este aviso la ventana se vería
-  // como una empresa sin configurar y guardar fallaría sin explicación.
-  const dentroDeEmpresa = !!appUser?.impersonatedCompanyId;
+  // como una empresa sin configurar y guardar fallaría sin explicación. La
+  // cabecera horneada cuenta igual: sigue saliendo hasta la recarga que viene
+  // después de salir de la empresa.
+  const dentroDeEmpresa = !!appUser?.impersonatedCompanyId || !!cabeceraImpersonacionHorneada;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
