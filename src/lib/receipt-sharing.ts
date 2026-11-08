@@ -1,5 +1,6 @@
 import type { Sale } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
+import { esperarQrEcf } from '@/lib/ecf';
 
 
 /** Normaliza el teléfono del cliente al formato que espera WhatsApp. */
@@ -226,8 +227,12 @@ function prepararClonParaMedir(_documento: Document, clon: HTMLElement) {
  *  otra, estirada a A4.
  *
  *  scale 3: el recibo mide unos 100 mm de ancho, así que a menos resolución el
- *  texto sale suave al ampliarlo en el teléfono o al imprimirlo. */
+ *  texto sale suave al ampliarlo en el teléfono o al imprimirlo.
+ *
+ *  Antes de fotografiar espera al QR del e-CF: se dibuja después de montar el
+ *  recibo, y un PDF pedido enseguida salía sin él. */
 async function renderizarRecibo(element: HTMLElement) {
+  await esperarQrEcf(element);
   const jsPDF = (await import('jspdf')).default;
   const html2canvas = (await import('html2canvas')).default;
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { PageHeader } from '@/components/page-header';
 import { useAuth } from '@/context/auth-provider';
-import { supabase } from '@/lib/supabase/client';
+import { supabase, cabeceraImpersonacionHorneada } from '@/lib/supabase/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -77,8 +77,11 @@ export default function FacturacionElectronicaPage() {
   const { appUser } = useAuth();
   const esSuperAdmin = !!appUser?.isSuperAdmin;
   // La base comprueba is_super_admin(), que es falso mientras el super admin
-  // está dentro de una empresa: ahí el resumen no se puede pedir.
-  const dentroDeEmpresa = !!appUser?.impersonatedCompanyId;
+  // está dentro de una empresa: ahí el resumen no se puede pedir. Al salir de
+  // la empresa el estado se limpia al instante, pero el cliente de Supabase
+  // sigue mandando la cabecera horneada hasta la recarga que viene detrás; en
+  // ese rato la llamada fallaría, así que también cuenta como "dentro".
+  const dentroDeEmpresa = !!appUser?.impersonatedCompanyId || !!cabeceraImpersonacionHorneada;
 
   const [filas, setFilas] = useState<FilaResumen[]>([]);
   const [cargando, setCargando] = useState(true);

@@ -14,9 +14,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useSales } from '@/context/sales-provider';
 import { useProducts } from '@/context/product-provider';
-import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency } from '@/lib/utils';
-import { esEcf, tipoDeEncf } from '@/lib/ecf';
+import { avisoNotaAlAnular, tipoDeEncf } from '@/lib/ecf';
 import type { RefundMethod, Sale } from '@/lib/types';
 
 interface AnnulSaleDialogProps {
@@ -32,14 +31,13 @@ const METHOD_LABEL: Record<RefundMethod, string> = {
   none: 'Sin devolución de dinero',
 };
 
-// Anulación de una venta: la base emite la nota de crédito B04 (si la venta
-// llevó NCF), repone el inventario y descuenta de caja si la devolución es en
-// efectivo. En una venta a crédito o financiada además anula el abono inicial
-// y le quita la deuda al cliente. Aquí solo se confirma y se muestra el resultado.
+// Anulación de una venta: la base emite la nota de crédito B04 o E34 (si la
+// venta llevó NCF), repone el inventario y descuenta de caja si la devolución
+// es en efectivo. En una venta a crédito o financiada además anula el abono
+// inicial y le quita la deuda al cliente. Aquí solo se confirma y se muestra el resultado.
 export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogProps) {
   const { annulSale } = useSales();
   const { reload: reloadProducts } = useProducts();
-  const { profile } = useCompanyProfile();
   const { toast } = useToast();
   const [reason, setReason] = useState('');
   // Por defecto el dinero vuelve por donde entró. "Sin devolución" se elige a
@@ -62,13 +60,7 @@ export function AnnulSaleDialog({ sale, open, onOpenChange }: AnnulSaleDialogPro
 
   // Qué nota de crédito saldrá. Un e-CF lleva una E34; si la DGII lo rechazó,
   // la venta se anula sin nota de crédito.
-  const avisoNota = !sale.ncf || !profile.ncfEnabled
-    ? ''
-    : !esEcf(sale.ncf)
-      ? ' Se emitirá una nota de crédito (B04) que referencia el NCF original: necesitas una secuencia B04 activa.'
-      : sale.ecf?.estado === 'rechazado'
-        ? ''
-        : ' Se emitirá una nota de crédito electrónica (E34) que referencia el e-NCF original.';
+  const avisoNota = avisoNotaAlAnular(sale.ncf, sale.ecf?.estado);
 
   const handleAnnul = async () => {
     setSaving(true);
