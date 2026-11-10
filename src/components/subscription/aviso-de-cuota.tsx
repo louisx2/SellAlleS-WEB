@@ -3,7 +3,7 @@
 // Aviso de la cuota para los administradores de la empresa, arriba de cada
 // pantalla. Solo lo ve quien puede pagar (el admin); los cajeros no.
 //
-// Colores: rojo si debe cuotas vencidas o está en solo ventas, ámbar si la
+// Colores: rojo si debe cuotas vencidas o está en solo facturación, ámbar si la
 // próxima cuota llega en pocos días, azul si ya subió un comprobante y lo
 // estamos revisando. El ámbar y el azul se pueden ocultar por hoy; el rojo no.
 
@@ -47,10 +47,10 @@ export function avisoDeCuota(c: CobroEmpresa | null): Aviso | null {
   if (c.soloVentas) {
     return {
       tono: 'rojo', icono: Lock, ocultable: false, clave: 'solo-ventas',
-      titulo: 'Tu cuenta está en modo solo ventas',
+      titulo: 'Su cuenta está en modo solo facturación',
       detalle: enRevision
-        ? `Puedes vender, cobrar y usar la caja. Estamos revisando tu comprobante de ${formatCurrency(c.porConfirmar)}.`
-        : `Puedes vender, cobrar y usar la caja; lo demás queda en consulta hasta ponerte al día${debe ? ` (${cuotas(c.cuotasPendientes)}, ${formatCurrency(c.saldo)})` : ''}.`,
+        ? `Solo está disponible la facturación. Estamos revisando su comprobante de ${formatCurrency(c.porConfirmar)}.`
+        : `Solo está disponible la facturación hasta que regularice el pago de su suscripción${debe ? ` (${cuotas(c.cuotasPendientes)}, ${formatCurrency(c.saldo)})` : ''}.`,
     };
   }
   if (enRevision && (!debe || c.porConfirmar + 0.005 >= c.saldo)) {

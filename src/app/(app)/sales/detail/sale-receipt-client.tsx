@@ -302,9 +302,10 @@ export default function SaleReceiptClient() {
   };
 
   const ecf = sale.ecf;
-  // Reintentar y Reemitir los resuelve el administrador (la base lo exige y, en
-  // solo consulta, no deja escribir). Reimprimir solo trae los datos que faltan.
-  const puedeAdministrarEcf = !!appUser?.isCompanyAdmin && !appUser.isReadOnly;
+  // Reintentar y Reemitir los resuelve el administrador (la base lo exige).
+  // Siguen en modo solo facturación: sin eso la factura no sale. Reimprimir
+  // solo trae los datos que faltan.
+  const puedeAdministrarEcf = !!appUser?.isCompanyAdmin;
   const verReintentar = puedeAdministrarEcf && !!ecf && puedeReintentar(ecf);
   // Una venta anulada ya no se reemite: la base lo rechaza.
   const verReemitir = puedeAdministrarEcf && !!ecf && puedeReemitir(ecf) && !sale.cancelledAt;

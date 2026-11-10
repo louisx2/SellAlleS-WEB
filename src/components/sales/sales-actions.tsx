@@ -29,7 +29,7 @@ export function SalesActions({ sale }: SalesActionsProps) {
   // Cualquier venta vigente se puede anular (la base exige administrador). Una
   // a crédito o financiada con abonos posteriores la rechaza la base hasta que
   // se anulen esos abonos.
-  const canAnnul = canDelete && !appUser?.isReadOnly && !sale.cancelledAt;
+  const canAnnul = canDelete && !appUser?.bloqueo && !sale.cancelledAt;
 
   return (
     <>

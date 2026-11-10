@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -34,6 +34,8 @@ import { AvisoDeCuota } from '@/components/subscription/aviso-de-cuota';
 import { EcfProblemasBanner } from '@/components/ecf/ecf-problemas-banner';
 import { useMiCuenta } from '@/hooks/use-mi-cuenta';
 import { useComprobantesPendientes } from '@/hooks/use-comprobantes-pendientes';
+import { AVISO_BLOQUEO, MENSAJE_BLOQUEO, RUTAS_EN_BLOQUEO, TITULO_BLOQUEO, rutaPermitidaEnBloqueo } from '@/lib/bloqueo';
+import type { User } from '@/lib/types';
 
 interface NavItem {
   href: string;
@@ -91,6 +93,18 @@ const adminNavItems: NavItem[] = [
     { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', permission: 'suscripcion' },
     { href: '/settings', icon: Settings, label: 'Ajustes', permission: 'company-profile' },
 ];
+
+// Modo solo facturación (lib/bloqueo.ts). Solo pesa dentro de una empresa: el
+// lobby de Mis Empresas y la plataforma del super admin siguen igual.
+function enModoBloqueo(u: User | null | undefined): boolean {
+  if (!u?.bloqueo) return false;
+  const variasEmpresas = (u.companies?.length ?? 0) > 1;
+  return (!u.isSuperAdmin && !variasEmpresas) || !!u.impersonatedCompanyId;
+}
+
+/** Orden del menú en bloqueo: el de RUTAS_EN_BLOQUEO (Carrito, Movimientos, Caja, Mi Suscripción). */
+const ordenEnBloqueo = (href: string) =>
+  RUTAS_EN_BLOQUEO.findIndex((r) => href === r || href.startsWith(`${r}/`));
 
 export default function AppLayoutContent({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -195,6 +209,13 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   }, [pathname]);
 
 
+  // En bloqueo no hay Dashboard: al entrar (el login aterriza en /dashboard)
+  // se va directo a facturar.
+  const bloqueoActivo = enModoBloqueo(appUser);
+  useEffect(() => {
+    if (bloqueoActivo && pathname === '/dashboard') router.replace('/pos');
+  }, [bloqueoActivo, pathname, router]);
+
   const handleLogout = async () => {
     await signOut();
     router.push('/login');
@@ -234,9 +255,10 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const hasMultipleCompanies = !!(appUser.companies && appUser.companies.length > 1);
   const isImpersonating = !!appUser.impersonatedCompanyId;
   const isDemoCompany = !!appUser.companyDemoExpiresAt;
-  const isReadOnly = !!appUser.isReadOnly;
+  const bloqueo = bloqueoActivo ? appUser.bloqueo ?? null : null;
+  const verAvisoBloqueo = !!bloqueo && !isDemoCompany;
   // El banner de "operando en otra empresa" solo se muestra a super admin.
-  const hasTopBanner = (isImpersonating && isSuperAdmin) || isDemoCompany || isReadOnly;
+  const hasTopBanner = (isImpersonating && isSuperAdmin) || isDemoCompany || verAvisoBloqueo;
   const showOperationalMenus = (!isSuperAdmin && !hasMultipleCompanies) || isImpersonating;
   // Aviso de comprobantes electrónicos con problemas: solo para quien puede
   // resolverlos (administrador de la empresa en la que opera) y si emite e-CF.
@@ -261,12 +283,21 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   // módulo de empresa. El enlace sale cuando ya consta que la sucursal la usa.
   const moduleActive = (m: ModuleKey) => isModuleEnabled(m) && (m !== 'caja' || branchUsesCaja === true);
   const moduleOk = (item: NavItem) => !item.module || moduleActive(item.module);
-  const visibleDashboard = showOperationalMenus && userRole && hasExtra(dashboardNavItem.permission);
-  const visibleCoreNavItems = coreNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && hasExtra(item.permission));
-  const visibleFeaturesNavItems = featuresNavItems.filter(item => showOperationalMenus && userRole && moduleOk(item) && hasExtra(item.permission));
-  const visibleAdminNavItems = adminNavItems.filter(item => showOperationalMenus && moduleOk(item) && hasExtra(item.permission));
-  const canViewAdmin = showOperationalMenus && visibleAdminNavItems.length > 0;
-  const canViewReports = showOperationalMenus && isModuleEnabled('reports') && hasExtra('reports');
+  // En bloqueo el menú normal desaparece y queda una lista corta y plana con
+  // lo que se puede usar (navEnBloqueo), con los mismos módulos y permisos.
+  const menuNormal = showOperationalMenus && !bloqueo;
+  const visibleDashboard = menuNormal && userRole && hasExtra(dashboardNavItem.permission);
+  const visibleCoreNavItems = coreNavItems.filter(item => menuNormal && userRole && moduleOk(item) && hasExtra(item.permission));
+  const visibleFeaturesNavItems = featuresNavItems.filter(item => menuNormal && userRole && moduleOk(item) && hasExtra(item.permission));
+  const visibleAdminNavItems = adminNavItems.filter(item => menuNormal && moduleOk(item) && hasExtra(item.permission));
+  const canViewAdmin = menuNormal && visibleAdminNavItems.length > 0;
+  const canViewReports = menuNormal && isModuleEnabled('reports') && hasExtra('reports');
+  const navEnBloqueo = bloqueo
+    ? [...coreNavItems, ...featuresNavItems, ...adminNavItems]
+        .filter(item => rutaPermitidaEnBloqueo(item.href) && moduleOk(item) && hasExtra(item.permission)
+          && (!!userRole || item.href === '/suscripcion'))
+        .sort((a, b) => ordenEnBloqueo(a.href) - ordenEnBloqueo(b.href))
+    : [];
   const visibleReportsNavItems = reportsNavItems.filter((item) => {
     const slug = item.href.split('/').pop()!;
     // El 606 es un reporte fiscal DGII: aplica solo a empresas formalizadas y
@@ -294,6 +325,11 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const matchedNavItem = allNavItems.find(item => pathname === item.href || pathname.startsWith(item.href + '/'));
   const permissionBlocked = !isSuperAdmin && !!matchedNavItem && !!userRole && !hasExtra(matchedNavItem.permission);
 
+  // Guard de bloqueo: fuera del Carrito, Movimientos, la Caja y Mi Suscripción
+  // no se muestra la pantalla, aunque escriban la URL a mano. /admin queda
+  // fuera: ahí solo llegan el lobby de Mis Empresas y el Panel Consolidado.
+  const bloqueoBlocked = !!bloqueo && !pathname.startsWith('/admin') && !rutaPermitidaEnBloqueo(pathname);
+
   const formatRole = (role: string | null) => {
     if (role === 'admin') return 'Administrador';
     if (role === 'cashier') return 'Cajero';
@@ -304,7 +340,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
 
   const logoLink = isSuperAdmin && !isImpersonating 
     ? '/admin/companies' 
-    : (hasMultipleCompanies && !isImpersonating ? '/admin/empresas' : '/dashboard');
+    : (hasMultipleCompanies && !isImpersonating ? '/admin/empresas' : bloqueo ? '/pos' : '/dashboard');
   let defaultLogoName = profile?.name || 'SellAlleS';
   if (profile?.headerNameDisplay === 'branch' && userBranch) {
     defaultLogoName = userBranch;
@@ -345,28 +381,39 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
           </span>
         </div>
       )}
-      {!isImpersonating && !isDemoCompany && isReadOnly && (
-        <div className="fixed top-0 z-50 w-full bg-red-600 text-white px-4 py-1.5 text-xs flex items-center justify-center gap-3 font-medium shadow-md">
-          <span>
-            ⚠️ Tu prueba gratis terminó. Puedes ver tus datos, pero no modificarlos hasta activar tu cuenta.
+      {verAvisoBloqueo && bloqueo && (
+        <div
+          role="alert"
+          className="fixed top-0 z-50 w-full bg-red-700 text-white px-4 py-1.5 text-xs flex items-center justify-center gap-3 font-medium shadow-md"
+        >
+          <Lock className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 truncate" title={MENSAJE_BLOQUEO[bloqueo]}>
+            <strong>{TITULO_BLOQUEO[bloqueo]}.</strong>
+            <span className="hidden md:inline"> {AVISO_BLOQUEO[bloqueo]}</span>
           </span>
-          {appUser.isCompanyAdmin && pathname !== '/suscripcion' && (
-            <Link
-              href="/suscripcion"
-              className="bg-white text-red-600 px-3 py-0.5 rounded-full hover:bg-red-50 transition-colors whitespace-nowrap"
-            >
-              Pagar y activar
-            </Link>
-          )}
-          {activationWaLink && (
-            <a
-              href={activationWaLink}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bg-white text-red-600 px-3 py-0.5 rounded-full hover:bg-red-50 transition-colors whitespace-nowrap"
-            >
-              Activar por WhatsApp
-            </a>
+          {appUser.isCompanyAdmin ? (
+            <>
+              {pathname !== '/suscripcion' && (
+                <Link
+                  href="/suscripcion"
+                  className="bg-white text-red-700 px-3 py-0.5 rounded-full hover:bg-red-50 transition-colors whitespace-nowrap"
+                >
+                  Realizar pago
+                </Link>
+              )}
+              {activationWaLink && (
+                <a
+                  href={activationWaLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hidden sm:inline bg-white text-red-700 px-3 py-0.5 rounded-full hover:bg-red-50 transition-colors whitespace-nowrap"
+                >
+                  Contactar por WhatsApp
+                </a>
+              )}
+            </>
+          ) : (
+            <span className="hidden lg:inline whitespace-nowrap opacity-90">Contacte al administrador de su empresa.</span>
           )}
         </div>
       )}
@@ -639,6 +686,17 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
+            {navEnBloqueo.map((item) => (
+              <SidebarMenuItem key={item.href}>
+                <Link href={item.href} passHref>
+                  <SidebarMenuButton isActive={pathname === item.href || pathname.startsWith(`${item.href}/`)} tooltip={item.label}>
+                    {item.icon && <item.icon />}
+                    <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
+            ))}
+
             {visibleDashboard && (
               <SidebarMenuItem>
                 <Link href={dashboardNavItem.href} passHref>
@@ -793,7 +851,26 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
         state === 'expanded' ? 'md:ml-[var(--sidebar-width)]' : 'md:ml-[var(--sidebar-width-icon)]'
       )}>
         <main className={cn(!isPosPage && "p-4 sm:p-6 lg:p-8")}>
-          {routeBlocked ? (
+          {bloqueoBlocked && bloqueo ? (
+            <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
+              <Lock className="h-10 w-10 text-muted-foreground" />
+              <h2 className="text-lg font-semibold">{TITULO_BLOQUEO[bloqueo]}</h2>
+              <p className="text-sm text-muted-foreground max-w-md">{MENSAJE_BLOQUEO[bloqueo]}</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <Button onClick={() => router.push('/pos')}>Ir a facturar</Button>
+                {appUser.isCompanyAdmin && (
+                  <Button variant="outline" asChild>
+                    <Link href="/suscripcion">Realizar pago</Link>
+                  </Button>
+                )}
+              </div>
+              {!appUser.isCompanyAdmin && (
+                <p className="text-xs text-muted-foreground max-w-sm">
+                  Contacte al administrador de su empresa para regularizar la suscripción.
+                </p>
+              )}
+            </div>
+          ) : routeBlocked ? (
             <div className="flex flex-col items-center justify-center py-24 text-center gap-3">
               <Shield className="h-10 w-10 text-muted-foreground" />
               <h2 className="text-lg font-semibold">Módulo no disponible</h2>

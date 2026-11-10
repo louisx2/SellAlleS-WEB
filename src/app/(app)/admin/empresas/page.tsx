@@ -53,8 +53,8 @@ const emptyForm = {
   customMonthlyPrice: '',
   // Los planes con tarifa se cobran por sucursal, mensual o anual.
   billingCycle: 'monthly' as BillingCycle,
-  // Fechas que gobiernan el bloqueo de la app: si la prueba vence o la
-  // suscripción caduca, la empresa pasa a solo-lectura. Vacías = nunca vence.
+  // Fechas de la cuenta: si la prueba vence, la empresa pasa a solo
+  // facturación (lib/bloqueo.ts). Vacías = nunca vence.
   trialEndsAt: '',
   paidUntil: '',
 };
@@ -905,8 +905,8 @@ export default function CompaniesManagementPage() {
                 </div>
               )}
 
-              {/* Estas dos fechas son las que deciden si la empresa entra en
-                  solo-lectura, y de las que salen los avisos automáticos. */}
+              {/* La fecha de la prueba decide si la empresa entra en solo
+                  facturación, y de estas fechas salen los avisos automáticos. */}
               <div className="grid gap-4 sm:grid-cols-2 rounded-lg border p-3">
                 <div className="grid gap-2">
                   <Label htmlFor="trialEndsAt">Prueba hasta</Label>

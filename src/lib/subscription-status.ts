@@ -63,7 +63,7 @@ export const GRUPOS_COBRO: { key: GrupoCobro; label: string; descripcion: string
   { key: 'atrasados', label: 'Atrasados', descripcion: 'Deben cuotas ya vencidas' },
   { key: 'por_vencer', label: 'Por vencer', descripcion: 'Están pagadas, pero la próxima cuota llega en pocos días' },
   { key: 'al_dia', label: 'Al día', descripcion: 'No deben nada' },
-  { key: 'prueba', label: 'En prueba', descripcion: 'Todavía no pagan; las de prueba terminada están en solo lectura' },
+  { key: 'prueba', label: 'En prueba', descripcion: 'Todavía no pagan; las de prueba terminada solo pueden facturar' },
   { key: 'no_se_cobran', label: 'No se cobran', descripcion: 'Plan sin precio o empresa suspendida' },
 ];
 

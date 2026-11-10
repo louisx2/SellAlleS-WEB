@@ -89,8 +89,8 @@ function resumen(c: CobroEmpresa): { tono: Tono; titulo: string; detalle: string
     case 'prueba_vencida':
       return {
         tono: 'rojo',
-        titulo: 'Tu prueba terminó',
-        detalle: `Puedes ver tus datos pero no modificarlos. Para activar la cuenta, transfiere${c.montoPeriodo > 0 ? ` ${formatCurrency(c.montoPeriodo)}` : ''} y sube el comprobante.`,
+        titulo: 'Su período de prueba ha finalizado',
+        detalle: `Para continuar utilizando todas las funciones de SellAlleS, realice el pago de su suscripción: transfiera${c.montoPeriodo > 0 ? ` ${formatCurrency(c.montoPeriodo)}` : ''} y suba el comprobante. Mientras tanto, solo está disponible la facturación.`,
         monto: c.montoPeriodo > 0 ? c.montoPeriodo : null,
       };
     case 'suspendida':
@@ -207,8 +207,10 @@ export default function SuscripcionPage() {
         {!esAdmin && appUser?.companyStatus && (
           <Card>
             <CardContent className="flex items-center gap-2 py-4 text-sm">
-              {appUser.isReadOnly
-                ? <><AlertTriangle className="h-4 w-4 text-red-600" /> La prueba de la empresa terminó. El administrador puede activarla desde aquí.</>
+              {appUser.bloqueo === 'prueba_vencida'
+                ? <><AlertTriangle className="h-4 w-4 shrink-0 text-red-600" /> El período de prueba de la empresa ha finalizado. Solo está disponible la facturación hasta que el administrador realice el pago de la suscripción.</>
+                : appUser.bloqueo === 'cuotas'
+                  ? <><AlertTriangle className="h-4 w-4 shrink-0 text-red-600" /> La cuenta de la empresa presenta pagos pendientes. Solo está disponible la facturación hasta que el administrador regularice la suscripción.</>
                 : appUser.companyStatus === 'trial'
                   ? <><Clock className="h-4 w-4 text-amber-600" /> La empresa está en prueba gratis.</>
                   : <><CheckCircle2 className="h-4 w-4 text-emerald-600" /> La cuenta de la empresa está activa.</>}
@@ -232,8 +234,8 @@ export default function SuscripcionPage() {
                 <div className="flex items-start gap-2 rounded-md border border-red-300 bg-white/60 p-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
                   <Lock className="mt-0.5 h-4 w-4 shrink-0" />
                   <span>
-                    Tu cuenta está en <strong>modo solo ventas</strong>: puedes vender, cobrar, usar la caja, cotizar y registrar
-                    servicios. Inventario, usuarios, gastos y la configuración quedan en consulta hasta que te pongas al día.
+                    Su cuenta está en <strong>modo solo facturación</strong>: puede vender, cobrar y usar la caja. Las demás
+                    funciones quedan ocultas hasta que regularice el pago de su suscripción.
                   </span>
                 </div>
               )}

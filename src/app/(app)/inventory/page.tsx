@@ -24,6 +24,8 @@ import { formatCurrency } from '@/lib/utils';
 import { formatQty } from '@/lib/units';
 import { buildExportCsv, downloadTextFile } from '@/lib/inventory-csv';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
+import { useBranches } from '@/context/branch-provider';
 
 // El envío entre sucursales se abre desde aquí (fila o cabecera) y su conduce
 // se muestra aquí, así que el host envuelve toda la página.
@@ -46,7 +48,13 @@ function InventoryContent() {
   const openTransfer = useOpenTransfer();
 
   const categoryName = useMemo(() => new Map(categories.map((c) => [c.id, c.name])), [categories]);
-  const columns = useMemo(() => buildProductColumns(categoryName), [categoryName]);
+  // La ganancia se calcula sin ITBIS si la sucursal vende con el ITBIS incluido.
+  const { appUser } = useAuth();
+  const { branches } = useBranches();
+  const sucursalActiva =
+    branches.find((b) => b.id === appUser?.activeBranchId) ?? branches.find((b) => b.name === appUser?.branch);
+  const itbisIncluido = !!sucursalActiva?.itbisIncluded;
+  const columns = useMemo(() => buildProductColumns(categoryName, itbisIncluido), [categoryName, itbisIncluido]);
   // Si la categoría elegida se borra (o deja de compartirse), se vuelve a "Todas".
   const activeFilter: CategoryFilterValue =
     categoryFilter === 'all' || categoryFilter === 'none' || categoryName.has(categoryFilter)

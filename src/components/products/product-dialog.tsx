@@ -33,6 +33,9 @@ import { useSuppliers } from '@/context/supplier-provider';
 import { useCategories } from '@/context/category-provider';
 import { useLocations } from '@/context/location-provider';
 import { useAuth } from '@/context/auth-provider';
+import { useBranches } from '@/context/branch-provider';
+import { factorItbis, formatoPorcentaje, gananciaDelPrecio, precioConGanancia } from '@/lib/margen';
+import { ITBIS_RATE, cn, formatCurrency } from '@/lib/utils';
 import { useModules } from '@/context/modules-provider';
 import { supabase } from '@/lib/supabase/client';
 import { ProductImage, SUFIJO_THUMB } from '@/components/products/product-image';
@@ -124,6 +127,62 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const [codeInput, setCodeInput] = useState(product?.code ?? '');
   const [nameInput, setNameInput] = useState(product?.name ?? '');
   const [costInput, setCostInput] = useState(product?.cost != null ? String(product.cost) : '');
+
+  // Ganancia sobre el costo (lib/margen.ts): costo, % y precio se mueven juntos.
+  // Si cambias el % sale el precio; si cambias el precio sale el %; si cambias
+  // el costo se respeta el último que escribiste y se recalcula el otro.
+  const { branches } = useBranches();
+  const sucursalActiva =
+    branches.find((b) => b.id === appUser?.activeBranchId) ?? branches.find((b) => b.name === appUser?.branch);
+  const itbisIncluido = !!sucursalActiva?.itbisIncluded;
+  const [aplicaItbis, setAplicaItbis] = useState(!!product?.itbis);
+  const [priceInput, setPriceInput] = useState(product?.price != null ? String(product.price) : '');
+  const [marginInput, setMarginInput] = useState('');
+  const mandaElMargen = useRef(false);
+  const factor = factorItbis(itbisIncluido, aplicaItbis, ITBIS_RATE);
+
+  const margenDesde = (costo: string, precio: string, f: number) => {
+    const g = gananciaDelPrecio(parseFloat(costo), parseFloat(precio), f);
+    return g ? formatoPorcentaje(g.porcentaje) : '';
+  };
+  const precioDesde = (costo: string, margen: string, f: number) => {
+    const p = precioConGanancia(parseFloat(costo), parseFloat(margen), f);
+    return p != null ? String(p) : null;
+  };
+  // Recalcula lo que no manda, con el costo o el ITBIS nuevos.
+  const recalcular = (costo: string, f: number) => {
+    if (mandaElMargen.current) {
+      const p = precioDesde(costo, marginInput, f);
+      if (p != null) setPriceInput(p);
+    } else {
+      setMarginInput(margenDesde(costo, priceInput, f));
+    }
+  };
+  const onCostChange = (v: string) => { setCostInput(v); recalcular(v, factor); };
+  const onAplicaItbisChange = (v: boolean) => {
+    setAplicaItbis(v);
+    recalcular(costInput, factorItbis(itbisIncluido, v, ITBIS_RATE));
+  };
+  const onMarginChange = (v: string) => {
+    setMarginInput(v);
+    mandaElMargen.current = true;
+    const p = precioDesde(costInput, v, factor);
+    if (p != null) setPriceInput(p);
+  };
+  const onPriceChange = (v: string) => {
+    setPriceInput(v);
+    mandaElMargen.current = false;
+    setMarginInput(margenDesde(costInput, v, factor));
+  };
+  const ganancia = gananciaDelPrecio(parseFloat(costInput), parseFloat(priceInput), factor);
+  // Si las sucursales cargan con el diálogo ya abierto, el % se calculó sin
+  // saber si el precio trae el ITBIS: se rehace, salvo que lo esté escribiendo.
+  useEffect(() => {
+    if (!open || mandaElMargen.current) return;
+    setMarginInput(margenDesde(costInput, priceInput, factor));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itbisIncluido]);
+
   // Producto creado en este diálogo: si las presentaciones fallan, el diálogo sigue
   // abierto y reintentar tiene que actualizarlo, no crear otro igual.
   const [created, setCreated] = useState<Product | null>(null);
@@ -137,6 +196,15 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     setCodeInput(product?.code ?? '');
     setNameInput(product?.name ?? '');
     setCostInput(product?.cost != null ? String(product.cost) : '');
+    setPriceInput(product?.price != null ? String(product.price) : '');
+    setAplicaItbis(!!product?.itbis);
+    setMarginInput(
+      product
+        ? margenDesde(String(product.cost ?? ''), String(product.price ?? ''),
+            factorItbis(itbisIncluido, !!product.itbis, ITBIS_RATE))
+        : '',
+    );
+    mandaElMargen.current = false;
     setCreated(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -531,13 +599,33 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
               </Select>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="cost">Precio Compra (Costo)</Label>
-              <Input id="cost" name="cost" type="number" step="0.01" defaultValue={product?.cost} onChange={(e) => setCostInput(e.target.value)} required/>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="price">Precio Venta</Label>
-              <Input id="price" name="price" type="number" step="0.01" defaultValue={product?.price} required/>
+            <div className="grid gap-4 sm:grid-cols-3 md:col-span-2">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="cost">Precio Compra (Costo)</Label>
+                <Input id="cost" name="cost" type="number" step="0.01" defaultValue={product?.cost} onChange={(e) => onCostChange(e.target.value)} required/>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="margin">Ganancia %</Label>
+                <Input
+                  id="margin" type="number" step="0.01" inputMode="decimal" placeholder="Ej. 30"
+                  value={marginInput} onChange={(e) => onMarginChange(e.target.value)}
+                  aria-describedby="margin-hint"
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="price">Precio Venta</Label>
+                <Input id="price" name="price" type="number" step="0.01" value={priceInput} onChange={(e) => onPriceChange(e.target.value)} required/>
+              </div>
+              <p id="margin-hint" className="-mt-2 text-xs text-muted-foreground sm:col-span-3">
+                {ganancia ? (
+                  <span className={cn(ganancia.monto < 0 && 'font-medium text-destructive')}>
+                    {ganancia.monto < 0 ? 'Pierdes' : 'Ganas'} {formatCurrency(Math.abs(ganancia.monto))} por unidad
+                    {factor > 1 ? ' (sin ITBIS)' : ''}.
+                  </span>
+                ) : (
+                  'Pon el costo y el % de ganancia para calcular el precio, o el precio para ver cuánto ganas.'
+                )}
+              </p>
             </div>
 
             <div className="flex items-center justify-between gap-4 rounded-lg border p-3 md:col-span-2">
@@ -598,7 +686,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
             <div className="flex flex-col justify-center gap-2 md:col-span-2">
               <Label htmlFor="itbis" className="mb-1">ITBIS</Label>
               <div className="flex items-center space-x-2 h-10">
-                <Checkbox id="itbis" name="itbis" defaultChecked={product?.itbis} />
+                <Checkbox id="itbis" name="itbis" checked={aplicaItbis} onCheckedChange={(v) => onAplicaItbisChange(v === true)} />
                 <label htmlFor="itbis" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
                   Aplica ITBIS
                 </label>
@@ -662,6 +750,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
               <PresentationsEditor
                 unit={tracksStock ? unit : DEFAULT_UNIT_CODE}
                 cost={parseFloat(costInput)}
+                factorItbis={factor}
                 drafts={drafts}
                 onChange={handleDraftsChange}
                 soldLoose={effectiveSoldLoose}

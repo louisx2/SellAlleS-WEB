@@ -8,13 +8,16 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { getUnit, unitAllowsDecimals, type UnitCode } from '@/lib/units';
 import { formatCurrency } from '@/lib/utils';
+import { gananciaDelPrecio } from '@/lib/margen';
 import type { PresentationDraft } from '@/lib/presentations';
 
 export interface PresentationsEditorProps {
   /** Unidad base del producto: en ella se cuenta el stock y de ella depende si "Contiene" admite fracciones. */
   unit: UnitCode;
-  /** Costo por unidad base; NaN o 0 = se desconoce y no se calcula el margen. */
+  /** Costo por unidad base; NaN o 0 = se desconoce y no se calcula la ganancia. */
   cost: number;
+  /** 1.18 si el precio trae el ITBIS adentro (lib/margen.ts); 1 si no. */
+  factorItbis?: number;
   drafts: PresentationDraft[];
   onChange: (drafts: PresentationDraft[]) => void;
   soldLoose: boolean;
@@ -32,19 +35,21 @@ const toNumberOrEmpty = (raw: string): number | '' => {
   return Number.isFinite(n) ? n : '';
 };
 
-// "RD$X por libra · margen N%", contra el costo de la presentación completa
-// (costo por unidad × unidades que trae). Sin unidades o sin precio válidos no hay nada que decir.
-function priceHint(d: PresentationDraft, cost: number, unitSingular: string) {
+// "RD$X por libra · ganancia N%", contra el costo de la presentación completa
+// (costo por unidad × unidades que trae). La ganancia es sobre el costo, igual
+// que en el producto (lib/margen.ts). Sin unidades o sin precio válidos no hay nada que decir.
+function priceHint(d: PresentationDraft, cost: number, unitSingular: string, factor: number) {
   const { units, price } = d;
   if (units === '' || price === '' || !(units > 1) || !Number.isFinite(price) || price < 0) return null;
   const perUnit = `${formatCurrency(price / units)} por ${unitSingular}`;
-  if (!(cost > 0) || !(price > 0)) return { perUnit, margin: null as number | null };
-  return { perUnit, margin: ((price - cost * units) / price) * 100 };
+  if (!(price > 0)) return { perUnit, margin: null as number | null };
+  return { perUnit, margin: gananciaDelPrecio(cost * units, price, factor)?.porcentaje ?? null };
 }
 
 export function PresentationsEditor({
   unit,
   cost,
+  factorItbis = 1,
   drafts,
   onChange,
   soldLoose,
@@ -84,7 +89,7 @@ export function PresentationsEditor({
       </div>
 
       {drafts.map((d, i) => {
-        const hint = priceHint(d, cost, u.singular);
+        const hint = priceHint(d, cost, u.singular, factorItbis);
         const warning = codeWarning(i);
         const id = `${baseId}-${i}`;
         return (
@@ -156,7 +161,7 @@ export function PresentationsEditor({
                   <>
                     {' · '}
                     <span className={hint.margin < 0 ? 'text-destructive' : undefined}>
-                      margen {hint.margin.toFixed(1)}%
+                      ganancia {hint.margin.toFixed(1)}%
                     </span>
                   </>
                 )}

@@ -101,7 +101,7 @@ export function hasAnySupportChannel(contact: SupportContact): boolean {
 }
 
 // ── Caché a nivel de módulo ─────────────────────────────────────────────────
-// Igual que setReadOnlyMode en lib/supabase/client.ts: deja que código fuera de
+// Igual que setModoBloqueo en lib/supabase/client.ts: deja que código fuera de
 // React (helpers, mensajes de error) lea el contacto vigente sin pasar por el
 // contexto. El provider lo mantiene actualizado.
 

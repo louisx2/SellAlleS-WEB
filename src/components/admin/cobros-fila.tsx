@@ -84,7 +84,7 @@ export function detalleEstado(c: CobroEmpresa): string | null {
     case 'atrasada':
     case 'nunca_pago':
       return `${cuotas(c.cuotasPendientes)} sin pagar · la más vieja hace ${enDias(n)}`;
-    case 'prueba_vencida': return `terminó hace ${enDias(n)} · en solo lectura`;
+    case 'prueba_vencida': return `terminó hace ${enDias(n)} · solo facturación`;
     case 'por_vencer': return c.dias === 0 ? 'le toca pagar hoy' : `le toca pagar en ${enDias(n)}`;
     case 'prueba': return c.dias === 0 ? 'termina hoy' : `le quedan ${enDias(n)}`;
     case 'al_dia': return `próximo pago en ${enDias(n)}`;
@@ -302,7 +302,7 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas, on
                 )}
                 {cobro.soloVentas && (
                   <p className="mt-1 text-xs text-red-700 dark:text-red-400">
-                    En solo ventas desde el {fmtInstante(cobro.soloVentasDesde)}: vende, cobra y usa la caja; lo demás queda en consulta.
+                    En solo ventas desde el {fmtInstante(cobro.soloVentasDesde)}: solo puede facturar; lo demás queda oculto.
                   </p>
                 )}
                 {cobro.tarifaPorSucursal == null && (

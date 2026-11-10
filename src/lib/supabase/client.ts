@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { escrituraBloqueada, rpcBloqueada, type MotivoBloqueo } from '@/lib/bloqueo';
 
 // =============================================================================
 // CLIENTE SUPABASE (scaffolding)
@@ -59,76 +60,26 @@ if (impersonatedCompany) {
 }
 
 // =============================================================================
-// MODO SOLO-LECTURA (prueba vencida) Y MODO SOLO VENTAS (atraso en la cuota)
+// MODO SOLO FACTURACIÓN (prueba vencida o atraso en la cuota)
 // -----------------------------------------------------------------------------
-// Las dos barreras viven en un único lugar: interceptamos insert/update/
-// delete/upsert y rpc del cliente. El auth-provider las activa/desactiva al
-// cargar el perfil. El super admin nunca queda en ninguna, así que puede
-// gestionar/reactivar empresas.
-//
-// - Solo lectura: la prueba terminó. Puede entrar y ver, no modificar.
-// - Solo ventas: el super admin la puso a mano desde Cobros por atraso. Sigue
-//   vendiendo, cobrando, usando la caja, las cotizaciones y los servicios;
-//   inventario, usuarios, configuración, gastos y lo demás quedan en consulta.
-//
-// En las dos se puede reportar el pago de la suscripción: es justo lo que la
-// empresa necesita hacer para salir de ahí.
+// La barrera vive en un único lugar: interceptamos insert/update/delete/upsert
+// y rpc del cliente. El auth-provider la activa con el motivo al cargar el
+// perfil (lib/bloqueo.ts decide qué pasa y qué no). El super admin nunca queda
+// bloqueado, así que puede gestionar/reactivar empresas.
 //
 // Es una barrera de UI (no de seguridad), igual que antes.
 // =============================================================================
-// Sin número de contacto: este string vive fuera de React y no puede leer
-// platform_settings. El canal vigente lo muestra la UI (banner superior,
-// pantalla de suspensión, botón de Soporte), que sí lee el provider.
-export const READONLY_MESSAGE =
-  'Tu prueba gratis terminó. Activa tu cuenta desde Mi Suscripción o el botón de Soporte para seguir registrando o modificando datos.';
-
-export const SOLO_VENTAS_MESSAGE =
-  'Tu cuenta está en modo solo ventas por cuotas pendientes: puedes vender, cobrar y usar la caja. Para lo demás, ponte al día desde Mi Suscripción.';
-
-let readOnlyMode = false;
-export function setReadOnlyMode(value: boolean) { readOnlyMode = value; }
-
-let soloVentasMode = false;
-export function setSoloVentasMode(value: boolean) { soloVentasMode = value; }
+let motivoBloqueo: MotivoBloqueo | null = null;
+export function setModoBloqueo(motivo: MotivoBloqueo | null) { motivoBloqueo = motivo; }
 
 const WRITE_METHODS = new Set(['insert', 'update', 'delete', 'upsert']);
 
-/** RPC que solo leen: no se bloquean en ningún modo. */
-const RPC_DE_LECTURA = new Set([
-  'mi_cuenta_de_suscripcion', 'get_my_admin_companies', 'get_consolidated_dashboard',
-  'buscar_en_otras_sucursales', 'company_branch_user_counts', 'articulos_rapidos_recientes',
-]);
-
-/** Pagar la suscripción siempre se puede. */
-const RPC_DE_SUSCRIPCION = new Set(['reportar_pago_de_suscripcion', 'anular_reporte_de_pago']);
-
-/** Lo que sigue funcionando en solo ventas: vender, cobrar y la caja. */
-const RPC_SOLO_VENTAS = new Set([
-  'create_sale_with_items', 'redeem_coupon', 'register_sale_payment', 'register_customer_payment',
-  'register_loan_payment', 'open_caja_session', 'close_caja_session', 'register_caja_movement',
-]);
-
-/** Escrituras directas que siguen en solo ventas: el cliente nuevo en la
- *  venta, y cotizaciones y órdenes de servicio, que también son vender. */
-const TABLAS_SOLO_VENTAS: Record<string, Set<string>> = {
-  customers: new Set(['insert', 'update']),
-  quotes: new Set(['insert', 'update']),
-  quote_items: new Set(['insert', 'delete']),
-  services: new Set(['insert', 'update']),
-  service_items: new Set(['insert', 'delete']),
-};
-
 function bloqueoDeEscritura(relation: string, method: string): string | null {
-  if (readOnlyMode) return READONLY_MESSAGE;
-  if (soloVentasMode && !TABLAS_SOLO_VENTAS[relation]?.has(method)) return SOLO_VENTAS_MESSAGE;
-  return null;
+  return escrituraBloqueada(motivoBloqueo, relation, method);
 }
 
 function bloqueoDeRpc(fn: string): string | null {
-  if (RPC_DE_LECTURA.has(fn) || RPC_DE_SUSCRIPCION.has(fn)) return null;
-  if (readOnlyMode) return READONLY_MESSAGE;
-  if (soloVentasMode && !RPC_SOLO_VENTAS.has(fn)) return SOLO_VENTAS_MESSAGE;
-  return null;
+  return rpcBloqueada(motivoBloqueo, fn);
 }
 
 // Reasignamos from/rpc sobre el cliente (casteado a any para evitar pelear con
