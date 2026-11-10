@@ -174,25 +174,28 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto, 
       const dias = Number(vars.daysLeft ?? 0);
       const cuando = dias === 1 ? 'mañana' : `en ${dias} días`;
       return {
-        subject: `Tu prueba de SellAlleS termina ${cuando}`,
-        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nLa prueba gratis de ${vars.companyName ?? 'tu empresa'} termina ${cuando} (${fmtFecha(vars.trialEndsAt)}).\n\nCuando termine podrás seguir viendo tus datos, pero no registrar ni modificar nada hasta activar tu cuenta.\n\nEquipo SellAlleS`,
-        html: envolver(`Tu prueba termina ${cuando}`, `
-          <p>Hola${nombre},</p>
-          <p>La prueba gratis de <strong>${empresa}</strong> termina <strong>${esc(cuando)}</strong>${vars.trialEndsAt ? ` (${esc(fmtFecha(vars.trialEndsAt))})` : ''}.</p>
-          <p>Cuando termine vas a poder <strong>seguir viendo tus datos</strong>, pero no registrar ventas ni modificar nada hasta activar la cuenta. Nada se borra.</p>
-          <p>Para activarla, escríbenos:</p>`, c),
+        subject: `Su período de prueba en SellAlleS finaliza ${cuando}`,
+        text: `Estimado(a)${vars.userName ? ` ${vars.userName}` : ''}:\n\nLe recordamos que el período de prueba de ${vars.companyName ?? 'su empresa'} en SellAlleS finaliza ${cuando} (${fmtFecha(vars.trialEndsAt)}).\n\nPara continuar utilizando todas las funciones del sistema, realice el pago de su suscripción desde Mi Suscripción. Si la prueba finaliza sin pago, la cuenta quedará en modo solo facturación hasta activarla. Sus datos se conservan íntegramente.\n\nEquipo SellAlleS`,
+        html: envolver(`Su período de prueba finaliza ${cuando}`, `
+          <p>Estimado(a)${nombre}:</p>
+          <p>Le recordamos que el período de prueba de <strong>${empresa}</strong> en SellAlleS finaliza <strong>${esc(cuando)}</strong>${vars.trialEndsAt ? ` (${esc(fmtFecha(vars.trialEndsAt))})` : ''}.</p>
+          <p>Para continuar utilizando todas las funciones del sistema, realice el pago de su suscripción desde <strong>Mi Suscripción</strong>. Si la prueba finaliza sin pago, la cuenta quedará en modo <strong>solo facturación</strong> hasta activarla. Sus datos se conservan íntegramente.</p>
+          ${boton('/suscripcion', 'Ir a Mi Suscripción')}
+          <p>Si necesita asistencia, contáctenos:</p>`, c),
       };
     }
 
     case 'prueba-vencida':
       return {
-        subject: 'Tu prueba de SellAlleS terminó',
-        text: `Hola${vars.userName ? ` ${vars.userName}` : ''},\n\nLa prueba gratis de ${vars.companyName ?? 'tu empresa'} terminó. Tus datos siguen ahí y puedes consultarlos, pero no registrar ni modificar hasta activar la cuenta.\n\nEquipo SellAlleS`,
-        html: envolver('Tu prueba terminó', `
-          <p>Hola${nombre},</p>
-          <p>La prueba gratis de <strong>${empresa}</strong> llegó a su fin.</p>
-          <p><strong>Tus datos siguen intactos.</strong> Puedes entrar y consultarlos cuando quieras; lo que queda bloqueado es registrar ventas y modificar información, hasta que actives la cuenta.</p>
-          <p>Activarla toma un minuto:</p>`, c),
+        subject: 'Su período de prueba en SellAlleS ha finalizado',
+        text: `Estimado(a)${vars.userName ? ` ${vars.userName}` : ''}:\n\nLe informamos que el período de prueba de ${vars.companyName ?? 'su empresa'} en SellAlleS ha finalizado.\n\nPara continuar utilizando todas las funciones del sistema, es necesario realizar el pago de su suscripción. Mientras tanto, la cuenta permanecerá en modo solo facturación: podrá seguir vendiendo, pero el resto de las funciones no estará disponible. Sus datos se conservan íntegramente.\n\nPuede realizar el pago desde Mi Suscripción, en la aplicación.\n\nEquipo SellAlleS`,
+        html: envolver('Su período de prueba ha finalizado', `
+          <p>Estimado(a)${nombre}:</p>
+          <p>Le informamos que el período de prueba de <strong>${empresa}</strong> en SellAlleS ha finalizado.</p>
+          <p>Para continuar utilizando todas las funciones del sistema, es necesario realizar el pago de su suscripción. Mientras tanto, la cuenta permanecerá en modo <strong>solo facturación</strong>: podrá seguir vendiendo, pero el resto de las funciones no estará disponible.</p>
+          <p><strong>Sus datos se conservan íntegramente.</strong></p>
+          ${boton('/suscripcion', 'Realizar el pago')}
+          <p>Si necesita asistencia, contáctenos:</p>`, c),
       };
 
     case 'cuenta-activada':

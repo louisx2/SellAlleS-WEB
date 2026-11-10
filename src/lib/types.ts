@@ -1,6 +1,7 @@
 import type { UnitCode } from './units';
 import type { InterestMode, PaymentFrequency } from './frequency';
 import type { LateFeeMode } from './late-fee';
+import type { MotivoBloqueo } from './bloqueo';
 
 export type { InterestMode, PaymentFrequency } from './frequency';
 export type { LateFeeMode } from './late-fee';
@@ -121,10 +122,10 @@ export type User = {
   companyDemoExpiresAt?: string; // empresa de prueba pública ("Probar Plataforma"); se banea al vencer
   companyTrialEndsAt?: string; // fin de la prueba de 14 días (null en empresas sin límite)
   companyPaidUntil?: string; // suscripción pagada hasta esta fecha (null = sin vencimiento)
-  isReadOnly?: boolean; // prueba vencida: puede entrar y ver, pero no modificar
-  // El super admin pasó la empresa a "solo ventas" por atraso: vende, cobra y
-  // usa la caja; lo demás queda en consulta. Nunca se activa solo.
-  isSoloVentas?: boolean;
+  // Modo solo facturación (lib/bloqueo.ts): la prueba venció, o el super admin
+  // la pasó a "solo ventas" por atraso. Solo ve el Carrito, Movimientos, la
+  // Caja y Mi Suscripción. null = opera normal.
+  bloqueo?: MotivoBloqueo | null;
   // Admin de la empresa activa (o super admin dentro de ella): el que ve el
   // aviso de cuotas y reporta los pagos.
   isCompanyAdmin?: boolean;
@@ -218,8 +219,8 @@ export type Company = {
   paid_until?: string | null;
   created_at: string;
   is_demo: boolean;
-  // Puesta a mano por el super admin (Cobros) por atraso: vende, cobra y usa
-  // la caja; lo demás queda en consulta.
+  // Puesta a mano por el super admin (Cobros) por atraso: la empresa queda en
+  // modo solo facturación (lib/bloqueo.ts).
   solo_ventas?: boolean;
   solo_ventas_desde?: string | null;
   business_type?: string | null;

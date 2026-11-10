@@ -158,7 +158,7 @@ export default function CobrosPage() {
     toast({
       title: soloVentas.activar ? 'Pasada a solo ventas' : 'Solo ventas quitado',
       description: soloVentas.activar
-        ? `${soloVentas.company.name} sigue vendiendo y cobrando; lo demás queda en consulta. Lo ve al recargar la app.`
+        ? `${soloVentas.company.name} solo puede facturar; lo demás queda oculto. Lo ve al recargar la app.`
         : `${soloVentas.company.name} vuelve a operar normal. Lo ve al recargar la app.`,
     });
     setSoloVentas(null);
@@ -357,7 +357,7 @@ export default function CobrosPage() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {soloVentas?.activar
-                ? 'Podrán seguir vendiendo, cobrando, usando la caja y reportando su pago. Inventario, clientes, usuarios, gastos y lo demás quedan en consulta hasta que se lo quites. Ven un aviso con lo que deben.'
+                ? 'Quedan en modo solo facturación: el menú se reduce al Carrito, Movimientos, la Caja y Mi Suscripción, y lo demás queda oculto hasta que se lo quites. Ven un aviso arriba para que paguen.'
                 : 'Vuelven a operar normal en cuanto recarguen la app.'}
             </AlertDialogDescription>
           </AlertDialogHeader>

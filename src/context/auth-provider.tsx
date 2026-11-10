@@ -4,7 +4,8 @@ import React, { createContext, useContext, useEffect, useState, useCallback, Rea
 import { useRouter, usePathname } from 'next/navigation';
 import type { Session } from '@supabase/supabase-js';
 import type { User as AppUser, RolePermissions } from '@/lib/types';
-import { supabase, setReadOnlyMode, setSoloVentasMode, cabeceraImpersonacionHorneada } from '@/lib/supabase/client';
+import { supabase, setModoBloqueo, cabeceraImpersonacionHorneada } from '@/lib/supabase/client';
+import { motivoDeBloqueo } from '@/lib/bloqueo';
 import {
   DEFAULT_ADMIN_PERMISSIONS, DEFAULT_CASHIER_PERMISSIONS,
   MANAGEMENT_PERMISSIONS, unionPermissions,
@@ -247,11 +248,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const empresaActiva = savedImpersonatedId || data.company_id;
       let maxUsers: number | null = null;
       let soloVentas = false;
+      // El bloqueo también se decide con la empresa en la que se opera: un
+      // dueño con varias empresas puede tener una al día y otra vencida.
+      let estadoActiva: string | undefined = compStatus;
+      let finPruebaActiva: string | undefined = trialEndsAt;
       if (empresaActiva) {
         const { data: comp } = await supabase
-          .from('companies').select('max_users, solo_ventas').eq('id', empresaActiva).maybeSingle();
+          .from('companies').select('max_users, solo_ventas, status, trial_ends_at').eq('id', empresaActiva).maybeSingle();
         maxUsers = (comp as any)?.max_users ?? null;
         soloVentas = !!(comp as any)?.solo_ventas;
+        if (comp) {
+          estadoActiva = (comp as any).status ?? undefined;
+          finPruebaActiva = (comp as any).trial_ends_at ?? undefined;
+        }
       }
 
       // El cupo de TODAS las sucursales accesibles, en una sola consulta, para que
@@ -263,17 +272,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .from('branches').select('id, max_users').in('id', idsSucursales);
         for (const s of (sucs ?? []) as any[]) branchMaxUsersById[s.id] = s.max_users ?? null;
       }
-      // Solo-lectura: puede entrar y ver, pero no modificar. Aplica solo si la
-      // prueba venció. Una empresa activa atrasada NO se bloquea sola (antes
-      // bastaba con que paid_until quedara en el pasado): el super admin
-      // decide a mano pasarla a "solo ventas" desde Cobros. El super admin
-      // nunca queda bloqueado (gestiona/reactiva empresas).
-      const trialExpired = compStatus === 'trial' && !!trialEndsAt && new Date(trialEndsAt).getTime() < Date.now();
-      const isReadOnly = !data.is_super_admin && trialExpired;
-      const isSoloVentas = !data.is_super_admin && !isReadOnly && soloVentas;
+      // Solo facturación: si la prueba venció, o si el super admin la pasó a
+      // "solo ventas" desde Cobros por atraso (una empresa activa atrasada NO
+      // se bloquea sola). El super admin nunca queda bloqueado.
+      const bloqueo = motivoDeBloqueo({
+        esSuperAdmin: !!data.is_super_admin,
+        estado: estadoActiva,
+        finPrueba: finPruebaActiva,
+        soloVentas,
+      });
       // Activa/desactiva el bloqueo central de escrituras en el cliente Supabase.
-      setReadOnlyMode(isReadOnly);
-      setSoloVentasMode(isSoloVentas);
+      setModoBloqueo(bloqueo);
 
       const user: AppUser = {
         id: data.id,
@@ -288,8 +297,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         companyDemoExpiresAt: demoExpiresAt,
         companyTrialEndsAt: trialEndsAt,
         companyPaidUntil: paidUntil,
-        isReadOnly,
-        isSoloVentas,
+        bloqueo,
         // Quien ve el aviso de cuotas y reporta el pago: el admin de la empresa,
         // o el super admin mientras está dentro de una.
         isCompanyAdmin: esAdminDeEmpresa || (!!data.is_super_admin && !!savedImpersonatedId),
@@ -357,8 +365,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           loadProfile(uid, mail).finally(() => { if (active) setLoading(false); });
         }, 0);
       } else {
-        setReadOnlyMode(false);
-        setSoloVentasMode(false);
+        setModoBloqueo(null);
         setAppUser(null);
         clearLocal();
         setLoading(false);

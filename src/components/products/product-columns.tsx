@@ -2,16 +2,25 @@
 
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Product } from '@/lib/types';
-import { formatCurrency } from '@/lib/utils';
+import { ITBIS_RATE, formatCurrency } from '@/lib/utils';
+import { factorItbis, formatoPorcentaje, gananciaDelPrecio } from '@/lib/margen';
 import { formatQuantity, getUnit } from '@/lib/units';
 import { breakdownStock, formatBreakdown } from '@/lib/presentations';
 import { Badge } from '@/components/ui/badge';
 import { ProductActions } from './product-actions';
 import { cn } from '@/lib/utils';
 
+// Ganancia por unidad sobre el costo (lib/margen.ts). Con la sucursal en
+// precios con ITBIS incluido, el impuesto se saca antes de calcularla.
+const gananciaDe = (p: Product, itbisIncluido: boolean) =>
+  gananciaDelPrecio(p.cost, p.price, factorItbis(itbisIncluido, !!p.itbis, ITBIS_RATE));
+
 // Factoría: el nombre de la categoría sale del provider de categorías (el
 // producto solo guarda el id).
-export const buildProductColumns = (categoryName: Map<string, string>): ColumnDef<Product>[] => [
+export const buildProductColumns = (
+  categoryName: Map<string, string>,
+  itbisIncluido = false,
+): ColumnDef<Product>[] => [
   {
     accessorKey: 'name',
     header: 'Nombre',
@@ -38,6 +47,24 @@ export const buildProductColumns = (categoryName: Map<string, string>): ColumnDe
     accessorKey: 'cost',
     header: 'Costo',
     cell: ({ row }) => formatCurrency(row.getValue('cost')),
+  },
+  {
+    id: 'ganancia',
+    header: 'Ganancia',
+    accessorFn: (p) => gananciaDe(p, itbisIncluido)?.monto ?? null,
+    cell: ({ row }) => {
+      const g = gananciaDe(row.original, itbisIncluido);
+      if (!g) return <span className="text-muted-foreground">—</span>;
+      const pierde = g.monto < 0;
+      return (
+        <div className="leading-tight">
+          <div className={cn(pierde && 'font-medium text-destructive')}>{formatCurrency(g.monto)}</div>
+          <div className={cn('text-xs', pierde ? 'text-destructive' : 'text-muted-foreground')}>
+            {formatoPorcentaje(g.porcentaje)}%
+          </div>
+        </div>
+      );
+    },
   },
   {
     accessorKey: 'stock',
