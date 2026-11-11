@@ -15,9 +15,9 @@
 // antes de salir).
 
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
-import { MsellerError, sesionVigente } from './mseller.ts';
-import type { Ambiente } from './mseller.ts';
-import { guardarSesion, leerCredenciales } from './rpc.ts';
+import { consultar, MsellerError, sesionVigente } from './mseller.ts';
+import type { Ambiente, Sesion } from './mseller.ts';
+import { guardarSesion, leerCredenciales, sumarUso } from './rpc.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const AMBIENTES: Ambiente[] = ['TesteCF', 'CerteCF', 'eCF'];
@@ -64,6 +64,59 @@ export function motivoDe(e: unknown): string {
   return mensajeDe(e);
 }
 
+/**
+ * Un e-NCF con formato válido que nadie emite. Consultarlo prueba la API key
+ * sin tocar ningún comprobante: el inicio de sesión no la lleva, así que sin
+ * esta consulta una key equivocada no se notaría hasta el primer envío.
+ */
+export const ENCF_DE_PRUEBA = 'E329999999999';
+
+/** Cada API key de MSeller sirve para un solo ambiente, y una recién creada tarda en propagarse. */
+export function motivoApiKey(ambiente: Ambiente): string {
+  return (
+    `La cuenta inicia sesión, pero MSeller no aceptó la API key en ${ambiente}. ` +
+    'Revisa que sea la key de ese ambiente (cada key sirve para uno solo); ' +
+    'si la acabas de crear, espera un minuto y vuelve a probar.'
+  );
+}
+
+/**
+ * Consulta `ENCF_DE_PRUEBA` con la sesión nueva y la API key. Si MSeller
+ * atiende la consulta (aunque no conozca el e-NCF u objete el parámetro), la
+ * key sirve y se suma esa consulta al uso del plan. Lanza si MSeller rechaza la
+ * key, no tiene cupo, está caído o no responde.
+ */
+async function probarApiKey(
+  db: SupabaseClient,
+  companyId: string,
+  ambiente: Ambiente,
+  sesion: Sesion,
+  apiKey: string,
+  deps: DepsAdmin,
+): Promise<void> {
+  let fallo: unknown = null;
+  let atendida = true;
+  try {
+    await consultar(ambiente, sesion, apiKey, ENCF_DE_PRUEBA, deps.fetch);
+  } catch (e) {
+    if (!(e instanceof MsellerError)) throw e;
+    // Igual que en emitir.ts: sin respuesta, con un rechazo de acceso o con un
+    // 429 MSeller no atendió la llamada y no gasta cupo.
+    atendida = e.tipo !== 'red' && e.tipo !== 'auth' && e.tipo !== 'cupo';
+    // Un 400/422 es MSeller objetando el parámetro: ya aceptó la key.
+    if (e.tipo === 'auth') fallo = new MsellerError('auth', motivoApiKey(ambiente), e.status);
+    else if (e.tipo !== 'datos') fallo = e;
+  }
+  if (atendida) {
+    try {
+      await sumarUso(db, companyId, 1, 0);
+    } catch {
+      // Contabilidad: si falla, la prueba vale igual.
+    }
+  }
+  if (fallo) throw fallo;
+}
+
 export type ResultadoPrueba =
   | { ok: true; marcada: boolean }
   | { ok: false; error: string };
@@ -95,6 +148,9 @@ export async function probarConexion(
     // Antes de guardarla: si guardar falla, el mensaje no puede dejar salir los tokens nuevos.
     secretos.push(sesion.idToken, sesion.refreshToken);
     await guardarSesion(db, companyId, ambiente, sesion);
+
+    // La conexión solo queda probada si además MSeller acepta la API key.
+    await probarApiKey(db, companyId, ambiente, sesion, cred.apiKey, deps);
 
     // La marca vale para el ambiente en uso de la empresa: probar otro (p. ej.
     // CerteCF antes de pasar a eCF) no la pone, porque el disparador de

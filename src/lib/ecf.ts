@@ -307,3 +307,31 @@ export function avisoNotaAlAnular(ncf: string | null | undefined, estadoEcf: Ecf
   if (estadoEcf === 'rechazado') return '';
   return ' Se emitirá una nota de crédito electrónica (E34) que referencia el e-NCF original.';
 }
+
+/**
+ * La prueba de conexión salió bien (MSeller aceptó la cuenta y la API key)
+ * pero no quedó marcada: dice por qué, para no confundirlo con un fallo.
+ * `ambienteEnUso` es null cuando la empresa todavía no tiene datos del emisor.
+ */
+export function avisoPruebaSinMarca(
+  ambiente: AmbienteEcf,
+  ambienteEnUso: AmbienteEcf | null,
+): { titulo: string; descripcion: string } {
+  const nombre = (a: AmbienteEcf) => `${ECF_AMBIENTE_NOMBRE[a]} (${a})`;
+  const titulo = 'La cuenta y la API key funcionan';
+  if (!ambienteEnUso) {
+    return {
+      titulo,
+      descripcion:
+        'Falta guardar los datos del emisor (RNC, razón social y dirección) en esta ventana. ' +
+        'Después vuelve a probar la conexión para que quede marcada.',
+    };
+  }
+  if (ambienteEnUso !== ambiente) {
+    return {
+      titulo,
+      descripcion: `Pero ${nombre(ambiente)} no es el ambiente en uso de la empresa, que es ${nombre(ambienteEnUso)}: probarlo no cuenta para activarla.`,
+    };
+  }
+  return { titulo, descripcion: 'La conexión no quedó marcada. Cierra esta ventana, ábrela de nuevo y vuelve a probar.' };
+}

@@ -34,6 +34,7 @@ import {
   ECF_QR_ATRIBUTO,
   esperarQrEcf,
   avisoNotaAlAnular,
+  avisoPruebaSinMarca,
 } from '../../src/lib/ecf.ts';
 import { PLANES_MSELLER } from '../../src/lib/ecf-planes.ts';
 
@@ -438,4 +439,21 @@ test('avisoNotaAlAnular: sigue al NCF de la venta, como annul_sale', () => {
   assert.match(avisoNotaAlAnular('E310000000012', 'recibido'), /E34/);
   // Rechazado: la DGII nunca lo aceptó y se anula sin nota.
   assert.equal(avisoNotaAlAnular('E320000000012', 'rechazado'), '');
+});
+
+test('avisoPruebaSinMarca: dice qué falta para que la conexión quede marcada', () => {
+  // Sin datos del emisor guardados (la empresa no tiene fila en ecf_config).
+  const sinDatos = avisoPruebaSinMarca('TesteCF', null);
+  assert.match(sinDatos.titulo, /funcionan/);
+  assert.match(sinDatos.descripcion, /datos del emisor/);
+  assert.doesNotMatch(sinDatos.descripcion, /ambiente en uso/);
+
+  // Credenciales de otro ambiente que el de la empresa.
+  const otro = avisoPruebaSinMarca('TesteCF', 'eCF');
+  assert.match(otro.descripcion, /Pruebas \(TesteCF\)/);
+  assert.match(otro.descripcion, /Producción \(eCF\)/);
+  assert.doesNotMatch(otro.descripcion, /datos del emisor/);
+
+  // Mismo ambiente y aun así sin marcar: no debería pasar; se pide reintentar.
+  assert.match(avisoPruebaSinMarca('TesteCF', 'TesteCF').descripcion, /vuelve a probar/);
 });
