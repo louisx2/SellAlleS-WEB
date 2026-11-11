@@ -8,11 +8,12 @@
 //     ecf_guardar_credenciales (la base apunta a ellas y olvida la sesión de las
 //     anteriores). Responde { ok: true }.
 //   * probar_conexion: inicia sesión con la contraseña (siempre un login nuevo,
-//     no reutiliza ni renueva la sesión guardada), guarda la sesión y, si el
-//     ambiente probado es el de la empresa, marca ecf_config.conexion_probada_at:
-//     es lo que deja activarla (ecf_cambiar_estado). No hace ninguna llamada
-//     que gaste cupo. Responde { ok: true, marcada } o, si MSeller no la acepta,
-//     { ok: false, error } con el motivo en español.
+//     no reutiliza ni renueva la sesión guardada), guarda la sesión, prueba la
+//     API key con una consulta de un e-NCF que no existe (gasta 1 del cupo) y,
+//     si el ambiente probado es el de la empresa, marca
+//     ecf_config.conexion_probada_at: es lo que deja activarla
+//     (ecf_cambiar_estado). Responde { ok: true, marcada } o, si MSeller no
+//     acepta la cuenta o la key, { ok: false, error } con el motivo en español.
 //
 // Las credenciales nunca vuelven al navegador: ninguna respuesta, mensaje de
 // error ni registro lleva la contraseña, la API key ni los tokens (lo que diga
