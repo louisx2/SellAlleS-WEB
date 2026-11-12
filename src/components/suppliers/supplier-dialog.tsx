@@ -15,8 +15,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Supplier } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSuppliers } from '@/context/supplier-provider';
+import { RncConDgii } from '@/components/dgii/rnc-con-dgii';
+import type { DatosRnc } from '@/lib/rnc';
 
 interface SupplierDialogProps {
   supplier?: Supplier;
@@ -28,13 +30,31 @@ export function SupplierDialog({ supplier, children }: SupplierDialogProps) {
   const { addSupplier, updateSupplier } = useSuppliers();
   const isEditMode = !!supplier;
   const [open, setOpen] = useState(false);
+  // El nombre se llena con la razón social que trae la DGII al escribir el RNC.
+  const [nombre, setNombre] = useState(supplier?.name ?? '');
+  const [rnc, setRnc] = useState(supplier?.rnc ?? '');
+  const [ofrecerNombre, setOfrecerNombre] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (!open) return;
+    setNombre(supplier?.name ?? '');
+    setRnc(supplier?.rnc ?? '');
+    setOfrecerNombre(undefined);
+  }, [open, supplier]);
+
+  const alEncontrarRnc = (datos: DatosRnc) => {
+    const razon = datos.razonSocial.trim();
+    if (!razon) return;
+    if (!nombre.trim()) setNombre(razon);
+    else if (nombre.trim().toLowerCase() !== razon.toLowerCase()) setOfrecerNombre(razon);
+  };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    
-    const name = (formData.get('name') as string)?.trim();
-    
+
+    const name = nombre.trim();
+
     if (!name) {
       toast({
         title: 'Campo requerido',
@@ -47,7 +67,7 @@ export function SupplierDialog({ supplier, children }: SupplierDialogProps) {
     const newSupplierData = {
       id: supplier?.id ?? '',
       name,
-      rnc: formData.get('rnc') as string,
+      rnc: rnc.trim(),
       contactPerson: formData.get('contactPerson') as string,
       phone: formData.get('phone') as string,
       email: formData.get('email') as string,
@@ -95,13 +115,27 @@ export function SupplierDialog({ supplier, children }: SupplierDialogProps) {
               <Label htmlFor="name" className="text-right">
                 Nombre
               </Label>
-              <Input id="name" name="name" defaultValue={supplier?.name} className="col-span-3" />
+              <Input id="name" name="name" value={nombre} onChange={(e) => setNombre(e.target.value)} className="col-span-3" />
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="rnc" className="text-right">
+            <div className="grid grid-cols-4 items-start gap-4">
+              <Label htmlFor="rnc" className="text-right pt-2.5">
                 RNC / Cédula
               </Label>
-              <Input id="rnc" name="rnc" defaultValue={supplier?.rnc} className="col-span-3" />
+              <RncConDgii
+                id="rnc"
+                value={rnc}
+                onChange={(v) => {
+                  setRnc(v);
+                  setOfrecerNombre(undefined);
+                }}
+                onDatos={alEncontrarRnc}
+                ofrecerNombre={ofrecerNombre}
+                onUsarNombre={(n) => {
+                  setNombre(n);
+                  setOfrecerNombre(undefined);
+                }}
+                className="col-span-3"
+              />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="contactPerson" className="text-right">
