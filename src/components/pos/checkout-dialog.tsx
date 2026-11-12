@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatLineQty } from '@/lib/line-format';
 import { useToast } from '@/hooks/use-toast';
-import type { Sale, FinancingDetails, NcfType } from '@/lib/types';
+import type { Sale, FinancingDetails, NcfType, Customer } from '@/lib/types';
 import { useProducts } from '@/context/product-provider';
 import { useSales } from '@/context/sales-provider';
 import { useCustomers } from '@/context/customer-provider';
@@ -36,6 +36,8 @@ import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { supabase } from '@/lib/supabase/client';
 import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
+import { RncDelComprador } from './rnc-del-comprador';
+import { reinicioAlCambiarCliente } from '@/lib/checkout-reinicio';
 import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
@@ -45,7 +47,7 @@ interface CheckoutDialogProps {
 }
 
 export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: CheckoutDialogProps) {
-  const { activeCart, total, subtotal, itbisAmount, itbisIncluded, totalDiscount, createSale, completeSale } = useCart();
+  const { activeCart, total, subtotal, itbisAmount, itbisIncluded, totalDiscount, createSale, completeSale, setSelectedCustomer } = useCart();
   const { reload: reloadProducts } = useProducts();
   const { addSale: addSaleToContext } = useSales();
   const { customers, reload: reloadCustomers } = useCustomers();
@@ -131,9 +133,31 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   // en un documento que no se puede armar. Con la serie B solo se advierte.
   const ecfSinRncCliente = ecfFaltaRncCliente(ecfActiva, ncfType, customerIdIsValid);
 
+  // "RNC del comprador": el cliente con ese documento pasa al carrito, marcado
+  // por su id. Cambiar el cliente reinicia el diálogo (el efecto de abajo); con
+  // la marca solo se actualiza el monto (reinicioAlCambiarCliente). Si el
+  // diálogo se cerró mientras se creaba el cliente, no se marca: la próxima
+  // apertura reinicia todo. `abierto` es un ref porque "Usar" llama a esta
+  // función después de esperar a la base, con el valor de cuando se tocó.
+  const marcaComprador = useRef<string | null>(null);
+  const abierto = useRef(isOpen);
+  abierto.current = isOpen;
+  const usarComprador = (cliente: Customer) => {
+    if (abierto.current) marcaComprador.current = cliente.id;
+    setSelectedCustomer(cliente);
+  };
+
 
   useEffect(() => {
-    if (isOpen) {
+    const reinicio = reinicioAlCambiarCliente(isOpen, marcaComprador.current, activeCart?.selectedCustomer?.id);
+    if (reinicio !== 'completo') marcaComprador.current = null;
+    if (reinicio === 'solo_monto') {
+      // Se conserva lo que el cajero ya eligió (pago, comprobante y tipo); el
+      // monto sigue al total, que cambia si el cliente tiene descuento.
+      setAmountPaid(total);
+      return;
+    }
+    if (reinicio === 'completo') {
       setPaymentMethod(cashBlocked ? 'card' : 'cash');
       setAmountPaid(total);
       setPaymentReference('');
@@ -144,7 +168,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       setNcfRequested(false);
       setNcfType(activeCart?.selectedCustomer?.ncfType ?? 'consumer');
     }
-  }, [isOpen, total, cashBlocked, activeCart?.selectedCustomer?.ncfType]);
+  }, [isOpen, total, cashBlocked, activeCart?.selectedCustomer?.ncfType, activeCart?.selectedCustomer?.id]);
 
   // El tipo por defecto es el del cliente, pero solo si hay secuencia para él;
   // si no, el primero que sí se pueda emitir.
@@ -602,12 +626,15 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                     </SelectContent>
                                 </Select>
                                 {ncfNeedsCustomerId && !customerIdIsValid && (
-                                    <p className="text-xs text-destructive">
-                                        Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.{' '}
-                                        {ecfActiva
-                                            ? 'Sin eso no se puede cobrar con comprobante electrónico: elige otro tipo o un cliente con RNC o cédula.'
-                                            : 'Sin eso el comprobante se emite, pero la venta no se podrá reportar en el 607.'}
-                                    </p>
+                                    <>
+                                        <p className="text-xs text-destructive">
+                                            Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.{' '}
+                                            {ecfActiva
+                                                ? 'Escríbelo abajo, o elige otro tipo.'
+                                                : 'Sin eso el comprobante se emite, pero la venta no se podrá reportar en el 607.'}
+                                        </p>
+                                        <RncDelComprador ncfType={ncfType} onClienteListo={usarComprador} />
+                                    </>
                                 )}
                             </div>
                         )}
