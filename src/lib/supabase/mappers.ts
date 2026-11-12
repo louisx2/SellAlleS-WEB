@@ -202,7 +202,16 @@ export const branchToRow = (b: Partial<Branch>) => ({
 export const rowToSupplier = (r: any): Supplier => ({
   id: r.id, name: r.name, contactPerson: r.contact_person ?? '', phone: r.phone ?? '',
   email: r.email ?? '', address: r.address ?? '', rnc: r.rnc ?? '',
+  tradeName: r.trade_name ?? '',
+  creditDays: r.credit_days ?? null,
+  expenseType606: r.expense_type_606 ?? '',
+  bankName: r.bank_name ?? '',
+  bankAccountType: r.bank_account_type === 'ahorro' || r.bank_account_type === 'corriente' ? r.bank_account_type : null,
+  bankAccountNumber: r.bank_account_number ?? '',
+  notes: r.notes ?? '',
 });
+// Texto vacío se guarda como null (las columnas nuevas tienen checks).
+const textoONull = (v: string | null | undefined) => (v && v.trim() ? v.trim() : null);
 export const supplierToRow = (s: Partial<Supplier>) => ({
   name: s.name,
   contact_person: s.contactPerson ?? null,
@@ -210,6 +219,13 @@ export const supplierToRow = (s: Partial<Supplier>) => ({
   email: s.email ?? null,
   address: s.address ?? null,
   rnc: s.rnc ?? null,
+  trade_name: textoONull(s.tradeName),
+  credit_days: s.creditDays ?? null,
+  expense_type_606: textoONull(s.expenseType606),
+  bank_name: textoONull(s.bankName),
+  bank_account_type: s.bankAccountType ?? null,
+  bank_account_number: textoONull(s.bankAccountNumber),
+  notes: textoONull(s.notes),
 });
 
 // ---------- Cuentas por Pagar (facturas de suplidores) ----------
