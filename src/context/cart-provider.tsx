@@ -8,6 +8,7 @@ import {
   baseQtyInCart, isSoldLoose, lineBaseQty, lineProduct, maxAddable, presentationLabel, toLinePresentation,
 } from '@/lib/presentations';
 import { buildQuickCartItem, quickUnitPrice, type QuickItemInput } from '@/lib/quick-sales';
+import { cuponAlCambiarCliente } from '@/lib/checkout-reinicio';
 import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
 import { create, useStore } from 'zustand';
@@ -343,8 +344,11 @@ const cartStore = create<CartStore>()(
       
       setSelectedCustomer: (customer) => set(state => ({
         carts: state.carts.map(cart =>
-          // Un cupón pertenece a un cliente específico: si cambia el cliente, se descarta.
-          cart.id === state.activeCartId ? { ...cart, selectedCustomer: customer, coupon: undefined } : cart
+          // Un cupón pertenece a un cliente específico: si cambia el cliente, se
+          // descarta; si es el mismo (se le acaba de guardar el RNC), se queda.
+          cart.id === state.activeCartId
+            ? { ...cart, selectedCustomer: customer, coupon: cuponAlCambiarCliente(cart.selectedCustomer?.id, customer.id, cart.coupon) }
+            : cart
         ),
       })),
 

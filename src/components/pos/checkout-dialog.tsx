@@ -14,7 +14,7 @@ import {
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
-import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
+import { formatCurrency, isUuid, ITBIS_RATE } from '@/lib/utils';
 import { formatLineQty } from '@/lib/line-format';
 import { useToast } from '@/hooks/use-toast';
 import type { Sale, FinancingDetails, NcfType, Customer } from '@/lib/types';
@@ -633,7 +633,14 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                                 ? 'Escríbelo abajo, o elige otro tipo.'
                                                 : 'Sin eso el comprobante se emite, pero la venta no se podrá reportar en el 607.'}
                                         </p>
-                                        <RncDelComprador ncfType={ncfType} onClienteListo={usarComprador} />
+                                        <RncDelComprador
+                                            ncfType={ncfType}
+                                            clienteCarrito={
+                                                // El consumidor final no es un cliente guardado: con él se crea uno.
+                                                isUuid(activeCart?.selectedCustomer?.id) ? activeCart?.selectedCustomer : undefined
+                                            }
+                                            onClienteListo={usarComprador}
+                                        />
                                     </>
                                 )}
                             </div>

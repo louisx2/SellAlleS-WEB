@@ -159,3 +159,42 @@ export function faltanDatosCliente(nombre: string, telefono: string, rnc: string
   if (!telefono.trim() && d.length !== 9 && d.length !== 11) return 'telefono';
   return null;
 }
+
+/**
+ * Qué hace "RNC del comprador" con el documento escrito:
+ *  - 'existente': ya es de un cliente; se pone ese en el carrito.
+ *  - 'elegir': el carrito tiene un cliente real sin RNC; el cajero elige entre
+ *    guardárselo a ese cliente (lo normal) o crear otro (la factura es para otra
+ *    persona o empresa).
+ *  - 'crear': no hay cliente en el carrito (consumidor final); se crea uno.
+ */
+export function destinoDelComprador(existente: unknown, clienteCarrito: unknown): 'existente' | 'elegir' | 'crear' {
+  if (existente) return 'existente';
+  if (clienteCarrito) return 'elegir';
+  return 'crear';
+}
+
+// Palabras que no dicen de quién es un nombre: tipos de sociedad y artículos.
+const PALABRAS_VACIAS = new Set(['srl', 'eirl', 'sas', 'sac', 'cxa', 'del', 'las', 'los', 'por']);
+
+function palabrasDeNombre(texto: string): string[] {
+  return (texto ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((p) => p.length >= 3 && !PALABRAS_VACIAS.has(p));
+}
+
+/**
+ * ¿El nombre del cliente y la razón social que trae la DGII comparten alguna
+ * palabra? Si no, se avisa antes de guardarle el RNC: puede ser un RNC mal
+ * escrito o la factura de otra empresa. Si uno de los dos no tiene palabras que
+ * comparar (vacío, iniciales), no se avisa.
+ */
+export function nombresParecidos(nombre: string, razonSocial: string): boolean {
+  const a = palabrasDeNombre(nombre);
+  const b = new Set(palabrasDeNombre(razonSocial));
+  if (a.length === 0 || b.size === 0) return true;
+  return a.some((p) => b.has(p));
+}

@@ -17,6 +17,8 @@ interface CustomerContextType {
   creditCustomers: Customer[];
   addCustomer: (customer: Omit<Customer, 'id'>, companyId?: string) => Promise<Customer | undefined>;
   updateCustomer: (customer: Customer) => Promise<void>;
+  /** Guarda solo el RNC de un cliente y devuelve el cliente como quedó en la base. */
+  setCustomerRnc: (id: string, rnc: string) => Promise<Customer>;
   getGenericCustomer: () => Customer;
   /** Recarga desde la base; el credit_balance lo escribe solo el servidor. */
   reload: () => Promise<void>;
@@ -97,10 +99,27 @@ export function CustomerProvider({ children }: { children: ReactNode }) {
     setAll((prev) => prev.map((c) => (c.id === updated.id ? { ...updated, branchId: c.branchId } : c)));
   };
 
+  // Solo la columna rnc: el cliente que trae el carrito puede ser una copia vieja,
+  // y guardarlo entero pisaría lo que otro le cambió mientras tanto.
+  const setCustomerRnc = async (id: string, rnc: string) => {
+    const { data, error } = await supabase
+      .from('customers')
+      .update({ rnc })
+      .eq('id', id)
+      .select('*, profiles:created_by(name)')
+      .maybeSingle();
+    if (error) throw error;
+    // Sin fila no hay error de la base: no dejó tocarlo, o ya no existe.
+    if (!data) throw new Error('No se pudo guardar el RNC en ese cliente.');
+    const guardado = rowToCustomer(data);
+    setAll((prev) => prev.map((c) => (c.id === id ? guardado : c)));
+    return guardado;
+  };
+
   const getGenericCustomer = (): Customer => GENERIC_CUSTOMER;
 
   return (
-    <CustomerContext.Provider value={{ customers, creditCustomers, addCustomer, updateCustomer, getGenericCustomer, reload: load, loading }}>
+    <CustomerContext.Provider value={{ customers, creditCustomers, addCustomer, updateCustomer, setCustomerRnc, getGenericCustomer, reload: load, loading }}>
       {children}
     </CustomerContext.Provider>
   );
