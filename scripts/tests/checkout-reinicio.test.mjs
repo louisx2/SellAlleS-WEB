@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { reinicioAlCambiarCliente } from '../../src/lib/checkout-reinicio.ts';
+import { reinicioAlCambiarCliente, cuponAlCambiarCliente } from '../../src/lib/checkout-reinicio.ts';
 
 test('cerrado no reinicia nada (y la marca se descarta)', () => {
   assert.equal(reinicioAlCambiarCliente(false, 'c1', 'c1'), 'ninguno');
@@ -20,4 +20,14 @@ test('al abrir, o con otro cliente que no puso "Usar", reinicia todo como siempr
   assert.equal(reinicioAlCambiarCliente(true, null, 'c1'), 'completo');
   assert.equal(reinicioAlCambiarCliente(true, 'c1', 'c2'), 'completo');
   assert.equal(reinicioAlCambiarCliente(true, 'c1', undefined), 'completo');
+});
+
+test('cuponAlCambiarCliente: el mismo cliente (se le acaba de guardar el RNC) conserva el cupón', () => {
+  const cupon = { code: 'JUAN10' };
+  assert.equal(cuponAlCambiarCliente('juan', 'juan', cupon), cupon);
+});
+
+test('cuponAlCambiarCliente: otro cliente pierde el cupón', () => {
+  assert.equal(cuponAlCambiarCliente('juan', 'pedro', { code: 'JUAN10' }), undefined);
+  assert.equal(cuponAlCambiarCliente(undefined, 'pedro', { code: 'JUAN10' }), undefined);
 });

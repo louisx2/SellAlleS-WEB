@@ -17,3 +17,12 @@ export function reinicioAlCambiarCliente(
   if (marca && marca === clienteId) return 'solo_monto';
   return 'completo';
 }
+
+/**
+ * El cupón del carrito al poner un cliente. Un cupón es de un cliente: si cambia
+ * el cliente se descarta. Si es el mismo (por ejemplo, "RNC del comprador" le
+ * acaba de guardar el RNC y lo vuelve a poner), se conserva.
+ */
+export function cuponAlCambiarCliente<T>(idAnterior: string | undefined, idNuevo: string, cupon: T | undefined): T | undefined {
+  return idAnterior === idNuevo ? cupon : undefined;
+}

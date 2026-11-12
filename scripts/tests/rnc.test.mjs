@@ -17,6 +17,8 @@ import {
   accionDeCampo,
   esDocumentoExtranjero,
   faltanDatosCliente,
+  destinoDelComprador,
+  nombresParecidos,
 } from '../../src/lib/rnc.ts';
 import { documentoValido as documentoValidoServidor } from '../../supabase/functions/_shared/dgii/rnc.ts';
 
@@ -157,4 +159,36 @@ test('faltanDatosCliente: el teléfono solo es obligatorio si no hay RNC o cédu
   assert.equal(faltanDatosCliente('IT SOLUCLICK SRL', '', '130-86234-6'), null);
   assert.equal(faltanDatosCliente('Juan', '', '402-1234567-8'), null);
   assert.equal(faltanDatosCliente('Juan', '809-555-1234', ''), null);
+});
+
+test('destinoDelComprador: con el documento de un cliente que ya existe, se usa ese', () => {
+  assert.equal(destinoDelComprador({ id: 'a' }, { id: 'juan' }), 'existente');
+  assert.equal(destinoDelComprador({ id: 'a' }, undefined), 'existente');
+});
+
+test('destinoDelComprador: con un cliente real sin RNC en el carrito, el cajero elige', () => {
+  assert.equal(destinoDelComprador(undefined, { id: 'juan' }), 'elegir');
+});
+
+test('destinoDelComprador: sin cliente en el carrito (consumidor final), se crea', () => {
+  assert.equal(destinoDelComprador(undefined, undefined), 'crear');
+});
+
+test('nombresParecidos: comparte una palabra, sin tildes ni mayúsculas', () => {
+  assert.equal(nombresParecidos('Juan Pérez', 'JUAN ANTONIO PEREZ GOMEZ'), true);
+  assert.equal(nombresParecidos('Pujols Group EIRL', 'D ELIAS & PUJOLS TIENDA DE COMUNICACIONES EIRL'), true);
+});
+
+test('nombresParecidos: nada en común avisa', () => {
+  assert.equal(nombresParecidos('Juan Pérez', 'FERRETERIA XYZ SRL'), false);
+});
+
+test('nombresParecidos: SRL, EIRL, "del" y palabras cortas no cuentan como parecido', () => {
+  assert.equal(nombresParecidos('Inversiones del Este SRL', 'CONSTRUCTORA DEL NORTE SRL'), false);
+});
+
+test('nombresParecidos: sin palabras que comparar no avisa', () => {
+  assert.equal(nombresParecidos('JP', 'FERRETERIA XYZ SRL'), true);
+  assert.equal(nombresParecidos('', 'FERRETERIA XYZ SRL'), true);
+  assert.equal(nombresParecidos('Juan Pérez', ''), true);
 });
