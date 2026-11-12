@@ -145,3 +145,10 @@ test('si la base falla al leer o al guardar, la consulta sigue y el error va al 
   assert.deepEqual(reg.consultas, ['130862346']);
   assert.equal(reg.registro.length, 2);
 });
+
+test('si la DGII devuelve la ficha de otro documento, no se guarda y cuenta como que no respondió', async () => {
+  const { deps, reg } = armar({ dgii: { encontrado: true, datos: { ...DATOS, rnc: '132893662' } } });
+  assert.deepEqual(await consultarRnc('130862346', deps), { ok: false, motivo: 'dgii_no_responde' });
+  assert.deepEqual(reg.guardadas, []);
+  assert.equal(reg.registro.length, 1);
+});

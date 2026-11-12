@@ -123,7 +123,7 @@ test('leerRespuesta: el error de la DGII o una página que no se reconoce lanzan
 function fetchFalso(...respuestas) {
   const llamadas = [];
   const f = async (url, init = {}) => {
-    llamadas.push({ url: String(url), metodo: init.method ?? 'GET', headers: new Headers(init.headers), cuerpo: init.body });
+    llamadas.push({ url: String(url), metodo: init.method ?? 'GET', headers: new Headers(init.headers), cuerpo: init.body, signal: init.signal });
     const r = respuestas.shift();
     if (r instanceof Error) throw r;
     return r;
@@ -161,4 +161,28 @@ test('consultarDgii: sin red o con un 500 lanza ErrorDgii', async () => {
     () => consultarDgii('130862346', fetchFalso(respuesta(FORMULARIO), respuesta('caído', 503))),
     ErrorDgii,
   );
+});
+
+// ---------------------------------------------------------------------------
+// Menores de la revisión final
+// ---------------------------------------------------------------------------
+
+test('leerRespuesta: una entidad numérica fuera de rango no rompe la lectura', () => {
+  const rara = ENCONTRADO.replace('<td>IT SOLUCLICK SRL</td>', '<td>IT &#99999999; SRL</td>');
+  const r = leerRespuesta(rara);
+  assert.equal(r.encontrado, true);
+  assert.equal(r.datos.razonSocial, 'IT &#99999999; SRL');
+});
+
+test('consultarDgii: si el cuerpo falla al leerse (por ejemplo, el plazo vence a mitad), lanza ErrorDgii', async () => {
+  const cuerpoQueFalla = { ok: true, status: 200, headers: new Headers(), text: async () => { throw new Error('The operation timed out'); } };
+  await assert.rejects(() => consultarDgii('130862346', fetchFalso(cuerpoQueFalla)), ErrorDgii);
+  await assert.rejects(() => consultarDgii('130862346', fetchFalso(respuesta(FORMULARIO), cuerpoQueFalla)), ErrorDgii);
+});
+
+test('consultarDgii: las dos llamadas comparten un solo plazo (10 segundos en total, no 10 por llamada)', async () => {
+  const f = fetchFalso(respuesta(FORMULARIO), respuesta(ENCONTRADO));
+  await consultarDgii('130862346', f);
+  assert.ok(f.llamadas[0].signal, 'la primera llamada lleva plazo');
+  assert.equal(f.llamadas[0].signal, f.llamadas[1].signal);
 });

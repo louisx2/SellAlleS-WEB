@@ -65,6 +65,11 @@ export async function consultarRnc(texto: string, deps: DepsConsulta): Promise<R
   let lectura: LecturaDgii;
   try {
     lectura = await deps.consultarDgii(rnc);
+    // La ficha tiene que ser del documento pedido: otra cosa es un enredo de la
+    // DGII (o de su sesión) y no se le puede dar al usuario ni guardar.
+    if (lectura.encontrado && lectura.datos.rnc !== rnc) {
+      throw new Error(`la DGII devolvió el documento ${lectura.datos.rnc} al pedir ${rnc}`);
+    }
   } catch (e) {
     deps.registrar(`dgii-rnc: la DGII no respondió: ${mensajeDe(e)}`);
     if (memoria && memoria.encontrado && memoria.datos) {

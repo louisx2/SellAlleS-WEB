@@ -22,7 +22,7 @@ import { useCustomers } from '@/context/customer-provider';
 import { useAuth } from '@/context/auth-provider';
 import { formatPhone } from '@/lib/format';
 import type { NcfType } from '@/lib/types';
-import { cascadaCliente, type DatosRnc } from '@/lib/rnc';
+import { cascadaCliente, digitosDeDocumento, faltanDatosCliente, type DatosRnc } from '@/lib/rnc';
 import { RncConDgii } from '@/components/dgii/rnc-con-dgii';
 
 interface CustomerDialogProps {
@@ -48,6 +48,8 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
   // El último nombre que puso la DGII: si el usuario corrige el RNC y el nombre
   // sigue siendo ese, se reemplaza por el del RNC nuevo (cascadaNombre).
   const nombreAutomatico = useRef<string | undefined>(undefined);
+  // Con RNC o cédula completos el teléfono deja de ser obligatorio (faltanDatosCliente).
+  const tieneDocumento = [9, 11].includes(digitosDeDocumento(rnc).length);
 
   useEffect(() => {
     if (!open) return;
@@ -82,10 +84,15 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
     const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
 
-    if (!trimmedName || !trimmedPhone) {
+    // El teléfono solo hace falta si no hay RNC o cédula: un cliente creado desde
+    // el carrito con su RNC no tiene teléfono, y editarlo no debe trabarse.
+    const falta = faltanDatosCliente(trimmedName, trimmedPhone, rnc);
+    if (falta) {
       toast({
         title: 'Campos requeridos vacíos',
-        description: 'El Nombre y el Teléfono son obligatorios.',
+        description: falta === 'nombre'
+          ? 'El nombre es obligatorio.'
+          : 'Escribe el teléfono, o el RNC o la cédula del cliente.',
         variant: 'destructive',
       });
       return;
@@ -194,7 +201,7 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
             </div>
             <div className="grid grid-cols-4 items-center gap-4">
               <Label htmlFor="phone" className="text-right">
-                Teléfono <span className="text-destructive">*</span>
+                Teléfono {!tieneDocumento && <span className="text-destructive">*</span>}
               </Label>
               <Input
                 id="phone"
@@ -203,7 +210,7 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
                 onChange={(e) => setPhone(formatPhone(e.target.value))}
                 placeholder="809-000-0000"
                 className="col-span-3"
-                required
+                required={!tieneDocumento}
               />
             </div>
             <div className="grid grid-cols-4 items-center gap-4">

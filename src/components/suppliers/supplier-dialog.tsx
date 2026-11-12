@@ -134,6 +134,7 @@ export function SupplierDialog({ supplier, children }: SupplierDialogProps) {
                   setOfrecerNombre(undefined);
                 }}
                 onDatos={alEncontrarRnc}
+                libre
                 ofrecerNombre={ofrecerNombre}
                 onUsarNombre={(n) => {
                   setNombre(n);

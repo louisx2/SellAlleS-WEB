@@ -6,7 +6,14 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { formatCedulaOrRnc } from '@/lib/format';
 import { consultarRncDgii } from '@/lib/dgii-client';
-import { digitosDeDocumento, documentoValido, respuestaAplicable, type DatosRnc, type RespuestaRnc } from '@/lib/rnc';
+import {
+  accionDeCampo,
+  digitosDeDocumento,
+  esDocumentoExtranjero,
+  respuestaAplicable,
+  type DatosRnc,
+  type RespuestaRnc,
+} from '@/lib/rnc';
 import { cn } from '@/lib/utils';
 
 // Campo de RNC o cédula que consulta la DGII cuando el documento está completo
@@ -36,6 +43,8 @@ interface RncConDgiiProps {
   autoFocus?: boolean;
   placeholder?: string;
   className?: string;
+  /** Acepta identificadores del exterior (con letras o más de 11 dígitos) sin darles formato. */
+  libre?: boolean;
 }
 
 /** "SUSPENDIDO" -> "Suspendido", "DADO DE BAJA" -> "Dado de baja". */
@@ -60,6 +69,7 @@ export function RncConDgii({
   autoFocus,
   placeholder = '000-0000000-0',
   className,
+  libre = false,
 }: RncConDgiiProps) {
   const [estado, setEstado] = useState<Estado>({ tipo: 'nada' });
   // El último documento que se mandó a consultar: no se repite mientras el campo
@@ -79,20 +89,21 @@ export function RncConDgii({
     };
   }, []);
 
+  // Sube con "Reintentar" para volver a consultar el mismo documento.
+  const [intento, setIntento] = useState(0);
+
   useEffect(() => {
     const digitos = digitosDeDocumento(value);
-    if (digitos.length !== 9 && digitos.length !== 11) {
+    const accion = accionDeCampo(digitos, consultado.current);
+    if (accion === 'mantener') return;
+    if (accion !== 'consultar') {
       consultado.current = '';
-      setEstado({ tipo: 'nada' });
+      setEstado({ tipo: accion === 'invalido' ? 'invalido' : 'nada' });
       return;
     }
-    if (!documentoValido(digitos)) {
-      consultado.current = '';
-      setEstado({ tipo: 'invalido' });
-      return;
-    }
-    if (consultado.current === digitos) return;
 
+    // Lo que decía la línea era de otro documento: se borra ya, sin esperar.
+    setEstado({ tipo: 'nada' });
     const espera = setTimeout(() => {
       consultado.current = digitos;
       setEstado({ tipo: 'buscando' });
@@ -104,7 +115,12 @@ export function RncConDgii({
       });
     }, ESPERA_MS);
     return () => clearTimeout(espera);
-  }, [value]);
+  }, [value, intento]);
+
+  const reintentar = () => {
+    consultado.current = '';
+    setIntento((n) => n + 1);
+  };
 
   return (
     <div className={cn('space-y-1.5', className)}>
@@ -112,14 +128,18 @@ export function RncConDgii({
         id={id}
         name={id}
         value={value}
-        onChange={(e) => onChange(formatCedulaOrRnc(e.target.value))}
+        onChange={(e) => {
+          const v = e.target.value;
+          // Un suplidor del exterior puede tener un identificador con letras: va tal cual.
+          onChange(libre && esDocumentoExtranjero(v) ? v : formatCedulaOrRnc(v));
+        }}
         placeholder={placeholder}
-        inputMode="numeric"
+        inputMode={libre ? 'text' : 'numeric'}
         autoComplete="off"
         disabled={disabled}
         autoFocus={autoFocus}
       />
-      <LineaDeEstado estado={estado} />
+      <LineaDeEstado estado={estado} onReintentar={reintentar} />
       {ofrecerNombre && onUsarNombre && (
         <Button type="button" size="sm" variant="outline" onClick={() => onUsarNombre(ofrecerNombre)}>
           Usar este nombre
@@ -129,7 +149,7 @@ export function RncConDgii({
   );
 }
 
-function LineaDeEstado({ estado }: { estado: Estado }) {
+function LineaDeEstado({ estado, onReintentar }: { estado: Estado; onReintentar: () => void }) {
   if (estado.tipo === 'nada') return null;
 
   if (estado.tipo === 'buscando') {
@@ -146,7 +166,12 @@ function LineaDeEstado({ estado }: { estado: Estado }) {
     return r.motivo === 'documento_invalido' ? (
       <p className="text-xs text-amber-600 dark:text-amber-400">El RNC no es válido (dígito verificador)</p>
     ) : (
-      <p className="text-xs text-muted-foreground">No se pudo consultar la DGII ahora</p>
+      <p className="text-xs text-muted-foreground">
+        No se pudo consultar la DGII ahora.{' '}
+        <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={onReintentar}>
+          Reintentar
+        </button>
+      </p>
     );
   }
 

@@ -125,11 +125,16 @@ export function cuerpoDeConsulta(digitos: string, campos: CamposFormulario): URL
 
 const ENTIDADES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
+/** El carácter de una entidad numérica; si no es un código válido, la entidad queda tal cual. */
+function caracter(codigo: number, original: string): string {
+  return Number.isInteger(codigo) && codigo > 0 && codigo <= 0x10ffff ? String.fromCodePoint(codigo) : original;
+}
+
 function decodificar(texto: string): string {
   return texto
     .replace(/<[^>]*>/g, ' ')
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (m, n) => caracter(Number(n), m))
+    .replace(/&#x([0-9a-f]+);/gi, (m, h) => caracter(parseInt(h, 16), m))
     .replace(/&([a-z]+);/gi, (m, nombre) => ENTIDADES[nombre.toLowerCase()] ?? m)
     .replace(/\s+/g, ' ')
     .trim();
@@ -207,20 +212,32 @@ function cookiesDe(r: Response): string {
     .join('; ');
 }
 
-async function pedir(f: typeof fetch, init: RequestInit): Promise<{ r: Response; texto: string }> {
+const sinRespuesta = (e: unknown) =>
+  new ErrorDgii(`Sin respuesta de la DGII (${e instanceof Error ? e.message : String(e)}).`);
+
+/** Un pedido a la página de consulta. Cualquier fallo, también al leer el cuerpo, sale como ErrorDgii. */
+async function pedir(f: typeof fetch, init: RequestInit, plazo: AbortSignal): Promise<{ r: Response; texto: string }> {
   let r: Response;
   try {
-    r = await f(URL_CONSULTA_RNC, { ...init, signal: AbortSignal.timeout(PLAZO_MS) });
+    r = await f(URL_CONSULTA_RNC, { ...init, signal: plazo });
   } catch (e) {
-    throw new ErrorDgii(`Sin respuesta de la DGII (${e instanceof Error ? e.message : String(e)}).`);
+    throw sinRespuesta(e);
   }
   if (!r.ok) throw new ErrorDgii(`La DGII respondió ${r.status}.`);
-  return { r, texto: await r.text() };
+  try {
+    return { r, texto: await r.text() };
+  } catch (e) {
+    throw sinRespuesta(e);
+  }
 }
 
-/** Consulta el documento (solo dígitos) en la DGII. Lanza ErrorDgii si no responde o no se reconoce. */
+/**
+ * Consulta el documento (solo dígitos) en la DGII. Lanza ErrorDgii si no responde
+ * o no se reconoce. Las dos llamadas comparten un solo plazo de 10 segundos.
+ */
 export async function consultarDgii(digitos: string, f: typeof fetch): Promise<LecturaDgii> {
-  const formulario = await pedir(f, { method: 'GET', headers: { 'User-Agent': AGENTE } });
+  const plazo = AbortSignal.timeout(PLAZO_MS);
+  const formulario = await pedir(f, { method: 'GET', headers: { 'User-Agent': AGENTE } }, plazo);
   const campos = camposDelFormulario(formulario.texto);
   const cookie = cookiesDe(formulario.r);
 
@@ -233,10 +250,10 @@ export async function consultarDgii(digitos: string, f: typeof fetch): Promise<L
   };
   if (cookie) encabezados.Cookie = cookie;
 
-  const respuesta = await pedir(f, {
-    method: 'POST',
-    headers: encabezados,
-    body: cuerpoDeConsulta(digitos, campos).toString(),
-  });
+  const respuesta = await pedir(
+    f,
+    { method: 'POST', headers: encabezados, body: cuerpoDeConsulta(digitos, campos).toString() },
+    plazo,
+  );
   return leerRespuesta(respuesta.texto);
 }

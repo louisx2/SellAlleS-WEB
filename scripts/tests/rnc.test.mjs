@@ -14,6 +14,9 @@ import {
   buscarClientePorDocumento,
   respuestaVigente,
   respuestaAplicable,
+  accionDeCampo,
+  esDocumentoExtranjero,
+  faltanDatosCliente,
 } from '../../src/lib/rnc.ts';
 import { documentoValido as documentoValidoServidor } from '../../supabase/functions/_shared/dgii/rnc.ts';
 
@@ -119,4 +122,39 @@ test('respuestaAplicable: con el campo desmontado (diálogo cerrado) la respuest
   assert.equal(respuestaAplicable(false, '130862346', '130862346'), false);
   assert.equal(respuestaAplicable(true, '130862346', '130-86234-6'), true);
   assert.equal(respuestaAplicable(true, '130862346', '132893662'), false);
+});
+
+// ---------------------------------------------------------------------------
+// Menores de la revisión final
+// ---------------------------------------------------------------------------
+
+test('accionDeCampo: qué hace el campo con cada valor', () => {
+  // Incompleto o vacío: se limpia la línea de estado (no queda el resultado anterior).
+  assert.equal(accionDeCampo('', ''), 'limpiar');
+  assert.equal(accionDeCampo('13086234', '130862346'), 'limpiar');
+  // Completo pero con el verificador malo.
+  assert.equal(accionDeCampo('130862347', ''), 'invalido');
+  // El mismo documento que ya se consultó: se deja como está.
+  assert.equal(accionDeCampo('130862346', '130862346'), 'mantener');
+  // Otro documento completo: se consulta (y la línea vieja se limpia ya, sin esperar).
+  assert.equal(accionDeCampo('132893662', '130862346'), 'consultar');
+  assert.equal(accionDeCampo('130862346', ''), 'consultar');
+});
+
+test('esDocumentoExtranjero: con letras o más de 11 dígitos no se le da formato de RNC', () => {
+  assert.equal(esDocumentoExtranjero('EIN 12-3456789'), true);
+  assert.equal(esDocumentoExtranjero('91350100MA2XYZ'), true);
+  assert.equal(esDocumentoExtranjero('123456789012'), true);
+  assert.equal(esDocumentoExtranjero('130-86234-6'), false);
+  assert.equal(esDocumentoExtranjero('402-1234567-8'), false);
+  assert.equal(esDocumentoExtranjero(''), false);
+});
+
+test('faltanDatosCliente: el teléfono solo es obligatorio si no hay RNC o cédula', () => {
+  assert.equal(faltanDatosCliente('', '809-555-1234', ''), 'nombre');
+  assert.equal(faltanDatosCliente('Juan', '', ''), 'telefono');
+  assert.equal(faltanDatosCliente('Juan', '', '1234'), 'telefono', 'un documento incompleto no cuenta');
+  assert.equal(faltanDatosCliente('IT SOLUCLICK SRL', '', '130-86234-6'), null);
+  assert.equal(faltanDatosCliente('Juan', '', '402-1234567-8'), null);
+  assert.equal(faltanDatosCliente('Juan', '809-555-1234', ''), null);
 });

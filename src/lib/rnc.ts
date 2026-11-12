@@ -123,3 +123,39 @@ export function respuestaVigente(pedido: string, actual: string): boolean {
 export function respuestaAplicable(montado: boolean, pedido: string, actual: string): boolean {
   return montado && respuestaVigente(pedido, actual);
 }
+
+/**
+ * Qué hace el campo de RNC con lo que tiene escrito (en dígitos), sabiendo cuál
+ * fue el último documento que consultó:
+ *  - 'limpiar': incompleto o vacío; la línea de estado se borra al instante, para
+ *    que no quede debajo el resultado de otro documento.
+ *  - 'invalido': completo, pero no pasa el dígito verificador.
+ *  - 'mantener': es el que ya se consultó; se deja lo que dice.
+ *  - 'consultar': un documento nuevo completo y válido.
+ */
+export function accionDeCampo(digitos: string, consultado: string): 'limpiar' | 'invalido' | 'mantener' | 'consultar' {
+  if (digitos.length !== 9 && digitos.length !== 11) return 'limpiar';
+  if (!documentoValido(digitos)) return 'invalido';
+  if (digitos === consultado) return 'mantener';
+  return 'consultar';
+}
+
+/**
+ * ¿Es un identificador que no es dominicano (un suplidor del exterior)? Con letras
+ * o con más de 11 dígitos no se le aplica el formato de RNC: se guarda tal cual.
+ */
+export function esDocumentoExtranjero(texto: string): boolean {
+  return /[a-z]/i.test(texto ?? '') || digitosDeDocumento(texto).length > 11;
+}
+
+/**
+ * Lo que le falta a un cliente para guardarse, o null. El nombre siempre; el
+ * teléfono, solo si no tiene RNC o cédula completos (al que se crea desde el
+ * carrito con su RNC no se le pide teléfono, y editarlo después no debe trabarse).
+ */
+export function faltanDatosCliente(nombre: string, telefono: string, rnc: string): 'nombre' | 'telefono' | null {
+  if (!nombre.trim()) return 'nombre';
+  const d = digitosDeDocumento(rnc);
+  if (!telefono.trim() && d.length !== 9 && d.length !== 11) return 'telefono';
+  return null;
+}
