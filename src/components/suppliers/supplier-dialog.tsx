@@ -15,10 +15,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Supplier } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSuppliers } from '@/context/supplier-provider';
 import { RncConDgii } from '@/components/dgii/rnc-con-dgii';
-import type { DatosRnc } from '@/lib/rnc';
+import { cascadaNombre, type DatosRnc } from '@/lib/rnc';
 
 interface SupplierDialogProps {
   supplier?: Supplier;
@@ -34,19 +34,24 @@ export function SupplierDialog({ supplier, children }: SupplierDialogProps) {
   const [nombre, setNombre] = useState(supplier?.name ?? '');
   const [rnc, setRnc] = useState(supplier?.rnc ?? '');
   const [ofrecerNombre, setOfrecerNombre] = useState<string | undefined>();
+  // El último nombre que puso la DGII (ver cascadaNombre).
+  const nombreAutomatico = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!open) return;
     setNombre(supplier?.name ?? '');
     setRnc(supplier?.rnc ?? '');
     setOfrecerNombre(undefined);
+    nombreAutomatico.current = undefined;
   }, [open, supplier]);
 
   const alEncontrarRnc = (datos: DatosRnc) => {
-    const razon = datos.razonSocial.trim();
-    if (!razon) return;
-    if (!nombre.trim()) setNombre(razon);
-    else if (nombre.trim().toLowerCase() !== razon.toLowerCase()) setOfrecerNombre(razon);
+    const c = cascadaNombre(datos.razonSocial, nombre, nombreAutomatico.current);
+    if (c.nombre) {
+      setNombre(c.nombre);
+      nombreAutomatico.current = c.nombre;
+    }
+    setOfrecerNombre(c.ofrecerNombre);
   };
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -132,6 +137,7 @@ export function SupplierDialog({ supplier, children }: SupplierDialogProps) {
                 ofrecerNombre={ofrecerNombre}
                 onUsarNombre={(n) => {
                   setNombre(n);
+                  nombreAutomatico.current = n;
                   setOfrecerNombre(undefined);
                 }}
                 className="col-span-3"

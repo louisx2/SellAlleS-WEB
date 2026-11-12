@@ -37,6 +37,7 @@ import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { supabase } from '@/lib/supabase/client';
 import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
 import { RncDelComprador } from './rnc-del-comprador';
+import { reinicioAlCambiarCliente } from '@/lib/checkout-reinicio';
 import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
@@ -132,25 +133,31 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   // en un documento que no se puede armar. Con la serie B solo se advierte.
   const ecfSinRncCliente = ecfFaltaRncCliente(ecfActiva, ncfType, customerIdIsValid);
 
-  // "RNC del comprador": el cliente con ese documento pasa al carrito. Cambiar el
-  // cliente reinicia el diálogo (el efecto de abajo depende de su tipo de NCF);
-  // esta vez no, para no perder lo ya elegido. Solo se marca si el tipo cambia,
-  // porque si no el efecto no corre y la marca quedaría puesta.
-  const conservarAlCambiarCliente = useRef(false);
+  // "RNC del comprador": el cliente con ese documento pasa al carrito, marcado
+  // por su id. Cambiar el cliente reinicia el diálogo (el efecto de abajo); con
+  // la marca solo se actualiza el monto (reinicioAlCambiarCliente). Si el
+  // diálogo se cerró mientras se creaba el cliente, no se marca: la próxima
+  // apertura reinicia todo. `abierto` es un ref porque "Usar" llama a esta
+  // función después de esperar a la base, con el valor de cuando se tocó.
+  const marcaComprador = useRef<string | null>(null);
+  const abierto = useRef(isOpen);
+  abierto.current = isOpen;
   const usarComprador = (cliente: Customer) => {
-    if (cliente.ncfType !== activeCart?.selectedCustomer?.ncfType) conservarAlCambiarCliente.current = true;
+    if (abierto.current) marcaComprador.current = cliente.id;
     setSelectedCustomer(cliente);
   };
 
 
   useEffect(() => {
-    if (isOpen) {
-      // El cliente lo acaba de poner "RNC del comprador": no se borra lo que el
-      // cajero ya eligió (pago, comprobante y tipo).
-      if (conservarAlCambiarCliente.current) {
-        conservarAlCambiarCliente.current = false;
-        return;
-      }
+    const reinicio = reinicioAlCambiarCliente(isOpen, marcaComprador.current, activeCart?.selectedCustomer?.id);
+    if (reinicio !== 'completo') marcaComprador.current = null;
+    if (reinicio === 'solo_monto') {
+      // Se conserva lo que el cajero ya eligió (pago, comprobante y tipo); el
+      // monto sigue al total, que cambia si el cliente tiene descuento.
+      setAmountPaid(total);
+      return;
+    }
+    if (reinicio === 'completo') {
       setPaymentMethod(cashBlocked ? 'card' : 'cash');
       setAmountPaid(total);
       setPaymentReference('');
@@ -161,7 +168,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       setNcfRequested(false);
       setNcfType(activeCart?.selectedCustomer?.ncfType ?? 'consumer');
     }
-  }, [isOpen, total, cashBlocked, activeCart?.selectedCustomer?.ncfType]);
+  }, [isOpen, total, cashBlocked, activeCart?.selectedCustomer?.ncfType, activeCart?.selectedCustomer?.id]);
 
   // El tipo por defecto es el del cliente, pero solo si hay secuencia para él;
   // si no, el primero que sí se pueda emitir.

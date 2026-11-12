@@ -62,22 +62,43 @@ export function documentoValido(digitos: string): boolean {
 const mismoNombre = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /**
- * Qué llenar en el formulario de cliente con lo que trajo la DGII. El nombre se
- * llena solo si está vacío; si ya hay uno distinto, se ofrece. El tipo de
- * comprobante pasa a crédito fiscal solo con un RNC (no una cédula) activo y si
- * estaba en consumidor final: otro tipo lo eligió alguien a propósito.
+ * Qué hacer con el campo de nombre cuando la DGII trae una razón social. Se llena
+ * si está vacío, o si lo que tiene lo puso la DGII con un RNC anterior
+ * (`nombreAutomatico`): al corregir el RNC no puede quedar el nombre de otra
+ * empresa. Si lo escribió el usuario, solo se ofrece.
+ */
+export function cascadaNombre(
+  razonSocial: string,
+  nombre: string,
+  nombreAutomatico: string | undefined,
+): { nombre?: string; ofrecerNombre?: string } {
+  const razon = razonSocial.trim();
+  if (!razon) return {};
+  const llenadoSolo = !nombre.trim() || (!!nombreAutomatico && mismoNombre(nombre, nombreAutomatico));
+  if (mismoNombre(nombre, razon)) return {};
+  return llenadoSolo ? { nombre: razon } : { ofrecerNombre: razon };
+}
+
+/**
+ * Qué llenar en el formulario de cliente con lo que trajo la DGII: el nombre con
+ * la regla de `cascadaNombre`, y el tipo de comprobante a crédito fiscal solo con
+ * un RNC (no una cédula) activo que estaba en consumidor final (otro tipo lo
+ * eligió alguien a propósito). Si el RNC es el que el cliente ya tenía guardado
+ * (se abrió "Editar cliente"), el tipo no se toca: nadie escribió nada.
  */
 export function cascadaCliente(
   datos: DatosRnc,
-  actual: { nombre: string; ncfType: NcfType },
+  actual: { nombre: string; ncfType: NcfType; nombreAutomatico?: string; rncGuardado?: string },
 ): { nombre?: string; ofrecerNombre?: string; ncfType?: NcfType } {
-  const r: { nombre?: string; ofrecerNombre?: string; ncfType?: NcfType } = {};
-  const razon = datos.razonSocial.trim();
-  if (razon) {
-    if (!actual.nombre.trim()) r.nombre = razon;
-    else if (!mismoNombre(actual.nombre, razon)) r.ofrecerNombre = razon;
+  const r: { nombre?: string; ofrecerNombre?: string; ncfType?: NcfType } = cascadaNombre(
+    datos.razonSocial,
+    actual.nombre,
+    actual.nombreAutomatico,
+  );
+  const yaGuardado = !!actual.rncGuardado && digitosDeDocumento(actual.rncGuardado) === datos.rnc;
+  if (!yaGuardado && datos.rnc.length === 9 && datos.estado === 'ACTIVO' && actual.ncfType === 'consumer') {
+    r.ncfType = 'fiscal';
   }
-  if (datos.rnc.length === 9 && datos.estado === 'ACTIVO' && actual.ncfType === 'consumer') r.ncfType = 'fiscal';
   return r;
 }
 
@@ -92,4 +113,13 @@ export function buscarClientePorDocumento<T extends { rnc?: string | null }>(cli
 export function respuestaVigente(pedido: string, actual: string): boolean {
   const p = digitosDeDocumento(pedido);
   return p !== '' && p === digitosDeDocumento(actual);
+}
+
+/**
+ * ¿Se aplica una respuesta de la DGII que acaba de llegar? Solo si el campo
+ * sigue en pantalla (si el diálogo se cerró, no puede llenar el que se abra
+ * después) y todavía tiene el documento consultado.
+ */
+export function respuestaAplicable(montado: boolean, pedido: string, actual: string): boolean {
+  return montado && respuestaVigente(pedido, actual);
 }

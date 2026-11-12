@@ -10,8 +10,10 @@ import {
   digitosDeDocumento,
   documentoValido,
   cascadaCliente,
+  cascadaNombre,
   buscarClientePorDocumento,
   respuestaVigente,
+  respuestaAplicable,
 } from '../../src/lib/rnc.ts';
 import { documentoValido as documentoValidoServidor } from '../../supabase/functions/_shared/dgii/rnc.ts';
 
@@ -80,4 +82,41 @@ test('respuestaVigente: la respuesta solo vale si el campo sigue teniendo ese do
   assert.equal(respuestaVigente('130862346', '13086234'), false);
   assert.equal(respuestaVigente('130862346', '132893662'), false);
   assert.equal(respuestaVigente('130862346', ''), false);
+});
+
+// ---------------------------------------------------------------------------
+// Revisión final: cascada sin efectos sorpresa
+// ---------------------------------------------------------------------------
+
+test('cascadaCliente: al abrir Editar cliente con su mismo RNC guardado no cambia el tipo NCF', () => {
+  const r = cascadaCliente(DATOS, { nombre: 'IT SOLUCLICK SRL', ncfType: 'consumer', rncGuardado: '130-86234-6' });
+  assert.equal(r.ncfType, undefined);
+  // Si el usuario escribe otro RNC distinto del guardado, la cascada sí aplica.
+  const otro = cascadaCliente(DATOS, { nombre: '', ncfType: 'consumer', rncGuardado: '132893662' });
+  assert.equal(otro.ncfType, 'fiscal');
+});
+
+test('cascadaNombre: un nombre que se llenó solo se reemplaza al corregir el RNC; uno escrito a mano, no', () => {
+  // El nombre actual es el que puso la DGII con el RNC anterior: se cambia.
+  assert.deepEqual(cascadaNombre('EMPRESA B SRL', 'EMPRESA A SRL', 'EMPRESA A SRL'), { nombre: 'EMPRESA B SRL' });
+  assert.deepEqual(cascadaNombre('EMPRESA B SRL', 'empresa a srl ', 'EMPRESA A SRL'), { nombre: 'EMPRESA B SRL' });
+  // Lo escribió el usuario: solo se ofrece.
+  assert.deepEqual(cascadaNombre('EMPRESA B SRL', 'Juan', 'EMPRESA A SRL'), { ofrecerNombre: 'EMPRESA B SRL' });
+  assert.deepEqual(cascadaNombre('EMPRESA B SRL', 'Juan', undefined), { ofrecerNombre: 'EMPRESA B SRL' });
+  // Vacío: se llena. Igual: nada. Sin razón social: nada.
+  assert.deepEqual(cascadaNombre('EMPRESA B SRL', '', undefined), { nombre: 'EMPRESA B SRL' });
+  assert.deepEqual(cascadaNombre('EMPRESA B SRL', 'Empresa B SRL', 'EMPRESA A SRL'), {});
+  assert.deepEqual(cascadaNombre('  ', 'Juan', undefined), {});
+});
+
+test('cascadaCliente usa la misma regla del nombre llenado solo', () => {
+  const r = cascadaCliente(DATOS, { nombre: 'EMPRESA A SRL', ncfType: 'fiscal', nombreAutomatico: 'EMPRESA A SRL' });
+  assert.equal(r.nombre, 'IT SOLUCLICK SRL');
+  assert.equal(r.ofrecerNombre, undefined);
+});
+
+test('respuestaAplicable: con el campo desmontado (diálogo cerrado) la respuesta no se aplica', () => {
+  assert.equal(respuestaAplicable(false, '130862346', '130862346'), false);
+  assert.equal(respuestaAplicable(true, '130862346', '130-86234-6'), true);
+  assert.equal(respuestaAplicable(true, '130862346', '132893662'), false);
 });

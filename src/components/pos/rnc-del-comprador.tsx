@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,7 +10,7 @@ import { useCustomers } from '@/context/customer-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useToast } from '@/hooks/use-toast';
 import { formatCedulaOrRnc } from '@/lib/format';
-import { buscarClientePorDocumento, digitosDeDocumento, type DatosRnc } from '@/lib/rnc';
+import { buscarClientePorDocumento, cascadaNombre, digitosDeDocumento, type DatosRnc } from '@/lib/rnc';
 import type { Customer, NcfType } from '@/lib/types';
 
 // Al cobrar con un comprobante que pide RNC (crédito fiscal, gubernamental,
@@ -32,16 +32,21 @@ export function RncDelComprador({ ncfType, onClienteListo }: RncDelCompradorProp
   const [nombre, setNombre] = useState('');
   const [ofrecerNombre, setOfrecerNombre] = useState<string | undefined>();
   const [guardando, setGuardando] = useState(false);
+  // El último nombre que puso la DGII: al corregir un RNC mal escrito no puede
+  // quedar el nombre de la otra empresa (ver cascadaNombre).
+  const nombreAutomatico = useRef<string | undefined>(undefined);
 
   const digitos = digitosDeDocumento(rnc);
   const existente = digitos ? buscarClientePorDocumento(customers, digitos) : undefined;
   const completo = digitos.length === 9 || digitos.length === 11;
 
   const alEncontrarRnc = (datos: DatosRnc) => {
-    const razon = datos.razonSocial.trim();
-    if (!razon) return;
-    if (!nombre.trim()) setNombre(razon);
-    else if (nombre.trim().toLowerCase() !== razon.toLowerCase()) setOfrecerNombre(razon);
+    const c = cascadaNombre(datos.razonSocial, nombre, nombreAutomatico.current);
+    if (c.nombre) {
+      setNombre(c.nombre);
+      nombreAutomatico.current = c.nombre;
+    }
+    setOfrecerNombre(c.ofrecerNombre);
   };
 
   const usar = async () => {
@@ -94,6 +99,7 @@ export function RncDelComprador({ ncfType, onClienteListo }: RncDelCompradorProp
           ofrecerNombre={ofrecerNombre}
           onUsarNombre={(n) => {
             setNombre(n);
+            nombreAutomatico.current = n;
             setOfrecerNombre(undefined);
           }}
           disabled={guardando}

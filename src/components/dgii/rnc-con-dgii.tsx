@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { formatCedulaOrRnc } from '@/lib/format';
 import { consultarRncDgii } from '@/lib/dgii-client';
-import { digitosDeDocumento, documentoValido, respuestaVigente, type DatosRnc, type RespuestaRnc } from '@/lib/rnc';
+import { digitosDeDocumento, documentoValido, respuestaAplicable, type DatosRnc, type RespuestaRnc } from '@/lib/rnc';
 import { cn } from '@/lib/utils';
 
 // Campo de RNC o cédula que consulta la DGII cuando el documento está completo
@@ -69,6 +69,15 @@ export function RncConDgii({
   valorActual.current = value;
   const onDatosRef = useRef(onDatos);
   onDatosRef.current = onDatos;
+  // Si el diálogo se cerró mientras se consultaba, la respuesta no puede llenar
+  // el formulario que se abra después (el estado del diálogo sobrevive al campo).
+  const montado = useRef(true);
+  useEffect(() => {
+    montado.current = true;
+    return () => {
+      montado.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const digitos = digitosDeDocumento(value);
@@ -88,8 +97,8 @@ export function RncConDgii({
       consultado.current = digitos;
       setEstado({ tipo: 'buscando' });
       consultarRncDgii(digitos).then((respuesta) => {
-        // El campo cambió mientras se consultaba: esta respuesta ya no le toca.
-        if (!respuestaVigente(digitos, valorActual.current)) return;
+        // El campo cambió (o se cerró) mientras se consultaba: esta respuesta ya no le toca.
+        if (!respuestaAplicable(montado.current, digitos, valorActual.current)) return;
         setEstado({ tipo: 'respuesta', respuesta });
         if (respuesta.ok && respuesta.encontrado) onDatosRef.current?.(respuesta.datos);
       });

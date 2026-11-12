@@ -17,7 +17,7 @@ import type { Customer } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useCustomers } from '@/context/customer-provider';
 import { useAuth } from '@/context/auth-provider';
 import { formatPhone } from '@/lib/format';
@@ -45,6 +45,9 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
   const [name, setName] = useState(customer?.name ?? '');
   const [ncfType, setNcfType] = useState<NcfType>(customer?.ncfType ?? 'consumer');
   const [ofrecerNombre, setOfrecerNombre] = useState<string | undefined>();
+  // El último nombre que puso la DGII: si el usuario corrige el RNC y el nombre
+  // sigue siendo ese, se reemplaza por el del RNC nuevo (cascadaNombre).
+  const nombreAutomatico = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (!open) return;
@@ -53,11 +56,21 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
     setName(customer?.name ?? '');
     setNcfType(customer?.ncfType ?? 'consumer');
     setOfrecerNombre(undefined);
+    nombreAutomatico.current = undefined;
   }, [open, customer]);
 
   const alEncontrarRnc = (datos: DatosRnc) => {
-    const c = cascadaCliente(datos, { nombre: name, ncfType });
-    if (c.nombre) setName(c.nombre);
+    const c = cascadaCliente(datos, {
+      nombre: name,
+      ncfType,
+      nombreAutomatico: nombreAutomatico.current,
+      // Con el RNC que el cliente ya tenía (se abrió "Editar") el tipo no se toca.
+      rncGuardado: customer?.rnc,
+    });
+    if (c.nombre) {
+      setName(c.nombre);
+      nombreAutomatico.current = c.nombre;
+    }
     if (c.ncfType) setNcfType(c.ncfType);
     setOfrecerNombre(c.ofrecerNombre);
   };
@@ -166,6 +179,7 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
                 ofrecerNombre={ofrecerNombre}
                 onUsarNombre={(n) => {
                   setName(n);
+                  nombreAutomatico.current = n;
                   setOfrecerNombre(undefined);
                 }}
                 autoFocus={!isEditMode}
