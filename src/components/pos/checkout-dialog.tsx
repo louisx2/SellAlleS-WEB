@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input';
 import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatLineQty } from '@/lib/line-format';
 import { useToast } from '@/hooks/use-toast';
-import type { Sale, FinancingDetails, NcfType } from '@/lib/types';
+import type { Sale, FinancingDetails, NcfType, Customer } from '@/lib/types';
 import { useProducts } from '@/context/product-provider';
 import { useSales } from '@/context/sales-provider';
 import { useCustomers } from '@/context/customer-provider';
@@ -36,6 +36,7 @@ import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { supabase } from '@/lib/supabase/client';
 import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
+import { RncDelComprador } from './rnc-del-comprador';
 import { Loader2 } from 'lucide-react';
 
 interface CheckoutDialogProps {
@@ -45,7 +46,7 @@ interface CheckoutDialogProps {
 }
 
 export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: CheckoutDialogProps) {
-  const { activeCart, total, subtotal, itbisAmount, itbisIncluded, totalDiscount, createSale, completeSale } = useCart();
+  const { activeCart, total, subtotal, itbisAmount, itbisIncluded, totalDiscount, createSale, completeSale, setSelectedCustomer } = useCart();
   const { reload: reloadProducts } = useProducts();
   const { addSale: addSaleToContext } = useSales();
   const { customers, reload: reloadCustomers } = useCustomers();
@@ -131,9 +132,25 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   // en un documento que no se puede armar. Con la serie B solo se advierte.
   const ecfSinRncCliente = ecfFaltaRncCliente(ecfActiva, ncfType, customerIdIsValid);
 
+  // "RNC del comprador": el cliente con ese documento pasa al carrito. Cambiar el
+  // cliente reinicia el diálogo (el efecto de abajo depende de su tipo de NCF);
+  // esta vez no, para no perder lo ya elegido. Solo se marca si el tipo cambia,
+  // porque si no el efecto no corre y la marca quedaría puesta.
+  const conservarAlCambiarCliente = useRef(false);
+  const usarComprador = (cliente: Customer) => {
+    if (cliente.ncfType !== activeCart?.selectedCustomer?.ncfType) conservarAlCambiarCliente.current = true;
+    setSelectedCustomer(cliente);
+  };
+
 
   useEffect(() => {
     if (isOpen) {
+      // El cliente lo acaba de poner "RNC del comprador": no se borra lo que el
+      // cajero ya eligió (pago, comprobante y tipo).
+      if (conservarAlCambiarCliente.current) {
+        conservarAlCambiarCliente.current = false;
+        return;
+      }
       setPaymentMethod(cashBlocked ? 'card' : 'cash');
       setAmountPaid(total);
       setPaymentReference('');
@@ -602,12 +619,15 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                     </SelectContent>
                                 </Select>
                                 {ncfNeedsCustomerId && !customerIdIsValid && (
-                                    <p className="text-xs text-destructive">
-                                        Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.{' '}
-                                        {ecfActiva
-                                            ? 'Sin eso no se puede cobrar con comprobante electrónico: elige otro tipo o un cliente con RNC o cédula.'
-                                            : 'Sin eso el comprobante se emite, pero la venta no se podrá reportar en el 607.'}
-                                    </p>
+                                    <>
+                                        <p className="text-xs text-destructive">
+                                            Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.{' '}
+                                            {ecfActiva
+                                                ? 'Escríbelo abajo, o elige otro tipo.'
+                                                : 'Sin eso el comprobante se emite, pero la venta no se podrá reportar en el 607.'}
+                                        </p>
+                                        <RncDelComprador ncfType={ncfType} onClienteListo={usarComprador} />
+                                    </>
                                 )}
                             </div>
                         )}
