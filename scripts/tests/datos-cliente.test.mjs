@@ -57,3 +57,19 @@ test('la casilla solo aparece con la config encendida y algún dato que imprimir
   assert.equal(puedeIncluirDatosCliente(true, ['address'], { address: 'x' }), true);
   assert.equal(puedeIncluirDatosCliente(true, ['address'], undefined), false);
 });
+
+// Revisión final: el carrito guarda una copia del cliente. Si el cajero le
+// agrega la dirección en Clientes, la factura debe salir con la de la base.
+import { clienteVigente } from '../../src/lib/datos-cliente.ts';
+
+test('se usa la copia de la base cuando el cliente está en la lista', () => {
+  const enCarrito = { id: 'c1', name: 'Ana', address: '' };
+  const enBase = { id: 'c1', name: 'Ana', address: 'Calle 1' };
+  assert.equal(clienteVigente([enBase], enCarrito), enBase);
+});
+
+test('si no está en la lista (consumidor final) se usa la del carrito', () => {
+  const generico = { id: '0', name: 'Consumidor Final' };
+  assert.equal(clienteVigente([{ id: 'c1', name: 'Ana' }], generico), generico);
+  assert.equal(clienteVigente([], undefined), undefined);
+});

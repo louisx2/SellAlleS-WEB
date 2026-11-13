@@ -23,6 +23,7 @@ import { DialogTrigger } from '@/components/ui/dialog';
 import { AddFinancingPaymentDialog } from '@/components/financing/add-financing-payment-dialog';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { FinancingStatementDialog } from '@/components/financing/financing-statement-dialog';
+import { estadoDisponible } from '@/lib/estado-financiamiento';
 import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
 import { AmendFinancingDialog } from '@/components/financing/amend-financing-dialog';
 import { RescheduleInstallmentsDialog } from '@/components/financing/reschedule-installments-dialog';
@@ -166,11 +167,14 @@ export default function FinancingDetailClient() {
               Imprimir Plan de Pagos
             </Button>
           )}
-          {/* Cuotas, pagos hechos y balance, para mandárselo al cliente. */}
-          <Button variant="outline" onClick={() => setStatementOpen(true)}>
-            <ListChecks className="mr-2 h-4 w-4" />
-            Estado del Financiamiento
-          </Button>
+          {/* Cuotas, pagos hechos y balance, para mandárselo al cliente. Una
+              venta anulada no debe nada, aunque sus cuotas sigan en la base. */}
+          {estadoDisponible(sale) && (
+            <Button variant="outline" onClick={() => setStatementOpen(true)}>
+              <ListChecks className="mr-2 h-4 w-4" />
+              Estado del Financiamiento
+            </Button>
+          )}
           {fin && isAdmin && !sale.cancelledAt && !refinancedAt && (
             <Button variant="outline" onClick={() => setAmendOpen(true)}>
               <Pencil className="mr-2 h-4 w-4" />

@@ -32,3 +32,12 @@ test('no modifica la lista que recibe', () => {
   abonosDelEstado(lista);
   assert.deepEqual(lista.map((p) => p.id), ['b', 'a']);
 });
+
+// Revisión final: una venta anulada no tiene deuda, aunque sus cuotas sigan en
+// la base. El estado no se le manda al cliente.
+import { estadoDisponible } from '../../src/lib/estado-financiamiento.ts';
+
+test('el estado no está disponible para una venta anulada', () => {
+  assert.equal(estadoDisponible({ cancelledAt: new Date('2026-11-01') }), false);
+  assert.equal(estadoDisponible({}), true);
+});

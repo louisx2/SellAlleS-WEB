@@ -44,3 +44,12 @@ export function puedeIncluirDatosCliente(
 ): boolean {
   return enabled && lineasDatosCliente(customer, campos).length > 0;
 }
+
+/** El cliente tal como está en la base, si está en la lista; si no (el
+ *  consumidor final, o una lista que aún no carga), el que se recibió. El
+ *  carrito guarda una copia: si el cajero le agregó la dirección en Clientes
+ *  después de elegirlo, la factura del chofer debe salir con ella. */
+export function clienteVigente<T extends { id: string }>(customers: T[], seleccionado: T | undefined): T | undefined {
+  if (!seleccionado) return undefined;
+  return customers.find((c) => c.id === seleccionado.id) ?? seleccionado;
+}

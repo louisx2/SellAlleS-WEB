@@ -44,3 +44,19 @@ test('el plan y el estado dicen qué son y llevan el enlace y los días', () => 
     assert.match(m, /Comercial GP/);
   }
 });
+
+// Revisión final: si el servidor todavía es el viejo, devuelve la ruta de la
+// factura también para el plan. El navegador debe frenar ANTES de subir, para
+// no pisar el PDF (ni el enlace) de la factura que el cliente ya tiene.
+import { rutaCorrespondeAlDocumento } from '../../src/lib/documentos-venta.ts';
+
+test('el plan con la ruta de la factura se rechaza (servidor viejo)', () => {
+  assert.equal(rutaCorrespondeAlDocumento('emp/vta.pdf', 'plan'), false);
+  assert.equal(rutaCorrespondeAlDocumento('emp/vta.pdf', 'estado'), false);
+});
+
+test('cada documento acepta su propia ruta', () => {
+  assert.equal(rutaCorrespondeAlDocumento('emp/vta-plan.pdf', 'plan'), true);
+  assert.equal(rutaCorrespondeAlDocumento('emp/vta-estado.pdf', 'estado'), true);
+  assert.equal(rutaCorrespondeAlDocumento('emp/vta.pdf', 'factura'), true);
+});

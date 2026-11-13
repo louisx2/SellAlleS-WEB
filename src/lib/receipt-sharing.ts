@@ -1,7 +1,7 @@
 import type { Sale } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { esperarQrEcf } from '@/lib/ecf';
-import { mensajeWhatsApp, type DocumentoVenta } from '@/lib/documentos-venta';
+import { mensajeWhatsApp, rutaCorrespondeAlDocumento, type DocumentoVenta } from '@/lib/documentos-venta';
 
 
 /** Normaliza el teléfono del cliente al formato que espera WhatsApp. */
@@ -123,6 +123,11 @@ export async function shareSalePdfLinkViaWhatsApp(
   // Cada documento (factura, plan, estado) tiene su archivo y su enlace.
   const subida = await llamarReceiptLink({ saleId, documento });
   const { ruta, uploadToken } = subida as { ruta: string; uploadToken: string };
+  // Un servidor viejo devuelve la ruta de la factura también para el plan:
+  // subir ahí pisaría la factura que el cliente ya tiene. Mejor fallar claro.
+  if (!rutaCorrespondeAlDocumento(ruta, documento)) {
+    throw new Error('El servidor todavía no sabe compartir este documento. Avísale al administrador del sistema.');
+  }
 
   const { error: upErr } = await supabase.storage
     .from('comprobantes')

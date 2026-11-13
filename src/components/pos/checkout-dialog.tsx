@@ -34,6 +34,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { IncluirDatosCliente } from './incluir-datos-cliente';
+import { clienteVigente } from '@/lib/datos-cliente';
 import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { supabase } from '@/lib/supabase/client';
 import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
@@ -286,7 +287,12 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
         await reloadCustomers(); // el balance lo escribió el trigger
       }
 
-      onSaleComplete(savedSale, { incluirDatosCliente });
+      // La factura con el cliente como está en la base: el carrito guarda una
+      // copia, y la dirección pudo agregarse en Clientes después de elegirlo.
+      onSaleComplete(
+        { ...savedSale, customer: clienteVigente(customers, savedSale.customer) },
+        { incluirDatosCliente },
+      );
       completeSale(); // Signal that a sale has been completed, this will clear the active cart
       onOpenChange(false);
 
@@ -664,7 +670,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                 )}
 
                 <IncluirDatosCliente
-                    customer={activeCart?.selectedCustomer}
+                    customer={clienteVigente(customers, activeCart?.selectedCustomer)}
                     checked={incluirDatosCliente}
                     onCheckedChange={setIncluirDatosCliente}
                 />

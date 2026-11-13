@@ -29,3 +29,12 @@ export function mensajeWhatsApp(doc: DocumentoVenta, url: string, dias: number, 
   return `¡Gracias por su compra en ${quien}!\n\n` +
     `Aquí puede descargar su comprobante en PDF:\n${url}\n\n${vence}`;
 }
+
+/** ¿La ruta que devolvió el servidor es la de este documento? Una función
+ *  receipt-link anterior a los documentos ignora `documento` y devuelve la ruta
+ *  de la factura: subir el plan ahí pisaría el PDF (y el enlace) de la factura
+ *  que el cliente ya tiene. Se comprueba antes de subir. */
+export function rutaCorrespondeAlDocumento(ruta: string, doc: DocumentoVenta): boolean {
+  if (doc === 'factura') return true;
+  return ruta.endsWith(`-${doc}.pdf`);
+}

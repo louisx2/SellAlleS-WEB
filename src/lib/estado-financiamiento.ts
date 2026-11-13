@@ -10,3 +10,9 @@ export function abonosDelEstado(payments: CreditPayment[]): CreditPayment[] {
     .slice()
     .sort((a, b) => a.date.getTime() - b.date.getTime());
 }
+
+/** Una venta anulada no tiene deuda aunque sus cuotas sigan en la base
+ *  (`annul_sale` no las toca): mandarle el estado al cliente le diría que debe. */
+export function estadoDisponible(sale: { cancelledAt?: unknown }): boolean {
+  return !sale.cancelledAt;
+}
