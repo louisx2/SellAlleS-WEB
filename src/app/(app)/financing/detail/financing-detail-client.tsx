@@ -22,11 +22,12 @@ import {
 import { DialogTrigger } from '@/components/ui/dialog';
 import { AddFinancingPaymentDialog } from '@/components/financing/add-financing-payment-dialog';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
+import { FinancingStatementDialog } from '@/components/financing/financing-statement-dialog';
 import { VoidPaymentDialog } from '@/components/credit/void-payment-dialog';
 import { AmendFinancingDialog } from '@/components/financing/amend-financing-dialog';
 import { RescheduleInstallmentsDialog } from '@/components/financing/reschedule-installments-dialog';
 import { RefinanceFinancingDialog } from '@/components/financing/refinance-financing-dialog';
-import { ArrowLeft, CalendarClock, DollarSign, FileText, Pencil, Printer, RefreshCw, Undo2 } from 'lucide-react';
+import { ArrowLeft, CalendarClock, DollarSign, FileText, ListChecks, Pencil, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -51,6 +52,7 @@ export default function FinancingDetailClient() {
   const [payments, setPayments] = useState<CreditPayment[]>([]);
   const [amendments, setAmendments] = useState<FinancingAmendment[]>([]);
   const [isPlanOpen, setPlanOpen] = useState(false);
+  const [isStatementOpen, setStatementOpen] = useState(false);
   const [isAmendOpen, setAmendOpen] = useState(false);
   const [voiding, setVoiding] = useState<CreditPayment | null>(null);
   const [isRescheduleOpen, setRescheduleOpen] = useState(false);
@@ -164,6 +166,11 @@ export default function FinancingDetailClient() {
               Imprimir Plan de Pagos
             </Button>
           )}
+          {/* Cuotas, pagos hechos y balance, para mandárselo al cliente. */}
+          <Button variant="outline" onClick={() => setStatementOpen(true)}>
+            <ListChecks className="mr-2 h-4 w-4" />
+            Estado del Financiamiento
+          </Button>
           {fin && isAdmin && !sale.cancelledAt && !refinancedAt && (
             <Button variant="outline" onClick={() => setAmendOpen(true)}>
               <Pencil className="mr-2 h-4 w-4" />
@@ -556,6 +563,12 @@ export default function FinancingDetailClient() {
       )}
 
       <PaymentPlanDialog sale={sale} isOpen={isPlanOpen} onOpenChange={setPlanOpen} />
+      <FinancingStatementDialog
+        sale={sale}
+        payments={payments}
+        isOpen={isStatementOpen}
+        onOpenChange={setStatementOpen}
+      />
 
       <AmendFinancingDialog
         sale={sale}
