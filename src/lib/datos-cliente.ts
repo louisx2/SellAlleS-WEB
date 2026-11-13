@@ -45,6 +45,38 @@ export function puedeIncluirDatosCliente(
   return enabled && lineasDatosCliente(customer, campos).length > 0;
 }
 
+/** Cómo se nombra cada dato dentro de una frase, y si es femenino (para decir
+ *  "agrégala" o "agrégalo"). */
+const EN_FRASE: Record<CampoCliente, { nombre: string; femenino: boolean }> = {
+  address: { nombre: 'la dirección', femenino: true },
+  phone: { nombre: 'el teléfono', femenino: false },
+  email: { nombre: 'el correo', femenino: false },
+};
+
+/** "a", "a y b", "a, b y c". */
+function enumerar(partes: string[]): string {
+  if (partes.length <= 1) return partes[0] ?? '';
+  return `${partes.slice(0, -1).join(', ')} y ${partes[partes.length - 1]}`;
+}
+
+/** Texto bajo la casilla: lo que se va a imprimir de ESTE cliente y, si le
+ *  falta algún dato de los configurados, el aviso para que el cajero lo agregue
+ *  antes de mandar al chofer sin la dirección. */
+export function textoCasillaDatosCliente(customer: DatosDeContacto | undefined, campos: CampoCliente[]): string {
+  const elegidos = CAMPOS_CLIENTE.filter((c) => campos.includes(c.campo)).map((c) => c.campo);
+  const tiene = (campo: CampoCliente) => (customer?.[campo] ?? '').trim() !== '';
+  const presentes = elegidos.filter(tiene);
+  const faltan = elegidos.filter((campo) => !tiene(campo));
+
+  let texto = `Para el chofer o mensajero: agrega ${enumerar(presentes.map((c) => EN_FRASE[c].nombre))} del cliente.`;
+  if (faltan.length > 0) {
+    const verbo = faltan.length === 1 ? 'Falta' : 'Faltan';
+    const agregalo = faltan.length > 1 ? 'agrégalos' : EN_FRASE[faltan[0]].femenino ? 'agrégala' : 'agrégalo';
+    texto += ` ${verbo} ${enumerar(faltan.map((c) => EN_FRASE[c].nombre))}: ${agregalo} en Clientes.`;
+  }
+  return texto;
+}
+
 /** El cliente tal como está en la base, si está en la lista; si no (el
  *  consumidor final, o una lista que aún no carga), el que se recibió. El
  *  carrito guarda una copia: si el cajero le agregó la dirección en Clientes

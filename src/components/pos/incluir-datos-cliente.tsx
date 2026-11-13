@@ -2,7 +2,7 @@
 
 import { Checkbox } from '@/components/ui/checkbox';
 import { useCompanyProfile } from '@/context/company-profile-provider';
-import { CAMPOS_CLIENTE, puedeIncluirDatosCliente } from '@/lib/datos-cliente';
+import { puedeIncluirDatosCliente, textoCasillaDatosCliente } from '@/lib/datos-cliente';
 import type { Customer } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -21,10 +21,6 @@ export function IncluirDatosCliente({ customer, checked, onCheckedChange, classN
   const campos = profile.receiptCustomerFields;
   if (!puedeIncluirDatosCliente(profile.receiptCustomerInfoEnabled, campos, customer)) return null;
 
-  const cuales = CAMPOS_CLIENTE.filter((c) => campos.includes(c.campo))
-    .map((c) => c.etiqueta.toLowerCase())
-    .join(', ');
-
   return (
     <label className={cn('flex items-start gap-2 rounded-lg border p-3 cursor-pointer', className)}>
       <Checkbox
@@ -36,7 +32,7 @@ export function IncluirDatosCliente({ customer, checked, onCheckedChange, classN
       <span className="space-y-0.5">
         <span className="block text-sm font-medium">Incluir datos del cliente en la factura</span>
         <span className="block text-xs text-muted-foreground">
-          Para el chofer o mensajero: agrega {cuales} del cliente.
+          {textoCasillaDatosCliente(customer, campos)}
         </span>
       </span>
     </label>

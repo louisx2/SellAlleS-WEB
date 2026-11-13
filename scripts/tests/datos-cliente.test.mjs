@@ -73,3 +73,44 @@ test('si no está en la lista (consumidor final) se usa la del carrito', () => {
   assert.equal(clienteVigente([{ id: 'c1', name: 'Ana' }], generico), generico);
   assert.equal(clienteVigente([], undefined), undefined);
 });
+
+// El texto de la casilla nombra lo que ESTE cliente tiene y avisa lo que le
+// falta. Antes listaba lo configurado en Ajustes: decía "dirección, teléfono"
+// aunque el cliente no tuviera dirección y en la factura solo saliera el teléfono.
+import { textoCasillaDatosCliente } from '../../src/lib/datos-cliente.ts';
+
+test('casilla: el cliente tiene todo lo configurado', () => {
+  assert.equal(
+    textoCasillaDatosCliente({ address: 'Calle 1', phone: '809' }, ['address', 'phone']),
+    'Para el chofer o mensajero: agrega la dirección y el teléfono del cliente.',
+  );
+  assert.equal(
+    textoCasillaDatosCliente({ address: 'Calle 1', phone: '809', email: 'a@b.do' }, ['address', 'phone', 'email']),
+    'Para el chofer o mensajero: agrega la dirección, el teléfono y el correo del cliente.',
+  );
+});
+
+test('casilla: avisa el dato que falta, con su artículo', () => {
+  assert.equal(
+    textoCasillaDatosCliente({ phone: '809', address: '  ' }, ['address', 'phone']),
+    'Para el chofer o mensajero: agrega el teléfono del cliente. Falta la dirección: agrégala en Clientes.',
+  );
+  assert.equal(
+    textoCasillaDatosCliente({ address: 'Calle 1' }, ['address', 'phone']),
+    'Para el chofer o mensajero: agrega la dirección del cliente. Falta el teléfono: agrégalo en Clientes.',
+  );
+});
+
+test('casilla: varios datos que faltan van en plural', () => {
+  assert.equal(
+    textoCasillaDatosCliente({ phone: '809' }, ['address', 'phone', 'email']),
+    'Para el chofer o mensajero: agrega el teléfono del cliente. Faltan la dirección y el correo: agrégalos en Clientes.',
+  );
+});
+
+test('casilla: un dato no configurado no se menciona aunque falte', () => {
+  assert.equal(
+    textoCasillaDatosCliente({ phone: '809' }, ['phone']),
+    'Para el chofer o mensajero: agrega el teléfono del cliente.',
+  );
+});
