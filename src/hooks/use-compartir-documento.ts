@@ -11,7 +11,12 @@ import {
   sendReceiptViaResendEmail,
   shareSalePdfLinkViaWhatsApp,
 } from '@/lib/receipt-sharing';
-import { nombreArchivoPdf, type DocumentoVenta } from '@/lib/documentos-venta';
+import {
+  nombreArchivoPdf,
+  vigenciaDelEnlace,
+  type DocumentoVenta,
+  type ValidezEnlace,
+} from '@/lib/documentos-venta';
 import type { Sale } from '@/lib/types';
 
 const NOMBRE: Record<DocumentoVenta, string> = {
@@ -29,7 +34,7 @@ export interface CompartirDocumento {
   /** true si salió; los errores se avisan con un toast. */
   enviarCorreo: () => Promise<boolean>;
   enviandoEnlace: boolean;
-  enlace: { url: string; diasValidez: number } | null;
+  enlace: { url: string; validez: ValidezEnlace } | null;
   compartirWhatsApp: () => Promise<void>;
   copiarEnlace: () => Promise<void>;
   reabrirWhatsApp: () => void;
@@ -57,7 +62,7 @@ export function useCompartirDocumento({
   const [enviandoEnlace, setEnviandoEnlace] = useState(false);
   // Enlace ya generado: se deja a la vista para copiarlo o reabrir el chat si
   // el navegador bloqueó la pestaña.
-  const [enlace, setEnlace] = useState<{ url: string; diasValidez: number } | null>(null);
+  const [enlace, setEnlace] = useState<{ url: string; validez: ValidezEnlace } | null>(null);
 
   // Otra venta, otro cliente: ni el correo ni el enlace de la anterior sirven.
   useEffect(() => {
@@ -79,15 +84,16 @@ export function useCompartirDocumento({
     setEnviandoEnlace(true);
     try {
       const pdfBase64 = await generateReceiptPdf(pdfRef.current, filename);
-      const { url, diasValidez, abrioWhatsApp } = await shareSalePdfLinkViaWhatsApp(
+      const { url, validez, abrioWhatsApp } = await shareSalePdfLinkViaWhatsApp(
         sale.id, pdfBase64, sale, profile.name, ventana, documento,
       );
-      setEnlace({ url, diasValidez });
+      setEnlace({ url, validez });
+      const vigencia = vigenciaDelEnlace(validez);
       toast({
         title: abrioWhatsApp ? 'WhatsApp abierto con el mensaje listo' : 'Enlace listo',
         description: abrioWhatsApp
-          ? `Revísalo y dale enviar. El enlace de descarga del PDF funciona por ${diasValidez} días.`
-          : `Dale a "Abrir WhatsApp" para mandarlo. El enlace funciona por ${diasValidez} días.`,
+          ? `Revísalo y dale enviar. El enlace de descarga del PDF funciona ${vigencia}.`
+          : `Dale a "Abrir WhatsApp" para mandarlo. El enlace funciona ${vigencia}.`,
       });
     } catch (error: any) {
       console.error(error);
@@ -117,7 +123,7 @@ export function useCompartirDocumento({
   };
 
   const reabrirWhatsApp = () => {
-    if (enlace) abrirWhatsAppConEnlace(sale, enlace.url, enlace.diasValidez, profile.name, documento);
+    if (enlace) abrirWhatsAppConEnlace(sale, enlace.url, enlace.validez, profile.name, documento);
   };
 
   const enviarCorreo = async (): Promise<boolean> => {

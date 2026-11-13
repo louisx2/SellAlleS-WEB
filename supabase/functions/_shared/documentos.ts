@@ -44,6 +44,21 @@ export function asuntoDelCorreo(doc: DocumentoVenta, companyName: string, ncf?: 
   return `${TITULO[doc]}${conNcf} - ${companyName}`;
 }
 
+/** Comprobantes que identifican al comprador: crédito fiscal, regímenes
+ *  especiales y gubernamental, en papel (B) o electrónicos (E). Los mismos que
+ *  exigen RNC en el 607 y en el e-CF. */
+const TIPOS_CON_COMPRADOR = ['B01', 'B14', 'B15', 'E31', 'E44', 'E45'];
+
+/** Días que vive el enlace desde que se manda (cada envío lo renueva). La
+ *  factura con comprobante que identifica al comprador dura más: su contador la
+ *  necesita para el 606 del mes siguiente y 15 días no le alcanzan. Más que eso
+ *  no: lleva RNC y montos, y el enlace se puede reenviar a cualquiera. */
+export function diasDeValidez(doc: DocumentoVenta, ncf?: string | null): number {
+  if (doc !== 'factura') return 15;
+  const tipo = (ncf ?? '').trim().toUpperCase().slice(0, 3);
+  return TIPOS_CON_COMPRADOR.includes(tipo) ? 90 : 15;
+}
+
 /** Lo que dice el correo que va adjunto: "...encontrará <esto>." */
 export function adjuntoDelCorreo(doc: DocumentoVenta): string {
   if (doc === 'plan') return 'su plan de pagos en formato PDF';

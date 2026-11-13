@@ -50,3 +50,28 @@ test('título y adjunto del correo según el documento', () => {
   assert.equal(adjuntoDelCorreo('plan'), 'su plan de pagos en formato PDF');
   assert.equal(adjuntoDelCorreo('estado'), 'el estado de su financiamiento en formato PDF');
 });
+
+// Cuánto vive el enlace. La factura con un comprobante que identifica al
+// comprador (crédito fiscal, regímenes especiales, gubernamental; en papel o
+// electrónico) la necesita su contador para el 606 del mes siguiente: 15 días
+// no le alcanzan. Lo demás sigue en 15.
+import { diasDeValidez } from '../../supabase/functions/_shared/documentos.ts';
+
+test('factura con comprobante que identifica al comprador: 90 días', () => {
+  for (const ncf of ['B0100000012', 'B1400000001', 'B1500000001', 'E310000000001', 'E440000000001', 'E450000000001']) {
+    assert.equal(diasDeValidez('factura', ncf), 90, ncf);
+  }
+});
+
+test('el tipo se lee aunque venga en minúscula o con espacios', () => {
+  assert.equal(diasDeValidez('factura', ' b0100000012 '), 90);
+});
+
+test('consumidor final, sin comprobante, plan y estado: 15 días', () => {
+  assert.equal(diasDeValidez('factura', 'B0200000012'), 15);
+  assert.equal(diasDeValidez('factura', 'E320000000001'), 15);
+  assert.equal(diasDeValidez('factura', null), 15);
+  assert.equal(diasDeValidez('factura', ''), 15);
+  assert.equal(diasDeValidez('plan', 'B0100000012'), 15);
+  assert.equal(diasDeValidez('estado', 'E310000000001'), 15);
+});

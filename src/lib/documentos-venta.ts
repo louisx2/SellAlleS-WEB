@@ -14,10 +14,42 @@ export function nombreArchivoPdf(doc: DocumentoVenta, sale: { id: string; ncf?: 
   return `factura_${sale.ncf || corto}.pdf`;
 }
 
+/** Comprobantes que identifican al comprador (crédito fiscal, regímenes
+ *  especiales, gubernamental). Igual que en el servidor: supabase/functions/
+ *  _shared/documentos.ts; una prueba comprueba que no se separen. */
+const TIPOS_CON_COMPRADOR = ['B01', 'B14', 'B15', 'E31', 'E44', 'E45'];
+
+/** Días que vive el enlace desde que se manda: 90 para la factura con un
+ *  comprobante que identifica al comprador (su contador la necesita para el
+ *  606), 15 para lo demás. Quien manda es el servidor; esto es para avisarle al
+ *  cajero antes de generar el enlace. */
+export function diasDeValidez(doc: DocumentoVenta, ncf?: string | null): number {
+  if (doc !== 'factura') return 15;
+  const tipo = (ncf ?? '').trim().toUpperCase().slice(0, 3);
+  return TIPOS_CON_COMPRADOR.includes(tipo) ? 90 : 15;
+}
+
+/** Cuánto vive el enlace que devolvió el servidor. */
+export interface ValidezEnlace {
+  dias: number;
+  /** Fecha exacta de vencimiento (ISO). Un servidor viejo no la manda. */
+  venceEl?: string;
+}
+
+/** "hasta el 28 de noviembre de 2026", en hora de Santo Domingo; sin fecha,
+ *  "por 15 días". Con la fecha no queda duda de desde cuándo cuenta. */
+export function vigenciaDelEnlace({ dias, venceEl }: ValidezEnlace): string {
+  if (!venceEl) return `por ${dias} días`;
+  const fecha = new Date(venceEl).toLocaleDateString('es-DO', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Santo_Domingo',
+  });
+  return `hasta el ${fecha}`;
+}
+
 /** Mensaje listo para WhatsApp con el enlace de descarga. */
-export function mensajeWhatsApp(doc: DocumentoVenta, url: string, dias: number, negocio?: string): string {
+export function mensajeWhatsApp(doc: DocumentoVenta, url: string, validez: ValidezEnlace, negocio?: string): string {
   const quien = negocio ?? 'nuestro negocio';
-  const vence = `El enlace estará disponible por ${dias} días.`;
+  const vence = `El enlace estará disponible ${vigenciaDelEnlace(validez)}.`;
   if (doc === 'plan') {
     return `Le compartimos el plan de pagos de su compra en ${quien}.\n\n` +
       `Aquí puede descargarlo en PDF:\n${url}\n\n${vence}`;

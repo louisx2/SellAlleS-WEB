@@ -23,7 +23,7 @@
 // financiamiento de la misma venta (`documento`, ver _shared/documentos.ts).
 // Sin `documento` es la factura, exactamente como antes.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { documentoValido, nombreDeDescarga, rutaDelDocumento } from '../_shared/documentos.ts';
+import { diasDeValidez, documentoValido, nombreDeDescarga, rutaDelDocumento } from '../_shared/documentos.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -37,10 +37,6 @@ function json(status: number, obj: unknown) {
     headers: { ...cors, 'Content-Type': 'application/json' },
   });
 }
-
-/** Dias que vive el enlace de descarga. Suficiente para que el cliente lo abra
- *  con calma, corto para que un reenvio no lo deje expuesto indefinidamente. */
-const DIAS_VALIDEZ = 15;
 
 /** Dominio del enlace que recibe el cliente. Va en el worker de la landing, que
  *  atiende /<empresa>/c/<codigo> y se lo pasa a la funcion `c`. Se puede mover
@@ -153,7 +149,10 @@ Deno.serve(async (req) => {
     // (o "plan-de-pagos.pdf") y no el uuid de la venta.
     const nombreArchivo = nombreDeDescarga(documento, sale.ncf);
     const empresaSlug = empresa?.link_slug?.trim() || slug(empresa?.name);
-    const vence = new Date(Date.now() + DIAS_VALIDEZ * 24 * 60 * 60 * 1000);
+    // Cuánto vive el enlace: 15 días, o 90 si es la factura de un comprobante
+    // que identifica al comprador (ver diasDeValidez). Cuenta desde este envío.
+    const dias = diasDeValidez(documento, sale.ncf);
+    const vence = new Date(Date.now() + dias * 24 * 60 * 60 * 1000);
 
     // Si este documento ya tiene un enlace vigente se reutiliza, para que
     // reenviarlo no le cambie la direccion al cliente que ya la tiene. Se busca
@@ -169,6 +168,20 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     let code = existente?.code as string | undefined;
+
+    // Reenviarlo renueva el plazo desde hoy. El mensaje dice hasta qué fecha
+    // funciona y tiene que ser verdad: antes el enlace reutilizado conservaba
+    // su vencimiento viejo y el mensaje igual decía "por 15 días".
+    if (code) {
+      const { error: renErr } = await admin
+        .from('receipt_links')
+        .update({ expires_at: vence.toISOString() })
+        .eq('code', code);
+      if (renErr) {
+        console.error('Fallo renovando el enlace:', renErr.message);
+        return json(502, { error: `No se pudo renovar el enlace: ${renErr.message}` });
+      }
+    }
 
     if (!code) {
       // Reintentos por si el codigo aleatorio ya existe. Con 9.6e13
@@ -200,7 +213,10 @@ Deno.serve(async (req) => {
       ok: true,
       ruta,
       url: `${BASE_ENLACE}/${empresaSlug}/c/${code}`,
-      diasValidez: DIAS_VALIDEZ,
+      // diasValidez lo sigue leyendo el front de antes; venceEl es la fecha
+      // exacta que el front nuevo pone en el mensaje.
+      diasValidez: dias,
+      venceEl: vence.toISOString(),
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

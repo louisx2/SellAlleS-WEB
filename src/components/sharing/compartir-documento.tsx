@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
 import { Copy, Download, Link as LinkIcon, Loader2, Mail, MessageSquare, Send } from 'lucide-react';
 import { useCompartirDocumento, type CompartirDocumento as Compartir } from '@/hooks/use-compartir-documento';
-import type { DocumentoVenta } from '@/lib/documentos-venta';
+import { diasDeValidez, vigenciaDelEnlace, type DocumentoVenta } from '@/lib/documentos-venta';
 import type { Sale } from '@/lib/types';
 
 /** Cómo se nombra el documento dentro de una frase: "descargar <esto> en PDF". */
@@ -48,7 +48,8 @@ export function PanelWhatsApp({ c }: { c: Compartir }) {
           </p>
           <p className="text-xs text-muted-foreground font-normal mt-0.5">
             Abre el chat del cliente en WhatsApp con un mensaje listo que incluye el enlace
-            para descargar {EN_FRASE[c.documento]} en PDF. El enlace funciona por 15 días.
+            para descargar {EN_FRASE[c.documento]} en PDF. El enlace funciona por{' '}
+            {diasDeValidez(c.documento, c.sale.ncf)} días.
           </p>
         </div>
       </Button>
@@ -56,7 +57,7 @@ export function PanelWhatsApp({ c }: { c: Compartir }) {
       {c.enlace && (
         <div className="rounded-md border bg-muted/40 p-3 space-y-2">
           <p className="text-xs text-muted-foreground">
-            Enlace generado (válido por {c.enlace.diasValidez} días):
+            Enlace generado (válido {vigenciaDelEnlace(c.enlace.validez)}):
           </p>
           <p className="text-xs break-all font-mono">{c.enlace.url}</p>
           <div className="flex gap-2">
