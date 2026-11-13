@@ -19,7 +19,7 @@ import { administrarEcf } from '@/lib/ecf-client';
 import { PLANES_MSELLER, type PlanMseller } from '@/lib/ecf-planes';
 import {
   ECF_AMBIENTES, ECF_AMBIENTE_NOMBRE, ECF_ESTADO_CONFIG_NOMBRE,
-  certificadoPorVencer, diasParaVencer, fechaDMA,
+  avisoPruebaSinMarca, certificadoPorVencer, diasParaVencer, fechaDMA,
   type AmbienteEcf, type EstadoEcfConfig,
 } from '@/lib/ecf';
 import { formatCedulaOrRnc } from '@/lib/format';
@@ -588,12 +588,11 @@ function CredencialesEcf({ companyId, ambienteInicial, ambienteEnUso, guardadas,
     if (!r.ok) {
       toast({ title: 'La conexión falló', description: r.error, variant: 'destructive' });
     } else if (r.marcada) {
-      toast({ title: 'Conexión exitosa', description: 'Quedó marcada como probada.' });
+      toast({ title: 'Conexión exitosa', description: 'MSeller aceptó la cuenta y la API key. Quedó marcada como probada.' });
     } else {
-      toast({
-        title: 'La cuenta inicia sesión',
-        description: 'Pero la conexión no quedó marcada: este no es el ambiente en uso de la empresa o todavía no hay datos del emisor guardados.',
-      });
+      // Funcionó, pero falta algo para que cuente: se dice qué, sin que parezca un error.
+      const aviso = avisoPruebaSinMarca(ambiente, ambienteEnUso);
+      toast({ title: aviso.titulo, description: aviso.descripcion });
     }
     await onCambio();
   };
@@ -668,7 +667,11 @@ function CredencialesEcf({ companyId, ambienteInicial, ambienteEnUso, guardadas,
           variant="outline"
           onClick={probarConexion}
           disabled={trabajando !== null || !guardada}
-          title={guardada ? 'Inicia sesión con las credenciales guardadas; no gasta cupo.' : 'Primero guarda las credenciales de este ambiente.'}
+          title={
+            guardada
+              ? 'Inicia sesión con las credenciales guardadas y prueba la API key con una consulta (gasta 1 del cupo de consultas).'
+              : 'Primero guarda las credenciales de este ambiente.'
+          }
         >
           {trabajando === 'probar' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Probar conexión

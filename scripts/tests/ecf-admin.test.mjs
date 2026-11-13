@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   administrar,
+  ENCF_DE_PRUEBA,
   ERROR_INTERNO,
   guardarCredenciales,
   motivoDe,
@@ -57,6 +58,9 @@ const res = (status, cuerpo) =>
   });
 
 const loginOk = () => res(200, { idToken: ID_TOKEN_NUEVO, refreshToken: REFRESH_NUEVO });
+// La consulta de prueba de la API key: MSeller no conoce ese e-NCF.
+const noEncontrado = () => res(404, { message: 'Documento no encontrado' });
+const CONSULTA_URL = `https://ecf.api.mseller.app/TesteCF/documentos-ecf?ecf=${ENCF_DE_PRUEBA}`;
 
 // `fetch` falso: atiende en orden lo que se le dio y guarda cada llamada.
 function fetchFalso(...respuestas) {
@@ -65,6 +69,7 @@ function fetchFalso(...respuestas) {
     llamadas.push({
       url: String(url),
       metodo: init.method,
+      encabezados: init.headers,
       cuerpo: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
     });
     const r = respuestas.shift();
@@ -132,13 +137,14 @@ function deps(f) {
 // ---------------------------------------------------------------------------
 
 test('probar_conexion inicia sesión con la contraseña aunque haya un idToken vigente y un refresh token guardados', async () => {
-  const f = fetchFalso(loginOk());
+  const f = fetchFalso(loginOk(), noEncontrado());
   const d = dbFalso();
   const r = await probarConexion(d.client, EMPRESA, 'TesteCF', deps(f));
 
   assert.deepEqual(r, { ok: true, marcada: true });
-  // R3: una sola llamada, al login, con correo y contraseña; nunca la renovación con el refresh token.
-  assert.equal(f.llamadas.length, 1);
+  // R3: el login con correo y contraseña, nunca la renovación con el refresh
+  // token; después, la consulta que prueba la API key.
+  assert.equal(f.llamadas.length, 2);
   assert.equal(f.llamadas[0].url, LOGIN_URL);
   assert.equal(f.llamadas[0].metodo, 'POST');
   assert.deepEqual(f.llamadas[0].cuerpo, { email: EMAIL, password: PASSWORD });
@@ -146,9 +152,9 @@ test('probar_conexion inicia sesión con la contraseña aunque haya un idToken v
 
 test('probar_conexion guarda la sesión nueva y marca la conexión como probada del ambiente de la empresa', async () => {
   const d = dbFalso();
-  await probarConexion(d.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk())));
+  await probarConexion(d.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk(), noEncontrado())));
 
-  assert.deepEqual(d.rpc.map((x) => x.fn), ['ecf_leer_credenciales', 'ecf_guardar_sesion']);
+  assert.deepEqual(d.rpc.map((x) => x.fn), ['ecf_leer_credenciales', 'ecf_guardar_sesion', 'ecf_sumar_uso']);
   assert.deepEqual(d.rpc[0].args, { p_company: EMPRESA, p_ambiente: 'TesteCF' });
   assert.deepEqual(d.rpc[1].args, {
     p_company: EMPRESA,
@@ -167,7 +173,7 @@ test('probar_conexion guarda la sesión nueva y marca la conexión como probada 
 
 test('probar_conexion: si el update no toca ninguna fila (otro ambiente o sin ecf_config) responde ok con marcada:false', async () => {
   const d = dbFalso({ filas: [] });
-  const r = await probarConexion(d.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk())));
+  const r = await probarConexion(d.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk(), noEncontrado())));
   assert.deepEqual(r, { ok: true, marcada: false });
   // Sí intentó marcar, y solo el ambiente que se probó.
   assert.deepEqual(d.from[0].filtros, [['company_id', EMPRESA], ['ambiente', 'TesteCF']]);
@@ -250,7 +256,7 @@ test('probar_conexion: si la base falla al marcar la conexión responde ok:false
   const d = dbFalso({
     errorUpdate: { message: `fila rechazada: ${ID_TOKEN_NUEVO} / ${REFRESH_NUEVO} / ${PASSWORD}` },
   });
-  const dep = deps(fetchFalso(loginOk()));
+  const dep = deps(fetchFalso(loginOk(), noEncontrado()));
   const r = await probarConexion(d.client, EMPRESA, 'TesteCF', dep);
 
   assert.equal(r.ok, false);
@@ -267,6 +273,77 @@ test('probar_conexion: si la base falla al leer las credenciales responde ok:fal
   const r = await probarConexion(d.client, EMPRESA, 'TesteCF', deps(f));
   assert.deepEqual(r, { ok: false, error: 'No se pudieron leer las credenciales de MSeller: boom' });
   assert.equal(f.llamadas.length, 0);
+});
+
+// ---------------------------------------------------------------------------
+// probarConexion: la API key
+// ---------------------------------------------------------------------------
+
+test('probar_conexion prueba la API key con una consulta de un e-NCF que no existe, con la sesión nueva', async () => {
+  const f = fetchFalso(loginOk(), noEncontrado());
+  await probarConexion(dbFalso().client, EMPRESA, 'TesteCF', deps(f));
+
+  const consulta = f.llamadas[1];
+  assert.equal(consulta.url, CONSULTA_URL);
+  assert.equal(consulta.metodo, 'GET');
+  assert.equal(consulta.encabezados['X-API-KEY'], API_KEY);
+  assert.equal(consulta.encabezados.Authorization, `Bearer ${ID_TOKEN_NUEVO}`);
+  // El login no lleva la API key: por eso hace falta la consulta.
+  assert.equal(f.llamadas[0].encabezados['X-API-KEY'], undefined);
+});
+
+test('probar_conexion: si MSeller rechaza la API key no marca la conexión y lo dice claro, sin secretos', async () => {
+  for (const status of [401, 403]) {
+    const d = dbFalso();
+    const dep = deps(fetchFalso(loginOk(), res(status, `API Key inválida: ${API_KEY}`)));
+    const r = await probarConexion(d.client, EMPRESA, 'TesteCF', dep);
+
+    assert.equal(r.ok, false);
+    assert.match(r.error, /API key/);
+    assert.match(r.error, /TesteCF/);
+    assert.ok(sinSecretos(r.error), r.error);
+    assert.equal(d.from.length, 0, 'no debía marcar la conexión');
+    // La cuenta sí inició sesión: la sesión queda guardada. Un rechazo no gasta cupo.
+    assert.deepEqual(d.rpc.map((x) => x.fn), ['ecf_leer_credenciales', 'ecf_guardar_sesion']);
+    assert.deepEqual(dep.registro, [], 'un fallo de MSeller no va al registro');
+  }
+});
+
+test('probar_conexion: la key sirve si MSeller atiende la consulta, aunque no conozca el e-NCF u objete el parámetro', async () => {
+  for (const respuesta of [noEncontrado(), res(200, { status: 'No encontrado' }), res(400, 'ecf inválido')]) {
+    const d = dbFalso();
+    const r = await probarConexion(d.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk(), respuesta)));
+    assert.deepEqual(r, { ok: true, marcada: true });
+  }
+});
+
+test('probar_conexion: la consulta atendida suma 1 al uso del plan; sin respuesta, sin cupo o rechazada no suma', async () => {
+  const atendida = dbFalso();
+  await probarConexion(atendida.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk(), noEncontrado())));
+  const uso = atendida.rpc.find((x) => x.fn === 'ecf_sumar_uso');
+  assert.deepEqual(uso.args, { p_company: EMPRESA, p_requests: 1, p_comprobantes: 0 });
+
+  for (const respuesta of [res(403, 'no'), res(429, 'sin cupo'), new Error('sin red')]) {
+    const d = dbFalso();
+    await probarConexion(d.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk(), respuesta)));
+    assert.ok(!d.rpc.some((x) => x.fn === 'ecf_sumar_uso'), 'no debía sumar uso');
+  }
+});
+
+test('probar_conexion: sin cupo, sin red o con MSeller caído en la consulta no marca la conexión', async () => {
+  for (const respuesta of [res(429, 'sin cupo'), res(503, 'caído'), new Error('sin red')]) {
+    const d = dbFalso();
+    const r = await probarConexion(d.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk(), respuesta)));
+    assert.equal(r.ok, false);
+    assert.match(r.error, /MSeller/);
+    assert.equal(d.from.length, 0);
+  }
+});
+
+test('probar_conexion: si sumar el uso falla, la prueba igual sale bien', async () => {
+  const d = dbFalso({ rpcs: { ecf_sumar_uso: { data: null, error: { message: 'boom' } } } });
+  const r = await probarConexion(d.client, EMPRESA, 'TesteCF', deps(fetchFalso(loginOk(), noEncontrado())));
+  assert.deepEqual(r, { ok: true, marcada: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -396,7 +473,7 @@ test('administrar despacha probar_conexion: un login fallido sigue siendo HTTP 2
   const bueno = await administrar(
     dbFalso().client,
     { accion: 'probar_conexion', companyId: EMPRESA, ambiente: 'TesteCF' },
-    deps(fetchFalso(loginOk())),
+    deps(fetchFalso(loginOk(), noEncontrado())),
   );
   assert.deepEqual(bueno, { status: 200, cuerpo: { ok: true, marcada: true } });
 
