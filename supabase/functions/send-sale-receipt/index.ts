@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { adjuntoDelCorreo, asuntoDelCorreo, documentoValido, tituloDelCorreo } from '../_shared/documentos.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -81,6 +82,8 @@ Deno.serve(async (req) => {
     const email = body?.email;
     const pdfBase64 = body?.pdfBase64;
     const filename = body?.filename || `recibo_venta_${saleId}.pdf`;
+    // factura (por defecto, como siempre), plan de pagos o estado del financiamiento.
+    const documento = documentoValido(body?.documento);
 
     if (!saleId || !email || !pdfBase64) {
       return json(400, { error: 'Solicitud inválida. Se requiere saleId, email y pdfBase64.' });
@@ -132,14 +135,21 @@ Deno.serve(async (req) => {
     const lugar = mostrarSucursal ? `${companyName} — ${branchName}` : companyName;
     const textoPorDefecto =
       `Le hacemos entrega del comprobante electrónico correspondiente a su compra en <strong>${lugar}</strong>, en fecha ${fechaVenta}.`;
-    const mensaje = (branch?.receipt_email_message ?? '').trim() || textoPorDefecto;
-    const emailSubject = `Comprobante de Compra${sale.ncf ? ` NCF ${sale.ncf}` : ''} - ${companyName}`;
+    // El mensaje que configura la sucursal es el de la factura. El plan y el
+    // estado del financiamiento llevan el suyo: "le hacemos entrega del
+    // comprobante" no describe un plan de pagos.
+    const mensaje = documento === 'plan'
+      ? `Le hacemos llegar el plan de pagos de su compra en <strong>${lugar}</strong>, del ${fechaVenta}.`
+      : documento === 'estado'
+        ? `Le hacemos llegar el estado de su financiamiento con <strong>${lugar}</strong>, por su compra del ${fechaVenta}: las cuotas, los pagos realizados y el balance pendiente.`
+        : (branch?.receipt_email_message ?? '').trim() || textoPorDefecto;
+    const emailSubject = asuntoDelCorreo(documento, companyName, sale.ncf);
     const emailHtml = `
       <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #eee; border-radius: 5px;">
-        <h2 style="color: #4F46E5; border-bottom: 2px solid #F3F4F6; padding-bottom: 10px;">Comprobante de Compra</h2>
+        <h2 style="color: #4F46E5; border-bottom: 2px solid #F3F4F6; padding-bottom: 10px;">${tituloDelCorreo(documento)}</h2>
         <p>Estimado(a) cliente,</p>
         <p>${mensaje}</p>
-        <p>En el archivo adjunto de este correo encontrará su factura en formato PDF.</p>
+        <p>En el archivo adjunto de este correo encontrará ${adjuntoDelCorreo(documento)}.</p>
         <div style="background-color: #F9FAFB; padding: 15px; border-radius: 5px; margin: 20px 0;">
           <table style="width: 100%; border-collapse: collapse;">
             ${mostrarSucursal ? `<tr><td style="padding: 5px 0; font-weight: bold;">Sucursal:</td><td style="padding: 5px 0;">${branchName}</td></tr>` : ''}
@@ -159,6 +169,8 @@ Deno.serve(async (req) => {
 
     return json(200, { ok: true });
   } catch (e: any) {
-    return json(500, { error: e?.message || String(e) });
+    const msg = e?.message || String(e);
+    console.error('send-sale-receipt:', msg);
+    return json(500, { error: msg });
   }
 });

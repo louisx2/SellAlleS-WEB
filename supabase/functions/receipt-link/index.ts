@@ -18,7 +18,12 @@
 // Tampoco se le dan permisos de escritura al cliente sobre el bucket: sube con
 // una URL firmada de un solo uso que se emite aqui, despues de comprobar que la
 // venta es de su empresa. El bucket sigue privado y sin policies.
+//
+// Ademas de la factura comparte el plan de pagos y el estado del
+// financiamiento de la misma venta (`documento`, ver _shared/documentos.ts).
+// Sin `documento` es la factura, exactamente como antes.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { documentoValido, nombreDeDescarga, rutaDelDocumento } from '../_shared/documentos.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -100,6 +105,7 @@ Deno.serve(async (req) => {
     const saleId = body?.saleId;
     if (!saleId) return json(400, { error: 'Se requiere saleId.' });
     const paso = body?.paso === 'enlace' ? 'enlace' : 'subida';
+    const documento = documentoValido(body?.documento);
 
     const { data: sale } = await admin
       .from('sales')
@@ -112,8 +118,9 @@ Deno.serve(async (req) => {
     }
 
     // Ruta por empresa: los archivos quedan separados y es evidente de quien es
-    // cada uno si algun dia hay que limpiar.
-    const ruta = `${sale.company_id}/${sale.id}.pdf`;
+    // cada uno si algun dia hay que limpiar. Cada documento tiene la suya: el
+    // plan no puede sobrescribir el PDF de la factura.
+    const ruta = rutaDelDocumento(sale.company_id, sale.id, documento);
 
     if (paso === 'subida') {
       // upsert para que reimprimir o reenviar el comprobante de la misma venta
@@ -143,17 +150,19 @@ Deno.serve(async (req) => {
       .maybeSingle();
 
     // El nombre de descarga hace que al cliente le llegue "comprobante-B01...pdf"
-    // y no el uuid de la venta.
-    const nombreArchivo = `comprobante${sale.ncf ? `-${sale.ncf}` : ''}.pdf`;
+    // (o "plan-de-pagos.pdf") y no el uuid de la venta.
+    const nombreArchivo = nombreDeDescarga(documento, sale.ncf);
     const empresaSlug = empresa?.link_slug?.trim() || slug(empresa?.name);
     const vence = new Date(Date.now() + DIAS_VALIDEZ * 24 * 60 * 60 * 1000);
 
-    // Si esta venta ya tiene un enlace vigente se reutiliza, para que reenviar
-    // el comprobante no le cambie la direccion al cliente que ya la tiene.
+    // Si este documento ya tiene un enlace vigente se reutiliza, para que
+    // reenviarlo no le cambie la direccion al cliente que ya la tiene. Se busca
+    // por ruta y no por venta: por venta, el plan reutilizaba el codigo de la
+    // factura y el cliente descargaba la factura en vez del plan.
     const { data: existente } = await admin
       .from('receipt_links')
       .select('code')
-      .eq('sale_id', sale.id)
+      .eq('storage_path', ruta)
       .gt('expires_at', new Date().toISOString())
       .order('created_at', { ascending: false })
       .limit(1)
