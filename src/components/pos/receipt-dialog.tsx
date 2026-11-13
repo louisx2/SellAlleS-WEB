@@ -12,57 +12,58 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Loader2, Download, Send, Copy, Link as LinkIcon } from 'lucide-react';
+import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Download } from 'lucide-react';
 import { ReceiptBarcode, ReceiptContent, ReceiptEcf, ReceiptHeader, ReceiptItems, ReceiptTotals } from './receipt-content';
+import { IncluirDatosCliente } from './incluir-datos-cliente';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
+import {
+  BotonEnviarCorreo,
+  DESCRIPCION_CORREO,
+  PanelCorreo,
+  PanelWhatsApp,
+  PREGUNTA_WHATSAPP,
+} from '@/components/sharing/compartir-documento';
+import { useCompartirDocumento } from '@/hooks/use-compartir-documento';
 import { esperarQrEcf } from '@/lib/ecf';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import {
-  shareSalePdfLinkViaWhatsApp,
-  abrirPestanaParaWhatsApp,
-  abrirWhatsAppConEnlace,
-  generateReceiptPdf,
-  downloadReceiptPdfFile,
-  sendReceiptViaResendEmail
-} from '@/lib/receipt-sharing';
-import { useCompanyProfile } from '@/context/company-profile-provider';
-import { useToast } from '@/hooks/use-toast';
 
 interface ReceiptDialogProps {
   sale: Sale | null;
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
+  /** Lo que el cajero marcó al cobrar; aquí se puede volver a cambiar. */
+  incluirDatosClienteInicial?: boolean;
 }
 
 type ActiveScreen = 'receipt' | 'email_confirm' | 'whatsapp_confirm';
 
-export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps) {
+export function ReceiptDialog(props: ReceiptDialogProps) {
+  // Los hooks de compartir necesitan la venta: sin venta no hay diálogo.
+  if (!props.sale) return null;
+  return <ReceiptDialogDeVenta {...props} sale={props.sale} />;
+}
+
+function ReceiptDialogDeVenta({
+  sale,
+  isOpen,
+  onOpenChange,
+  incluirDatosClienteInicial = false,
+}: ReceiptDialogProps & { sale: Sale }) {
   const printRef = useRef<HTMLDivElement>(null);
   const pdfContentRef = useRef<HTMLDivElement>(null);
-  
-  const { toast } = useToast();
-  const { profile } = useCompanyProfile();
-  
+
   const [isPlanOpen, setPlanOpen] = useState(false);
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>('receipt');
-  
-  // Email states
-  const [emailAddress, setEmailAddress] = useState('');
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
-  const [sendingLink, setSendingLink] = useState(false);
-  // Enlace ya generado: se deja a la vista para copiarlo o reabrir el chat si
-  // el navegador bloqueó la pestaña.
-  const [enlace, setEnlace] = useState<{ url: string; diasValidez: number } | null>(null);
+  const [incluirDatosCliente, setIncluirDatosCliente] = useState(incluirDatosClienteInicial);
+  const compartir = useCompartirDocumento({ sale, documento: 'factura', pdfRef: pdfContentRef });
 
-  // Reset screen and prefill email on open
+  // Cada vez que se abre: de vuelta al recibo y con lo que se marcó al cobrar.
   useEffect(() => {
-    if (isOpen && sale) {
+    if (isOpen) {
       setActiveScreen('receipt');
-      setEmailAddress(sale.customer?.email || '');
-      setEnlace(null);
+      setIncluirDatosCliente(incluirDatosClienteInicial);
     }
-  }, [isOpen, sale]);
+  }, [isOpen, sale.id, incluirDatosClienteInicial]);
 
   const handlePrint = useReactToPrint({
     content: () => printRef.current,
@@ -71,117 +72,6 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
     onBeforeGetContent: () => esperarQrEcf(printRef.current),
   });
 
-  if (!sale) return null;
-
-  const filename = `factura_${sale.ncf || sale.id.slice(0, 8)}.pdf`;
-
-  // Sube el PDF y abre WhatsApp con el enlace de descarga. WhatsApp no deja
-  // adjuntar archivos desde un enlace, así que esta es la única forma de que el
-  // cajero no tenga que descargar y adjuntar a mano.
-  const handleSharePdfLink = async () => {
-    if (!pdfContentRef.current) return;
-    // Se abre YA, dentro del clic. Generar y subir el PDF tarda más de lo que
-    // dura el permiso del navegador para abrir ventanas, así que dejarlo para
-    // el final hace que la bloquee.
-    const ventana = abrirPestanaParaWhatsApp();
-    setSendingLink(true);
-    try {
-      const pdfBase64 = await generateReceiptPdf(pdfContentRef.current, filename);
-      const { url, diasValidez, abrioWhatsApp } = await shareSalePdfLinkViaWhatsApp(
-        sale.id, pdfBase64, sale, profile.name, ventana,
-      );
-      setEnlace({ url, diasValidez });
-      toast({
-        title: abrioWhatsApp ? 'WhatsApp abierto con el mensaje listo' : 'Enlace listo',
-        description: abrioWhatsApp
-          ? `Revísalo y dale enviar. El enlace de descarga del PDF funciona por ${diasValidez} días.`
-          : `Dale a "Abrir WhatsApp" para mandarlo. El enlace funciona por ${diasValidez} días.`,
-      });
-    } catch (error: any) {
-      console.error(error);
-      ventana?.close();
-      toast({
-        title: 'No se pudo generar el enlace',
-        description: error?.message || 'Intenta de nuevo.',
-        variant: 'destructive',
-      });
-    } finally {
-      setSendingLink(false);
-    }
-  };
-
-  const handleCopiarEnlace = async () => {
-    if (!enlace) return;
-    try {
-      await navigator.clipboard.writeText(enlace.url);
-      toast({ title: 'Enlace copiado', description: 'Ya puedes pegarlo donde lo necesites.' });
-    } catch {
-      toast({
-        title: 'No se pudo copiar',
-        description: 'Selecciona el enlace y cópialo a mano.',
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleSendEmail = async () => {
-    if (!emailAddress.trim() || !emailAddress.includes('@')) {
-      toast({
-        title: 'Correo inválido',
-        description: 'Por favor ingrese una dirección de correo electrónico válida.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsSendingEmail(true);
-    try {
-      if (!pdfContentRef.current) {
-        throw new Error('No se pudo ubicar el elemento de la factura para generar el PDF.');
-      }
-      
-      // 1. Generate PDF in background
-      const pdfBase64 = await generateReceiptPdf(pdfContentRef.current, filename);
-      
-      // 2. Call Edge Function to send email
-      await sendReceiptViaResendEmail(sale.id, emailAddress.trim(), pdfBase64, filename, sale, profile.name);
-      
-      toast({
-        title: '¡Correo enviado!',
-        description: `El comprobante se envió correctamente a ${emailAddress}.`,
-      });
-      setActiveScreen('receipt');
-    } catch (error: any) {
-      console.error(error);
-      toast({
-        title: 'Error al enviar correo',
-        description: error?.message || 'No se pudo enviar el correo. Intenta de nuevo.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSendingEmail(false);
-    }
-  };
-
-  const handleDownloadPdf = async () => {
-    try {
-      if (!pdfContentRef.current) {
-        throw new Error('No se pudo ubicar el elemento de la factura.');
-      }
-      await downloadReceiptPdfFile(pdfContentRef.current, filename);
-      toast({
-        title: 'Descarga iniciada',
-        description: 'La factura en PDF se ha descargado correctamente.',
-      });
-    } catch (error: any) {
-      toast({
-        title: 'Error al generar PDF',
-        description: error?.message || 'No se pudo descargar el archivo PDF.',
-        variant: 'destructive',
-      });
-    }
-  };
-
   return (
     <>
     <Dialog open={isOpen && !isPlanOpen} onOpenChange={onOpenChange}>
@@ -189,7 +79,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
         {activeScreen === 'receipt' && (
           <>
             <DialogHeader className="p-6 pb-2">
-                <ReceiptHeader sale={sale} />
+                <ReceiptHeader sale={sale} showCustomerInfo={incluirDatosCliente} />
             </DialogHeader>
 
             <ScrollArea className="flex-grow px-6">
@@ -198,6 +88,12 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
 
             <div className="px-6 pb-6 border-t pt-4">
               <ReceiptTotals sale={sale} />
+              <IncluirDatosCliente
+                className="mt-4"
+                customer={sale.customer}
+                checked={incluirDatosCliente}
+                onCheckedChange={setIncluirDatosCliente}
+              />
             </div>
 
             <DialogFooter className="flex-col sm:flex-row gap-2 p-4 border-t bg-secondary/50">
@@ -226,7 +122,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                 {/* Vivía dentro de "Descargar PDF y abrir chat", en el diálogo
                     de WhatsApp. Al quitar esa opción era la única forma de
                     guardar el PDF en el dispositivo, así que sube al pie. */}
-                <Button variant="outline" size="sm" onClick={handleDownloadPdf}>
+                <Button variant="outline" size="sm" onClick={compartir.descargarPdf}>
                   <Download className="mr-1.5 h-4 w-4" />
                   Descargar PDF
                 </Button>
@@ -253,44 +149,17 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                 </Button>
                 <DialogTitle>Enviar por Correo</DialogTitle>
               </div>
-              <DialogDescription>
-                Se generará la factura en PDF y se enviará al correo del cliente.
-              </DialogDescription>
-              
-              <div className="space-y-2 pt-2">
-                <label className="text-sm font-medium">Correo del destinatario:</label>
-                <Input
-                  type="email"
-                  placeholder="ejemplo@correo.com"
-                  value={emailAddress}
-                  onChange={(e) => setEmailAddress(e.target.value)}
-                  disabled={isSendingEmail}
-                />
-                {sale.customer && sale.customer.id !== '0' && (
-                  <p className="text-xs text-muted-foreground">
-                    {sale.customer.email ? '✓ Correo registrado del cliente.' : '⚠ El cliente no tiene correo registrado.'}
-                  </p>
-                )}
+              <DialogDescription>{DESCRIPCION_CORREO.factura}</DialogDescription>
+              <div className="pt-2">
+                <PanelCorreo c={compartir} />
               </div>
             </div>
 
             <div className="flex gap-2 pt-4 border-t mt-auto">
-              <Button variant="outline" onClick={() => setActiveScreen('receipt')} className="flex-1" disabled={isSendingEmail}>
+              <Button variant="outline" onClick={() => setActiveScreen('receipt')} className="flex-1" disabled={compartir.enviandoCorreo}>
                 Volver
               </Button>
-              <Button onClick={handleSendEmail} className="flex-1" disabled={isSendingEmail}>
-                {isSendingEmail ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Enviando...
-                  </>
-                ) : (
-                  <>
-                    <Send className="mr-2 h-4 w-4" />
-                    Enviar Correo
-                  </>
-                )}
-              </Button>
+              <BotonEnviarCorreo c={compartir} className="flex-1" onEnviado={() => setActiveScreen('receipt')} />
             </div>
           </div>
         )}
@@ -304,55 +173,9 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
                 </Button>
                 <DialogTitle>Compartir por WhatsApp</DialogTitle>
               </div>
-              <DialogDescription>
-                ¿Cómo deseas compartir el comprobante de esta venta?
-              </DialogDescription>
-
-              <div className="flex flex-col gap-3 pt-4">
-                {/* whitespace-normal: el Button base trae whitespace-nowrap y
-                    estas descripciones largas se salían del botón. */}
-                <Button
-                  variant="outline"
-                  className="justify-start h-auto py-3 px-4 whitespace-normal border-emerald-200 dark:border-emerald-900"
-                  disabled={sendingLink}
-                  onClick={handleSharePdfLink}
-                >
-                  <div className="text-left">
-                    <p className="font-semibold flex items-center">
-                      <LinkIcon className="mr-2 h-4 w-4 shrink-0" />
-                      {sendingLink ? 'Generando enlace...' : 'Enlace de descarga del PDF'}
-                    </p>
-                    <p className="text-xs text-muted-foreground font-normal mt-0.5">
-                      Abre el chat del cliente en WhatsApp con un mensaje listo que incluye el enlace
-                      para descargar la factura en PDF. El enlace funciona por 15 días.
-                    </p>
-                  </div>
-                </Button>
-
-                {enlace && (
-                  <div className="rounded-md border bg-muted/40 p-3 space-y-2">
-                    <p className="text-xs text-muted-foreground">
-                      Enlace generado (válido por {enlace.diasValidez} días):
-                    </p>
-                    <p className="text-xs break-all font-mono">{enlace.url}</p>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm" className="flex-1" onClick={handleCopiarEnlace}>
-                        <Copy className="mr-1.5 h-3.5 w-3.5" />
-                        Copiar enlace
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="flex-1"
-                        onClick={() => abrirWhatsAppConEnlace(sale, enlace.url, enlace.diasValidez, profile.name)}
-                      >
-                        <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
-                        Abrir WhatsApp
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
+              <DialogDescription>{PREGUNTA_WHATSAPP.factura}</DialogDescription>
+              <div className="pt-4">
+                <PanelWhatsApp c={compartir} />
               </div>
             </div>
 
@@ -374,7 +197,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
             final de los totales. */}
         <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
           <div ref={pdfContentRef} className="bg-white text-black w-[100mm] p-4 space-y-4">
-            <ReceiptHeader sale={sale} />
+            <ReceiptHeader sale={sale} showCustomerInfo={incluirDatosCliente} />
             <ReceiptItems sale={sale} />
             <div className="border-t pt-3">
               <ReceiptTotals sale={sale} />
@@ -387,7 +210,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
         {/* Hidden component for printing */}
         <div className="hidden">
             <div ref={printRef} className="receipt-container">
-                <ReceiptContent sale={sale} />
+                <ReceiptContent sale={sale} showCustomerInfo={incluirDatosCliente} />
             </div>
         </div>
       </DialogContent>

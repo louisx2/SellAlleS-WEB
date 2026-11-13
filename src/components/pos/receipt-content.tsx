@@ -9,6 +9,8 @@ import { Separator } from '@/components/ui/separator';
 import { Badge } from '../ui/badge';
 import { cn } from '@/lib/utils';
 import { useState, useEffect } from 'react';
+import { useCompanyProfile } from '@/context/company-profile-provider';
+import { lineasDatosCliente } from '@/lib/datos-cliente';
 
 interface ReceiptProps {
   sale: Sale;
@@ -29,10 +31,21 @@ const paymentMethodText = {
   financing: 'Financiamiento'
 };
 
-export function ReceiptHeader({ sale }: ReceiptProps) {
+interface ReceiptHeaderProps extends ReceiptProps {
+  /** El cajero marcó "Incluir datos del cliente en la factura". Solo surte
+   *  efecto si la empresa tiene la opción encendida en Ajustes. */
+  showCustomerInfo?: boolean;
+}
+
+export function ReceiptHeader({ sale, showCustomerInfo = false }: ReceiptHeaderProps) {
   // Perfil efectivo del ticket: datos de la sucursal donde se hizo la venta
   // (sale.branchId guarda el nombre), con herencia de la empresa por campo.
   const profile = useTicketProfile(sale.branchId);
+  const { profile: company } = useCompanyProfile();
+  // Para el chofer que entrega: dirección, teléfono... lo que la empresa eligió.
+  const datosCliente = showCustomerInfo && company.receiptCustomerInfoEnabled
+    ? lineasDatosCliente(sale.customer, company.receiptCustomerFields)
+    : [];
 
   return (
     <div className="text-left space-y-1">
@@ -60,6 +73,11 @@ export function ReceiptHeader({ sale }: ReceiptProps) {
        <div className="text-left pt-1 text-xs">
           <p className="font-semibold uppercase">CLIENTE: {sale.customer?.name ?? 'Consumidor Final'}</p>
           {sale.customer?.rnc && <p><span className="font-semibold uppercase">RNC:</span> {sale.customer.rnc}</p>}
+          {datosCliente.map((l) => (
+            <p key={l.etiqueta} className="break-words">
+              <span className="font-semibold uppercase">{l.etiqueta}:</span> {l.valor}
+            </p>
+          ))}
        </div>
        {/* Solo las ventas que pidieron comprobante llevan NCF. Imprimir
            "NCF: N/A" en las demás hacía parecer que el fiscal falló. Un e-NCF
@@ -356,12 +374,12 @@ export function ReceiptEcf({ sale, className }: ReceiptProps & { className?: str
   );
 }
 
-export function ReceiptContent({ sale }: ReceiptProps) {
+export function ReceiptContent({ sale, showCustomerInfo = false }: ReceiptHeaderProps) {
   const profile = useTicketProfile(sale.branchId);
 
   return (
      <div className="space-y-4">
-        <ReceiptHeader sale={sale} />
+        <ReceiptHeader sale={sale} showCustomerInfo={showCustomerInfo} />
         <ReceiptItems sale={sale} />
         <div className="pt-2">
             <ReceiptTotals sale={sale} />

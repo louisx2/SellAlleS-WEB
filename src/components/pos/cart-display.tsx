@@ -96,6 +96,7 @@ export function CartDisplay() {
   const [isCheckoutOpen, setCheckoutOpen] = useState(false);
   const [isQuoteOpen, setQuoteOpen] = useState(false);
   const [completedSale, setCompletedSale] = useState<Sale | null>(null);
+  const [incluirDatosCliente, setIncluirDatosCliente] = useState(false);
   const [isCustomerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [isCouponSearchOpen, setCouponSearchOpen] = useState(false);
   const isMobile = useIsMobile();
@@ -104,7 +105,8 @@ export function CartDisplay() {
   const activeCart = carts.find(cart => cart.id === activeCartId);
   const hasStockError = activeCart?.items.some(item => exceedsStock(item, activeCart.items)) || false;
   
-  const handleSaleComplete = (sale: Sale) => {
+  const handleSaleComplete = (sale: Sale, opciones: { incluirDatosCliente: boolean }) => {
+    setIncluirDatosCliente(opciones.incluirDatosCliente);
     setCompletedSale(sale);
   };
   
@@ -408,6 +410,7 @@ export function CartDisplay() {
         sale={completedSale} 
         isOpen={!!completedSale} 
         onOpenChange={() => setCompletedSale(null)} 
+        incluirDatosClienteInicial={incluirDatosCliente}
       />
       <CustomerSearchDialog
         isOpen={isCustomerSearchOpen}

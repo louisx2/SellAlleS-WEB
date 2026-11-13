@@ -8,6 +8,9 @@ import { rowToCompanyProfile, companyProfileToRow } from '@/lib/supabase/mappers
 interface CompanyProfileContextType {
   profile: CompanyProfile;
   updateProfile: (profile: CompanyProfile) => void;
+  /** Pone al día el perfil en memoria sin escribir en la base: para las
+   *  tarjetas de Ajustes que guardan sus columnas por su cuenta. */
+  mergeProfile: (partial: Partial<CompanyProfile>) => void;
 }
 
 const EMPTY: CompanyProfile = {
@@ -15,6 +18,7 @@ const EMPTY: CompanyProfile = {
   isFormalized: false, ncfEnabled: false, ecfActiva: false,
   socialMedia: { instagram: '', facebook: '' }, email: '', logoUrl: '', ticketLogoUrl: '', receiptFooter: '',
   ticketNameDisplay: 'company', headerNameDisplay: 'company', ticketSocialDisplay: 'company', linkSlug: '',
+  receiptCustomerInfoEnabled: false, receiptCustomerFields: ['address', 'phone'],
   // Los mismos defaults que las columnas en la base: mora fija del 5% por cuota
   // vencida, sin gracia y sin tope, que es como se ha cobrado siempre.
   lateFeeRate: 5, lateFeeMode: 'once', lateFeeGraceDays: 0, lateFeeMaxRate: 0,
@@ -72,8 +76,12 @@ export function CompanyProfileProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const mergeProfile = (partial: Partial<CompanyProfile>) => {
+    setProfile((prev) => ({ ...prev, ...partial }));
+  };
+
   return (
-    <CompanyProfileContext.Provider value={{ profile, updateProfile }}>
+    <CompanyProfileContext.Provider value={{ profile, updateProfile, mergeProfile }}>
       {children}
     </CompanyProfileContext.Provider>
   );

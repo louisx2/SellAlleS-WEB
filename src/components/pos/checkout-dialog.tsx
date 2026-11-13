@@ -33,6 +33,8 @@ import { useCaja } from '@/context/caja-provider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { IncluirDatosCliente } from './incluir-datos-cliente';
+import { clienteVigente } from '@/lib/datos-cliente';
 import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { supabase } from '@/lib/supabase/client';
 import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
@@ -43,7 +45,9 @@ import { Loader2 } from 'lucide-react';
 interface CheckoutDialogProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
-  onSaleComplete: (sale: Sale) => void;
+  /** `incluirDatosCliente`: lo que el cajero marcó en la casilla; la factura que
+   *  se abre después arranca con eso. */
+  onSaleComplete: (sale: Sale, opciones: { incluirDatosCliente: boolean }) => void;
 }
 
 export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: CheckoutDialogProps) {
@@ -70,6 +74,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   const [downPaymentMethod, setDownPaymentMethod] = useState<'cash' | 'card' | 'transfer'>('cash');
   const [downPaymentReference, setDownPaymentReference] = useState('');
   const [saleNotes, setSaleNotes] = useState('');
+  const [incluirDatosCliente, setIncluirDatosCliente] = useState(false);
   const [change, setChange] = useState(0);
   // Guardar la venta tarda: inserta en la base, relee inventario y a veces
   // clientes. En ese hueco el cajero cree que no respondió y vuelve a tocar.
@@ -164,6 +169,8 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       setDownPaymentMethod(cashBlocked ? 'card' : 'cash');
       setDownPaymentReference('');
       setSaleNotes('');
+      // Los datos del cliente se piden venta por venta (las que van con chofer).
+      setIncluirDatosCliente(false);
       // Cada venta arranca sin comprobante: se pide a propósito, no por inercia.
       setNcfRequested(false);
       setNcfType(activeCart?.selectedCustomer?.ncfType ?? 'consumer');
@@ -280,7 +287,12 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
         await reloadCustomers(); // el balance lo escribió el trigger
       }
 
-      onSaleComplete(savedSale);
+      // La factura con el cliente como está en la base: el carrito guarda una
+      // copia, y la dirección pudo agregarse en Clientes después de elegirlo.
+      onSaleComplete(
+        { ...savedSale, customer: clienteVigente(customers, savedSale.customer) },
+        { incluirDatosCliente },
+      );
       completeSale(); // Signal that a sale has been completed, this will clear the active cart
       onOpenChange(false);
 
@@ -656,6 +668,12 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                         )}
                     </div>
                 )}
+
+                <IncluirDatosCliente
+                    customer={clienteVigente(customers, activeCart?.selectedCustomer)}
+                    checked={incluirDatosCliente}
+                    onCheckedChange={setIncluirDatosCliente}
+                />
 
                 <div>
                     <Label htmlFor="sale-notes">Notas de la Venta (Opcional)</Label>
