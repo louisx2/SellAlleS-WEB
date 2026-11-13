@@ -2,6 +2,7 @@ import type { Product, ProductPresentation, LinePresentation, Customer, Branch, 
 import { isUuid } from '@/lib/utils';
 import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
+import { normalizarCamposCliente } from '@/lib/datos-cliente';
 
 // ---------- Role ----------
 export const rowToRole = (r: any): Role => ({
@@ -345,6 +346,11 @@ export const rowToCompanyProfile = (r: any, ecfActiva = false): CompanyProfile =
   headerNameDisplay: (r.header_name_display ?? 'company') as CompanyProfile['headerNameDisplay'],
   ticketSocialDisplay: (r.ticket_social_display ?? 'company') as CompanyProfile['ticketSocialDisplay'],
   linkSlug: r.link_slug ?? '',
+  receiptCustomerInfoEnabled: !!r.receipt_customer_info_enabled,
+  // Sin la columna (lectura vieja en caché) se usa el mismo default que la base.
+  receiptCustomerFields: r.receipt_customer_fields != null
+    ? normalizarCamposCliente(r.receipt_customer_fields)
+    : ['address', 'phone'],
   lateFeeRate: Number(r.late_fee_rate ?? 5),
   lateFeeMode: (r.late_fee_mode ?? 'once') as CompanyProfile['lateFeeMode'],
   lateFeeGraceDays: Number(r.late_fee_grace_days ?? 0),

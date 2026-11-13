@@ -2,6 +2,7 @@ import type { UnitCode } from './units';
 import type { InterestMode, PaymentFrequency } from './frequency';
 import type { LateFeeMode } from './late-fee';
 import type { MotivoBloqueo } from './bloqueo';
+import type { CampoCliente } from './datos-cliente';
 
 export type { InterestMode, PaymentFrequency } from './frequency';
 export type { LateFeeMode } from './late-fee';
@@ -560,6 +561,10 @@ export type CompanyProfile = {
   // Cómo se ve el negocio en el enlace del comprobante que va por WhatsApp:
   // sellalles.com/<linkSlug>/c/7Kq2Wp. Vacío = se deriva del nombre.
   linkSlug: string;
+  // Datos del cliente en la factura (caso del chofer que entrega). Encendido, el
+  // pago ofrece una casilla para incluirlos; los campos dicen cuáles salen.
+  receiptCustomerInfoEnabled: boolean;
+  receiptCustomerFields: CampoCliente[];
   lateFeeRate: number;         // % de mora sobre la cuota vencida
   lateFeeMode: LateFeeMode;    // cómo corre esa mora (ver src/lib/late-fee.ts)
   lateFeeGraceDays: number;    // días después del vencimiento antes de cobrarla
