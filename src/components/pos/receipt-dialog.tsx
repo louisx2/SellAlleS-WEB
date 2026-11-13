@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Loader2, Download, Send, Copy, Link as LinkIcon } from 'lucide-react';
 import { ReceiptBarcode, ReceiptContent, ReceiptEcf, ReceiptHeader, ReceiptItems, ReceiptTotals } from './receipt-content';
+import { IncluirDatosCliente } from './incluir-datos-cliente';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import { esperarQrEcf } from '@/lib/ecf';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -33,11 +34,13 @@ interface ReceiptDialogProps {
   sale: Sale | null;
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
+  /** Lo que el cajero marcó al cobrar; aquí se puede volver a cambiar. */
+  incluirDatosClienteInicial?: boolean;
 }
 
 type ActiveScreen = 'receipt' | 'email_confirm' | 'whatsapp_confirm';
 
-export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps) {
+export function ReceiptDialog({ sale, isOpen, onOpenChange, incluirDatosClienteInicial = false }: ReceiptDialogProps) {
   const printRef = useRef<HTMLDivElement>(null);
   const pdfContentRef = useRef<HTMLDivElement>(null);
   
@@ -54,6 +57,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
   // Enlace ya generado: se deja a la vista para copiarlo o reabrir el chat si
   // el navegador bloqueó la pestaña.
   const [enlace, setEnlace] = useState<{ url: string; diasValidez: number } | null>(null);
+  const [incluirDatosCliente, setIncluirDatosCliente] = useState(incluirDatosClienteInicial);
 
   // Reset screen and prefill email on open
   useEffect(() => {
@@ -61,8 +65,9 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
       setActiveScreen('receipt');
       setEmailAddress(sale.customer?.email || '');
       setEnlace(null);
+      setIncluirDatosCliente(incluirDatosClienteInicial);
     }
-  }, [isOpen, sale]);
+  }, [isOpen, sale, incluirDatosClienteInicial]);
 
   const handlePrint = useReactToPrint({
     content: () => printRef.current,
@@ -189,7 +194,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
         {activeScreen === 'receipt' && (
           <>
             <DialogHeader className="p-6 pb-2">
-                <ReceiptHeader sale={sale} />
+                <ReceiptHeader sale={sale} showCustomerInfo={incluirDatosCliente} />
             </DialogHeader>
 
             <ScrollArea className="flex-grow px-6">
@@ -198,6 +203,12 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
 
             <div className="px-6 pb-6 border-t pt-4">
               <ReceiptTotals sale={sale} />
+              <IncluirDatosCliente
+                className="mt-4"
+                customer={sale.customer}
+                checked={incluirDatosCliente}
+                onCheckedChange={setIncluirDatosCliente}
+              />
             </div>
 
             <DialogFooter className="flex-col sm:flex-row gap-2 p-4 border-t bg-secondary/50">
@@ -374,7 +385,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
             final de los totales. */}
         <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
           <div ref={pdfContentRef} className="bg-white text-black w-[100mm] p-4 space-y-4">
-            <ReceiptHeader sale={sale} />
+            <ReceiptHeader sale={sale} showCustomerInfo={incluirDatosCliente} />
             <ReceiptItems sale={sale} />
             <div className="border-t pt-3">
               <ReceiptTotals sale={sale} />
@@ -387,7 +398,7 @@ export function ReceiptDialog({ sale, isOpen, onOpenChange }: ReceiptDialogProps
         {/* Hidden component for printing */}
         <div className="hidden">
             <div ref={printRef} className="receipt-container">
-                <ReceiptContent sale={sale} />
+                <ReceiptContent sale={sale} showCustomerInfo={incluirDatosCliente} />
             </div>
         </div>
       </DialogContent>

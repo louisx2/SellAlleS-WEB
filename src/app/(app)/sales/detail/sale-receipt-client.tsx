@@ -23,6 +23,7 @@ import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useToast } from '@/hooks/use-toast';
 import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { SalePaymentsCard } from '@/components/sales/sale-payments-card';
+import { IncluirDatosCliente } from '@/components/pos/incluir-datos-cliente';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -82,6 +83,8 @@ export default function SaleReceiptClient() {
   // Enlace ya generado: se deja a la vista para copiarlo o reabrir el chat si
   // el navegador bloqueó la pestaña.
   const [enlace, setEnlace] = useState<{ url: string; diasValidez: number } | null>(null);
+  // No se guarda en la venta: al reimprimir para el chofer se vuelve a marcar.
+  const [incluirDatosCliente, setIncluirDatosCliente] = useState(false);
 
   useEffect(() => {
     if (baseSale) {
@@ -390,8 +393,14 @@ export default function SaleReceiptClient() {
         <CardHeader className="print:hidden" />
         <CardContent>
             <div ref={receiptRef} className="receipt-container">
-                <ReceiptContent sale={sale} />
+                <ReceiptContent sale={sale} showCustomerInfo={incluirDatosCliente} />
             </div>
+            <IncluirDatosCliente
+              className="mt-4 print:hidden"
+              customer={sale.customer}
+              checked={incluirDatosCliente}
+              onCheckedChange={setIncluirDatosCliente}
+            />
         </CardContent>
         <CardFooter className="flex-wrap justify-end gap-2 print:hidden">
             <Button variant="outline" size="sm" onClick={handlePrint}>
@@ -566,7 +575,7 @@ export default function SaleReceiptClient() {
           los totales. */}
       <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
         <div ref={pdfContentRef} className="bg-white text-black w-[100mm] p-4 space-y-4">
-          <ReceiptHeader sale={sale} />
+          <ReceiptHeader sale={sale} showCustomerInfo={incluirDatosCliente} />
           <ReceiptItems sale={sale} />
           <div className="border-t pt-3">
             <ReceiptTotals sale={sale} />
