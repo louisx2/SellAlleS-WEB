@@ -158,13 +158,11 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
           ))}
         </tbody>
       </table>
-      <div className="pt-10 grid grid-cols-2 gap-6 text-xs text-center">
-        <div>
-          <div className="border-t border-foreground/60 pt-1">Firma del Cliente</div>
-        </div>
-        <div>
-          <div className="border-t border-foreground/60 pt-1">Por {profile.name}</div>
-        </div>
+      {/* Una debajo de la otra: lado a lado, en un ticket de 80 mm, cada firma
+          quedaba en menos de la mitad del ancho y no cabía. */}
+      <div className="pt-10 flex flex-col gap-10 text-xs text-center">
+        <div className="border-t border-foreground/60 pt-1">Firma del Cliente</div>
+        <div className="border-t border-foreground/60 pt-1">Por {profile.name}</div>
       </div>
       {profile.receiptFooter && (
         <p className="text-xs text-center text-muted-foreground pt-4">{profile.receiptFooter}</p>
