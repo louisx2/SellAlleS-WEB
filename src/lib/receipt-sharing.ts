@@ -1,6 +1,7 @@
 import type { Sale } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { esperarQrEcf } from '@/lib/ecf';
+import { mensajeWhatsApp, type DocumentoVenta } from '@/lib/documentos-venta';
 
 
 /** Normaliza el teléfono del cliente al formato que espera WhatsApp. */
@@ -102,6 +103,7 @@ export async function shareSalePdfLinkViaWhatsApp(
   sale: Sale,
   companyName?: string,
   ventana?: Window | null,
+  documento: DocumentoVenta = 'factura',
 ): Promise<{ url: string; diasValidez: number; abrioWhatsApp: boolean }> {
   // El PDF NO viaja dentro del JSON de la función: por ahí no cabía y la
   // petición ni siquiera llegaba ("Failed to send a request to the Edge
@@ -118,7 +120,8 @@ export async function shareSalePdfLinkViaWhatsApp(
   // de un objeto que todavía no existe (responde "Object not found"), así que
   // primero se pide el permiso de subida, se sube, y recién ahí se pide el
   // enlace.
-  const subida = await llamarReceiptLink({ saleId });
+  // Cada documento (factura, plan, estado) tiene su archivo y su enlace.
+  const subida = await llamarReceiptLink({ saleId, documento });
   const { ruta, uploadToken } = subida as { ruta: string; uploadToken: string };
 
   const { error: upErr } = await supabase.storage
@@ -129,24 +132,15 @@ export async function shareSalePdfLinkViaWhatsApp(
     });
   if (upErr) throw new Error(`No se pudo guardar el PDF: ${upErr.message}`);
 
-  const enlace = await llamarReceiptLink({ saleId, paso: 'enlace' });
+  const enlace = await llamarReceiptLink({ saleId, paso: 'enlace', documento });
   const { url, diasValidez } = enlace as { url: string; diasValidez: number };
 
   const abrioWhatsApp = abrirWhatsApp(
-    mensajeConEnlace(url, diasValidez, companyName),
+    mensajeWhatsApp(documento, url, diasValidez, companyName),
     telefonoParaWhatsApp(sale),
     ventana,
   );
   return { url, diasValidez, abrioWhatsApp };
-}
-
-function mensajeConEnlace(url: string, diasValidez: number, companyName?: string) {
-  const negocio = companyName ?? 'nuestro negocio';
-  return (
-    `¡Gracias por su compra en ${negocio}!\n\n` +
-    `Aquí puede descargar su comprobante en PDF:\n${url}\n\n` +
-    `El enlace estará disponible por ${diasValidez} días.`
-  );
 }
 
 /** Reintento manual: el enlace ya está generado y solo falta abrir el chat.
@@ -156,13 +150,14 @@ export function abrirWhatsAppConEnlace(
   url: string,
   diasValidez: number,
   companyName?: string,
+  documento: DocumentoVenta = 'factura',
 ) {
-  abrirWhatsApp(mensajeConEnlace(url, diasValidez, companyName), telefonoParaWhatsApp(sale));
+  abrirWhatsApp(mensajeWhatsApp(documento, url, diasValidez, companyName), telefonoParaWhatsApp(sale));
 }
 
 /** Llama a la Edge Function y desenreda los dos sitios donde puede venir el
  *  error: el transporte (`error`) y el cuerpo de la respuesta (`data.error`). */
-async function llamarReceiptLink(body: { saleId: string; paso?: 'enlace' }) {
+async function llamarReceiptLink(body: { saleId: string; paso?: 'enlace'; documento: DocumentoVenta }) {
   const { data, error } = await supabase.functions.invoke('receipt-link', { body });
   const msg = (data as { error?: string } | null)?.error ?? error?.message;
   if (msg) throw new Error(msg);
@@ -279,7 +274,8 @@ export async function sendReceiptViaResendEmail(
   pdfBase64: string,
   filename: string,
   sale?: Sale,
-  companyName?: string
+  companyName?: string,
+  documento: DocumentoVenta = 'factura',
 ): Promise<void> {
   const { data, error } = await supabase.functions.invoke('send-sale-receipt', {
     body: {
@@ -287,6 +283,8 @@ export async function sendReceiptViaResendEmail(
       email,
       pdfBase64,
       filename,
+      // factura (por defecto), plan de pagos o estado: cambia el asunto y el texto.
+      documento,
     },
   });
 
