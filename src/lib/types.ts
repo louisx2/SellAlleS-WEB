@@ -823,6 +823,16 @@ export type Supplier = {
     email: string;
     address: string;
     rnc?: string;
+    /** Nombre comercial (la DGII lo trae con el RNC). */
+    tradeName?: string;
+    /** Plazo que da el proveedor: 0 = contado, null = sin plazo. */
+    creditDays?: number | null;
+    /** Tipo de gasto del 606 (01-11) que trae su factura en Cuentas por Pagar. */
+    expenseType606?: string;
+    bankName?: string;
+    bankAccountType?: 'ahorro' | 'corriente' | null;
+    bankAccountNumber?: string;
+    notes?: string;
 };
 
 // Gasto del negocio. Los campos fiscales son opcionales: un gasto con NCF y

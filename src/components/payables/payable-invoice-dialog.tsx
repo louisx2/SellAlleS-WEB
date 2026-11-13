@@ -30,6 +30,7 @@ import { formatCurrency, ITBIS_RATE } from '@/lib/utils';
 import { formatQty, getUnit, unitAllowsDecimals } from '@/lib/units';
 import { presentationLabel, presentationsOf } from '@/lib/presentations';
 import { EXPENSE_TYPES_606, ISR_RETENTION_TYPES_606, PAYMENT_FORMS_606, suggestPaymentForm606 } from '@/lib/dgii-606';
+import { condicionesDelProveedor, vencimientoAlCambiarFecha } from '@/lib/proveedores';
 import { ChevronsUpDown, Loader2, Plus, Trash2 } from 'lucide-react';
 
 interface PayableInvoiceDialogProps {
@@ -130,6 +131,22 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
     setPropinaLegal('');
     setItems([]);
   }, [open, cashBlocked]);
+
+  // Elegir el proveedor trae sus condiciones (plazo y tipo de gasto del 606).
+  const proveedorElegido = suppliers.find((s) => s.id === supplierId);
+  const elegirProveedor = (id: string) => {
+    setSupplierId(id);
+    const c = condicionesDelProveedor(suppliers.find((s) => s.id === id), issueDate);
+    setCondition(c.condition);
+    setDueDate(c.dueDate);
+    setExpenseType(c.expenseType);
+  };
+  // El vencimiento que se calculó con el plazo sigue a la fecha del comprobante.
+  const cambiarFecha = (nueva: string) => {
+    const v = vencimientoAlCambiarFecha(proveedorElegido?.creditDays, issueDate, nueva, dueDate);
+    setIssueDate(nueva);
+    if (v) setDueDate(v);
+  };
 
   // Forma de pago 606 sugerida según cómo se registra la operación.
   useEffect(() => {
@@ -419,7 +436,7 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label htmlFor="pi-supplier">Suplidor</Label>
-              <Select value={supplierId} onValueChange={setSupplierId}>
+              <Select value={supplierId} onValueChange={elegirProveedor}>
                 <SelectTrigger id="pi-supplier"><SelectValue placeholder="Selecciona un suplidor" /></SelectTrigger>
                 <SelectContent>
                   {suppliers.map((s) => (
@@ -434,7 +451,7 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
             </div>
             <div className="space-y-2">
               <Label htmlFor="pi-date">Fecha del comprobante</Label>
-              <Input id="pi-date" type="date" value={issueDate} onChange={(e) => setIssueDate(e.target.value)} required />
+              <Input id="pi-date" type="date" value={issueDate} onChange={(e) => cambiarFecha(e.target.value)} required />
             </div>
             <div className="space-y-2">
               <Label htmlFor="pi-condition">Condición de pago</Label>
@@ -450,6 +467,11 @@ export function PayableInvoiceDialog({ children }: PayableInvoiceDialogProps) {
               <div className="space-y-2">
                 <Label htmlFor="pi-due">Fecha de vencimiento</Label>
                 <Input id="pi-due" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} min={issueDate} />
+                {!!proveedorElegido?.creditDays && (
+                  <p className="text-xs text-muted-foreground">
+                    {proveedorElegido.creditDays} días de crédito de este proveedor.
+                  </p>
+                )}
               </div>
             ) : (
               <>
