@@ -60,6 +60,7 @@ export default function ReportsDashboardPage() {
     [appUser?.baseRolePermissions, appUser?.customRoles],
   );
   const showQuickSalesReport = isModuleEnabled('quick-sales') && isReportVisible(effectivePermissions, 'ventas-rapidas');
+  const showCommissionsReport = isModuleEnabled('commissions') && isReportVisible(effectivePermissions, 'comisiones');
 
   // --- Filtrado por Sucursal (las ventas anuladas no cuentan como ingreso) ---
   const filteredSales = React.useMemo(() => {
@@ -336,16 +337,42 @@ export default function ReportsDashboardPage() {
           )}
 
           <Link href="/reports/top-products">
-            <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
+            <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group bg-gradient-to-br from-amber-500/5 to-transparent">
               <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
                 <div>
-                  <CardTitle className="text-sm font-bold">Más Vendidos</CardTitle>
-                  <CardDescription className="text-3xs mt-1">Rotación de productos y stock</CardDescription>
+                  <CardTitle className="text-sm font-bold">Productos Estrella</CardTitle>
+                  <CardDescription className="text-3xs mt-1">Los más vendidos del período</CardDescription>
                 </div>
                 <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
               </CardHeader>
             </Card>
           </Link>
+
+          <Link href="/reports/top-customers">
+            <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group bg-gradient-to-br from-amber-500/5 to-transparent">
+              <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                <div>
+                  <CardTitle className="text-sm font-bold">Clientes Estrella</CardTitle>
+                  <CardDescription className="text-3xs mt-1">Quiénes más compran</CardDescription>
+                </div>
+                <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+              </CardHeader>
+            </Card>
+          </Link>
+
+          {showCommissionsReport && (
+            <Link href="/reports/comisiones">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group bg-gradient-to-br from-emerald-500/5 to-transparent">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold text-emerald-500">Comisiones</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Lo que gana cada vendedor</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-emerald-500 group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
 
           {(hasCredit || hasFinancing) && (
             <Link href="/reports/receivables">

@@ -70,7 +70,9 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
 export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'sales-summary', label: 'Resumen de Ventas' },
   { slug: 'user-sales', label: 'Ventas por Usuario' },
-  { slug: 'top-products', label: 'Productos Más Vendidos' },
+  { slug: 'top-products', label: 'Productos Estrella (más vendidos)' },
+  { slug: 'top-customers', label: 'Clientes Estrella' },
+  { slug: 'comisiones', label: 'Comisiones por Vendedor' },
   { slug: 'date-range', label: 'Ingresos por Fechas' },
   { slug: 'receivables', label: 'Cuentas por Cobrar' },
   { slug: 'inventory', label: 'Valorización de Inventario' },

@@ -10,7 +10,9 @@ export type WidgetId =
   | 'kpi_collected'
   | 'chart_by_hour'
   | 'chart_by_branch'
-  | 'recent_sales';
+  | 'recent_sales'
+  | 'star_customer'
+  | 'star_product';
 
 export interface WidgetMeta {
   id: WidgetId;
@@ -30,6 +32,8 @@ export const DASHBOARD_WIDGETS: WidgetMeta[] = [
   { id: 'chart_by_hour', label: 'Ventas por hora', chartTypes: ['bar', 'line', 'table'], defaultChart: 'bar' },
   { id: 'chart_by_branch', label: 'Ventas por sucursal', chartTypes: ['bar', 'pie', 'table'], defaultChart: 'bar', adminOnly: true },
   { id: 'recent_sales', label: 'Últimas ventas de hoy' },
+  { id: 'star_customer', label: 'Cliente estrella del mes' },
+  { id: 'star_product', label: 'Producto estrella del mes' },
 ];
 
 export interface DashboardConfig {

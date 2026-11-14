@@ -41,6 +41,8 @@ import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
 import { RncDelComprador } from './rnc-del-comprador';
 import { reinicioAlCambiarCliente } from '@/lib/checkout-reinicio';
 import { Loader2 } from 'lucide-react';
+import { useVendedores } from '@/hooks/use-vendedores';
+import { SelectorVendedor } from './selector-vendedor';
 
 interface CheckoutDialogProps {
   isOpen: boolean;
@@ -63,6 +65,11 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   // activo (se configura en Plataforma → Módulos). Mantiene el checkout
   // consistente con lo que aparece en el menú.
   const creditEnabled = isModuleEnabled('credit');
+  // Comisiones: el cobro pregunta quién vendió. Sin el módulo no se pregunta y
+  // la base deja la venta a nombre de quien cobra.
+  const comisionesActivas = isModuleEnabled('commissions');
+  const { vendedores } = useVendedores(comisionesActivas && isOpen);
+  const [sellerId, setSellerId] = useState<string | undefined>(undefined);
   // Dos interruptores, como la caja: el módulo dice si la EMPRESA financia, y
   // `financingEnabled` de la sucursal si esta en concreto lo hace. El trigger
   // de la base rechaza igual la venta, esto solo evita ofrecer lo que no es.
@@ -169,6 +176,8 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       setDownPaymentMethod(cashBlocked ? 'card' : 'cash');
       setDownPaymentReference('');
       setSaleNotes('');
+      // Cada venta arranca a nombre de quien cobra.
+      setSellerId(undefined);
       // Los datos del cliente se piden venta por venta (las que van con chofer).
       setIncluirDatosCliente(false);
       // Cada venta arranca sin comprobante: se pide a propósito, no por inercia.
@@ -270,6 +279,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       // o venga vacía: si no hay con qué emitirlo, el servidor lo dice con claridad.
       ncfRequested: ecfActiva || (ncfEmitible && hayComprobantes && ncfRequested),
       ncfType: ecfActiva || (ncfEmitible && hayComprobantes && ncfRequested) ? ncfType : undefined,
+      sellerId: comisionesActivas && sellerId && sellerId !== appUser.id ? sellerId : undefined,
     });
 
     try {
@@ -674,6 +684,15 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                     checked={incluirDatosCliente}
                     onCheckedChange={setIncluirDatosCliente}
                 />
+
+                {comisionesActivas && appUser && (
+                    <SelectorVendedor
+                        vendedores={vendedores}
+                        value={sellerId ?? appUser.id}
+                        onChange={setSellerId}
+                        yo={{ id: appUser.id, name: appUser.name }}
+                    />
+                )}
 
                 <div>
                     <Label htmlFor="sale-notes">Notas de la Venta (Opcional)</Label>

@@ -545,6 +545,8 @@ export const rowToSale = (r: any): Sale => ({
     .sort((a: FinancingInstallment, b: FinancingInstallment) => a.number - b.number),
   payments: [],
   notes: r.notes ?? undefined, userName: r.user_name ?? undefined, userEmail: r.user_email ?? undefined,
+  sellerId: r.seller_id ?? undefined, sellerName: r.seller_name ?? undefined,
+  commissionRate: r.commission_rate != null ? Number(r.commission_rate) : undefined,
   ncf: r.ncf ?? undefined, ncfType: r.ncf_type, ncfRequested: !!r.ncf_requested,
   quoteId: r.quote_id ?? undefined,
   couponId: r.coupon_id ?? undefined,
@@ -599,6 +601,8 @@ export const saleToRow = (s: Omit<Sale, 'id'>, branchUuid: string | null) => ({
   user_name: s.userName ?? null, user_email: s.userEmail ?? null,
   quote_id: isUuid(s.quoteId) ? s.quoteId : null,
   coupon_id: isUuid(s.couponId) ? s.couponId : null,
+  // Solo si se eligió otro vendedor en el cobro; sin él la base pone a quien cobra.
+  ...(isUuid(s.sellerId) ? { seller_id: s.sellerId } : {}),
 });
 
 // ---------- Coupon (fidelidad) ----------

@@ -5,7 +5,10 @@ import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { formatCurrency } from '@/lib/utils';
-import { DollarSign, Hash, CreditCard, ClipboardList, Settings2, HandCoins } from 'lucide-react';
+import { DollarSign, Hash, CreditCard, ClipboardList, Settings2, HandCoins, Star } from 'lucide-react';
+import Link from 'next/link';
+import { formatQuantity } from '@/lib/units';
+import { inicioDeMes, rankingClientes, rankingProductos } from '@/lib/estrellas';
 import { RecentSales } from '@/components/reports/recent-sales';
 import { FlexChart } from '@/components/dashboard/flex-chart';
 import { DashboardConfigDialog } from '@/components/dashboard/dashboard-config-dialog';
@@ -18,6 +21,31 @@ import { fetchAllRows } from '@/lib/supabase/paginate';
 import {
   loadDashboardConfig, saveDashboardConfig, defaultDashboardConfig, type DashboardConfig,
 } from '@/lib/dashboard-config';
+
+function EstrellaCard({ title, name, detail, href, empty }: {
+  title: string; name?: string; detail?: string; href?: string; empty: string;
+}) {
+  return (
+    <Card className="border-amber-300/60 bg-gradient-to-br from-amber-500/10 to-transparent">
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        <Star className="h-4 w-4 fill-amber-400 text-amber-500" />
+      </CardHeader>
+      <CardContent>
+        {name ? (
+          <>
+            <div className="truncate text-2xl font-bold" title={name}>
+              {href ? <Link href={href} className="hover:underline">{name}</Link> : name}
+            </div>
+            <p className="text-xs text-muted-foreground">{detail}</p>
+          </>
+        ) : (
+          <p className="pt-2 text-sm text-muted-foreground">{empty}</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 function KpiCard({ title, value, subtitle, icon: Icon, accentClass }: {
   title: string; value: string; subtitle: string; icon: React.ElementType; accentClass?: string;
@@ -174,8 +202,21 @@ export default function DashboardPage() {
     return Object.entries(acc).map(([name, total]) => ({ name, total }));
   }, [salesToday, allowedBranches, appUser]);
 
+  // Estrellas del mes, con el mismo criterio de sucursal que las ventas de hoy.
+  const salesMonth = useMemo(() => {
+    const desde = inicioDeMes();
+    const delMes = allSales.filter((s) => s.createdAt >= desde);
+    if (selectedBranch !== 'all') return delMes.filter((s) => s.branchId === selectedBranch);
+    if (appUser?.isSuperAdmin) return delMes;
+    const allowedNames = allowedBranches.map((b) => b.name);
+    return delMes.filter((s) => allowedNames.includes(s.branchId));
+  }, [allSales, selectedBranch, allowedBranches, appUser]);
+  const clienteEstrella = useMemo(() => rankingClientes(salesMonth)[0], [salesMonth]);
+  const productoEstrella = useMemo(() => rankingProductos(salesMonth, 'ingresos')[0], [salesMonth]);
+
   const v = config.visible;
   const anyKpi = v.kpi_revenue || v.kpi_sales_count || v.kpi_credit || v.kpi_credit_tx || v.kpi_collected;
+  const anyEstrella = v.star_customer || v.star_product;
 
   return (
     <div>
@@ -222,6 +263,32 @@ export default function DashboardPage() {
           {v.kpi_collected && (
             <KpiCard title="Cobros de Crédito Hoy" value={formatCurrency(collectedTotal)}
               subtitle="abonos recibidos de deudas" icon={HandCoins} accentClass="text-green-600" />
+          )}
+        </div>
+      )}
+
+      {anyEstrella && (
+        <div className={`grid gap-4 md:grid-cols-2 ${anyKpi ? 'mt-4' : ''}`}>
+          {v.star_customer && (
+            <EstrellaCard
+              title="Cliente Estrella del Mes"
+              name={clienteEstrella?.nombre}
+              href={clienteEstrella ? `/customers/history?id=${clienteEstrella.customerId}` : undefined}
+              detail={clienteEstrella
+                ? `${formatCurrency(clienteEstrella.monto)} en ${clienteEstrella.compras} compra${clienteEstrella.compras === 1 ? '' : 's'}`
+                : undefined}
+              empty="Aún no hay ventas a clientes identificados este mes."
+            />
+          )}
+          {v.star_product && (
+            <EstrellaCard
+              title="Producto Estrella del Mes"
+              name={productoEstrella?.nombre}
+              detail={productoEstrella
+                ? `${formatCurrency(productoEstrella.ingresos)} · ${formatQuantity(productoEstrella.cantidad, productoEstrella.unidad)} vendidos`
+                : undefined}
+              empty="Aún no hay ventas este mes."
+            />
           )}
         </div>
       )}

@@ -1,99 +1,83 @@
 'use client';
 
-import { useMemo } from 'react';
+import * as React from 'react';
+import type { DateRange } from 'react-day-picker';
+import { BarChart, Loader2, Star } from 'lucide-react';
 import { PageHeader } from '@/components/page-header';
-import { useSales } from '@/context/sales-provider';
 import { useProducts } from '@/context/product-provider';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatCurrency } from '@/lib/utils';
-import { formatQuantity, roundQty } from '@/lib/units';
-import { topProductKey } from '@/lib/quick-sales';
-import { lineBaseQty } from '@/lib/presentations';
-import { BarChart } from 'lucide-react';
+import { formatQuantity } from '@/lib/units';
+import { rankingProductos, type OrdenProductos } from '@/lib/estrellas';
 import { ExportButton } from '@/components/reports/export-button';
 import { SalesChart } from '@/components/reports/sales-chart';
+import { FiltroPeriodo, rangoMesActual, useFiltroSucursal } from '@/components/reports/filtro-periodo';
+import { useVentasPeriodo } from '@/hooks/use-ventas-periodo';
 
 export default function TopProductsReportPage() {
-  const { sales: salesRaw } = useSales();
-  // Las ventas anuladas no cuentan en la rotación de productos.
-  const sales = useMemo(() => salesRaw.filter((s) => !s.cancelledAt), [salesRaw]);
+  const [rango, setRango] = React.useState<DateRange | undefined>(rangoMesActual);
+  const { branchId, setBranchId, esAdmin } = useFiltroSucursal();
+  // Por ingreso por defecto: por cantidad compara libras con cajas.
+  const [orden, setOrden] = React.useState<OrdenProductos>('ingresos');
+  const { ventas, loading, error } = useVentasPeriodo({ rango, branchId, conItems: true });
   const { products } = useProducts();
 
-  const topProducts = useMemo(() => {
-    // La unidad se arrastra desde la línea vendida para poder mostrar "12.5 lb"
-    // y no un "12.5" suelto. Ojo: el ranking suma cantidades de unidades
-    // distintas, así que compara libras con cajas; ordenar por ingreso sería lo
-    // correcto, mostrar la unidad al menos lo hace evidente.
-    //
-    // `name` es el de la primera línea que se vio: las rápidas no tienen producto
-    // de catálogo y el reporte las nombra por lo que se escribió al venderlas.
-    const productSales = new Map<string, { name: string; isQuick: boolean; quantity: number; revenue: number; unit?: string }>();
-
-    sales.forEach(sale => {
-      sale.items.forEach(item => {
-        // Una rápida se agrupa por su descripción normalizada (`rapido:cable usb`).
-        // Las líneas sin producto emparejado (importadas del legacy) también
-        // llegan sin id: se agrupan por nombre para que no se mezclen todas en
-        // una sola fila con el nombre de la primera.
-        const key = topProductKey(item) || `sin-id:${item.product.name}`;
-        const currentSales = productSales.get(key) || {
-          name: item.product.name,
-          isQuick: !!item.isQuick,
-          quantity: 0,
-          revenue: 0,
-          unit: item.product.unit,
-        };
-        const price = item.customPrice ?? item.product.price;
-        productSales.set(key, {
-          ...currentSales,
-          // Las unidades se cuentan en la base del producto (2 paquetes de 12 son 24),
-          // para que el ranking y la unidad mostrada coincidan. El ingreso no cambia:
-          // el precio de la línea ya es el de la presentación.
-          quantity: roundQty(currentSales.quantity + lineBaseQty(item)),
-          revenue: currentSales.revenue + (price * item.quantity),
-          unit: currentSales.unit ?? item.product.unit,
-        });
-      });
-    });
-    
-    return Array.from(productSales.entries())
-      .map(([key, { name, ...data }]) => {
-        // El nombre del catálogo manda si el producto existe (puede haberse
-        // renombrado desde la venta); si no, el que quedó en la línea.
-        const product = products.find(p => p.id === key);
-        return {
-          key,
-          productName: product?.name || name,
-          ...data,
-        };
-      })
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 10); // Top 10 products
-
-  }, [sales, products]);
-
-  const chartData = topProducts.slice(0, 8).map((p) => ({ name: p.productName, total: p.quantity }));
+  const nombres = React.useMemo(() => new Map(products.map((p) => [p.id, p.name])), [products]);
+  const ranking = React.useMemo(
+    () => rankingProductos(ventas, orden, (id) => nombres.get(id)),
+    [ventas, orden, nombres],
+  );
+  const totalIngresos = React.useMemo(() => ranking.reduce((t, p) => t + p.ingresos, 0), [ranking]);
+  const estrella = ranking[0];
+  const chartData = ranking.slice(0, 8).map((p) => ({
+    name: p.nombre,
+    total: orden === 'cantidad' ? p.cantidad : p.ingresos,
+  }));
 
   return (
-    <div>
-      <PageHeader title="Reporte de Productos Más Vendidos">
-        <ExportButton
-          filename="productos_mas_vendidos"
-          rows={topProducts}
-          columns={[
-            { header: 'Producto', value: (p) => p.productName },
-            { header: 'Cantidad vendida', value: (p) => formatQuantity(p.quantity, p.unit) },
-            { header: 'Ingresos', value: (p) => p.revenue },
-          ]}
-        />
+    <div className="space-y-6">
+      <PageHeader title="Productos Estrella">
+        <div className="flex flex-wrap items-center gap-2">
+          <FiltroPeriodo rango={rango} onRango={setRango} branchId={branchId} onBranch={setBranchId} esAdmin={esAdmin} />
+          <ExportButton
+            filename="productos_estrella"
+            rows={ranking}
+            columns={[
+              { header: 'Producto', value: (p) => p.nombre },
+              { header: 'Cantidad vendida', value: (p) => formatQuantity(p.cantidad, p.unidad) },
+              { header: 'Ingresos', value: (p) => p.ingresos },
+              { header: 'Venta rapida', value: (p) => (p.isQuick ? 'Si' : 'No') },
+            ]}
+          />
+        </div>
       </PageHeader>
 
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {!loading && estrella && (
+        <Card className="border-amber-300/60 bg-gradient-to-br from-amber-500/10 to-transparent">
+          <CardHeader className="pb-2">
+            <CardDescription className="flex items-center gap-1 text-amber-700 dark:text-amber-400">
+              <Star className="h-4 w-4 fill-current" /> Producto estrella del período
+            </CardDescription>
+            <CardTitle className="text-2xl">{estrella.nombre}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            {formatCurrency(estrella.ingresos)} en ventas · {formatQuantity(estrella.cantidad, estrella.unidad)} vendidos
+            {totalIngresos > 0 && <> · {((estrella.ingresos / totalIngresos) * 100).toFixed(1)}% de los ingresos</>}
+          </CardContent>
+        </Card>
+      )}
+
       {chartData.length > 0 && (
-        <Card className="mb-6 min-w-0 overflow-hidden">
+        <Card className="min-w-0 overflow-hidden">
           <CardHeader>
-            <CardTitle className="text-base">Top 8 por unidades vendidas</CardTitle>
+            <CardTitle className="text-base">
+              Top 8 por {orden === 'cantidad' ? 'cantidad vendida' : 'ingresos'}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <SalesChart data={chartData} />
@@ -102,48 +86,80 @@ export default function TopProductsReportPage() {
       )}
 
       <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <BarChart className="h-5 w-5" />
-            <span>Ranking de Productos por Unidades Vendidas</span>
-          </CardTitle>
+        <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <BarChart className="h-5 w-5" />
+              <span>Ranking de productos</span>
+            </CardTitle>
+            <CardDescription className="mt-1.5">
+              Las ventas anuladas no cuentan. La cantidad va en la unidad base del producto (2 paquetes de 12 son 24).
+            </CardDescription>
+          </div>
+          <Tabs value={orden} onValueChange={(v) => setOrden(v as OrdenProductos)}>
+            <TabsList>
+              <TabsTrigger value="ingresos">Por ingresos</TabsTrigger>
+              <TabsTrigger value="cantidad">Por cantidad</TabsTrigger>
+            </TabsList>
+          </Tabs>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[50px]">#</TableHead>
-                <TableHead>Producto</TableHead>
-                <TableHead className="text-right">Cantidad Vendida</TableHead>
-                <TableHead className="text-right">Ingresos Generados</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {topProducts.length > 0 ? (
-                topProducts.map((p, index) => (
-                  <TableRow key={p.key}>
-                    <TableCell className="font-medium">{index + 1}</TableCell>
-                    <TableCell>
-                      {p.productName}
-                      {p.isQuick && <Badge variant="outline" className="ml-2 text-xs">Rápida</Badge>}
-                    </TableCell>
-                    <TableCell className="text-right font-bold">{formatQuantity(p.quantity, p.unit)}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(p.revenue)}</TableCell>
-                  </TableRow>
-                ))
-              ) : (
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={4} className="h-24 text-center">
-                    No hay suficientes datos de ventas para generar un ranking.
-                  </TableCell>
+                  <TableHead className="w-[50px]">#</TableHead>
+                  <TableHead>Producto</TableHead>
+                  <TableHead className="text-right">Cantidad vendida</TableHead>
+                  <TableHead className="text-right">Ingresos</TableHead>
+                  <TableHead className="text-right">% de ingresos</TableHead>
                 </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {loading ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-24 text-center">
+                      <Loader2 className="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+                    </TableCell>
+                  </TableRow>
+                ) : ranking.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-24 text-center">
+                      No hay ventas en este rango de fechas.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  ranking.slice(0, 50).map((p, i) => (
+                    <TableRow key={p.key}>
+                      <TableCell className="font-medium">
+                        {i < 3 ? <Star className="h-4 w-4 fill-amber-400 text-amber-500" aria-label={`Puesto ${i + 1}`} /> : i + 1}
+                      </TableCell>
+                      <TableCell>
+                        {p.nombre}
+                        {p.isQuick && <Badge variant="outline" className="ml-2 text-xs">Rápida</Badge>}
+                      </TableCell>
+                      <TableCell className={`text-right ${orden === 'cantidad' ? 'font-bold' : ''}`}>
+                        {formatQuantity(p.cantidad, p.unidad)}
+                      </TableCell>
+                      <TableCell className={`text-right ${orden === 'ingresos' ? 'font-bold' : ''}`}>
+                        {formatCurrency(p.ingresos)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {totalIngresos > 0 ? `${((p.ingresos / totalIngresos) * 100).toFixed(1)}%` : '—'}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          {ranking.length > 50 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Se muestran los 50 primeros de {ranking.length}. El CSV los trae todos.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
   );
 }
-
-    
