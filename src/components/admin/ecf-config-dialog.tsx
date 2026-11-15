@@ -90,6 +90,10 @@ const fechaHora = (s: string) =>
     day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 
+// La hora en es-DO ya termina en "p. m." / "a. m.": al cerrar la oración no se
+// le agrega otro punto (salía "08:32 p. m..").
+const finDeOracion = (s: string) => (s.endsWith('.') ? s : `${s}.`);
+
 const etiquetaAmbiente = (a: AmbienteEcf) => `${ECF_AMBIENTE_NOMBRE[a]} (${a})`;
 
 // Los cupos que trae el plan: se copian al formulario al elegirlo.
@@ -443,7 +447,7 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
         ? `Conexión con MSeller probada en ${etiquetaAmbiente(config.ambiente)}`
         : 'Conexión con MSeller probada en el ambiente en uso',
       detalle: config?.conexion_probada_at
-        ? `El ${fechaHora(config.conexion_probada_at)}.`
+        ? finDeOracion(`El ${fechaHora(config.conexion_probada_at)}`)
         : 'Guarda las credenciales de ese ambiente y usa "Probar conexión".',
     },
     {
@@ -652,7 +656,7 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
           <>
             {config.activada_at && (
               <p className="text-xs text-muted-foreground">
-                Activada por última vez el {fechaHora(config.activada_at)}.
+                {finDeOracion(`Activada por última vez el ${fechaHora(config.activada_at)}`)}
               </p>
             )}
             <div className="flex flex-wrap gap-2">
@@ -796,7 +800,7 @@ function CredencialesEcf({ companyId, ambienteInicial, ambienteEnUso, guardadas,
         {guardada
           // updated_at también se mueve cada vez que se renueva la sesión con MSeller:
           // dice cuándo hubo actividad, no cuándo se escribieron las credenciales.
-          ? `Cuenta guardada: ${guardada.email}. Última actividad: ${fechaHora(guardada.updated_at)}.`
+          ? finDeOracion(`Cuenta guardada: ${guardada.email}. Última actividad: ${fechaHora(guardada.updated_at)}`)
           : 'Todavía no hay credenciales guardadas en este ambiente.'}
         {' '}Por seguridad, la contraseña y la API key no se muestran nunca: para cambiarlas, escribe las nuevas.
       </p>
