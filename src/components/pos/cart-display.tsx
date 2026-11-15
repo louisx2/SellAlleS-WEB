@@ -222,6 +222,14 @@ export function CartDisplay() {
                             Deuda: {formatCurrency(cart.selectedCustomer.creditBalance)}
                           </Badge>
                         )}
+                        {/* El % de la ficha del cliente: getEffectiveUnitPrice lo aplica a
+                            cada línea sin precio manual. Decirlo evita que el cajero lo
+                            rebaje otra vez a mano. */}
+                        {cart.selectedCustomer?.id !== '0' && (cart.selectedCustomer?.discountPercentage ?? 0) > 0 && (
+                          <Badge variant="secondary" className="mt-2 ml-1 bg-yellow-100 text-yellow-900 hover:bg-yellow-100 dark:bg-yellow-500/20 dark:text-yellow-200">
+                            Descuento de cliente: {cart.selectedCustomer.discountPercentage}% aplicado
+                          </Badge>
+                        )}
                         {isModuleEnabled('loyalty') && cart.selectedCustomer?.id !== '0' && (
                           cart.coupon ? (
                             <div className="mt-2 flex items-start justify-between gap-2 rounded-md bg-primary/10 p-2">

@@ -463,6 +463,11 @@ export type Sale = {
   notes?: string;
   userName?: string;
   userEmail?: string;
+  // Quién vendió (por defecto quien cobró) y su % de comisión congelado al
+  // vender. commissionRate undefined = la venta no comisiona.
+  sellerId?: string;
+  sellerName?: string;
+  commissionRate?: number;
   ncf?: string;
   ncfType: NcfType;
   // El cliente pidió comprobante fiscal: solo entonces la base quema un número

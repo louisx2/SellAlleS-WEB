@@ -20,7 +20,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog';
-import { ArrowLeft, KeyRound } from 'lucide-react';
+import { ArrowLeft, KeyRound, Star } from 'lucide-react';
+import { idsClientesEstrella } from '@/lib/estrellas';
 import { useToast } from '@/hooks/use-toast';
 import { PasswordInput } from '@/components/ui/password-input';
 
@@ -146,6 +147,9 @@ export default function CustomerHistoryClient() {
   const customerSales = sales
     .filter((s) => s.customerId === customer.id)
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  // Lo que ha comprado (sin anuladas) y si está entre los que más compran.
+  const totalComprado = customerSales.filter((s) => !s.cancelledAt).reduce((t, s) => t + s.total, 0);
+  const esEstrella = idsClientesEstrella(sales).has(customer.id);
 
   return (
     <div className="space-y-6">
@@ -158,14 +162,22 @@ export default function CustomerHistoryClient() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{customer.name}</CardTitle>
+          <CardTitle className="flex flex-wrap items-center gap-2">
+            {customer.name}
+            {esEstrella && (
+              <Badge className="gap-1 border-amber-300 bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-500/20 dark:text-amber-300">
+                <Star className="h-3.5 w-3.5 fill-current" />
+                Cliente estrella
+              </Badge>
+            )}
+          </CardTitle>
           <CardDescription>
             {customer.phone && <>Tel: {customer.phone}</>}
             {customer.rnc && <> · RNC: {customer.rnc}</>}
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
             <div className="rounded-lg border p-3">
               <p className="text-muted-foreground">Descuento automático</p>
               <p className="text-xl font-bold">{customer.discountPercentage > 0 ? `${customer.discountPercentage}%` : 'Sin descuento'}</p>
@@ -177,6 +189,10 @@ export default function CustomerHistoryClient() {
             <div className="rounded-lg border p-3">
               <p className="text-muted-foreground">Ventas registradas</p>
               <p className="text-xl font-bold">{customerSales.length}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-muted-foreground">Total comprado</p>
+              <p className="text-xl font-bold">{formatCurrency(totalComprado)}</p>
             </div>
           </div>
         </CardContent>

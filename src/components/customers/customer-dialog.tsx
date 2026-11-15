@@ -277,6 +277,10 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
                 defaultValue={customer?.discountPercentage || ''}
                 className="col-span-3"
               />
+              <p className="col-span-3 col-start-2 -mt-2 text-xs text-muted-foreground">
+                El carrito lo aplica solo a cada artículo al elegir a este cliente (sobre el precio al detalle o
+                por mayor). Un precio puesto a mano en el carrito manda sobre este descuento.
+              </p>
             </div>
              <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="notes" className="text-right pt-2">

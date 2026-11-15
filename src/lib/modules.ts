@@ -21,7 +21,8 @@ export type ModuleKey =
   | 'customer-portal'
   | 'caja'
   | 'quick-sales'
-  | 'ecf';
+  | 'ecf'
+  | 'commissions';
 
 export interface AppModule {
   key: ModuleKey;
@@ -51,6 +52,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'caja',       label: 'Caja',               description: 'Control de efectivo por sucursal: apertura, cierre y movimientos. Al activarlo, no se puede cobrar en efectivo sin una caja abierta.', defaultEnabled: false },
   { key: 'quick-sales', label: 'Ventas Rápidas',    description: 'Vender en el POS artículos que no están en el inventario, con descripción o como monto libre.', defaultEnabled: true },
   { key: 'ecf',        label: 'Facturación Electrónica (e-CF)', description: 'Comprobantes fiscales electrónicos ante la DGII. Solo para empresas formalizadas; SellAlleS hace el alta.', defaultEnabled: false },
+  { key: 'commissions', label: 'Comisiones por Vendedor', description: 'Cada usuario tiene un % de comisión sobre lo que vende (sin ITBIS). En el cobro se elige el vendedor y hay un reporte de comisiones por período.', defaultEnabled: false },
 ];
 
 /** Ruta → módulo que la gobierna. Las rutas que no aparecen aquí son núcleo
@@ -64,6 +66,8 @@ const ROUTE_MODULE: Array<{ prefix: string; module: ModuleKey }> = [
   { prefix: '/suppliers', module: 'suppliers' },
   { prefix: '/expenses',  module: 'expenses' },
   { prefix: '/payables',  module: 'payables' },
+  // Antes que '/reports': gana la primera que coincide.
+  { prefix: '/reports/comisiones', module: 'commissions' },
   { prefix: '/reports',   module: 'reports' },
   { prefix: '/services',  module: 'services' },
   { prefix: '/service-types', module: 'services' },

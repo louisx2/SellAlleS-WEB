@@ -497,6 +497,9 @@ export const useCart = () => {
     // tener que editar el cliente (cliente de paso que pide crédito fiscal).
     ncfRequested?: boolean;
     ncfType?: NcfType;
+    // Vendedor elegido en el cobro (módulo de comisiones). Sin él, la base pone
+    // a quien cobra.
+    sellerId?: string;
   }): Omit<Sale, 'id'> & { id: string } => {
     if (!activeCart) throw new Error("No active cart to create sale from");
 
@@ -546,6 +549,7 @@ export const useCart = () => {
       notes,
       userName,
       userEmail,
+      sellerId: options.sellerId,
       ncf: undefined, // lo asigna la base desde ncf_sequences, solo si se pidió
       ncfRequested: options.ncfRequested ?? false,
       ncfType: options.ncfType ?? activeCart.selectedCustomer?.ncfType ?? 'consumer',

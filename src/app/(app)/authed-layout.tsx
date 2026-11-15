@@ -66,7 +66,9 @@ const featuresNavItems: NavItem[] = [
 const reportsNavItems = [
     { href: '/reports/sales-summary', label: 'Resumen de Ventas' },
     { href: '/reports/user-sales', label: 'Ventas por Usuario' },
-    { href: '/reports/top-products', label: 'Productos Más Vendidos' },
+    { href: '/reports/top-products', label: 'Productos Estrella' },
+    { href: '/reports/top-customers', label: 'Clientes Estrella' },
+    { href: '/reports/comisiones', label: 'Comisiones por Vendedor' },
     { href: '/reports/date-range', label: 'Ingresos por Fechas' },
     { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
     { href: '/reports/cobros', label: 'Cobros Recibidos' },
@@ -307,6 +309,8 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     if (slug === 'ventas-607' && !profile.isFormalized) return false;
     // El 608 registra NCF anulados: solo aplica a empresas formalizadas.
     if (slug === 'anulados-608' && !profile.isFormalized) return false;
+    // Comisiones existe solo con el módulo encendido (Plataforma → Módulos).
+    if (slug === 'comisiones' && !isModuleEnabled('commissions')) return false;
     return isReportVisible(effectivePermissions, slug);
   });
 
