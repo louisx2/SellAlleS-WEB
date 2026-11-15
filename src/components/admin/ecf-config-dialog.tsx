@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog';
@@ -22,9 +22,12 @@ import {
   avisoPruebaSinMarca, certificadoPorVencer, diasParaVencer, fechaDMA,
   type AmbienteEcf, type EstadoEcfConfig,
 } from '@/lib/ecf';
+import { COLUMNAS_SECUENCIA, hayEVigente, type NcfSequenceRow } from '@/lib/ncf-secuencias';
+import { useModules } from '@/context/modules-provider';
+import { EcfSecuenciasSection } from '@/components/admin/ecf-secuencias-section';
 import { formatCedulaOrRnc } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { Loader2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 
 interface EcfConfigDialogProps {
   companyId: string | null;
@@ -109,6 +112,19 @@ const FORM_NUEVO: FormEcf = {
 
 const soloDigitos = (s: string) => s.replace(/\D/g, '');
 
+// Un requisito de la lista de "Activar". Los obligatorios son los mismos que
+// comprueba ecf_cambiar_estado, en el mismo orden: si se separan, la lista dice
+// "listo" y la base igual rechaza (el error de la base se sigue mostrando).
+interface Requisito {
+  clave: string;
+  ok: boolean;
+  /** false: no impide activar, pero sin él algo deja de funcionar. */
+  obligatorio: boolean;
+  texto: string;
+  detalle?: string;
+  accion?: ReactNode;
+}
+
 // Panel del super admin: alta y seguimiento de la facturación electrónica (e-CF)
 // de UNA empresa. Todo lo que pasa por aquí es solo de SellAlleS; la empresa
 // únicamente ve el estado en su perfil.
@@ -153,11 +169,18 @@ export function EcfConfigDialog({ companyId, companyName, open, onOpenChange }: 
 
 function EcfConfigContenido({ companyId }: { companyId: string }) {
   const { toast } = useToast();
+  const { reload: recargarModulosPropios } = useModules();
   const [cargando, setCargando] = useState(true);
   const [fallo, setFallo] = useState<string | null>(null);
   // null: la empresa todavía no tiene fila en ecf_config.
   const [config, setConfig] = useState<ConfigGuardada | null>(null);
   const [formalizada, setFormalizada] = useState(true);
+  const [esDemo, setEsDemo] = useState(false);
+  // Como lo mira ecf_cambiar_estado: hace falta una fila con enabled; sin fila
+  // está apagado (el módulo viene apagado por defecto en el catálogo).
+  const [moduloEncendido, setModuloEncendido] = useState(false);
+  const [encendiendoModulo, setEncendiendoModulo] = useState(false);
+  const [secuencias, setSecuencias] = useState<NcfSequenceRow[]>([]);
   const [guardadas, setGuardadas] = useState<CredencialGuardada[]>([]);
   const [form, setForm] = useState<FormEcf>(FORM_NUEVO);
   // El formulario como quedó en la base, para saber si hay algo por guardar.
@@ -178,17 +201,39 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
     if (!cred.error) setGuardadas((cred.data ?? []) as CredencialGuardada[]);
   }, [companyId]);
 
+  const leerSecuencias = useCallback(
+    () =>
+      supabase
+        .from('ncf_sequences')
+        .select(COLUMNAS_SECUENCIA)
+        .eq('company_id', companyId)
+        .eq('electronica', true)
+        .order('created_at', { ascending: false }),
+    [companyId],
+  );
+
+  const recargarSecuencias = useCallback(async () => {
+    const { data, error } = await leerSecuencias();
+    if (error) {
+      toast({ title: 'No se pudieron leer las secuencias', description: error.message, variant: 'destructive' });
+      return;
+    }
+    setSecuencias((data ?? []) as NcfSequenceRow[]);
+  }, [leerSecuencias, toast]);
+
   useEffect(() => {
     let cancelado = false;
     (async () => {
-      const [cfg, empresa, sucursales, cred] = await Promise.all([
+      const [cfg, empresa, sucursales, cred, modulo, seqs] = await Promise.all([
         supabase.from('ecf_config').select(COLUMNAS_CONFIG).eq('company_id', companyId).maybeSingle(),
-        supabase.from('companies').select('rnc, is_formalized').eq('id', companyId).maybeSingle(),
+        supabase.from('companies').select('rnc, is_formalized, is_demo').eq('id', companyId).maybeSingle(),
         supabase.from('branches').select('rnc').eq('company_id', companyId).order('created_at', { ascending: true }),
         supabase.rpc('ecf_credenciales_guardadas', { p_company: companyId }),
+        supabase.from('company_modules').select('enabled').eq('company_id', companyId).eq('module_key', 'ecf').maybeSingle(),
+        leerSecuencias(),
       ]);
       if (cancelado) return;
-      const error = cfg.error ?? empresa.error ?? sucursales.error ?? cred.error;
+      const error = cfg.error ?? empresa.error ?? sucursales.error ?? cred.error ?? modulo.error ?? seqs.error;
       if (error) {
         setFallo(error.message);
         setCargando(false);
@@ -234,13 +279,34 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
 
       setConfig(fila ? { estado: fila.estado, ambiente: fila.ambiente, conexion_probada_at: fila.conexion_probada_at, activada_at: fila.activada_at } : null);
       setFormalizada(!!empresa.data?.is_formalized);
+      setEsDemo(!!empresa.data?.is_demo);
+      setModuloEncendido(modulo.data?.enabled === true);
+      setSecuencias((seqs.data ?? []) as NcfSequenceRow[]);
       setGuardadas((cred.data ?? []) as CredencialGuardada[]);
       setForm(rncPrellenado ? { ...desdeBase, rnc: rncPrellenado.rnc } : desdeBase);
       setInicial(desdeBase);
       setCargando(false);
     })();
     return () => { cancelado = true; };
-  }, [companyId]);
+  }, [companyId, leerSecuencias]);
+
+  // El mismo upsert del diálogo de módulos. Solo enciende: para apagarlo está
+  // ese diálogo (apagarlo con la empresa activa deja de emitir e-CF).
+  const encenderModulo = async () => {
+    setEncendiendoModulo(true);
+    const { error } = await supabase
+      .from('company_modules')
+      .upsert({ company_id: companyId, module_key: 'ecf', enabled: true }, { onConflict: 'company_id,module_key' });
+    setEncendiendoModulo(false);
+    if (error) {
+      toast({ title: 'No se pudo encender el módulo', description: error.message, variant: 'destructive' });
+      return;
+    }
+    setModuloEncendido(true);
+    toast({ title: 'Módulo de facturación electrónica encendido' });
+    // Si la empresa es la del propio super admin, que su menú lo vea.
+    recargarModulosPropios();
+  };
 
   const cambiar = (patch: Partial<FormEcf>) => setForm((f) => ({ ...f, ...patch }));
 
@@ -337,6 +403,83 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
   // Con la empresa activa la base no deja cambiar el ambiente (los comprobantes
   // siguientes saldrían por otro sin pasar las comprobaciones de activar).
   const ambienteBloqueado = config?.estado === 'activa';
+
+  // Lo guardado, no lo que se está escribiendo: la base mira la fila.
+  const emisorGuardado =
+    !!config && soloDigitos(inicial.rnc) !== '' && inicial.razonSocial.trim() !== '' && inicial.direccion.trim() !== '';
+  const requisitos: Requisito[] = [
+    {
+      clave: 'formalizada',
+      ok: formalizada,
+      obligatorio: true,
+      texto: 'Empresa formalizada',
+      detalle: formalizada ? undefined : 'Se marca en el perfil de la empresa, en Facturación fiscal.',
+    },
+    {
+      clave: 'modulo',
+      ok: moduloEncendido,
+      obligatorio: true,
+      texto: 'Módulo de facturación electrónica encendido',
+      detalle: !moduloEncendido && !formalizada ? 'Se puede encender cuando la empresa esté formalizada.' : undefined,
+      accion: moduloEncendido ? undefined : (
+        <Button size="sm" variant="outline" onClick={encenderModulo} disabled={!formalizada || encendiendoModulo}>
+          {encendiendoModulo && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
+          Encender
+        </Button>
+      ),
+    },
+    {
+      clave: 'emisor',
+      ok: emisorGuardado,
+      obligatorio: true,
+      texto: 'Datos del emisor guardados (RNC, razón social y dirección)',
+      detalle: emisorGuardado ? undefined : 'Llénalos arriba y usa "Guardar datos".',
+    },
+    {
+      clave: 'conexion',
+      ok: !!config?.conexion_probada_at,
+      obligatorio: true,
+      texto: config
+        ? `Conexión con MSeller probada en ${etiquetaAmbiente(config.ambiente)}`
+        : 'Conexión con MSeller probada en el ambiente en uso',
+      detalle: config?.conexion_probada_at
+        ? `El ${fechaHora(config.conexion_probada_at)}.`
+        : 'Guarda las credenciales de ese ambiente y usa "Probar conexión".',
+    },
+    {
+      clave: 'e32',
+      ok: hayEVigente(secuencias, 'consumer', hoy),
+      obligatorio: true,
+      texto: 'Secuencia E32 vigente (consumo)',
+      detalle: hayEVigente(secuencias, 'consumer', hoy) ? undefined : 'Cárgala en "Secuencias e-NCF".',
+    },
+    {
+      clave: 'ambiente',
+      ok: !!config && (config.ambiente === 'eCF' || esDemo),
+      obligatorio: true,
+      texto: config ? `Ambiente permitido: ${etiquetaAmbiente(config.ambiente)}` : 'Ambiente permitido',
+      detalle: !config
+        ? 'Guarda los datos primero.'
+        : config.ambiente === 'eCF' || esDemo
+          ? undefined
+          : 'Solo la empresa demo se activa en Pruebas o Certificación, para que las ventas reales nunca vayan a la DGII de prueba. Esta empresa se activa en Producción (eCF).',
+    },
+    {
+      clave: 'e31',
+      ok: hayEVigente(secuencias, 'fiscal', hoy),
+      obligatorio: false,
+      texto: 'Secuencia E31 vigente (crédito fiscal)',
+      detalle: hayEVigente(secuencias, 'fiscal', hoy) ? undefined : 'Sin ella no se puede vender con crédito fiscal a un cliente con RNC.',
+    },
+    {
+      clave: 'e34',
+      ok: hayEVigente(secuencias, 'nota_credito', hoy),
+      obligatorio: false,
+      texto: 'Secuencia E34 vigente (nota de crédito)',
+      detalle: hayEVigente(secuencias, 'nota_credito', hoy) ? undefined : 'Hace falta para anular ventas que ya tienen e-CF.',
+    },
+  ];
+  const listoParaActivar = requisitos.every((r) => r.ok || !r.obligatorio);
 
   return (
     <div className="space-y-4">
@@ -465,26 +608,50 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
         onCambio={recargarEstado}
       />
 
-      {/* Estado */}
+      {/* Secuencias e-NCF */}
+      <EcfSecuenciasSection
+        companyId={companyId}
+        secuencias={secuencias}
+        hoy={hoy}
+        onCambio={recargarSecuencias}
+      />
+
+      {/* Requisitos y estado */}
       <section className="space-y-3 rounded-lg border p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">Estado</h3>
+          <h3 className="text-sm font-semibold">Requisitos y estado</h3>
           {config && <Badge variant={ESTADO_VARIANT[config.estado]}>{ECF_ESTADO_CONFIG_NOMBRE[config.estado]}</Badge>}
         </div>
 
-        {!config ? (
-          <p className="text-xs text-muted-foreground">Guarda los datos del emisor para poder cambiar el estado.</p>
-        ) : (
+        <ul className="space-y-2">
+          {requisitos.map((r) => (
+            <li key={r.clave} className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start gap-2">
+                {r.ok ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-label="Listo" />
+                ) : r.obligatorio ? (
+                  <XCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-label="Falta" />
+                ) : (
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-label="Recomendado" />
+                )}
+                <div className="min-w-0">
+                  <p className="text-sm">
+                    {r.texto}
+                    {!r.obligatorio && <span className="text-xs text-muted-foreground"> · recomendado</span>}
+                  </p>
+                  {r.detalle && <p className="text-xs text-muted-foreground">{r.detalle}</p>}
+                </div>
+              </div>
+              {r.accion && <div className="shrink-0">{r.accion}</div>}
+            </li>
+          ))}
+        </ul>
+
+        {config && (
           <>
-            <p className="text-xs text-muted-foreground">
-              {config.conexion_probada_at
-                ? `Conexión probada el ${fechaHora(config.conexion_probada_at)}.`
-                : 'La conexión con MSeller todavía no se ha probado.'}
-              {config.activada_at && ` Activada por última vez el ${fechaHora(config.activada_at)}.`}
-            </p>
-            {!formalizada && (
-              <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
-                La empresa no está formalizada: no se podrá activar.
+            {config.activada_at && (
+              <p className="text-xs text-muted-foreground">
+                Activada por última vez el {fechaHora(config.activada_at)}.
               </p>
             )}
             <div className="flex flex-wrap gap-2">
@@ -493,7 +660,10 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
                   key={valor}
                   size="sm"
                   variant={config.estado === valor ? 'default' : 'outline'}
-                  disabled={config.estado === valor || cambiandoA !== null || hayCambios}
+                  disabled={
+                    config.estado === valor || cambiandoA !== null || hayCambios
+                    || (valor === 'activa' && !listoParaActivar)
+                  }
                   onClick={() => cambiarEstado(valor)}
                 >
                   {cambiandoA === valor && <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />}
@@ -501,14 +671,13 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
                 </Button>
               ))}
             </div>
-            {hayCambios && (
+            {hayCambios ? (
               <p className="text-xs text-muted-foreground">Guarda los cambios antes de cambiar el estado.</p>
-            )}
-            <p className="text-xs text-muted-foreground">
-              Para activar hace falta: empresa formalizada, módulo encendido, datos del emisor, conexión
-              probada, una secuencia E32 vigente y el ambiente de producción (solo la empresa demo puede
-              activarse en pruebas).
-            </p>
+            ) : config.estado !== 'activa' && !listoParaActivar ? (
+              <p className="text-xs text-muted-foreground">
+                &quot;Activa&quot; se habilita cuando todo lo obligatorio esté listo.
+              </p>
+            ) : null}
           </>
         )}
       </section>
