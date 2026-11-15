@@ -23,6 +23,8 @@ import {
 import { PlusCircle, ArrowRight, ArrowLeft } from 'lucide-react';
 import { CompanyModulesDialog } from '@/components/admin/company-modules-dialog';
 import { EcfConfigDialog } from '@/components/admin/ecf-config-dialog';
+import type { AmbienteEcf, EstadoEcfConfig } from '@/lib/ecf';
+import type { EcfDeEmpresa } from '@/components/admin/companies-data-table';
 import { CompaniesDataTable } from '@/components/admin/companies-data-table';
 import { DeleteConfirmDialog } from '@/components/admin/delete-confirm-dialog';
 import { ManageCompanyUsersDialog } from '@/components/admin/manage-company-users-dialog';
@@ -104,6 +106,7 @@ export default function CompaniesManagementPage() {
   // "3 de 5" junto al tope. Se pide por RPC porque los perfiles de otras
   // empresas no son visibles por RLS desde aquí.
   const [branchUserCounts, setBranchUserCounts] = useState<Record<string, number>>({});
+  const [ecfPorEmpresa, setEcfPorEmpresa] = useState<Record<string, EcfDeEmpresa>>({});
   const [manageUsersFor, setManageUsersFor] = useState<Company | null>(null);
   const [paymentsFor, setPaymentsFor] = useState<Company | null>(null);
   const [rolesFor, setRolesFor] = useState<Company | null>(null);
@@ -137,11 +140,41 @@ export default function CompaniesManagementPage() {
       { data: comps },
       { data: pls },
       { data: ss },
+      { data: ecfs },
+      { data: modulosEcf },
     ] = await Promise.all([
       compsQuery,
       supabase.from('plans').select('id, name, price, max_users, monthly_price, annual_price_per_month').order('sort_order'),
       supabase.from('subscriptions').select('id, company_id, plan_id, custom_monthly_price, billing_cycle'),
+      // Aparte y no como embed: una FK más a companies podría volver ambigua la
+      // consulta de arriba. Si fallan, la lista sale igual, sin la etiqueta.
+      supabase.from('ecf_config').select('company_id, estado, ambiente'),
+      supabase.from('company_modules').select('company_id').eq('module_key', 'ecf').eq('enabled', true),
     ]);
+
+    // Estado del e-CF de cada empresa que ya empezó: con ecf_config, el suyo.
+    // Sin ecf_config pero con el módulo encendido o credenciales guardadas,
+    // "en preparación". Las credenciales solo se leen con
+    // ecf_credenciales_guardadas (una llamada por empresa, solo super admin), así
+    // que se preguntan nada más para las formalizadas sin configuración.
+    const ecfMapa: Record<string, EcfDeEmpresa> = {};
+    ((ecfs ?? []) as { company_id: string; estado: EstadoEcfConfig; ambiente: AmbienteEcf }[]).forEach((e) => {
+      ecfMapa[e.company_id] = { estado: e.estado, ambiente: e.ambiente };
+    });
+    if (esSuperAdmin && comps) {
+      const conModulo = new Set(((modulosEcf ?? []) as { company_id: string }[]).map((m) => m.company_id));
+      const sinConfig = (comps as Company[]).filter((c) => !ecfMapa[c.id] && (c.is_formalized || conModulo.has(c.id)));
+      const creds = await Promise.all(
+        sinConfig.map((c) => supabase.rpc('ecf_credenciales_guardadas', { p_company: c.id })),
+      );
+      sinConfig.forEach((c, i) => {
+        const filas = (creds[i].data ?? []) as { ambiente: AmbienteEcf }[];
+        if (filas.length > 0 || conModulo.has(c.id)) {
+          ecfMapa[c.id] = { estado: 'preparacion', ambiente: filas[0]?.ambiente ?? null };
+        }
+      });
+    }
+    setEcfPorEmpresa(ecfMapa);
 
     if (comps) setCompanies(comps as Company[]);
     if (pls) setPlans(pls as Plan[]);
@@ -725,6 +758,7 @@ export default function CompaniesManagementPage() {
         onToggleBranchStatus={setBranchStatusTarget}
         getPlanName={getPlanName}
         branchUserCounts={branchUserCounts}
+        ecfPorEmpresa={ecfPorEmpresa}
       />
 
       <SubscriptionPaymentsDialog

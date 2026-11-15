@@ -17,6 +17,7 @@ import {
   Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt, Shield, FileCheck,
 } from 'lucide-react';
 import type { Company } from '@/lib/types';
+import { ECF_AMBIENTE_NOMBRE, type AmbienteEcf, type EstadoEcfConfig } from '@/lib/ecf';
 import { BUSINESS_TYPE_PRESETS, type BusinessType } from '@/lib/business-types';
 import { useAuth } from '@/context/auth-provider';
 
@@ -47,7 +48,23 @@ interface CompaniesDataTableProps {
   // Usuarios que hoy ocupan cada sucursal, por branch_id. Viene del RPC
   // company_branch_user_counts; si aún no cargó, no se muestra el conteo.
   branchUserCounts?: Record<string, number>;
+  // Estado del e-CF de cada empresa que ya empezó, por company_id.
+  ecfPorEmpresa?: Record<string, EcfDeEmpresa>;
 }
+
+/** El e-CF de una empresa en la lista. ambiente null: aún no se sabe (sin credenciales ni configuración). */
+export interface EcfDeEmpresa {
+  estado: EstadoEcfConfig;
+  ambiente: AmbienteEcf | null;
+}
+
+// La etiqueta de e-CF sale de ecf_config, no de ncf_enabled: ncf_enabled es el
+// interruptor "Emitir comprobantes (NCF)" del perfil y no dice nada del e-CF.
+const ECF_ETIQUETA: Record<EstadoEcfConfig, string> = {
+  activa: 'e-CF activo',
+  preparacion: 'e-CF en preparación',
+  suspendida: 'e-CF suspendido',
+};
 
 const STATUS_LABEL: Record<string, string> = { trial: 'Prueba', active: 'Activa', suspended: 'Suspendida' };
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive'> = {
@@ -103,6 +120,7 @@ export function CompaniesDataTable({
   onToggleBranchStatus,
   getPlanName,
   branchUserCounts,
+  ecfPorEmpresa,
 }: CompaniesDataTableProps) {
   const { appUser } = useAuth();
   const [expandedCompanies, setExpandedCompanies] = useState<string[]>([]);
@@ -361,9 +379,23 @@ export function CompaniesDataTable({
                        <span className={c.is_formalized ? "text-emerald-600 font-medium" : "text-muted-foreground"}>
                          {c.is_formalized ? 'Formalizada' : 'Informal'}
                        </span>
-                       {c.ncf_enabled && (
-                         <Badge variant="outline" className="w-fit text-[10px] h-4 px-1 border-primary/30 text-primary bg-primary/5">e-CF Activo</Badge>
-                       )}
+                       {ecfPorEmpresa?.[c.id] && (() => {
+                         const ecf = ecfPorEmpresa[c.id];
+                         return (
+                           <Badge
+                             variant="outline"
+                             className={
+                               ecf.estado === 'activa'
+                                 ? 'w-fit text-[10px] h-4 px-1 border-primary/30 text-primary bg-primary/5'
+                                 : 'w-fit text-[10px] h-4 px-1 text-muted-foreground'
+                             }
+                           >
+                             {ECF_ETIQUETA[ecf.estado]}
+                             {ecf.ambiente && ecf.ambiente !== 'eCF' && ` · ${ECF_AMBIENTE_NOMBRE[ecf.ambiente]}`}
+                           </Badge>
+                         );
+                       })()}
+                       {c.ncf_enabled && <span className="text-muted-foreground">Emite NCF</span>}
                     </div>
                   </TableCell>
                   <TableCell className="align-top py-4 text-sm">{getPlanBadge(getPlanName(c.id))}</TableCell>
