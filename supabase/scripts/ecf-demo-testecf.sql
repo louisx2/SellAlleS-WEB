@@ -75,15 +75,23 @@ begin
         razon_social = excluded.razon_social,
         direccion    = excluded.direccion;
 
-  -- 5. Secuencias E de prueba (en TesteCF no hace falta que la DGII las autorice).
-  --    El E31 lleva vencimiento; al E32 y al E34 se les pone igual.
+  -- 5. Secuencias E de prueba. En TesteCF no hace falta que la DGII las autorice:
+  --    según la documentación de MSeller sirve cualquier número sin usar del 1 al
+  --    20,000 de cada tipo, con FechaVencimientoSecuencia 31-12-2028. Con otra
+  --    fecha la DGII rechaza el E31 (código 145, "Fecha de vencimiento de
+  --    secuencia inválida": pasó el 12-nov-2026 con 31-12-2027). El E31 lleva el
+  --    vencimiento en el comprobante; al E32 y al E34 se les pone igual.
   insert into ncf_sequences (company_id, tipo, prefix, range_from, range_to, current_val, expires_at, active, electronica)
-  select demo, s.tipo, s.prefix, 1, 1000, 1, date '2027-12-31', true, true
+  select demo, s.tipo, s.prefix, 1, 1000, 1, date '2028-12-31', true, true
     from (values ('consumer', 'E32'), ('fiscal', 'E31'), ('nota_credito', 'E34')) s(tipo, prefix)
    where not exists (
      select 1 from ncf_sequences x
       where x.company_id = demo and x.prefix = s.prefix and x.electronica and x.active
    );
+  -- Las que dejó una versión anterior de este script, con la fecha equivocada.
+  update ncf_sequences
+     set expires_at = date '2028-12-31'
+   where company_id = demo and electronica and expires_at = date '2027-12-31';
 
   -- 6. Las credenciales en la demo (quedan en Vault con sus propios secretos).
   perform ecf_guardar_credenciales(demo, 'TesteCF', v_email, v_pass, v_key);

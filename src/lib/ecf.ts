@@ -219,6 +219,14 @@ export function secuenciaExigeVencimiento(electronica: boolean, tipo: TipoSecuen
 /** El mayor número de secuencia que cabe en un e-NCF (10 dígitos). Espeja `ncf_sequences_rango_e_check`. */
 export const SECUENCIA_E_MAXIMA = 9_999_999_999;
 
+/**
+ * En Pruebas (TesteCF) la DGII no autoriza secuencias: según la documentación de
+ * MSeller sirve cualquier número sin usar hasta el 20,000 de cada tipo, con este
+ * vencimiento. Con otra fecha la DGII rechaza el E31 (código 145).
+ */
+export const TESTECF_VENCIMIENTO = '2028-12-31';
+export const TESTECF_SECUENCIA_MAXIMA = 20_000;
+
 // ---------------------------------------------------------------------------
 // Panel de SellAlleS: configuración por empresa y resumen de la plataforma
 // ---------------------------------------------------------------------------

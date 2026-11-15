@@ -14,7 +14,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import {
-  SECUENCIA_E_MAXIMA, TIPO_PREFIX_E, fechaDMA, formatearNcf, secuenciaExigeVencimiento, type TipoSecuencia,
+  SECUENCIA_E_MAXIMA, TESTECF_SECUENCIA_MAXIMA, TESTECF_VENCIMIENTO, TIPO_PREFIX_E, fechaDMA, formatearNcf,
+  secuenciaExigeVencimiento, type AmbienteEcf, type TipoSecuencia,
 } from '@/lib/ecf';
 import {
   TIPO_LABEL_E, estadoDeSecuencia, etiquetaDeSecuencia, umbralPorAgotarse, type NcfSequenceRow,
@@ -29,6 +30,8 @@ const TIPOS_E: TipoSecuencia[] = [
 
 interface EcfSecuenciasSectionProps {
   companyId: string;
+  /** El ambiente guardado de la empresa; null si aún no tiene configuración. */
+  ambiente: AmbienteEcf | null;
   /** Solo las secuencias electrónicas de la empresa. */
   secuencias: NcfSequenceRow[];
   /** AAAA-MM-DD, el mismo "hoy" con que el panel decide si hay E32 vigente. */
@@ -41,12 +44,15 @@ interface EcfSecuenciasSectionProps {
 // lugar donde se cargan las E: en el perfil de la empresa solo se ven. Se
 // escriben con el company_id explícito porque el super admin está fuera de la
 // empresa (la columna toma current_company_id() por defecto).
-export function EcfSecuenciasSection({ companyId, secuencias, hoy, onCambio }: EcfSecuenciasSectionProps) {
+export function EcfSecuenciasSection({ companyId, ambiente, secuencias, hoy, onCambio }: EcfSecuenciasSectionProps) {
   const { toast } = useToast();
+  const enPruebas = ambiente === 'TesteCF';
+  // En Pruebas el vencimiento es siempre el mismo: se deja puesto.
+  const venceInicial = enPruebas ? TESTECF_VENCIMIENTO : '';
   const [tipo, setTipo] = useState<TipoSecuencia>('consumer');
   const [desde, setDesde] = useState('1');
   const [hasta, setHasta] = useState('');
-  const [vence, setVence] = useState('');
+  const [vence, setVence] = useState(venceInicial);
   const [guardando, setGuardando] = useState(false);
   const [cambiandoId, setCambiandoId] = useState<string | null>(null);
 
@@ -69,6 +75,14 @@ export function EcfSecuenciasSection({ companyId, secuencias, hoy, onCambio }: E
       toast({
         title: 'Rango inválido',
         description: 'Un e-NCF lleva 10 dígitos de secuencia: "hasta" no puede pasar de 9999999999.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (enPruebas && to > TESTECF_SECUENCIA_MAXIMA) {
+      toast({
+        title: 'Rango inválido',
+        description: `En Pruebas (TesteCF) MSeller solo acepta números del 1 al ${TESTECF_SECUENCIA_MAXIMA.toLocaleString('es-DO')}.`,
         variant: 'destructive',
       });
       return;
@@ -103,7 +117,7 @@ export function EcfSecuenciasSection({ companyId, secuencias, hoy, onCambio }: E
     });
     setDesde('1');
     setHasta('');
-    setVence('');
+    setVence(venceInicial);
     await onCambio();
   };
 
@@ -122,8 +136,10 @@ export function EcfSecuenciasSection({ companyId, secuencias, hoy, onCambio }: E
     <section className="space-y-3 rounded-lg border p-4">
       <h3 className="text-sm font-semibold">Secuencias e-NCF</h3>
       <p className="text-xs text-muted-foreground">
-        Los rangos que la DGII le autorizó a este RNC en la Oficina Virtual. La empresa los ve en su perfil,
-        pero solo se cargan aquí.
+        {enPruebas
+          ? `En Pruebas (TesteCF) la DGII no autoriza secuencias: MSeller acepta cualquier número sin usar del 1 al ${TESTECF_SECUENCIA_MAXIMA.toLocaleString('es-DO')} de cada tipo, con vencimiento ${fechaDMA(TESTECF_VENCIMIENTO)}.`
+          : 'Los rangos que la DGII le autorizó a este RNC en la Oficina Virtual.'}
+        {' '}La empresa los ve en su perfil, pero solo se cargan aquí.
       </p>
 
       {secuencias.length === 0 ? (
@@ -239,9 +255,11 @@ export function EcfSecuenciasSection({ companyId, secuencias, hoy, onCambio }: E
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          {vencimientoObligatorio
-            ? `La fecha tiene que ser la misma que sale en la autorización de la DGII: el ${prefijo} la lleva en el comprobante y, si no coincide, la DGII lo rechaza ("fecha de vencimiento de secuencia inválida").`
-            : `El ${prefijo} no lleva el vencimiento en el comprobante. Si pones una fecha, la secuencia deja de usarse ese día.`}
+          {!vencimientoObligatorio
+            ? `El ${prefijo} no lleva el vencimiento en el comprobante. Si pones una fecha, la secuencia deja de usarse ese día.`
+            : enPruebas
+              ? `En Pruebas la fecha tiene que ser ${fechaDMA(TESTECF_VENCIMIENTO)}: el ${prefijo} la lleva en el comprobante y, con otra, la DGII lo rechaza ("fecha de vencimiento de secuencia inválida").`
+              : `La fecha tiene que ser la misma que sale en la autorización de la DGII: el ${prefijo} la lleva en el comprobante y, si no coincide, la DGII lo rechaza ("fecha de vencimiento de secuencia inválida").`}
         </p>
       </div>
     </section>

@@ -611,6 +611,7 @@ function EcfConfigContenido({ companyId }: { companyId: string }) {
       {/* Secuencias e-NCF */}
       <EcfSecuenciasSection
         companyId={companyId}
+        ambiente={config?.ambiente ?? null}
         secuencias={secuencias}
         hoy={hoy}
         onCambio={recargarSecuencias}
