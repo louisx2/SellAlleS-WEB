@@ -17,34 +17,22 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { useModules } from '@/context/modules-provider';
 import {
-  SECUENCIA_E_MAXIMA, TIPO_PREFIX_E, avisoSerieB, certificadoPorVencer, diasParaVencer, fechaDMA, formatearNcf,
-  secuenciaExigeVencimiento,
+  avisoSerieB, certificadoPorVencer, diasParaVencer, fechaDMA, formatearNcf, type TipoSecuencia,
 } from '@/lib/ecf';
+import {
+  COLUMNAS_SECUENCIA, TIPO_LABEL, estadoDeSecuencia, etiquetaDeSecuencia, umbralPorAgotarse,
+  type NcfSequenceRow,
+} from '@/lib/ncf-secuencias';
 import { Loader2, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-type NcfTipo = 'consumer' | 'fiscal' | 'nota_credito' | 'gubernamental' | 'regimen_especial' | 'nota_debito';
+type NcfTipo = TipoSecuencia;
 
 interface FiscalState {
   companyId: string;
   isFormalized: boolean;
   ncfEnabled: boolean;
 }
-
-interface NcfSequenceRow {
-  id: string;
-  tipo: NcfTipo;
-  prefix: string | null;
-  range_from: number;
-  range_to: number;
-  current_val: number;
-  expires_at: string | null;
-  active: boolean;
-  electronica: boolean;
-}
-
-// La serie de la secuencia: B (papel, la de siempre) o E (comprobante electrónico).
-type Serie = 'B' | 'E';
 
 // Lo que la empresa ve de su ecf_config (solo lectura: la escribe el super admin).
 interface EcfConfigRow {
@@ -53,29 +41,10 @@ interface EcfConfigRow {
   certificado_vence: string | null;
 }
 
-const TIPO_LABEL: Record<NcfTipo, string> = {
-  consumer: 'Consumidor Final (B02)',
-  fiscal: 'Crédito Fiscal (B01)',
-  nota_credito: 'Nota de Crédito (B04)',
-  gubernamental: 'Gubernamental (B15)',
-  regimen_especial: 'Régimen Especial (B14)',
-  nota_debito: 'Nota de Débito (B03)',
-};
-const TIPO_LABEL_E: Record<NcfTipo, string> = {
-  consumer: 'Consumidor Final (E32)',
-  fiscal: 'Crédito Fiscal (E31)',
-  nota_credito: 'Nota de Crédito (E34)',
-  gubernamental: 'Gubernamental (E45)',
-  regimen_especial: 'Régimen Especial (E44)',
-  nota_debito: 'Nota de Débito (E33)',
-};
 const TIPO_PREFIX: Record<NcfTipo, string> = {
   consumer: 'B02', fiscal: 'B01', nota_credito: 'B04',
   gubernamental: 'B15', regimen_especial: 'B14', nota_debito: 'B03',
 };
-// El nombre del tipo según la serie de la secuencia.
-const etiquetaDeSecuencia = (seq: NcfSequenceRow): string =>
-  (seq.electronica ? TIPO_LABEL_E : TIPO_LABEL)[seq.tipo] ?? seq.tipo;
 
 const ECF_ESTADO: Record<EcfConfigRow['estado'], { label: string; variant: 'default' | 'secondary' | 'destructive' }> = {
   preparacion: { label: 'En preparación', variant: 'secondary' },
@@ -93,40 +62,6 @@ const ECF_AMBIENTE: Record<EcfConfigRow['ambiente'], string> = {
 const TIPOS: NcfTipo[] = [
   'consumer', 'fiscal', 'nota_credito', 'gubernamental', 'regimen_especial', 'nota_debito',
 ];
-
-// Aviso cuando a una secuencia en uso le quedan pocos números: sin esto el
-// aviso llega el día que el POS deja de facturar. El umbral se mide contra el
-// tamaño del rango, no en absoluto: 50 sobre un talonario de 500 avisa a
-// tiempo, pero sobre uno de 15 estaría encendido desde el primer día.
-const UMBRAL_MAXIMO = 50;
-const umbralPorAgotarse = (seq: NcfSequenceRow): number => {
-  const total = Math.max(seq.range_to - seq.range_from + 1, 1);
-  return Math.min(UMBRAL_MAXIMO, Math.max(3, Math.ceil(total * 0.2)));
-};
-
-type EstadoSeq = {
-  label: string;
-  variant: 'default' | 'secondary' | 'destructive' | 'outline';
-  disponibles: number;
-  /** La base la tomaría ahora mismo (mismo filtro que assign_ncf). */
-  usable: boolean;
-};
-
-// Espeja exactamente el filtro de assign_ncf: active, con números y sin vencer.
-// Si esto y la función se separan, la tarjeta miente sobre lo que hará el POS.
-const estadoDeSecuencia = (seq: NcfSequenceRow, hoy: string): EstadoSeq => {
-  const disponibles = Math.max(seq.range_to - seq.current_val + 1, 0);
-  if (seq.current_val > seq.range_to) {
-    return { label: 'Agotada', variant: 'destructive', disponibles: 0, usable: false };
-  }
-  if (seq.expires_at && seq.expires_at < hoy) {
-    return { label: 'Vencida', variant: 'destructive', disponibles, usable: false };
-  }
-  if (!seq.active) {
-    return { label: 'Inactiva', variant: 'secondary', disponibles, usable: false };
-  }
-  return { label: 'Activa', variant: 'default', disponibles, usable: true };
-};
 
 // Lo que dice la tarjeta del certificado digital; en rojo (ver certificadoPorVencer)
 // cuando faltan 30 días o menos.
@@ -157,8 +92,8 @@ export function NcfSettingsCard() {
   const [ncfBVigente, setNcfBVigente] = useState(true);
   const [fechaCorteB, setFechaCorteB] = useState<string | null>(null);
 
-  // Formulario de nueva secuencia
-  const [serieElegida, setSerieElegida] = useState<Serie>('E');
+  // Formulario de nueva secuencia (solo serie B: las E las carga SellAlleS
+  // desde su panel de facturación electrónica, con la autorización de la DGII).
   const [tipo, setTipo] = useState<NcfTipo>('consumer');
   const [prefix, setPrefix] = useState(TIPO_PREFIX.consumer);
   const [rangeFrom, setRangeFrom] = useState('1');
@@ -171,13 +106,10 @@ export function NcfSettingsCard() {
 
   // Misma regla que ecf_activa: formalizada, con el módulo y la configuración activa.
   const ecfActiva = ecfModulo && !!fiscal?.isFormalized && ecfConfig?.estado === 'activa';
-  // Sin el módulo solo hay serie B, y pasada la fecha de corte ni siquiera esa.
-  const serie: Serie = !ecfModulo ? 'B' : serieElegida === 'B' && !ncfBVigente ? 'E' : serieElegida;
-  const formularioDisponible = ecfModulo || ncfBVigente;
+  // Aquí solo se cargan secuencias B, y pasada la fecha de corte ni siquiera esas.
+  const formularioDisponible = ncfBVigente;
   const mostrarSerie = ecfModulo || sequences.some((s) => s.electronica);
-  const prefijoEfectivo = serie === 'E' ? TIPO_PREFIX_E[tipo] : prefix.trim().toUpperCase();
-  // E31, E33, E44 y E45 llevan el vencimiento en el comprobante: la base no las acepta sin él.
-  const vencimientoObligatorio = secuenciaExigeVencimiento(serie === 'E', tipo);
+  const prefijoEfectivo = prefix.trim().toUpperCase();
 
   // Avisos que hay que ver ANTES de que el POS deje de facturar: secuencias por
   // agotarse, y secuencias encendidas que la base ya no tomaría. Solo cuentan las
@@ -206,7 +138,7 @@ export function NcfSettingsCard() {
     }
     const { data: seqs } = await supabase
       .from('ncf_sequences')
-      .select('id, tipo, prefix, range_from, range_to, current_val, expires_at, active, electronica')
+      .select(COLUMNAS_SECUENCIA)
       .order('created_at', { ascending: false });
     if (seqs) setSequences(seqs as NcfSequenceRow[]);
   }, []);
@@ -274,7 +206,7 @@ export function NcfSettingsCard() {
 
   const handleAddSequence = async () => {
     // La base ya no emite B pasada la fecha de corte: no se carga una que no se usaría.
-    if (serie === 'B' && !ncfBVigente) return;
+    if (!ncfBVigente) return;
     const from = Number(rangeFrom);
     const to = Number(rangeTo);
     if (!prefijoEfectivo || !Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) {
@@ -285,27 +217,11 @@ export function NcfSettingsCard() {
       });
       return;
     }
-    if (serie === 'E' && to > SECUENCIA_E_MAXIMA) {
-      toast({
-        title: 'Rango inválido',
-        description: 'Un e-NCF lleva 10 dígitos de secuencia: "hasta" no puede pasar de 9999999999.',
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (vencimientoObligatorio && !expiresAt) {
-      toast({
-        title: 'Falta el vencimiento',
-        description: `La secuencia ${prefijoEfectivo} lleva la fecha de vencimiento que autorizó la DGII.`,
-        variant: 'destructive',
-      });
-      return;
-    }
     setSaving(true);
     const { error } = await supabase.from('ncf_sequences').insert({
       tipo,
       prefix: prefijoEfectivo,
-      electronica: serie === 'E',
+      electronica: false,
       range_from: from,
       range_to: to,
       current_val: from,
@@ -316,10 +232,9 @@ export function NcfSettingsCard() {
       toast({ title: 'No se pudo agregar la secuencia', description: error.message, variant: 'destructive' });
       return;
     }
-    const electronica = serie === 'E';
     toast({
       title: 'Secuencia agregada',
-      description: `${(electronica ? TIPO_LABEL_E : TIPO_LABEL)[tipo]}: ${formatearNcf(prefijoEfectivo, from, electronica)} — ${formatearNcf(prefijoEfectivo, to, electronica)}`,
+      description: `${TIPO_LABEL[tipo]}: ${formatearNcf(prefijoEfectivo, from, false)} — ${formatearNcf(prefijoEfectivo, to, false)}`,
     });
     setRangeFrom('1');
     setRangeTo('');
@@ -441,7 +356,10 @@ export function NcfSettingsCard() {
                       </ul>
                     </li>
                     <li>Declaración jurada y solicitud de secuencias E en la Oficina Virtual.</li>
-                    <li>Cargar aquí las secuencias E.</li>
+                    <li>
+                      Enviarle a SellAlleS la autorización de las secuencias E (rango y fecha de vencimiento):
+                      SellAlleS las carga y te aparecen abajo.
+                    </li>
                   </ol>
                 </details>
               </div>
@@ -505,7 +423,8 @@ export function NcfSettingsCard() {
                             <Badge variant={estado.variant}>{estado.label}</Badge>
                           </TableCell>
                           <TableCell className="text-right">
-                            {!agotada && (
+                            {/* Las E las administra SellAlleS desde su panel de facturación electrónica. */}
+                            {!agotada && !seq.electronica && (
                               <Button type="button" variant="ghost" size="sm" onClick={() => toggleSequence(seq)}>
                                 {seq.active ? 'Desactivar' : 'Activar'}
                               </Button>
@@ -520,7 +439,12 @@ export function NcfSettingsCard() {
             </div>
 
             <div className="rounded-lg border p-4 space-y-4">
-              <h4 className="text-sm font-semibold">Agregar secuencia</h4>
+              <h4 className="text-sm font-semibold">{ecfModulo ? 'Agregar secuencia B' : 'Agregar secuencia'}</h4>
+              {ecfModulo && (
+                <p className="text-xs text-muted-foreground">
+                  Las secuencias E (electrónicas) las carga SellAlleS con la autorización de la DGII.
+                </p>
+              )}
               {!ncfBVigente && (
                 // Con e-CF activo no es un problema, solo que la B ya no se carga.
                 <p
@@ -534,39 +458,25 @@ export function NcfSettingsCard() {
               )}
               {formularioDisponible && (
                 <div className="space-y-4">
-                  <div className={cn('grid gap-3', ecfModulo ? 'sm:grid-cols-6' : 'sm:grid-cols-5')}>
-                    {ecfModulo && (
-                      <div className="space-y-1">
-                        <Label className="text-xs">Serie</Label>
-                        <Select value={serie} onValueChange={(v: Serie) => setSerieElegida(v)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="B" disabled={!ncfBVigente}>B</SelectItem>
-                            <SelectItem value="E">E (electrónica)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
+                  <div className="grid gap-3 sm:grid-cols-5">
                     <div className="space-y-1 sm:col-span-2">
                       <Label className="text-xs">Tipo de comprobante</Label>
                       <Select value={tipo} onValueChange={(v: NcfTipo) => { setTipo(v); setPrefix(TIPO_PREFIX[v]); }}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {TIPOS.map((t) => (
-                            <SelectItem key={t} value={t}>{(serie === 'E' ? TIPO_LABEL_E : TIPO_LABEL)[t]}</SelectItem>
+                            <SelectItem key={t} value={t}>{TIPO_LABEL[t]}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-1">
                       <Label htmlFor="ncf-prefix" className="text-xs">Prefijo</Label>
-                      {/* En la serie E el prefijo lo fija el tipo: la base no acepta otro. */}
                       <Input
                         id="ncf-prefix"
-                        value={serie === 'E' ? TIPO_PREFIX_E[tipo] : prefix}
+                        value={prefix}
                         onChange={(e) => setPrefix(e.target.value)}
                         maxLength={3}
-                        disabled={serie === 'E'}
                       />
                     </div>
                     <div className="space-y-1">
@@ -580,16 +490,12 @@ export function NcfSettingsCard() {
                   </div>
                   <div className="flex items-end gap-3 flex-wrap">
                     <div className="space-y-1">
-                      <Label htmlFor="ncf-expires" className="text-xs">
-                        {vencimientoObligatorio ? 'Vencimiento' : 'Vencimiento (opcional)'}
-                      </Label>
+                      <Label htmlFor="ncf-expires" className="text-xs">Vencimiento (opcional)</Label>
                       <Input
                         id="ncf-expires"
                         type="date"
                         value={expiresAt}
                         onChange={(e) => setExpiresAt(e.target.value)}
-                        required={vencimientoObligatorio}
-                        aria-required={vencimientoObligatorio}
                       />
                     </div>
                     <Button type="button" onClick={handleAddSequence} disabled={saving || !rangeTo}>
