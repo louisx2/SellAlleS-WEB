@@ -37,7 +37,8 @@ import { IncluirDatosCliente } from './incluir-datos-cliente';
 import { clienteVigente } from '@/lib/datos-cliente';
 import { useNcfAvailability } from '@/hooks/use-ncf-availability';
 import { supabase } from '@/lib/supabase/client';
-import { esEcf, ecfFaltaRncCliente } from '@/lib/ecf';
+import { esEcf, ecfFaltaRncCliente, cantidadExcedeDecimalesEcf, redondearCantidadEcf } from '@/lib/ecf';
+import { ventaExentaDeItbis, totalesDeLaVenta } from '@/lib/totales-venta';
 import { RncDelComprador } from './rnc-del-comprador';
 import { reinicioAlCambiarCliente } from '@/lib/checkout-reinicio';
 import { Loader2 } from 'lucide-react';
@@ -53,7 +54,10 @@ interface CheckoutDialogProps {
 }
 
 export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: CheckoutDialogProps) {
-  const { activeCart, total, subtotal, itbisAmount, itbisIncluded, totalDiscount, createSale, completeSale, setSelectedCustomer } = useCart();
+  const {
+    activeCart, total: totalCarrito, subtotal: subtotalCarrito, itbisAmount: itbisCarrito, itbisIncluded,
+    totalDiscount, createSale, completeSale, setSelectedCustomer, updateQuantity,
+  } = useCart();
   const { reload: reloadProducts } = useProducts();
   const { addSale: addSaleToContext } = useSales();
   const { customers, reload: reloadCustomers } = useCustomers();
@@ -144,6 +148,26 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
   // Con e-CF la falta de RNC sí bloquea el cobro: el número ya se habría gastado
   // en un documento que no se puede armar. Con la serie B solo se advierte.
   const ecfSinRncCliente = ecfFaltaRncCliente(ecfActiva, ncfType, customerIdIsValid);
+
+  // ¿La venta sale con comprobante? Con e-CF siempre; con la serie B solo si se pidió.
+  const conComprobante = ecfActiva || (ncfEmitible && hayComprobantes && ncfRequested);
+  // Régimen especial (E44/B14) va exento de ITBIS: lo que se cobra y se muestra
+  // aquí es lo mismo que guarda createSale (misma regla, ventaExentaDeItbis).
+  const ventaExenta = ventaExentaDeItbis(conComprobante, ncfType);
+  const { total, subtotal, itbisAmount } = totalesDeLaVenta(
+    { total: totalCarrito, subtotal: subtotalCarrito, itbisAmount: itbisCarrito, itbisIncluded },
+    ventaExenta,
+  );
+  // Con e-CF la DGII acepta 2 decimales en la cantidad: con 2.375 lb el
+  // documento no sale y el e-NCF se pierde. Se frena el cobro y se ofrece redondear.
+  const lineasConDecimalesDeMas = ecfActiva
+    ? (activeCart?.items ?? []).filter((item) => cantidadExcedeDecimalesEcf(item.quantity))
+    : [];
+  const redondearCantidades = () => {
+    for (const item of lineasConDecimalesDeMas) {
+      updateQuantity(item.cartItemId, redondearCantidadEcf(item.quantity));
+    }
+  };
 
   // "RNC del comprador": el cliente con ese documento pasa al carrito, marcado
   // por su id. Cambiar el cliente reinicia el diálogo (el efecto de abajo); con
@@ -277,8 +301,8 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
       userEmail: appUser.email,
       // Con e-CF siempre va el tipo, aunque la lista de secuencias no haya cargado
       // o venga vacía: si no hay con qué emitirlo, el servidor lo dice con claridad.
-      ncfRequested: ecfActiva || (ncfEmitible && hayComprobantes && ncfRequested),
-      ncfType: ecfActiva || (ncfEmitible && hayComprobantes && ncfRequested) ? ncfType : undefined,
+      ncfRequested: conComprobante,
+      ncfType: conComprobante ? ncfType : undefined,
       sellerId: comisionesActivas && sellerId && sellerId !== appUser.id ? sellerId : undefined,
     });
 
@@ -365,7 +389,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     && (total - Number(amountPaid || 0)) > availableCredit;
 
   const confirmButtonAction = () => {
-    if (ecfSinRncCliente) return;
+    if (ecfSinRncCliente || lineasConDecimalesDeMas.length > 0) return;
     if (paymentMethod === 'financing') {
       handleOpenFinancing();
     } else {
@@ -676,6 +700,27 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                                 Este tipo exige RNC (9 dígitos) o cédula (11) del cliente.
                             </p>
                         )}
+
+                        {ventaExenta && (
+                            <p className="text-xs text-muted-foreground">
+                                Régimen especial: la venta va exenta de ITBIS.
+                            </p>
+                        )}
+                    </div>
+                )}
+
+                {lineasConDecimalesDeMas.length > 0 && (
+                    <div className="rounded-lg border border-destructive/50 bg-destructive/5 p-3 space-y-2">
+                        <p className="text-xs text-destructive">
+                            La factura electrónica acepta cantidades con 2 decimales como máximo:{' '}
+                            {lineasConDecimalesDeMas
+                                .map((item) => `${item.product.name} (${formatLineQty(item)})`)
+                                .join(', ')}
+                            .
+                        </p>
+                        <Button type="button" variant="outline" size="sm" onClick={redondearCantidades}>
+                            Redondear a 2 decimales
+                        </Button>
                     </div>
                 )}
 
@@ -750,7 +795,9 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
                     )}
                     <div className="flex justify-between">
                         <span className="text-muted-foreground">
-                          {itbisIncluded ? `ITBIS incluido (${ITBIS_RATE * 100}%)` : `ITBIS (${ITBIS_RATE * 100}%)`}
+                          {ventaExenta
+                            ? 'ITBIS (exento)'
+                            : itbisIncluded ? `ITBIS incluido (${ITBIS_RATE * 100}%)` : `ITBIS (${ITBIS_RATE * 100}%)`}
                         </span>
                         <span>{formatCurrency(itbisAmount)}</span>
                     </div>
@@ -767,7 +814,7 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
           <Button type="button" variant="secondary" onClick={() => onOpenChange(false)} disabled={guardandoVenta}>
             Cancelar
           </Button>
-          <Button type="button" onClick={confirmButtonAction} disabled={guardandoVenta || isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid || ecfSinRncCliente}>
+          <Button type="button" onClick={confirmButtonAction} disabled={guardandoVenta || isCashPaymentInvalid || isCashBlocked || isRefPaymentInvalid || isCreditPaymentInvalid || isCreditAmountInvalid || isOverCreditLimit || isDownPaymentCashBlocked || isDownPaymentRefInvalid || ecfSinRncCliente || lineasConDecimalesDeMas.length > 0}>
             {guardandoVenta ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />

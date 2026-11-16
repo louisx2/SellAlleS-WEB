@@ -343,3 +343,21 @@ export function avisoPruebaSinMarca(
   }
   return { titulo, descripcion: 'La conexión no quedó marcada. Cierra esta ventana, ábrela de nuevo y vuelve a probar.' };
 }
+
+// La DGII acepta hasta 2 decimales en la cantidad de cada línea del e-CF
+// (CantidadItem). Con 3 (2.375 lb) MSeller rechaza el documento con
+// CANTIDAD_ITEM_DECIMAL_OVERFLOW y el e-NCF queda gastado: el cobro lo detecta
+// antes y ofrece redondear.
+export const ECF_DECIMALES_CANTIDAD = 2;
+
+/** ¿La cantidad tiene más decimales de los que acepta el e-CF? Tolera el ruido de coma flotante (1.1 + 2.2). */
+export function cantidadExcedeDecimalesEcf(cantidad: number): boolean {
+  const escalada = cantidad * 10 ** ECF_DECIMALES_CANTIDAD;
+  return Math.abs(escalada - Math.round(escalada)) > 1e-6;
+}
+
+/** La cantidad redondeada a los decimales que acepta el e-CF. */
+export function redondearCantidadEcf(cantidad: number): number {
+  const factor = 10 ** ECF_DECIMALES_CANTIDAD;
+  return Math.round((cantidad + Number.EPSILON) * factor) / factor;
+}

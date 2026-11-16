@@ -9,6 +9,7 @@ import {
 } from '@/lib/presentations';
 import { buildQuickCartItem, quickUnitPrice, type QuickItemInput } from '@/lib/quick-sales';
 import { cuponAlCambiarCliente } from '@/lib/checkout-reinicio';
+import { ventaExentaDeItbis, totalesDeLaVenta } from '@/lib/totales-venta';
 import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
 import { create, useStore } from 'zustand';
@@ -505,12 +506,18 @@ export const useCart = () => {
 
     const { paymentMethod, branchId, amountPaid, paymentReference, downPaymentMethod, downPaymentReference, financingDetails, notes } = options;
 
+    // Régimen especial con comprobante (E44/B14): la venta va exenta de ITBIS.
+    // El cobro (checkout-dialog) muestra lo mismo con la misma regla. Los totales
+    // van redondeados a centavos, que es lo que guarda la base.
+    const exenta = ventaExentaDeItbis(options.ncfRequested ?? false, options.ncfType);
+    const totales = totalesDeLaVenta({ subtotal, itbisAmount, total, itbisIncluded }, exenta);
+
     let paymentStatus: Sale['paymentStatus'] = 'paid';
     if (paymentMethod === 'financing' || financingDetails) {
         paymentStatus = 'in_financing';
     } else if (paymentMethod === 'credit') {
         paymentStatus = 'credit';
-    } else if (amountPaid < total) {
+    } else if (amountPaid < totales.total) {
         paymentStatus = 'credit';
     }
 
@@ -521,17 +528,22 @@ export const useCart = () => {
     // un precio manual pero el cliente tiene descuento, ese precio pasa a ser
     // el customPrice guardado (trazabilidad histórica en sale_items).
     const items = activeCart.items.map((item) => {
-      if (item.customPrice !== undefined) return item;
-      const effectivePrice = getEffectiveUnitPrice(item, activeCart.selectedCustomer);
-      return effectivePrice < item.product.price ? { ...item, customPrice: effectivePrice } : item;
+      let linea = item;
+      if (item.customPrice === undefined) {
+        const effectivePrice = getEffectiveUnitPrice(item, activeCart.selectedCustomer);
+        if (effectivePrice < item.product.price) linea = { ...item, customPrice: effectivePrice };
+      }
+      // Exenta: cada línea se guarda sin ITBIS (sale_items.itbis), que es lo que
+      // lee el e-CF para marcarla exenta y lo que imprime el recibo.
+      return exenta ? { ...linea, product: { ...linea.product, itbis: false } } : linea;
     });
 
     return {
       id: '', // el id real (uuid) lo genera la base al guardar
       items,
-      subtotal,
-      itbisAmount,
-      total,
+      subtotal: totales.subtotal,
+      itbisAmount: totales.itbisAmount,
+      total: totales.total,
       itbisIncluded, // congelado para que el recibo desglose igual siempre
       paymentMethod,
       paymentStatus: paymentStatus,
