@@ -143,6 +143,20 @@ export function armarEcf(d: DatosEcf): ResultadoArmado {
     const valido =
       Number.isFinite(l.cantidad) && l.cantidad > 0 && Number.isFinite(l.precio) && l.precio >= 0;
     if (!valido) return falla(`La línea "${l.nombre}" tiene una cantidad o un precio inválido.`);
+    // La DGII acepta 2 decimales en CantidadItem; MSeller rechaza más
+    // (CANTIDAD_ITEM_DECIMAL_OVERFLOW). Se corta aquí, con un mensaje claro.
+    const escalada = l.cantidad * 100;
+    if (Math.abs(escalada - Math.round(escalada)) > 1e-6) {
+      return falla(
+        `La cantidad de "${l.nombre}" (${l.cantidad}) tiene más de 2 decimales; la DGII acepta 2 como máximo.`,
+      );
+    }
+  }
+
+  // El E44 (régimen especial: zonas francas y demás) va exento de ITBIS: la DGII
+  // solo admite líneas exentas o no facturables (INDICADOR_FACTURACION_NOT_ALLOWED_FOR_TYPE).
+  if (d.tipo === 44 && d.lineas.some((l) => l.itbis)) {
+    return falla('El comprobante de régimen especial (E44) va exento de ITBIS, y la venta tiene líneas con ITBIS.');
   }
 
   // Sumas brutas SIN redondear por línea (los precios tal cual se cobran), en
@@ -215,8 +229,10 @@ export function armarEcf(d: DatosEcf): ResultadoArmado {
   const idDoc: Record<string, unknown> = { TipoeCF: d.tipo, eNCF: d.encf };
   if (llevaVencimiento && vencimiento) idDoc.FechaVencimientoSecuencia = aFechaDgii(vencimiento);
   if (d.tipo === 34 && referencia) idDoc.IndicadorNotaCredito = referencia.masDe30Dias ? 1 : 0;
-  // Sin líneas gravadas no hay precio al que "incluirle" el ITBIS.
-  idDoc.IndicadorMontoGravado = d.itbisIncluido && hayGravado ? 1 : 0;
+  // Sin líneas gravadas no hay precio al que "incluirle" el ITBIS. El E44 no
+  // lleva el campo: su esquema no lo admite y la DGII lo rechaza (código 3,
+  // "invalid child element 'IndicadorMontoGravado'", E440000000002 de la demo).
+  if (d.tipo !== 44) idDoc.IndicadorMontoGravado = d.itbisIncluido && hayGravado ? 1 : 0;
   idDoc.TipoIngresos = '01';
   idDoc.TipoPago = d.aCredito ? 2 : 1;
   if (llevaLimitePago && limitePago) idDoc.FechaLimitePago = aFechaDgii(limitePago);

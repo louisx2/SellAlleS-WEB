@@ -35,6 +35,9 @@ import {
   esperarQrEcf,
   avisoNotaAlAnular,
   avisoPruebaSinMarca,
+  cantidadExcedeDecimalesEcf,
+  redondearCantidadEcf,
+  ECF_DECIMALES_CANTIDAD,
 } from '../../src/lib/ecf.ts';
 import { PLANES_MSELLER } from '../../src/lib/ecf-planes.ts';
 
@@ -456,4 +459,26 @@ test('avisoPruebaSinMarca: dice qué falta para que la conexión quede marcada',
 
   // Mismo ambiente y aun así sin marcar: no debería pasar; se pide reintentar.
   assert.match(avisoPruebaSinMarca('TesteCF', 'TesteCF').descripcion, /vuelve a probar/);
+});
+
+// La DGII acepta 2 decimales en la cantidad de cada línea del e-CF (MSeller
+// rechaza 2.375 lb con CANTIDAD_ITEM_DECIMAL_OVERFLOW). El cobro las detecta y
+// ofrece redondearlas.
+test('cantidadExcedeDecimalesEcf: más de 2 decimales', () => {
+  assert.equal(cantidadExcedeDecimalesEcf(2.375), true);
+  assert.equal(cantidadExcedeDecimalesEcf(0.125), true);
+  assert.equal(cantidadExcedeDecimalesEcf(1.005), true);
+});
+
+test('cantidadExcedeDecimalesEcf: enteros y hasta 2 decimales pasan (sin ruido de coma flotante)', () => {
+  for (const q of [1, 3, 2.5, 2.37, 0.01, 1.1 + 2.2, 0.1 * 3, 1.7 + 0.3]) {
+    assert.equal(cantidadExcedeDecimalesEcf(q), false, String(q));
+  }
+});
+
+test('redondearCantidadEcf deja 2 decimales', () => {
+  assert.equal(redondearCantidadEcf(2.375), 2.38);
+  assert.equal(redondearCantidadEcf(0.124), 0.12);
+  assert.equal(redondearCantidadEcf(3), 3);
+  assert.equal(ECF_DECIMALES_CANTIDAD, 2);
 });

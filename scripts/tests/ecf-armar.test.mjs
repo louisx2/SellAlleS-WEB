@@ -158,26 +158,25 @@ const totalesDelCarrito = (lineas, incluido) => {
   return { total: incluido ? bruto : bruto + itbis, itbis };
 };
 
-// Tres líneas con cantidades de 3 decimales; sumar los renglones ya redondeados
-// da 749.93 y el carrito guarda 749.9094099999999.
+// Tres líneas con cantidades de 2 decimales (lo más que acepta la DGII); sumar
+// los renglones ya redondeados da 633.98 y el carrito guarda 633.973 de bruto.
 const lineasDecimales = [
-  gravado('Tubo', 1.337, 42.48),
-  gravado('Cable', 2.054, 117.89),
-  gravado('Cuerda', 2.831, 118.89),
+  gravado('Tubo', 1.37, 42.48),
+  gravado('Cable', 2.03, 117.89),
+  gravado('Cuerda', 2.83, 118.89),
 ];
 
 test('Cantidades decimales, ITBIS aparte: los totales son los que guarda el carrito', () => {
   const { total, itbis } = totalesDelCarrito(lineasDecimales, false);
-  assert.equal(total, 749.9094099999999);
   const ecf = armar({ lineas: lineasDecimales, totalGuardado: total, itbisGuardado: itbis });
   const t = ecf.Encabezado.Totales;
-  assert.equal(t.MontoTotal, 749.91);
+  assert.equal(t.MontoTotal, 748.09);
   assert.equal(t.TotalITBIS, itbis);
-  assert.equal(t.TotalITBIS, 114.39);
-  assert.equal(t.TotalITBIS1, 114.39);
-  assert.equal(t.MontoGravadoTotal, 635.52);
-  // Cada renglón va redondeado; su suma (635.53) puede diferir de Totales.
-  assert.deepEqual(ecf.DetallesItems.Item.map((i) => i.MontoItem), [56.8, 242.15, 336.58]);
+  assert.equal(t.TotalITBIS, 114.12);
+  assert.equal(t.TotalITBIS1, 114.12);
+  assert.equal(t.MontoGravadoTotal, 633.97);
+  // Cada renglón va redondeado; su suma (633.98) puede diferir de Totales.
+  assert.deepEqual(ecf.DetallesItems.Item.map((i) => i.MontoItem), [58.2, 239.32, 336.46]);
 });
 
 test('Cantidades decimales, ITBIS incluido: los totales son los que guarda el carrito', () => {
@@ -189,17 +188,26 @@ test('Cantidades decimales, ITBIS incluido: los totales son los que guarda el ca
     itbisGuardado: itbis,
   });
   const t = ecf.Encabezado.Totales;
-  assert.equal(t.MontoTotal, 635.52);
-  assert.equal(t.TotalITBIS, 96.94);
-  assert.equal(t.MontoGravadoTotal, 538.58);
+  assert.equal(t.MontoTotal, 633.97);
+  assert.equal(t.TotalITBIS, 96.71);
+  assert.equal(t.MontoGravadoTotal, 537.26);
 });
 
 test('Cantidades decimales: lo guardado ya redondeado a centavos también cuadra', () => {
-  const ecf = armar({ lineas: lineasDecimales, totalGuardado: 749.91, itbisGuardado: 114.39 });
-  assert.equal(ecf.Encabezado.Totales.MontoTotal, 749.91);
+  const ecf = armar({ lineas: lineasDecimales, totalGuardado: 748.09, itbisGuardado: 114.12 });
+  assert.equal(ecf.Encabezado.Totales.MontoTotal, 748.09);
 });
 
-test('Carritos con cantidades de 3 decimales siempre cuadran con lo que guarda el carrito', () => {
+test('Cantidad con 3 decimales no se arma: la DGII acepta 2 como máximo', () => {
+  // MSeller la rechaza con CANTIDAD_ITEM_DECIMAL_OVERFLOW (E310000000009 de la
+  // demo, 2.375 lb, 15-nov-2026); se corta antes de gastar el envío.
+  const r = armarEcf(datos({ lineas: [gravado('Clavos (lb)', 2.375, 47.5)], totalGuardado: 133.12, itbisGuardado: 20.31 }));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /Clavos \(lb\)/);
+  assert.match(r.error, /2 decimales/);
+});
+
+test('Carritos con cantidades de 2 decimales siempre cuadran con lo que guarda el carrito', () => {
   // Generador determinista (LCG) para que la prueba no sea intermitente.
   let semilla = 20261102;
   const azar = () => {
@@ -211,7 +219,7 @@ test('Carritos con cantidades de 3 decimales siempre cuadran con lo que guarda e
     const cuantas = 1 + Math.floor(azar() * 10);
     const lineas = [];
     for (let i = 0; i < cuantas; i++) {
-      const cantidad = Math.round((0.1 + azar() * 9.9) * 1000) / 1000;
+      const cantidad = Math.round((0.1 + azar() * 9.9) * 100) / 100;
       const precio = Math.round((1 + azar() * 499) * 100) / 100;
       lineas.push({ nombre: `P${i}`, cantidad, precio, itbis: azar() < 0.7, servicio: false });
     }
@@ -365,6 +373,44 @@ test('Solo el E34 lleva InformacionReferencia ni IndicadorNotaCredito', () => {
   const ecf = armar({ referencia: { encf: 'E320000000007', fechaEmision: '2026-10-01', masDe30Dias: true } });
   assert.equal('InformacionReferencia' in ecf, false);
   assert.equal(ecf.Encabezado.IdDoc.IndicadorNotaCredito, undefined);
+});
+
+// E44 (régimen especial: zonas francas y demás): solo admite líneas exentas o no
+// facturables. Con ITBIS MSeller lo rechaza (INDICADOR_FACTURACION_NOT_ALLOWED_FOR_TYPE,
+// E440000000001 de la demo, 15-nov-2026).
+const datosE44 = (over = {}) => ({
+  tipo: 44,
+  encf: 'E440000000001',
+  vencimientoSecuencia: '2028-12-31',
+  comprador: { rnc: '132662067', nombre: 'ZONA FRANCA INDUSTRIAL CABALLONA SRL' },
+  ...over,
+});
+
+test('E44 exento se arma: líneas con IndicadorFacturacion 4 y sin ITBIS', () => {
+  const ecf = armar(datosE44({ lineas: [exento('Cover', 1, 300)], totalGuardado: 300, itbisGuardado: 0 }));
+  assert.equal(ecf.Encabezado.IdDoc.TipoeCF, 44);
+  assert.equal(ecf.DetallesItems.Item[0].IndicadorFacturacion, 4);
+  assert.deepEqual(ecf.Encabezado.Totales, { MontoExento: 300, MontoTotal: 300 });
+  // El esquema del 44 no tiene IndicadorMontoGravado: la DGII lo rechazó con código 3.
+  assert.equal('IndicadorMontoGravado' in ecf.Encabezado.IdDoc, false);
+  assert.deepEqual(Object.keys(ecf.Encabezado.IdDoc), [
+    'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia', 'TipoIngresos', 'TipoPago',
+  ]);
+});
+
+test('Los demás tipos sí llevan IndicadorMontoGravado (el E45 lo llevó y fue aceptado)', () => {
+  for (const tipo of [31, 32, 45]) {
+    const comprador = tipo === 32 ? null : { rnc: '401506254', nombre: 'DGII' };
+    const ecf = armar({ tipo, comprador, vencimientoSecuencia: '2028-12-31' });
+    assert.equal(ecf.Encabezado.IdDoc.IndicadorMontoGravado, 0, String(tipo));
+  }
+});
+
+test('E44 con una línea gravada no se arma', () => {
+  const r = armarEcf(datos(datosE44({ lineas: [gravado('Cover', 1, 300)], totalGuardado: 354, itbisGuardado: 54 })));
+  assert.equal(r.ok, false);
+  assert.match(r.error, /régimen especial/i);
+  assert.match(r.error, /exent/i);
 });
 
 test('Servicio marca IndicadorBienoServicio 2', () => {
