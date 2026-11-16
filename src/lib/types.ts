@@ -120,6 +120,11 @@ export type User = {
   branchRoles?: Record<string, string>;
   companyId?: string;
   companyStatus?: 'trial' | 'active' | 'suspended';
+  // Nombre de la empresa activa y, si está suspendida, por qué y desde cuándo
+  // (lib/suspension.ts).
+  companyName?: string;
+  companySuspensionReason?: string | null;
+  companySuspendedAt?: string | null;
   companyDemoExpiresAt?: string; // empresa de prueba pública ("Probar Plataforma"); se banea al vencer
   companyTrialEndsAt?: string; // fin de la prueba de 14 días (null en empresas sin límite)
   companyPaidUntil?: string; // suscripción pagada hasta esta fecha (null = sin vencimiento)
@@ -224,6 +229,9 @@ export type Company = {
   // modo solo facturación (lib/bloqueo.ts).
   solo_ventas?: boolean;
   solo_ventas_desde?: string | null;
+  // Suspendida: por qué (lib/suspension.ts) y desde cuándo. Null si no lo está.
+  suspension_reason?: string | null;
+  suspended_at?: string | null;
   business_type?: string | null;
   max_users?: number;
   // max_users por sucursal: null = sin límite (el tope de la empresa sigue aplicando aparte).

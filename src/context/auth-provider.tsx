@@ -252,14 +252,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // dueño con varias empresas puede tener una al día y otra vencida.
       let estadoActiva: string | undefined = compStatus;
       let finPruebaActiva: string | undefined = trialEndsAt;
+      let nombreActiva: string | undefined;
+      let motivoSuspension: string | null = null;
+      let suspendidaDesde: string | null = null;
       if (empresaActiva) {
         const { data: comp } = await supabase
-          .from('companies').select('max_users, solo_ventas, status, trial_ends_at').eq('id', empresaActiva).maybeSingle();
+          .from('companies')
+          .select('name, max_users, solo_ventas, status, trial_ends_at, suspension_reason, suspended_at')
+          .eq('id', empresaActiva).maybeSingle();
         maxUsers = (comp as any)?.max_users ?? null;
         soloVentas = !!(comp as any)?.solo_ventas;
         if (comp) {
           estadoActiva = (comp as any).status ?? undefined;
           finPruebaActiva = (comp as any).trial_ends_at ?? undefined;
+          nombreActiva = (comp as any).name ?? undefined;
+          motivoSuspension = (comp as any).suspension_reason ?? null;
+          suspendidaDesde = (comp as any).suspended_at ?? null;
         }
       }
 
@@ -293,7 +301,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         activeBranchId: activeBranch.id,
         branches: branchList,
         companyId: data.company_id,
-        companyStatus: compStatus,
+        // El de la empresa en la que se opera (la elegida o la impersonada).
+        companyStatus: (estadoActiva ?? compStatus) as AppUser['companyStatus'],
+        companyName: nombreActiva,
+        companySuspensionReason: motivoSuspension,
+        companySuspendedAt: suspendidaDesde,
         companyDemoExpiresAt: demoExpiresAt,
         companyTrialEndsAt: trialEndsAt,
         companyPaidUntil: paidUntil,
@@ -630,6 +642,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [appUser?.id, appUser?.email, loadProfile]);
 
+  // Suspensión y reactivación sin recargar: cada minuto y al volver a la
+  // pestaña se mira el estado de la empresa activa. Si cambió (la suspendieron,
+  // la reactivaron, cambió el motivo o el modo solo facturación), se recarga el
+  // perfil y la app muestra o quita la pantalla de bloqueo. El super admin no
+  // queda bloqueado, así que no hace falta para él.
+  const empresaVigilada = appUser && !appUser.isSuperAdmin ? (appUser.impersonatedCompanyId || appUser.companyId) : undefined;
+  const firmaEstado = appUser ? `${appUser.companyStatus}|${appUser.companySuspensionReason ?? ''}|${appUser.bloqueo ?? ''}` : '';
+  useEffect(() => {
+    if (!session || !empresaVigilada) return;
+    let vivo = true;
+    const revisar = async () => {
+      const { data } = await supabase
+        .from('companies').select('status, suspension_reason, solo_ventas, trial_ends_at')
+        .eq('id', empresaVigilada).maybeSingle();
+      if (!vivo || !data) return;
+      const bloqueo = motivoDeBloqueo({
+        esSuperAdmin: false,
+        estado: (data as any).status,
+        finPrueba: (data as any).trial_ends_at,
+        soloVentas: !!(data as any).solo_ventas,
+      });
+      const firma = `${(data as any).status}|${(data as any).suspension_reason ?? ''}|${bloqueo ?? ''}`;
+      if (firma !== firmaEstado) refreshProfile();
+    };
+    const intervalo = window.setInterval(revisar, 60_000);
+    const alVolver = () => { if (document.visibilityState === 'visible') revisar(); };
+    document.addEventListener('visibilitychange', alVolver);
+    return () => {
+      vivo = false;
+      window.clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', alVolver);
+    };
+  }, [session, empresaVigilada, firmaEstado, refreshProfile]);
+
   // Estado de carga / transición: mostrar el skeleton a pantalla completa.
   if (loading) return <AppSkeleton message="Cargando plataforma..." />;
   const isPublic = publicRoutes.includes(pathname);
@@ -658,9 +704,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return <CreateCompanyScreen userName={appUser.name} onSignOut={signOut} />;
   }
 
-  // Cuenta suspendida o pendiente de activación
+  // Empresa suspendida por el super admin (lib/suspension.ts).
   if (session && appUser && appUser.companyStatus === 'suspended' && !appUser.isSuperAdmin && !isPublic) {
-    return <SuspendedScreen userName={appUser.name} onSignOut={signOut} />;
+    return (
+      <SuspendedScreen
+        userName={appUser.name}
+        companyName={appUser.companyName}
+        motivo={appUser.companySuspensionReason}
+        suspendedAt={appUser.companySuspendedAt}
+        isAdmin={!!appUser.isCompanyAdmin}
+        onSignOut={signOut}
+        onRetry={refreshProfile}
+        onGoToCompanies={
+          appUser.companies && appUser.companies.length > 1
+            ? () => setImpersonatedCompany(null, null)
+            : undefined
+        }
+      />
+    );
   }
 
   // Todas las sucursales del usuario están desactivadas: no puede operar.

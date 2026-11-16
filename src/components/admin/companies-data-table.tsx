@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { Company } from '@/lib/types';
 import { ECF_AMBIENTE_NOMBRE, type AmbienteEcf, type EstadoEcfConfig } from '@/lib/ecf';
+import { esMotivoSuspension, MOTIVO_SUSPENSION_INFO } from '@/lib/suspension';
 import { BUSINESS_TYPE_PRESETS, type BusinessType } from '@/lib/business-types';
 import { useAuth } from '@/context/auth-provider';
 
@@ -373,6 +374,12 @@ export function CompaniesDataTable({
                   </TableCell>
                   <TableCell className="align-top py-4">
                     <Badge variant={STATUS_VARIANT[c.status]} className="shadow-sm">{STATUS_LABEL[c.status]}</Badge>
+                    {c.status === 'suspended' && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {esMotivoSuspension(c.suspension_reason) ? MOTIVO_SUSPENSION_INFO[c.suspension_reason].nombre : 'Sin motivo'}
+                        {c.suspended_at ? ` · desde ${new Date(c.suspended_at).toLocaleDateString('es-DO', { day: 'numeric', month: 'short' })}` : ''}
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell className="align-top py-4">
                     <div className="flex flex-col gap-1 text-xs">
@@ -454,7 +461,7 @@ export function CompaniesDataTable({
                                   </DropdownMenuItem>
                                 ) : (
                                   <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-destructive focus:text-destructive">
-                                    <Ban className="mr-2 h-4 w-4" /> Desactivar empresa
+                                    <Ban className="mr-2 h-4 w-4" /> Suspender empresa
                                   </DropdownMenuItem>
                                 )}
                               </>
