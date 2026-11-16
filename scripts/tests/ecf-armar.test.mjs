@@ -391,6 +391,19 @@ test('E44 exento se arma: líneas con IndicadorFacturacion 4 y sin ITBIS', () =>
   assert.equal(ecf.Encabezado.IdDoc.TipoeCF, 44);
   assert.equal(ecf.DetallesItems.Item[0].IndicadorFacturacion, 4);
   assert.deepEqual(ecf.Encabezado.Totales, { MontoExento: 300, MontoTotal: 300 });
+  // El esquema del 44 no tiene IndicadorMontoGravado: la DGII lo rechazó con código 3.
+  assert.equal('IndicadorMontoGravado' in ecf.Encabezado.IdDoc, false);
+  assert.deepEqual(Object.keys(ecf.Encabezado.IdDoc), [
+    'TipoeCF', 'eNCF', 'FechaVencimientoSecuencia', 'TipoIngresos', 'TipoPago',
+  ]);
+});
+
+test('Los demás tipos sí llevan IndicadorMontoGravado (el E45 lo llevó y fue aceptado)', () => {
+  for (const tipo of [31, 32, 45]) {
+    const comprador = tipo === 32 ? null : { rnc: '401506254', nombre: 'DGII' };
+    const ecf = armar({ tipo, comprador, vencimientoSecuencia: '2028-12-31' });
+    assert.equal(ecf.Encabezado.IdDoc.IndicadorMontoGravado, 0, String(tipo));
+  }
 });
 
 test('E44 con una línea gravada no se arma', () => {
