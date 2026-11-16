@@ -83,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // skeleton infinito de `session && !appUser`.
       console.error('No se pudo cargar el perfil:', error?.message ?? 'perfil no encontrado');
       setAppUser(null);
-      setTimeout(() => { supabase.auth.signOut(); }, 0);
+      setTimeout(() => { supabase.auth.signOut({ scope: 'local' }); }, 0);
       return;
     }
 
@@ -350,7 +350,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setAppUser(null);
           clearLocal();
           setLoading(false);
-          setTimeout(() => { supabase.auth.signOut(); }, 0);
+          setTimeout(() => { supabase.auth.signOut({ scope: 'local' }); }, 0);
           return;
         }
       }
@@ -401,7 +401,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(null);
       setAppUser(null);
       clearLocal();
-      setTimeout(() => { supabase.auth.signOut(); }, 0);
+      setTimeout(() => { supabase.auth.signOut({ scope: 'local' }); }, 0);
       return;
     }
 
@@ -593,8 +593,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { needsConfirmation: !data.session };
   };
 
+  // Todos los signOut de este archivo son 'local': cierran solo este navegador.
+  // El de supabase-js por defecto es 'global' y revoca las sesiones de la cuenta
+  // en todos los dispositivos (un cajero que sale en una caja tumbaba la otra, y
+  // los cierres automáticos de arriba hacían lo mismo sin que nadie lo pidiera).
+  // reset-password sí cierra en todos: tras cambiar la contraseña es lo correcto.
   const signOut = async () => {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut({ scope: 'local' });
     clearLocal();
     resetCartStore();
     localStorage.removeItem('cartCompanyId');
