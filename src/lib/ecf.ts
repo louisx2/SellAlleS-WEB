@@ -278,6 +278,70 @@ export function cupoPorAgotarse(pct: number): boolean {
   return pct >= CUPO_AVISO_PCT;
 }
 
+// ── Aviso de cupo para el administrador de la empresa ──────────────────────
+
+/** Lo que devuelve `ecf_cupo_del_mes()`: el uso del mes de la empresa actual. */
+export interface CupoEcfMes {
+  comprobantes: number;
+  cupo_comprobantes: number;
+  /** El mayor % entre comprobantes y llamadas a la API (MSeller corta con el que se acabe primero). */
+  uso_pct: number;
+  /** Documentos vigentes que ya se quedaron sin salir por falta de cupo. */
+  sin_cupo: number;
+  /** Día 1 del mes en UTC ('YYYY-MM-DD'), cuando reinicia el cupo. */
+  periodo: string;
+}
+
+export interface AvisoCupoEcf {
+  /** 'agotado': ya no salen comprobantes. 'por_agotarse': todavía salen, pero falta poco. */
+  nivel: 'por_agotarse' | 'agotado';
+  usados: number;
+  cupo: number;
+  /** Comprobantes que se quedaron sin salir (solo cuenta en 'agotado'). */
+  pendientes: number;
+  /** Cuándo reinicia el cupo: el día 1 del mes siguiente, 00:00 UTC. */
+  renueva: Date;
+  /** Al ritmo del mes, cuándo se acabaría; null si ya se acabó o no se acaba antes de renovarse. */
+  agotaAprox: Date | null;
+}
+
+/** Desde qué % se avisa aunque el ritmo no lo pida. */
+export const CUPO_AVISO_ADMIN_PCT = 80;
+/** Desde qué % se avisa si, al ritmo del mes, el cupo se acabaría antes de renovarse. */
+export const CUPO_AVISO_RITMO_PCT = 50;
+/** Días del mes que tienen que haber pasado para que el ritmo sea creíble. */
+const DIAS_MIN_PARA_RITMO = 3;
+
+/**
+ * Si hay que avisar al administrador y de qué. Se avisa:
+ *  - 'agotado' si ya hay comprobantes sin salir o el uso llegó al 100 %;
+ *  - 'por_agotarse' desde el 80 %, o desde el 50 % si al ritmo del mes el cupo
+ *    se acabaría antes del día 1 (y ya pasaron unos días, para que el ritmo
+ *    no sea el de una sola mañana).
+ */
+export function avisoDeCupoEcf(c: CupoEcfMes | null | undefined, ahora: Date): AvisoCupoEcf | null {
+  if (!c) return null;
+  const pct = Number(c.uso_pct) || 0;
+  const [y, m] = c.periodo.slice(0, 10).split('-').map(Number);
+  const inicio = Date.UTC(y, m - 1, 1);
+  const renueva = new Date(Date.UTC(y, m, 1));
+  const base = { usados: c.comprobantes, cupo: c.cupo_comprobantes, pendientes: c.sin_cupo, renueva };
+
+  if (c.sin_cupo > 0 || pct >= 100) return { nivel: 'agotado', ...base, agotaAprox: null };
+
+  const transcurrido = ahora.getTime() - inicio;
+  let agotaAprox: Date | null = null;
+  if (pct > 0 && transcurrido >= DIAS_MIN_PARA_RITMO * 86_400_000) {
+    const cuando = inicio + transcurrido * (100 / pct);
+    if (cuando < renueva.getTime()) agotaAprox = new Date(cuando);
+  }
+
+  if (pct >= CUPO_AVISO_ADMIN_PCT || (pct >= CUPO_AVISO_RITMO_PCT && agotaAprox)) {
+    return { nivel: 'por_agotarse', ...base, agotaAprox };
+  }
+  return null;
+}
+
 /** Atributo que ReceiptEcf pone en su bloque: "cargando" mientras dibuja el QR,
  *  "listo" cuando ya está, "error" si no se pudo. */
 export const ECF_QR_ATRIBUTO = 'data-ecf-qr';

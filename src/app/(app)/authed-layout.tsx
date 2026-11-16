@@ -32,6 +32,7 @@ import { SupportDialog } from '@/components/support/support-dialog';
 import { useActualizacionDisponible, aplicarActualizacion, VERSION } from '@/lib/pwa-update';
 import { AvisoDeCuota } from '@/components/subscription/aviso-de-cuota';
 import { EcfProblemasBanner } from '@/components/ecf/ecf-problemas-banner';
+import { EcfCupoBanner } from '@/components/ecf/ecf-cupo-banner';
 import { useMiCuenta } from '@/hooks/use-mi-cuenta';
 import { useComprobantesPendientes } from '@/hooks/use-comprobantes-pendientes';
 import { AVISO_BLOQUEO, MENSAJE_BLOQUEO, RUTAS_EN_BLOQUEO, TITULO_BLOQUEO, rutaPermitidaEnBloqueo } from '@/lib/bloqueo';
@@ -897,7 +898,10 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
             <>
               {verAvisoDeCuota && !isPosPage && pathname !== '/suscripcion' && <AvisoDeCuota cuenta={miCuenta} />}
               {verAvisoEcf && !isPosPage && (
-                <EcfProblemasBanner companyId={appUser.impersonatedCompanyId || appUser.companyId} />
+                <>
+                  <EcfCupoBanner companyId={appUser.impersonatedCompanyId || appUser.companyId} />
+                  <EcfProblemasBanner companyId={appUser.impersonatedCompanyId || appUser.companyId} />
+                </>
               )}
               {children}
             </>

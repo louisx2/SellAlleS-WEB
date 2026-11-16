@@ -38,6 +38,9 @@ import {
   cantidadExcedeDecimalesEcf,
   redondearCantidadEcf,
   ECF_DECIMALES_CANTIDAD,
+  avisoDeCupoEcf,
+  CUPO_AVISO_ADMIN_PCT,
+  CUPO_AVISO_RITMO_PCT,
 } from '../../src/lib/ecf.ts';
 import { PLANES_MSELLER } from '../../src/lib/ecf-planes.ts';
 
@@ -481,4 +484,56 @@ test('redondearCantidadEcf deja 2 decimales', () => {
   assert.equal(redondearCantidadEcf(0.124), 0.12);
   assert.equal(redondearCantidadEcf(3), 3);
   assert.equal(ECF_DECIMALES_CANTIDAD, 2);
+});
+
+// ── Aviso de cupo al administrador ─────────────────────────────────────────
+const cupo = (over = {}) => ({ comprobantes: 0, cupo_comprobantes: 250, uso_pct: 0, sin_cupo: 0, periodo: '2026-11-01', ...over });
+const dia = (d, h = 12) => new Date(Date.UTC(2026, 10, d, h));
+
+test('avisoDeCupoEcf: sin datos o con poco uso no avisa', () => {
+  assert.equal(avisoDeCupoEcf(null, dia(10)), null);
+  assert.equal(avisoDeCupoEcf(cupo({ comprobantes: 20, uso_pct: 8 }), dia(16)), null);
+});
+
+test('avisoDeCupoEcf: desde el 80 % avisa con los números y la renovación', () => {
+  const a = avisoDeCupoEcf(cupo({ comprobantes: 200, uso_pct: CUPO_AVISO_ADMIN_PCT }), dia(29));
+  assert.equal(a.nivel, 'por_agotarse');
+  assert.equal(a.usados, 200);
+  assert.equal(a.cupo, 250);
+  assert.equal(a.renueva.toISOString(), '2026-12-01T00:00:00.000Z');
+});
+
+test('avisoDeCupoEcf: desde el 50 % avisa si al ritmo del mes se acaba antes del día 1', () => {
+  // Día 11 a las 00:00 UTC: 10 días, 52 % -> 100 % hacia el día 20.
+  const a = avisoDeCupoEcf(cupo({ comprobantes: 130, uso_pct: 52 }), dia(11, 0));
+  assert.equal(a.nivel, 'por_agotarse');
+  const d = a.agotaAprox.getUTCDate();
+  assert.ok(d >= 19 && d <= 20, String(a.agotaAprox));
+  // Mismo % el día 25: al ritmo no se acaba antes de renovarse.
+  assert.equal(avisoDeCupoEcf(cupo({ comprobantes: 130, uso_pct: 52 }), dia(25)), null);
+});
+
+test('avisoDeCupoEcf: con menos de 3 días el ritmo no cuenta', () => {
+  assert.equal(avisoDeCupoEcf(cupo({ comprobantes: 130, uso_pct: CUPO_AVISO_RITMO_PCT + 5 }), dia(2)), null);
+  // Pero desde el 80 % se avisa igual.
+  assert.equal(avisoDeCupoEcf(cupo({ comprobantes: 210, uso_pct: 84 }), dia(2)).nivel, 'por_agotarse');
+});
+
+test('avisoDeCupoEcf: al 100 % o con comprobantes sin salir está agotado', () => {
+  const a = avisoDeCupoEcf(cupo({ comprobantes: 250, uso_pct: 100 }), dia(22));
+  assert.equal(a.nivel, 'agotado');
+  assert.equal(a.agotaAprox, null);
+  // Las llamadas a la API se pueden acabar antes que los comprobantes: manda el 429.
+  const b = avisoDeCupoEcf(cupo({ comprobantes: 180, uso_pct: 72, sin_cupo: 4 }), dia(22));
+  assert.equal(b.nivel, 'agotado');
+  assert.equal(b.pendientes, 4);
+});
+
+test('avisoDeCupoEcf: uso_pct puede llegar como texto (numeric de Postgres)', () => {
+  assert.equal(avisoDeCupoEcf(cupo({ comprobantes: 230, uso_pct: '92.0000' }), dia(20)).nivel, 'por_agotarse');
+});
+
+test('avisoDeCupoEcf: diciembre renueva el 1 de enero', () => {
+  const a = avisoDeCupoEcf(cupo({ comprobantes: 240, uso_pct: 96, periodo: '2026-12-01' }), new Date(Date.UTC(2026, 11, 20)));
+  assert.equal(a.renueva.toISOString(), '2027-01-01T00:00:00.000Z');
 });
