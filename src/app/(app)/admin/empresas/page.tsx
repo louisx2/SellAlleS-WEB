@@ -30,6 +30,7 @@ import { DeleteConfirmDialog } from '@/components/admin/delete-confirm-dialog';
 import { ManageCompanyUsersDialog } from '@/components/admin/manage-company-users-dialog';
 import { SubscriptionPaymentsDialog } from '@/components/admin/subscription-payments-dialog';
 import { CompanyRolesDialog } from '@/components/admin/company-roles-dialog';
+import { SuspensionEmpresaDialog } from '@/components/admin/suspension-empresa-dialog';
 import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
@@ -612,26 +613,6 @@ export default function CompaniesManagementPage() {
     }
   };
 
-  const handleToggleStatus = async () => {
-    if (!statusTarget) return;
-    const nextStatus: Company['status'] = statusTarget.status === 'suspended' ? 'active' : 'suspended';
-    setSaving(true);
-    try {
-      const { error } = await supabase.from('companies').update({ status: nextStatus }).eq('id', statusTarget.id);
-      if (error) throw error;
-      toast({
-        title: nextStatus === 'suspended' ? 'Empresa desactivada' : 'Empresa reactivada',
-        description: statusTarget.name,
-      });
-      setStatusTarget(null);
-      await load();
-    } catch (err: any) {
-      toast({ title: 'Error', description: err?.message ?? 'No se pudo cambiar el estado.', variant: 'destructive' });
-    } finally {
-      setSaving(false);
-    }
-  };
-
   // Borra la empresa y TODO su historial (ventas, clientes, financiamientos,
   // usuarios...) vía RPC. Los perfiles borrados por SQL dejan cuentas de auth
   // huérfanas, así que se purgan aparte con la Edge Function admin-user-actions.
@@ -855,14 +836,25 @@ export default function CompaniesManagementPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label>Estado</Label>
-                  <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v as Company['status'] })}>
+                  {/* Suspender y reactivar tienen su propio diálogo (motivo,
+                      cómo queda, aviso por correo): aquí no se cambia. */}
+                  <Select
+                    value={form.status}
+                    onValueChange={(v) => setForm({ ...form, status: v as Company['status'] })}
+                    disabled={form.status === 'suspended'}
+                  >
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="trial">Prueba</SelectItem>
                       <SelectItem value="active">Activa</SelectItem>
-                      <SelectItem value="suspended">Suspendida</SelectItem>
+                      {form.status === 'suspended' && <SelectItem value="suspended">Suspendida</SelectItem>}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {form.status === 'suspended'
+                      ? 'Para reactivarla, use "Reactivar empresa" en el menú de la lista.'
+                      : 'Para suspenderla, use "Suspender empresa" en el menú de la lista.'}
+                  </p>
                 </div>
                 <div className="grid gap-2">
                   <Label>Plan</Label>
@@ -1241,30 +1233,11 @@ export default function CompaniesManagementPage() {
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={statusTarget !== null} onOpenChange={(o) => { if (!o) setStatusTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {statusTarget?.status === 'suspended' ? '¿Reactivar esta empresa?' : '¿Desactivar esta empresa?'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {statusTarget?.status === 'suspended'
-                ? `“${statusTarget?.name}” volverá a estar activa y sus usuarios podrán acceder de nuevo.`
-                : `“${statusTarget?.name}” quedará suspendida. Sus usuarios no podrán acceder hasta que la reactives.`}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); handleToggleStatus(); }}
-              disabled={saving}
-              className={statusTarget?.status === 'suspended' ? '' : 'bg-destructive text-destructive-foreground hover:bg-destructive/90'}
-            >
-              {saving ? 'Guardando…' : statusTarget?.status === 'suspended' ? 'Reactivar' : 'Desactivar'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <SuspensionEmpresaDialog
+        company={statusTarget}
+        onClose={() => setStatusTarget(null)}
+        onDone={load}
+      />
 
       <DeleteConfirmDialog
         open={deleteCompanyTarget !== null}

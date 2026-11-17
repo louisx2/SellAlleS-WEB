@@ -53,7 +53,28 @@ type Template =
   | 'pago-rechazado'
   | 'comprobante-recibido'
   | 'resumen-cobros'
-  | 'ecf-avisos';
+  | 'ecf-avisos'
+  | 'cuenta-suspendida'
+  | 'cuenta-reactivada';
+
+/** Lo que se le dice a la empresa según por qué se suspendió (companies.suspension_reason). */
+const MOTIVO_SUSPENSION: Record<string, { titulo: string; parrafo: string; accion: string }> = {
+  falta_de_pago: {
+    titulo: 'Su cuenta ha sido suspendida por falta de pago',
+    parrafo: 'el acceso a la cuenta de {empresa} en SellAlleS ha sido suspendido porque la suscripción presenta pagos pendientes.',
+    accion: 'Para reactivarla, realice el pago pendiente y envíenos el comprobante. La reactivaremos en cuanto lo confirmemos.',
+  },
+  solicitud_cliente: {
+    titulo: 'Su cuenta ha sido suspendida',
+    parrafo: 'atendiendo a su solicitud, el acceso a la cuenta de {empresa} en SellAlleS ha sido suspendido.',
+    accion: 'Cuando desee reactivarla, comuníquese con nosotros.',
+  },
+  revision: {
+    titulo: 'Su cuenta ha sido suspendida temporalmente',
+    parrafo: 'el acceso a la cuenta de {empresa} en SellAlleS ha sido suspendido temporalmente mientras realizamos una revisión administrativa.',
+    accion: 'Si tiene alguna pregunta, comuníquese con nosotros.',
+  },
+};
 
 // Plantillas que recibe el super admin, no una empresa: no llevan el bloque
 // de "contáctanos" de soporte, que sería escribirse a sí mismo.
@@ -340,6 +361,47 @@ function render(template: Template, vars: Record<string, unknown>, c: Contacto, 
       };
     }
 
+    case 'cuenta-suspendida': {
+      const m = MOTIVO_SUSPENSION[String(vars.motivo ?? '')] ?? MOTIVO_SUSPENSION.revision;
+      const nombreEmpresa = String(vars.companyName ?? 'su empresa');
+      return {
+        subject: `${m.titulo} — SellAlleS`,
+        text: `Estimado(a)${vars.userName ? ` ${vars.userName}` : ''}:\n\nLe informamos que ${m.parrafo.replace('{empresa}', nombreEmpresa)}\n\nMientras la cuenta esté suspendida, sus usuarios no podrán acceder al sistema ni registrar ventas, y se pausan los recordatorios de cuotas a sus clientes. Los comprobantes electrónicos ya emitidos se siguen enviando a la DGII. Sus datos se conservan íntegramente.\n\n${m.accion}${vars.motivo === 'falta_de_pago' ? textoBancos(vars.bankAccounts) : ''}\n\nEquipo SellAlleS`,
+        html: envolver(m.titulo, `
+          <p>Estimado(a)${nombre}:</p>
+          <p>Le informamos que ${esc(m.parrafo).replace('{empresa}', `<strong>${empresa}</strong>`)}</p>
+          <p>Mientras la cuenta esté suspendida, sus usuarios no podrán acceder al sistema ni registrar ventas, y se pausan los recordatorios de cuotas a sus clientes. Los comprobantes electrónicos ya emitidos se siguen enviando a la DGII.</p>
+          <p><strong>Sus datos se conservan íntegramente.</strong></p>
+          <p>${esc(m.accion)}</p>
+          ${vars.motivo === 'falta_de_pago' ? bloqueBancos(vars.bankAccounts) : ''}
+          <p>Puede contactarnos por:</p>`, c),
+      };
+    }
+
+    case 'cuenta-reactivada': {
+      const prueba = vars.estado === 'trial';
+      const soloFacturacion = !!vars.soloFacturacion;
+      const vencida = prueba && vars.trialEndsAt && new Date(String(vars.trialEndsAt)).getTime() < Date.now();
+      const detalle = prueba
+        ? (vencida
+          ? 'La cuenta queda en modo solo facturación: podrá seguir vendiendo, y el resto de las funciones estará disponible al realizar el pago de su suscripción.'
+          : `Su período de prueba continúa hasta el ${fmtFecha(vars.trialEndsAt)}.`)
+        : soloFacturacion
+          ? 'Por ahora la cuenta queda en modo solo facturación: podrá seguir vendiendo, y el resto de las funciones se restablecerá al regularizar el pago de su suscripción.'
+          : 'Ya puede utilizar todas las funciones del sistema con normalidad.';
+      return {
+        subject: 'Su cuenta de SellAlleS ha sido reactivada',
+        text: `Estimado(a)${vars.userName ? ` ${vars.userName}` : ''}:\n\nLe informamos que la cuenta de ${vars.companyName ?? 'su empresa'} en SellAlleS ha sido reactivada y sus usuarios ya pueden acceder.\n\n${detalle}${soloFacturacion ? textoBancos(vars.bankAccounts) : ''}\n\nGracias por confiar en SellAlleS.\n\nEquipo SellAlleS`,
+        html: envolver('Su cuenta ha sido reactivada', `
+          <p>Estimado(a)${nombre}:</p>
+          <p>Le informamos que la cuenta de <strong>${empresa}</strong> en SellAlleS ha sido <strong>reactivada</strong> y sus usuarios ya pueden acceder.</p>
+          <p>${esc(detalle)}</p>
+          ${soloFacturacion ? bloqueBancos(vars.bankAccounts) : ''}
+          ${boton(soloFacturacion || vencida ? '/suscripcion' : '/dashboard', soloFacturacion || vencida ? 'Ir a Mi Suscripción' : 'Entrar a SellAlleS')}
+          <p>Gracias por confiar en SellAlleS.</p>`, c),
+      };
+    }
+
     case 'recibo-suscripcion': {
       // Con la factura adjunta el correo se presenta como factura; sin ella
       // (el adjunto falló o lo llama alguien que no lo manda) sigue siendo el
@@ -406,6 +468,7 @@ Deno.serve(async (req) => {
       'bienvenida', 'prueba-por-vencer', 'prueba-vencida', 'cuenta-activada',
       'recibo-suscripcion', 'cobro-por-vencer', 'cuota-vencida', 'pago-rechazado',
       'comprobante-recibido', 'resumen-cobros', 'ecf-avisos',
+      'cuenta-suspendida', 'cuenta-reactivada',
     ];
     if (!template || !validas.includes(template)) return json(400, { error: 'Plantilla no reconocida.' });
     if (!to || !to.includes('@')) return json(400, { error: 'Destinatario inválido.' });
