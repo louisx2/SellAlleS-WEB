@@ -9,6 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { getUnit, unitAllowsDecimals, type UnitCode } from '@/lib/units';
 import { formatCurrency } from '@/lib/utils';
 import { gananciaDelPrecio } from '@/lib/margen';
+import { desglosarPrecio } from '@/lib/precio-itbis';
 import type { PresentationDraft } from '@/lib/presentations';
 
 export interface PresentationsEditorProps {
@@ -18,6 +19,8 @@ export interface PresentationsEditorProps {
   cost: number;
   /** 1.18 si el precio trae el ITBIS adentro (lib/margen.ts); 1 si no. */
   factorItbis?: number;
+  /** Tasa de ITBIS que la caja suma ENCIMA del precio; 0 = no mostrar el precio con ITBIS. */
+  tasaItbisEncima?: number;
   drafts: PresentationDraft[];
   onChange: (drafts: PresentationDraft[]) => void;
   soldLoose: boolean;
@@ -50,6 +53,7 @@ export function PresentationsEditor({
   unit,
   cost,
   factorItbis = 1,
+  tasaItbisEncima = 0,
   drafts,
   onChange,
   soldLoose,
@@ -90,6 +94,9 @@ export function PresentationsEditor({
 
       {drafts.map((d, i) => {
         const hint = priceHint(d, cost, u.singular, factorItbis);
+        const conItbis = tasaItbisEncima > 0 && d.price !== '' && d.price > 0
+          ? desglosarPrecio(d.price, false, true, tasaItbisEncima)?.conItbis ?? null
+          : null;
         const warning = codeWarning(i);
         const id = `${baseId}-${i}`;
         return (
@@ -154,8 +161,12 @@ export function PresentationsEditor({
               </div>
             </div>
 
+            {!hint && conItbis != null && (
+              <p className="text-xs text-muted-foreground">con ITBIS {formatCurrency(conItbis)}</p>
+            )}
             {hint && (
               <p className="text-xs text-muted-foreground">
+                {conItbis != null && <>con ITBIS {formatCurrency(conItbis)}{' · '}</>}
                 {hint.perUnit}
                 {hint.margin !== null && (
                   <>
