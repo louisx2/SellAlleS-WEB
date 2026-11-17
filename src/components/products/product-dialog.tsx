@@ -140,6 +140,8 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const [priceInput, setPriceInput] = useState(product?.price != null ? String(product.price) : '');
   const [marginInput, setMarginInput] = useState('');
   const mandaElMargen = useRef(false);
+  // Cuál de las dos casillas de precio con ITBIS se está tecleando (ver más abajo).
+  const escribiendo = useRef<'sin' | 'con' | null>(null);
   const factor = factorItbis(itbisIncluido, aplicaItbis, ITBIS_RATE);
 
   const margenDesde = (costo: string, precio: string, f: number) => {
@@ -153,6 +155,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   // Recalcula lo que no manda, con el costo o el ITBIS nuevos.
   const recalcular = (costo: string, f: number) => {
     if (mandaElMargen.current) {
+      escribiendo.current = null; setAvisoCobro(null); // el precio cambia desde fuera: las dos casillas se rederivan
       const p = precioDesde(costo, marginInput, f);
       if (p != null) setPriceInput(p);
     } else {
@@ -163,11 +166,13 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const onAplicaItbisChange = (v: boolean) => {
     setAplicaItbis(v);
     setAvisoCobro(null);
+    escribiendo.current = null;
     recalcular(costInput, factorItbis(itbisIncluido, v, ITBIS_RATE));
   };
   const onMarginChange = (v: string) => {
     setMarginInput(v);
     mandaElMargen.current = true;
+    escribiendo.current = null; setAvisoCobro(null); // el precio cambia desde fuera: las dos casillas se rederivan
     const p = precioDesde(costInput, v, factor);
     if (p != null) setPriceInput(p);
   };
@@ -193,7 +198,6 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const [sinItbisInput, setSinItbisInput] = useState('');
   const [conItbisInput, setConItbisInput] = useState('');
   const [avisoCobro, setAvisoCobro] = useState<number | null>(null);
-  const escribiendo = useRef<'sin' | 'con' | null>(null);
   const desglose = desglosarPrecio(parseFloat(priceInput), itbisIncluido, aplicaItbis, ITBIS_RATE);
   useEffect(() => {
     if (escribiendo.current !== 'sin') setSinItbisInput(desglose ? String(desglose.sinItbis) : '');
