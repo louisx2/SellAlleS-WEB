@@ -35,6 +35,7 @@ import { useLocations } from '@/context/location-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
 import { factorItbis, formatoPorcentaje, gananciaDelPrecio, precioConGanancia } from '@/lib/margen';
+import { desglosarPrecio, guardadoDesdeBase, guardadoDesdeFinal } from '@/lib/precio-itbis';
 import { ITBIS_RATE, cn, formatCurrency } from '@/lib/utils';
 import { useModules } from '@/context/modules-provider';
 import { supabase } from '@/lib/supabase/client';
@@ -161,6 +162,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const onCostChange = (v: string) => { setCostInput(v); recalcular(v, factor); };
   const onAplicaItbisChange = (v: boolean) => {
     setAplicaItbis(v);
+    setAvisoCobro(null);
     recalcular(costInput, factorItbis(itbisIncluido, v, ITBIS_RATE));
   };
   const onMarginChange = (v: string) => {
@@ -175,6 +177,41 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     setMarginInput(margenDesde(costInput, v, factor));
   };
   const ganancia = gananciaDelPrecio(parseFloat(costInput), parseFloat(priceInput), factor);
+
+  // Precio con y sin ITBIS (lib/precio-itbis.ts). `priceInput` sigue siendo el
+  // único precio que se guarda: sin ITBIS si la sucursal lo suma encima, con
+  // ITBIS si lo trae incluido. Las dos casillas se derivan de él con la cuenta
+  // de la caja, salvo la que se está escribiendo, que conserva lo tecleado
+  // hasta salir de ella.
+  const [sinItbisInput, setSinItbisInput] = useState('');
+  const [conItbisInput, setConItbisInput] = useState('');
+  const [avisoCobro, setAvisoCobro] = useState<number | null>(null);
+  const escribiendo = useRef<'sin' | 'con' | null>(null);
+  const desglose = desglosarPrecio(parseFloat(priceInput), itbisIncluido, aplicaItbis, ITBIS_RATE);
+  useEffect(() => {
+    if (escribiendo.current !== 'sin') setSinItbisInput(desglose ? String(desglose.sinItbis) : '');
+    if (escribiendo.current !== 'con') setConItbisInput(desglose ? String(desglose.conItbis) : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [priceInput, itbisIncluido, aplicaItbis, open]);
+  const onPrecioConDesglose = (lado: 'sin' | 'con', v: string) => {
+    escribiendo.current = lado;
+    setAvisoCobro(null);
+    if (lado === 'sin') setSinItbisInput(v); else setConItbisInput(v);
+    const guardado = lado === 'sin'
+      ? guardadoDesdeBase(parseFloat(v), itbisIncluido, ITBIS_RATE)
+      : guardadoDesdeFinal(parseFloat(v), itbisIncluido, ITBIS_RATE);
+    onPriceChange(guardado != null ? String(guardado) : '');
+  };
+  // Al salir, la casilla muestra lo que de verdad cobra la caja: con 2
+  // decimales y el ITBIS encima no todo precio final existe (100 → 100.01).
+  const onPrecioConDesgloseBlur = (lado: 'sin' | 'con') => {
+    escribiendo.current = null;
+    if (!desglose) return;
+    if (lado === 'sin') { setSinItbisInput(String(desglose.sinItbis)); return; }
+    const escrito = parseFloat(conItbisInput);
+    if (Number.isFinite(escrito) && Math.abs(escrito - desglose.conItbis) >= 0.005) setAvisoCobro(desglose.conItbis);
+    setConItbisInput(String(desglose.conItbis));
+  };
   // Si las sucursales cargan con el diálogo ya abierto, el % se calculó sin
   // saber si el precio trae el ITBIS: se rehace, salvo que lo esté escribiendo.
   useEffect(() => {
@@ -198,6 +235,14 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     setCostInput(product?.cost != null ? String(product.cost) : '');
     setPriceInput(product?.price != null ? String(product.price) : '');
     setAplicaItbis(!!product?.itbis);
+    setAvisoCobro(null);
+    escribiendo.current = null;
+    {
+      // Lo tecleado y cancelado no reaparece: las casillas vuelven al precio guardado.
+      const d = desglosarPrecio(product?.price ?? NaN, itbisIncluido, !!product?.itbis, ITBIS_RATE);
+      setSinItbisInput(d ? String(d.sinItbis) : '');
+      setConItbisInput(d ? String(d.conItbis) : '');
+    }
     setMarginInput(
       product
         ? margenDesde(String(product.cost ?? ''), String(product.price ?? ''),
@@ -612,15 +657,65 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                   aria-describedby="margin-hint"
                 />
               </div>
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="price">Precio Venta</Label>
-                <Input id="price" name="price" type="number" step="0.01" value={priceInput} onChange={(e) => onPriceChange(e.target.value)} required/>
+              {aplicaItbis ? (
+                // El precio que se guarda viaja oculto; las dos casillas de abajo lo derivan.
+                <input type="hidden" name="price" value={priceInput} />
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="price">Precio Venta</Label>
+                  <Input id="price" name="price" type="number" min="0" step="0.01" value={priceInput} onChange={(e) => onPriceChange(e.target.value)} required/>
+                </div>
+              )}
+              <div className="flex items-center space-x-2 sm:col-span-3">
+                <Checkbox id="itbis" name="itbis" checked={aplicaItbis} onCheckedChange={(v) => onAplicaItbisChange(v === true)} />
+                <label htmlFor="itbis" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                  Aplica ITBIS ({formatoPorcentaje(ITBIS_RATE * 100)} %)
+                </label>
               </div>
+              {aplicaItbis && (
+                <>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="priceSinItbis">Precio sin ITBIS</Label>
+                    <Input
+                      id="priceSinItbis" type="number" min="0" step="0.01" inputMode="decimal"
+                      value={sinItbisInput}
+                      onChange={(e) => onPrecioConDesglose('sin', e.target.value)}
+                      onBlur={() => onPrecioConDesgloseBlur('sin')}
+                      required
+                    />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label>+ ITBIS</Label>
+                    <div className="flex h-10 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground" aria-live="polite">
+                      {desglose ? formatCurrency(desglose.itbis) : '—'}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="priceConItbis">= Precio con ITBIS</Label>
+                    <Input
+                      id="priceConItbis" type="number" min="0" step="0.01" inputMode="decimal"
+                      value={conItbisInput}
+                      onChange={(e) => onPrecioConDesglose('con', e.target.value)}
+                      onBlur={() => onPrecioConDesgloseBlur('con')}
+                      aria-describedby="precio-itbis-hint"
+                      required
+                    />
+                  </div>
+                  <p id="precio-itbis-hint" className="-mt-2 text-xs text-muted-foreground sm:col-span-3">
+                    Escribe cualquiera de los dos precios y el otro se calcula solo.
+                    {avisoCobro != null && (
+                      <span className="font-medium text-foreground">
+                        {' '}Con 2 decimales la caja cobra {formatCurrency(avisoCobro)}.
+                      </span>
+                    )}
+                  </p>
+                </>
+              )}
               <p id="margin-hint" className="-mt-2 text-xs text-muted-foreground sm:col-span-3">
                 {ganancia ? (
                   <span className={cn(ganancia.monto < 0 && 'font-medium text-destructive')}>
                     {ganancia.monto < 0 ? 'Pierdes' : 'Ganas'} {formatCurrency(Math.abs(ganancia.monto))} por unidad
-                    {factor > 1 ? ' (sin ITBIS)' : ''}.
+                    {aplicaItbis ? ' (sin ITBIS)' : ''}.
                   </span>
                 ) : (
                   'Pon el costo y el % de ganancia para calcular el precio, o el precio para ver cuánto ganas.'
@@ -683,16 +778,6 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
             </div>
             </>
             )}
-            <div className="flex flex-col justify-center gap-2 md:col-span-2">
-              <Label htmlFor="itbis" className="mb-1">ITBIS</Label>
-              <div className="flex items-center space-x-2 h-10">
-                <Checkbox id="itbis" name="itbis" checked={aplicaItbis} onCheckedChange={(v) => onAplicaItbisChange(v === true)} />
-                <label htmlFor="itbis" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
-                  Aplica ITBIS
-                </label>
-              </div>
-            </div>
-
             {showEsServicio && (
             <div className="flex flex-col justify-center gap-2 md:col-span-2">
               <Label htmlFor="esServicio" className="mb-1">Factura electrónica (e-CF)</Label>
