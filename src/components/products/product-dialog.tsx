@@ -687,7 +687,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
               {aplicaItbis && (
                 <>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="priceSinItbis">Precio sin ITBIS</Label>
+                    <Label htmlFor="priceSinItbis">Precio de venta sin ITBIS</Label>
                     <Input
                       id="priceSinItbis" type="number" min="0" step="0.01" inputMode="decimal"
                       value={sinItbisInput}
@@ -703,7 +703,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                     </div>
                   </div>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="priceConItbis">= Precio con ITBIS</Label>
+                    <Label htmlFor="priceConItbis">= Precio de venta con ITBIS</Label>
                     <Input
                       id="priceConItbis" type="number" min="0" step="0.01" inputMode="decimal"
                       value={conItbisInput}
@@ -714,7 +714,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                     />
                   </div>
                   <p id="precio-itbis-hint" className="-mt-2 text-xs text-muted-foreground sm:col-span-3">
-                    Escribe cualquiera de los dos precios y el otro se calcula solo.
+                    Escribe el precio de venta con o sin ITBIS y el otro se calcula solo.
                     {avisoCobro != null && (
                       <span className="font-medium text-foreground">
                         {' '}Con 2 decimales la caja cobra {formatCurrency(avisoCobro)}.
