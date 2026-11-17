@@ -4,6 +4,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import type { Product } from '@/lib/types';
 import { ITBIS_RATE, formatCurrency } from '@/lib/utils';
 import { factorItbis, formatoPorcentaje, gananciaDelPrecio } from '@/lib/margen';
+import { desglosarPrecio } from '@/lib/precio-itbis';
 import { formatQuantity, getUnit } from '@/lib/units';
 import { breakdownStock, formatBreakdown } from '@/lib/presentations';
 import { Badge } from '@/components/ui/badge';
@@ -41,7 +42,22 @@ export const buildProductColumns = (
   {
     accessorKey: 'price',
     header: 'Precio',
-    cell: ({ row }) => formatCurrency(row.getValue('price')),
+    // Con ITBIS, debajo va el otro precio: el final si la sucursal lo suma
+    // encima, el neto si ya lo trae incluido (lib/precio-itbis.ts).
+    cell: ({ row }) => {
+      const p = row.original;
+      const d = p.itbis ? desglosarPrecio(p.price, itbisIncluido, true, ITBIS_RATE) : null;
+      return (
+        <div className="leading-tight">
+          <div>{formatCurrency(p.price)}</div>
+          {d && (
+            <div className="whitespace-nowrap text-xs text-muted-foreground">
+              {itbisIncluido ? `sin ITBIS ${formatCurrency(d.sinItbis)}` : `con ITBIS ${formatCurrency(d.conItbis)}`}
+            </div>
+          )}
+        </div>
+      );
+    },
   },
   {
     accessorKey: 'cost',

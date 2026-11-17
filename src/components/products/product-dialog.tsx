@@ -183,6 +183,13 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   // ITBIS si lo trae incluido. Las dos casillas se derivan de él con la cuenta
   // de la caja, salvo la que se está escribiendo, que conserva lo tecleado
   // hasta salir de ella.
+  // Mayoreo y presentaciones no llevan segunda casilla: solo se muestra lo que
+  // cobrará la caja cuando la sucursal suma el ITBIS encima.
+  const tasaItbisEncima = aplicaItbis && !itbisIncluido ? ITBIS_RATE : 0;
+  const [wholesaleInput, setWholesaleInput] = useState(product?.wholesalePrice != null ? String(product.wholesalePrice) : '');
+  const mayoreoConItbis = tasaItbisEncima > 0 && parseFloat(wholesaleInput) > 0
+    ? desglosarPrecio(parseFloat(wholesaleInput), false, true, tasaItbisEncima)?.conItbis ?? null
+    : null;
   const [sinItbisInput, setSinItbisInput] = useState('');
   const [conItbisInput, setConItbisInput] = useState('');
   const [avisoCobro, setAvisoCobro] = useState<number | null>(null);
@@ -236,6 +243,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     setPriceInput(product?.price != null ? String(product.price) : '');
     setAplicaItbis(!!product?.itbis);
     setAvisoCobro(null);
+    setWholesaleInput(product?.wholesalePrice != null ? String(product.wholesalePrice) : '');
     escribiendo.current = null;
     {
       // Lo tecleado y cancelado no reaparece: las casillas vuelven al precio guardado.
@@ -814,7 +822,13 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
               <>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="wholesalePrice">Precio Mayoreo</Label>
-                  <Input id="wholesalePrice" name="wholesalePrice" type="number" step="0.01" defaultValue={product?.wholesalePrice} />
+                  <Input
+                    id="wholesalePrice" name="wholesalePrice" type="number" step="0.01"
+                    value={wholesaleInput} onChange={(e) => setWholesaleInput(e.target.value)}
+                  />
+                  {mayoreoConItbis != null && (
+                    <p className="text-xs text-muted-foreground">con ITBIS: {formatCurrency(mayoreoConItbis)}</p>
+                  )}
                 </div>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="wholesaleMinQuantity">Cant. Mín. Mayor. ({getUnit(unit).short})</Label>
@@ -836,6 +850,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                 unit={tracksStock ? unit : DEFAULT_UNIT_CODE}
                 cost={parseFloat(costInput)}
                 factorItbis={factor}
+                tasaItbisEncima={tasaItbisEncima}
                 drafts={drafts}
                 onChange={handleDraftsChange}
                 soldLoose={effectiveSoldLoose}
