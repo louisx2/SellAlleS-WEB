@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils';
 import { AuthProvider } from '@/context/auth-provider';
 import { PlatformSettingsProvider } from '@/context/platform-settings-provider';
 import { PWARegister } from '@/components/pwa-register';
+import { ThemeFavicon } from '@/components/theme-favicon';
 
 const ptSans = PT_Sans({
   subsets: ['latin'],
@@ -53,6 +54,7 @@ export default function RootLayout({
         <PlatformSettingsProvider>
           <AuthProvider>
             <PWARegister />
+            <ThemeFavicon />
             {children}
             <Toaster />
           </AuthProvider>
