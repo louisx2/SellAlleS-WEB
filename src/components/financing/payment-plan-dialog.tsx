@@ -11,7 +11,6 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Printer } from 'lucide-react';
 import { useSales } from '@/context/sales-provider';
 import { CompartirDocumento } from '@/components/sharing/compartir-documento';
 import { PaymentPlanContent } from './payment-plan-content';
@@ -47,14 +46,10 @@ export function PaymentPlanDialog({ sale, isOpen, onOpenChange }: PaymentPlanDia
         <ScrollArea className="flex-grow pr-3">
           <PaymentPlanContent sale={freshSale} />
         </ScrollArea>
-        <DialogFooter className="flex-row flex-wrap gap-2 pt-4 border-t sm:justify-start">
-          <Button variant="outline" size="sm" onClick={handlePrint}>
-            <Printer className="mr-1.5 h-4 w-4" />
-            Imprimir
-          </Button>
+        <DialogFooter className="flex-col gap-2 pt-4 border-t sm:flex-col sm:space-x-0">
           {/* Se manda igual que la factura: enlace por WhatsApp, correo o PDF. */}
-          <CompartirDocumento sale={freshSale} documento="plan" pdfRef={pdfRef} />
-          <Button size="sm" className="ml-auto" onClick={() => onOpenChange(false)}>Atrás</Button>
+          <CompartirDocumento sale={freshSale} documento="plan" pdfRef={pdfRef} onImprimir={handlePrint} />
+          <Button size="sm" className="w-full" onClick={() => onOpenChange(false)}>Atrás</Button>
         </DialogFooter>
 
         {/* Copia oculta para impresión */}

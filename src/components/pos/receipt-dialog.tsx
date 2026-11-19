@@ -12,12 +12,13 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Printer, CalendarClock, MessageSquare, Mail, ArrowLeft, Download } from 'lucide-react';
+import { CalendarClock, ArrowLeft } from 'lucide-react';
 import { ReceiptBarcode, ReceiptContent, ReceiptEcf, ReceiptHeader, ReceiptItems, ReceiptTotals } from './receipt-content';
 import { IncluirDatosCliente } from './incluir-datos-cliente';
 import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 import {
   BotonEnviarCorreo,
+  BotonesDocumento,
   DESCRIPCION_CORREO,
   PanelCorreo,
   PanelWhatsApp,
@@ -79,6 +80,8 @@ function ReceiptDialogDeVenta({
         {activeScreen === 'receipt' && (
           <>
             <DialogHeader className="p-6 pb-2">
+                {/* Radix exige un título; el recibo ya lleva su encabezado. */}
+                <DialogTitle className="sr-only">Recibo de la venta</DialogTitle>
                 <ReceiptHeader sale={sale} showCustomerInfo={incluirDatosCliente} />
             </DialogHeader>
 
@@ -96,46 +99,27 @@ function ReceiptDialogDeVenta({
               />
             </div>
 
-            <DialogFooter className="flex-col sm:flex-row gap-2 p-4 border-t bg-secondary/50">
-              <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                <Button variant="outline" size="sm" onClick={handlePrint}>
-                  <Printer className="mr-1.5 h-4 w-4" />
-                  Imprimir
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700"
-                  onClick={() => setActiveScreen('whatsapp_confirm')}
-                >
-                  <MessageSquare className="mr-1.5 h-4 w-4" />
-                  WhatsApp
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setActiveScreen('email_confirm')}
-                >
-                  <Mail className="mr-1.5 h-4 w-4" />
-                  Correo
-                </Button>
-                {/* Vivía dentro de "Descargar PDF y abrir chat", en el diálogo
-                    de WhatsApp. Al quitar esa opción era la única forma de
-                    guardar el PDF en el dispositivo, así que sube al pie. */}
-                <Button variant="outline" size="sm" onClick={compartir.descargarPdf}>
-                  <Download className="mr-1.5 h-4 w-4" />
-                  Descargar PDF
-                </Button>
+            <DialogFooter className="flex-col gap-2 p-4 border-t bg-secondary/50 sm:flex-col sm:space-x-0">
+              {/* Misma botonera que el detalle de la venta y los documentos
+                  del financiamiento; WhatsApp y Correo abren las pantallas de
+                  este mismo diálogo. */}
+              <BotonesDocumento
+                onImprimir={handlePrint}
+                onWhatsApp={() => setActiveScreen('whatsapp_confirm')}
+                onCorreo={() => setActiveScreen('email_confirm')}
+                onPdf={compartir.descargarPdf}
+              />
+              <div className="flex items-center gap-2">
                 {sale.paymentMethod === 'financing' && (
-                  <Button variant="outline" size="sm" onClick={() => setPlanOpen(true)}>
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => setPlanOpen(true)}>
                     <CalendarClock className="mr-1.5 h-4 w-4" />
-                    Plan de Pagos
+                    Plan de pagos
                   </Button>
                 )}
+                <Button size="sm" onClick={() => onOpenChange(false)} className="flex-1">
+                  Cerrar
+                </Button>
               </div>
-              <Button size="sm" onClick={() => onOpenChange(false)} className="w-full sm:w-auto ml-auto">
-                Cerrar
-              </Button>
             </DialogFooter>
           </>
         )}
