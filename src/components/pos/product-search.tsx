@@ -21,6 +21,7 @@ import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/context/auth-provider';
 import { useCanQuickSell } from '@/hooks/use-can-quick-sell';
+import { usePiezasOcultasEnPos } from '@/components/taller/use-piezas-ocultas';
 import { QuickSaleDialog } from './quick-sale-dialog';
 import {
   BarcodeScannerDialog,
@@ -42,7 +43,13 @@ export function ProductSearch() {
   const [searchMode, setSearchMode] = useState<'name' | 'code'>('name');
   // Por defecto activado, para no cambiarle el comportamiento a quien ya usa lector.
   const [scannerMode, setScannerMode] = useState(true);
-  const { products: allProducts } = useProducts();
+  const { products: catalogo } = useProducts();
+  // Piezas del taller que no se venden en el mostrador (Configuración del Taller).
+  const ubicacionOculta = usePiezasOcultasEnPos();
+  const allProducts = useMemo(
+    () => (ubicacionOculta ? catalogo.filter((p) => p.locationId !== ubicacionOculta) : catalogo),
+    [catalogo, ubicacionOculta],
+  );
   const { addItem, saleCompletionCount, activeCart } = useCart();
   const { toast } = useToast();
   const { appUser, setInventoryView } = useAuth();

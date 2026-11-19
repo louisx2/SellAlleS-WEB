@@ -34,6 +34,7 @@ import { SuspensionEmpresaDialog } from '@/components/admin/suspension-empresa-d
 import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
+import { RUBROS } from '@/lib/taller';
 import { PasswordInput } from '@/components/ui/password-input';
 import { formatCurrency } from '@/lib/utils';
 import { BILLING_CYCLE_LABEL, planRatePerBranch, type BillingCycle } from '@/lib/subscription-pricing';
@@ -548,6 +549,20 @@ export default function CompaniesManagementPage() {
           await supabase.from('service_types').insert(
             preset.serviceTypes.map((st) => ({ name: st.name, base_price: st.basePrice ?? 0, company_id: companyId })),
           );
+        }
+        // Taller: los tipos de equipo y chequeos del rubro (company_id explícito:
+        // el valor por defecto sería la empresa de quien la está creando).
+        const rubro = preset.tallerRubro ? RUBROS.find((r) => r.key === preset.tallerRubro) : undefined;
+        for (const [i, eq] of (rubro?.equipos ?? []).entries()) {
+          const { data: tipo } = await supabase.from('service_equipment_types').insert({
+            company_id: companyId, name: eq.name, serial_label: eq.serialLabel, asks_password: eq.asksPassword,
+            extra_fields: eq.extraFields ?? [], position: i,
+          }).select('id').single();
+          if (tipo) {
+            await supabase.from('service_checklist_items').insert(eq.checklist.map((label, j) => ({
+              company_id: companyId, equipment_type_id: tipo.id, label, position: j, required: j < 2, required_quick: j < 2,
+            })));
+          }
         }
       }
 

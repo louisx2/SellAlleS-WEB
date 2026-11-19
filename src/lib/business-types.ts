@@ -11,6 +11,8 @@ export interface BusinessTypePreset {
   modules: ModuleKey[];
   productCategories?: string[];
   serviceTypes?: { name: string; basePrice?: number }[];
+  /** Rubro del taller (src/lib/taller.ts → RUBROS): siembra tipos de equipo y chequeos. */
+  tallerRubro?: string;
 }
 
 /** Módulos "verticales" que un preset de rubro puede activar/desactivar
@@ -41,13 +43,10 @@ export const BUSINESS_TYPE_PRESETS: Record<BusinessType, BusinessTypePreset> = {
   },
   reparaciones: {
     label: 'Reparación de teléfonos',
-    description: 'Órdenes de servicio técnico con repuestos.',
+    description: 'Taller: casos con chequeos de llegada, técnicos, piezas y seguimiento para el cliente.',
     modules: ['services'],
-    serviceTypes: [
-      { name: 'Cambio de pantalla' },
-      { name: 'Cambio de batería' },
-      { name: 'Reparación de puerto de carga' },
-    ],
+    // El catálogo (con precio) lo arma cada taller: cada servicio crea su artículo.
+    tallerRubro: 'celulares',
   },
   prestamos: {
     label: 'Préstamos',

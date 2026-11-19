@@ -8,7 +8,9 @@ import { useSales } from '@/context/sales-provider';
 import { useModules } from '@/context/modules-provider';
 import { useSharing } from '@/context/sharing-provider';
 import { supabase } from '@/lib/supabase/client';
-import { rowToService, rowToCoupon } from '@/lib/supabase/mappers';
+import { rowToService, rowToCoupon, SERVICE_SELECT } from '@/lib/supabase/mappers';
+import { caseNumber, equipmentLabel } from '@/lib/taller';
+import { StatusBadge } from '@/components/taller/status-badge';
 import { formatCurrency } from '@/lib/utils';
 import type { Service, Coupon } from '@/lib/types';
 import { Button } from '@/components/ui/button';
@@ -33,9 +35,6 @@ const PAYMENT_STATUS_LABEL: Record<string, string> = {
   paid: 'Pagada', credit: 'A crédito', in_financing: 'En financiamiento',
 };
 
-const SERVICE_STATUS_LABEL: Record<string, string> = {
-  pending: 'Pendiente', in_progress: 'En progreso', completed: 'Completado', cancelled: 'Cancelado',
-};
 
 const COUPON_STATUS_BADGE: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }> = {
   active: { label: 'Activo', variant: 'default' },
@@ -74,7 +73,7 @@ export default function CustomerHistoryClient() {
     (async () => {
       const { data } = await supabase
         .from('services')
-        .select('*, customers(id,name,phone), service_types(id,name,base_price)')
+        .select(SERVICE_SELECT)
         .eq('customer_id', customerId)
         .in('branch_id', branchIds)
         .order('created_at', { ascending: false });
@@ -337,12 +336,13 @@ export default function CustomerHistoryClient() {
                   {services.map((service) => (
                     <TableRow key={service.id}>
                       <TableCell>{service.createdAt.toLocaleDateString('es-DO')}</TableCell>
-                      <TableCell>{service.description}</TableCell>
+                      <TableCell>
+                        <Link href={`/services/caso?id=${service.id}`} className="font-medium hover:underline">{caseNumber(service.number)}</Link>
+                        <span className="text-muted-foreground"> · {[equipmentLabel(service), service.description].filter(Boolean).join(' — ')}</span>
+                      </TableCell>
                       <TableCell className="text-right">{formatCurrency(service.total)}</TableCell>
                       <TableCell>
-                        <Badge variant={service.status === 'completed' ? 'outline' : 'secondary'}>
-                          {SERVICE_STATUS_LABEL[service.status] ?? service.status}
-                        </Badge>
+                        <StatusBadge status={service.status} />
                       </TableCell>
                     </TableRow>
                   ))}

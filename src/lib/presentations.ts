@@ -59,6 +59,8 @@ export function baseQtyInCart(productId: string, items: CartItem[], exceptCartIt
   let total = 0;
   for (const item of items) {
     if (item.product.id !== productId) continue;
+    // Pieza de un caso del taller: ya salió del inventario al agregarla al caso.
+    if (item.serviceItemId) continue;
     if (exceptCartItemId !== undefined && item.cartItemId === exceptCartItemId) continue;
     total += lineBaseQty(item);
   }

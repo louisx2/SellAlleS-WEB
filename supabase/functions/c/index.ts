@@ -1,4 +1,6 @@
-// Resuelve el enlace corto de un comprobante y redirige a la descarga.
+// Resuelve el enlace corto de un comprobante y redirige a la descarga. También
+// resuelve el enlace de seguimiento de un caso del taller (código de 10
+// caracteres) y redirige a su página pública en la app.
 //
 // Es la unica funcion del proyecto SIN verificacion de JWT, y tiene que serlo:
 // la abre el cliente final desde WhatsApp, sin sesion ni cuenta. Lo que la
@@ -14,6 +16,14 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 /** Minutos que vive la URL firmada a la que se redirige. */
 const MINUTOS_FIRMA = 5;
+
+/** Página pública de seguimiento de un caso del taller (en la app, porque una
+ *  Edge Function no puede servir HTML: Supabase lo reescribe a text/plain). */
+const APP_BASE = Deno.env.get('APP_BASE_URL') ?? 'https://app.sellalles.com';
+
+/** Los códigos de seguimiento del taller tienen 10 caracteres; los de los
+ *  comprobantes, 8. Mismo alfabeto, sin caracteres que se confunden. */
+const CODIGO_TALLER = /^[23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ]{10}$/;
 
 /** Respuesta legible para el cliente final, que no es tecnico y no espera un
  *  JSON. Se ve en el navegador del telefono. */
@@ -59,6 +69,22 @@ Deno.serve(async (req) => {
     // cliente hay que decirle cual de las dos es: si vencio, sabe que tiene que
     // pedirlo de nuevo; el codigo ya lo tiene, asi que no se filtra nada.
     if (!enlace) {
+      // ¿Es el enlace de seguimiento de un caso del taller? Mismo formato que el
+      // de las facturas (sellalles.com/<empresa>/c/<código>), así el cliente ve
+      // el nombre del negocio. La página vive en la app; aquí solo se redirige.
+      if (CODIGO_TALLER.test(code)) {
+        const { data: caso } = await admin
+          .from('services')
+          .select('id')
+          .eq('tracking_code', code)
+          .maybeSingle();
+        if (caso) {
+          return new Response(null, {
+            status: 302,
+            headers: { Location: `${APP_BASE}/seguimiento?c=${encodeURIComponent(code)}` },
+          });
+        }
+      }
       return pagina(404, 'Enlace no encontrado', 'Verifica que copiaste el enlace completo, o pídele el comprobante de nuevo al negocio.');
     }
     if (new Date(enlace.expires_at) <= new Date()) {

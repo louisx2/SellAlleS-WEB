@@ -32,8 +32,9 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // /mi-prestamo es el portal público de clientes finales (cédula + PIN, sin
 // Supabase Auth de por medio) — debe quedar fuera del guard de sesión igual
-// que /login.
-const publicRoutes = ['/login', '/reset-password', '/mi-prestamo'];
+// que /login. /seguimiento es la página pública de un caso del taller (el
+// cliente la abre desde WhatsApp con el código del caso).
+const publicRoutes = ['/login', '/reset-password', '/mi-prestamo', '/seguimiento'];
 
 function persistLocal(user: AppUser) {
   localStorage.setItem('userRole', user.role);
@@ -425,7 +426,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const isImpersonating = !!appUser?.impersonatedCompanyId;
       const isClientRoute = !pathname.startsWith('/admin');
 
-      if (isPublic && pathname !== '/reset-password') {
+      // /seguimiento tampoco rebota: quien atiende el taller abre el enlace del
+      // cliente en su propio teléfono para ver lo mismo que verá el cliente.
+      if (isPublic && pathname !== '/reset-password' && pathname !== '/seguimiento') {
         // /reset-password se excluye: durante la recuperación se establece una
         // sesión temporal (para poder llamar updateUser), pero el usuario debe
         // quedarse ahí a fijar su contraseña, no rebotar al dashboard.

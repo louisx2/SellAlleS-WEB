@@ -155,9 +155,11 @@ const cartStore = create<CartStore>()(
             const toAdd = normalizeQty(Math.min(quantity, room), presentation ? COUNTABLE_UNIT : product.unit);
             // Find an item with the same product ID, the same presentation (or both
             // loose) and no custom price
+            // Las líneas de un caso del taller no se fusionan: su cantidad es la del caso.
             const existingItem = cart.items.find(item =>
               item.product.id === product.id
               && item.customPrice === undefined
+              && !item.serviceItemId
               && sameLinePresentation(item.presentation, presentation));
             if (existingItem) {
               // If found, just increase its quantity
@@ -193,13 +195,22 @@ const cartStore = create<CartStore>()(
         ),
       })),
 
-      removeItem: (cartItemId) => set(state => ({
-        carts: state.carts.map(cart =>
-          cart.id === state.activeCartId
-            ? { ...cart, items: cart.items.filter(item => item.cartItemId !== cartItemId) }
-            : cart
-        ),
-      })),
+      removeItem: (cartItemId) => set(state => {
+        const active = state.carts.find(c => c.id === state.activeCartId);
+        // El caso se cobra con todas sus líneas: la base rechaza el cobro si falta
+        // alguna. Para no cobrar una, se le pone precio 0 o se quita en el caso.
+        if (active?.items.find(i => i.cartItemId === cartItemId)?.serviceItemId) {
+          setTimeout(() => set({ toast: null }), 3000);
+          return { toast: 'Esta línea viene del caso del taller: quítala allí o vacía el carrito.' };
+        }
+        return {
+          carts: state.carts.map(cart =>
+            cart.id === state.activeCartId
+              ? { ...cart, items: cart.items.filter(item => item.cartItemId !== cartItemId) }
+              : cart
+          ),
+        };
+      }),
 
       // Normaliza aquí, no en la UI: así cualquier origen de la cantidad (input
       // del carrito, botones ±, editor de precio) queda cubierto por igual.
@@ -208,6 +219,11 @@ const cartStore = create<CartStore>()(
           if (cart.id === state.activeCartId) {
             const itemToUpdate = cart.items.find(item => item.cartItemId === cartItemId);
             if (!itemToUpdate) return cart;
+            if (itemToUpdate.serviceItemId) {
+              set({ toast: 'La cantidad viene del caso del taller: cámbiala allí.' });
+              setTimeout(() => set({ toast: null }), 3000);
+              return cart;
+            }
             // La unidad manda: contables se redondean a entero, medibles a 3
             // decimales (la escala real de products.stock en la base). Una línea con
             // presentación cuenta presentaciones, que son enteras siempre.
@@ -251,7 +267,9 @@ const cartStore = create<CartStore>()(
                 // En medibles (1.7 lb) el precio se aplica a toda la línea: si
                 // no, quedaría una línea de 1 y otra de 0.7000000000000002, y
                 // con 0.5 lb se partía en 1 y -0.5.
-                const canSplit = !unitAllowsDecimals(itemToChange.product.unit)
+                // Una línea del taller no se parte: el caso la cobra entera, una vez.
+                const canSplit = !itemToChange.serviceItemId
+                  && !unitAllowsDecimals(itemToChange.product.unit)
                   && Number.isInteger(itemToChange.quantity)
                   && itemToChange.quantity > 1;
 
@@ -292,7 +310,9 @@ const cartStore = create<CartStore>()(
 
       clearCart: () => set(state => ({
         carts: state.carts.map(cart =>
-          cart.id === state.activeCartId ? { ...cart, items: [], selectedCustomer: getGenericCustomer(), coupon: undefined } : cart
+          cart.id === state.activeCartId
+            ? { ...cart, items: [], selectedCustomer: getGenericCustomer(), coupon: undefined, serviceId: undefined, serviceNumber: undefined }
+            : cart
         ),
       })),
       
@@ -402,6 +422,37 @@ export function openQuoteCart(items: CartItem[], customer: Customer | undefined,
   if (active && active.items.length === 0) {
     cartStore.setState({
       carts: state.carts.map(c => (c.id === active.id ? newCart : c)),
+      activeCartId: newCart.id,
+    });
+    return true;
+  }
+  if (state.carts.length < MAX_CARTS) {
+    cartStore.setState({ carts: [...state.carts, newCart], activeCartId: newCart.id });
+    return true;
+  }
+  return false;
+}
+
+// Carga un caso del taller como carrito activo para cobrarlo. Si ya hay un carrito
+// con ese caso, lo reemplaza (las líneas pudieron cambiar en el taller).
+// Devuelve false si ya hay MAX_CARTS carritos con artículos.
+export function openServiceCart(
+  items: CartItem[], customer: Customer | undefined, serviceId: string, serviceNumber: number,
+): boolean {
+  const state = cartStore.getState();
+  const newCart: Cart = {
+    id: `cart-${Date.now()}-${Math.random()}`,
+    items,
+    selectedCustomer: customer ?? getGenericCustomer(),
+    serviceId,
+    serviceNumber,
+  };
+  const existing = state.carts.find(c => c.serviceId === serviceId);
+  const active = state.carts.find(c => c.id === state.activeCartId);
+  const target = existing ?? (active && active.items.length === 0 ? active : undefined);
+  if (target) {
+    cartStore.setState({
+      carts: state.carts.map(c => (c.id === target.id ? newCart : c)),
       activeCartId: newCart.id,
     });
     return true;
@@ -566,6 +617,7 @@ export const useCart = () => {
       ncfRequested: options.ncfRequested ?? false,
       ncfType: options.ncfType ?? activeCart.selectedCustomer?.ncfType ?? 'consumer',
       quoteId: activeCart.quoteId, // si vino de una cotización, se marcará convertida
+      serviceId: activeCart.serviceId, // si es un caso del taller, la base lo marca cobrado
       couponId: activeCart.coupon?.id, // se canjea en el servidor tras crear la venta
       coupon: activeCart.coupon, // solo para mostrarlo en el recibo
     };

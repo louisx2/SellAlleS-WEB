@@ -6,7 +6,9 @@ import { useReactToPrint } from 'react-to-print';
 import { useSales } from '@/context/sales-provider';
 import { useAuth } from '@/context/auth-provider';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Loader2, RefreshCw, FilePlus2, QrCode } from 'lucide-react';
+import { ArrowLeft, Loader2, RefreshCw, FilePlus2, QrCode, ShieldCheck } from 'lucide-react';
+import { usePermission } from '@/hooks/use-permission';
+import { useModules } from '@/context/modules-provider';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
 import { ReceiptBarcode, ReceiptContent, ReceiptEcf, ReceiptHeader, ReceiptItems, ReceiptTotals } from '@/components/pos/receipt-content';
@@ -64,6 +66,9 @@ export default function SaleReceiptClient() {
   const pdfContentRef = useRef<HTMLDivElement>(null);
   
   const { toast } = useToast();
+  // Garantía de lo vendido: se ingresa al taller enlazada a esta venta.
+  const { isModuleEnabled } = useModules();
+  const puedeIngresarAlTaller = usePermission('services', 'create') && isModuleEnabled('services');
 
   // No se guarda en la venta: al reimprimir para el chofer se vuelve a marcar.
   const [incluirDatosCliente, setIncluirDatosCliente] = useState(false);
@@ -191,13 +196,21 @@ export default function SaleReceiptClient() {
 
   return (
     <div className="max-w-md mx-auto print:mx-0 print:max-w-full">
-        <div className="mb-6 print:hidden">
+        <div className="mb-6 flex flex-wrap gap-2 print:hidden">
             <Button asChild variant="outline">
                 <Link href="/sales">
                     <ArrowLeft className="mr-2 h-4 w-4" />
                     Volver al Historial
                 </Link>
             </Button>
+            {puedeIngresarAlTaller && !sale.cancelledAt && (
+              <Button asChild variant="outline">
+                <Link href={`/services/nuevo?garantia_venta=${sale.id}`}>
+                  <ShieldCheck className="mr-2 h-4 w-4" />
+                  Garantía al taller
+                </Link>
+              </Button>
+            )}
         </div>
       {sale.cancelledAt && (
         <div className="mb-4 rounded-md border border-destructive bg-destructive/10 p-3 text-center text-sm font-semibold text-destructive">
