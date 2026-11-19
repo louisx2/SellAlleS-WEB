@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
@@ -161,16 +161,31 @@ interface BotonesDocumentoProps {
 export function BotonesDocumento({
   onImprimir, onWhatsApp, onCorreo, onPdf, disabled, className,
 }: BotonesDocumentoProps) {
+  // Si la botonera vive dentro de un diálogo (recibo del POS, plan de pagos,
+  // estado del financiamiento, abonos), el menú se dibuja DENTRO de ese diálogo.
+  //
+  // El proyecto tiene dos copias de la capa de Radix que maneja clics y foco
+  // (@radix-ui/react-dismissable-layer 1.1.5 en el menú y 1.1.11 en el diálogo),
+  // y no se ven entre sí. Dibujado fuera, el diálogo trataba el menú como algo
+  // ajeno: le bloqueaba los clics y lo dejaba invisible ("Enviar no hace nada").
+  // Con el menú modal pasaba lo contrario: al cerrar el diálogo que abre, la página
+  // se quedaba sin clics. Dentro del diálogo, para él es contenido propio.
+  const raizRef = useRef<HTMLDivElement>(null);
+  const [contenedor, setContenedor] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setContenedor(raizRef.current?.closest<HTMLElement>('[role="dialog"]') ?? null);
+  }, []);
+
   return (
-    <div className={cn('grid w-full gap-2', onImprimir ? 'grid-cols-3' : 'grid-cols-2', className)}>
+    <div ref={raizRef} className={cn('grid w-full gap-2', onImprimir ? 'grid-cols-3' : 'grid-cols-2', className)}>
       {onImprimir && (
         <Button variant="outline" size="sm" className={BOTON} onClick={onImprimir} disabled={disabled}>
           <Printer className={ICONO} />
           Imprimir
         </Button>
       )}
-      {/* modal={false}: el menú vive dentro de diálogos y abre otro diálogo; en
-          modo modal Radix deja el body sin clics al cerrar (ver AGENTS.md). */}
+      {/* modal={false}: el menú abre otro diálogo, y en modo modal la página se
+          queda sin clics al cerrarlo (dos copias de la capa de Radix, ver arriba). */}
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
           <Button
@@ -185,7 +200,7 @@ export function BotonesDocumento({
             <ChevronDown className="!size-3.5 opacity-60" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="center" className="min-w-44">
+        <DropdownMenuContent align="center" className="min-w-44" container={contenedor}>
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
             Enviar al cliente por
           </DropdownMenuLabel>
