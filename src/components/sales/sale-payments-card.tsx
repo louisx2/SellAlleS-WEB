@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { DollarSign, FileText, Loader2 } from 'lucide-react';
+import { useReactToPrint } from 'react-to-print';
+import { ArrowRight, CalendarClock, DollarSign, FileText, ListChecks, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { rowToCreditPayment } from '@/lib/supabase/mappers';
 import { formatCurrency, calculateFinancingStatus } from '@/lib/utils';
+import { estadoDisponible } from '@/lib/estado-financiamiento';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import type { CreditPayment, PaymentMethod, Sale } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +16,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
+import { CompartirDocumento } from '@/components/sharing/compartir-documento';
+import { FinancingStatementContent } from '@/components/financing/financing-statement-content';
+import { PaymentPlanDialog } from '@/components/financing/payment-plan-dialog';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -33,6 +38,14 @@ export function SalePaymentsCard({ sale }: { sale: Sale }) {
   const [payments, setPayments] = useState<CreditPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+  // Copias del estado del financiamiento para imprimir y para el PDF, como en
+  // su diálogo: el cuadro lo manda sin tener que abrirlo.
+  const estadoPrintRef = useRef<HTMLDivElement>(null);
+  const estadoPdfRef = useRef<HTMLDivElement>(null);
+  const imprimirEstado = useReactToPrint({
+    content: () => estadoPrintRef.current,
+  });
 
   // Una venta queda debiendo por su estado, no por el método: pagar de menos en
   // efectivo también deja deuda (cart-provider.tsx), con payment_method 'cash'.
@@ -89,6 +102,12 @@ export function SalePaymentsCard({ sale }: { sale: Sale }) {
       ? `/credit/statement?id=${sale.customerId}`
       : null;
 
+  // Los documentos del financiamiento, como los del recibo de arriba. Una venta
+  // anulada no debe nada: su estado le diría al cliente lo contrario.
+  const conDocumentos = esFinanciamiento && estadoDisponible(sale);
+  // El estado lleva los pagos: sin ellos diría que el cliente no ha abonado.
+  const estadoListo = !loading && !error;
+
   return (
     <Card className="mt-6 print:hidden">
       <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
@@ -105,7 +124,8 @@ export function SalePaymentsCard({ sale }: { sale: Sale }) {
             {' · '}pagado {formatCurrency(sale.amountPaid)}
           </CardDescription>
         </div>
-        {verTodo && (
+        {/* Con documentos, el enlace al financiamiento va en su bloque. */}
+        {verTodo && !conDocumentos && (
           <Button asChild variant="outline" size="sm">
             <Link href={verTodo}>
               <FileText className="mr-1.5 h-4 w-4" />
@@ -115,6 +135,42 @@ export function SalePaymentsCard({ sale }: { sale: Sale }) {
         )}
       </CardHeader>
       <CardContent>
+        {conDocumentos && (
+          <div className="mb-4 rounded-lg border bg-muted/40">
+            <div className="space-y-3 p-3">
+              <div className="flex items-start gap-2.5">
+                <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium leading-tight">Estado del financiamiento</p>
+                  <p className="text-xs text-muted-foreground">
+                    Cuotas, pagos realizados y balance pendiente, listo para el cliente.
+                  </p>
+                </div>
+              </div>
+              <CompartirDocumento
+                sale={sale}
+                documento="estado"
+                pdfRef={estadoPdfRef}
+                onImprimir={imprimirEstado}
+                disabled={!estadoListo}
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-1 border-t px-1.5 py-1.5">
+              {sale.financingDetails && (
+                <Button variant="ghost" size="sm" onClick={() => setPlanOpen(true)}>
+                  <CalendarClock className="mr-1.5 h-4 w-4" />
+                  Plan de pagos
+                </Button>
+              )}
+              <Button asChild variant="ghost" size="sm" className="ml-auto">
+                <Link href={`/financing/detail?id=${sale.id}`}>
+                  Ver financiamiento
+                  <ArrowRight className="ml-1.5 h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        )}
         {loading ? (
           <div className="flex justify-center py-6">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -171,6 +227,29 @@ export function SalePaymentsCard({ sale }: { sale: Sale }) {
           </p>
         )}
       </CardContent>
+
+      {conDocumentos && (
+        <>
+          {estadoListo && (
+            <>
+              {/* Copia oculta para impresión */}
+              <div className="hidden">
+                <div ref={estadoPrintRef} className="receipt-container">
+                  <FinancingStatementContent sale={sale} payments={payments} />
+                </div>
+              </div>
+              {/* Copia fuera de pantalla, a 100 mm como el ticket, de la que
+                  sale el PDF (ver la nota en receipt-dialog). */}
+              <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
+                <div ref={estadoPdfRef} className="bg-white text-black w-[100mm] p-4">
+                  <FinancingStatementContent sale={sale} payments={payments} />
+                </div>
+              </div>
+            </>
+          )}
+          <PaymentPlanDialog sale={sale} isOpen={planOpen} onOpenChange={setPlanOpen} />
+        </>
+      )}
     </Card>
   );
 }

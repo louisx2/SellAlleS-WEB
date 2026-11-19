@@ -4,9 +4,17 @@ import { useState, type RefObject } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from '@/components/ui/dialog';
-import { Copy, Download, Link as LinkIcon, Loader2, Mail, MessageSquare, Send } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { ChevronDown, Copy, Download, Link as LinkIcon, Loader2, Mail, MessageSquare, Printer, Send } from 'lucide-react';
 import { useCompartirDocumento, type CompartirDocumento as Compartir } from '@/hooks/use-compartir-documento';
 import { diasDeValidez, vigenciaDelEnlace, type DocumentoVenta } from '@/lib/documentos-venta';
+import { cn } from '@/lib/utils';
 import type { Sale } from '@/lib/types';
 
 /** Cómo se nombra el documento dentro de una frase: "descargar <esto> en PDF". */
@@ -120,39 +128,114 @@ export function BotonEnviarCorreo({ c, onEnviado, className }: { c: Compartir; o
   );
 }
 
+// Columnas de la botonera: poco relleno y poca separación (el Button trae
+// gap-2), y el ícono solo desde tableta. El tamaño del ícono lo pone el Button.
+const BOTON = 'w-full gap-1 px-1.5';
+const ICONO = 'hidden sm:block';
+
+interface BotonesDocumentoProps {
+  /** Sin esto no sale el botón de imprimir (p. ej. mientras carga el documento). */
+  onImprimir?: () => void;
+  onWhatsApp: () => void;
+  onCorreo: () => void;
+  onPdf: () => void;
+  /** Mientras el documento no está listo (cargando sus datos), nada se manda. */
+  disabled?: boolean;
+  className?: string;
+}
+
+/** La botonera de un documento de la venta, igual en todas partes:
+ *  Imprimir · Enviar ▾ (WhatsApp, Correo) · PDF, en columnas iguales que
+ *  ocupan todo el ancho.
+ *
+ *  Va en columnas porque casi siempre vive en algo angosto (el ticket mide
+ *  ~335 px en sus diálogos): sueltos, los botones se partían en filas
+ *  desparejas.
+ *
+ *  En el teléfono cada columna baja a ~84 px (cuadro de abonos) y el ícono ya
+ *  no cabe junto al texto: ahí van solo con texto. «Enviar» conserva la flecha,
+ *  que es lo que dice que despliega un menú.
+ *
+ *  Solo pinta los botones; quien la usa decide qué abre cada uno (diálogos en
+ *  CompartirDocumento, pantallas internas en el recibo del POS). */
+export function BotonesDocumento({
+  onImprimir, onWhatsApp, onCorreo, onPdf, disabled, className,
+}: BotonesDocumentoProps) {
+  return (
+    <div className={cn('grid w-full gap-2', onImprimir ? 'grid-cols-3' : 'grid-cols-2', className)}>
+      {onImprimir && (
+        <Button variant="outline" size="sm" className={BOTON} onClick={onImprimir} disabled={disabled}>
+          <Printer className={ICONO} />
+          Imprimir
+        </Button>
+      )}
+      {/* modal={false}: el menú vive dentro de diálogos y abre otro diálogo; en
+          modo modal Radix deja el body sin clics al cerrar (ver AGENTS.md). */}
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className={BOTON}
+            disabled={disabled}
+            title="Enviar al cliente por WhatsApp o correo"
+          >
+            <Send className={ICONO} />
+            Enviar
+            <ChevronDown className="!size-3.5 opacity-60" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center" className="min-w-44">
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+            Enviar al cliente por
+          </DropdownMenuLabel>
+          <DropdownMenuItem onSelect={onWhatsApp}>
+            <MessageSquare className="mr-2 h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            WhatsApp
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onCorreo}>
+            <Mail className="mr-2 h-4 w-4" />
+            Correo
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Button variant="outline" size="sm" className={BOTON} onClick={onPdf} disabled={disabled} title="Descargar en PDF">
+        <Download className={ICONO} />
+        PDF
+      </Button>
+    </div>
+  );
+}
+
 interface CompartirDocumentoProps {
   sale: Sale;
   documento: DocumentoVenta;
   /** Elemento fuera de pantalla, a 100 mm, del que se saca el PDF. */
   pdfRef: RefObject<HTMLDivElement>;
+  onImprimir?: () => void;
+  disabled?: boolean;
+  className?: string;
 }
 
-/** Botones WhatsApp / Correo / Descargar PDF de un documento de la venta, con
- *  sus diálogos. Lo usan el detalle de la venta, el plan de pagos y el estado
- *  del financiamiento. */
-export function CompartirDocumento({ sale, documento, pdfRef }: CompartirDocumentoProps) {
+/** Botonera de un documento de la venta (ver BotonesDocumento) con sus diálogos
+ *  de WhatsApp y Correo. Lo usan el detalle de la venta, el cuadro de abonos, el
+ *  plan de pagos y el estado del financiamiento. */
+export function CompartirDocumento({
+  sale, documento, pdfRef, onImprimir, disabled, className,
+}: CompartirDocumentoProps) {
   const c = useCompartirDocumento({ sale, documento, pdfRef });
   const [abierto, setAbierto] = useState<'none' | 'whatsapp' | 'correo'>('none');
 
   return (
     <>
-      <Button
-        variant="outline"
-        size="sm"
-        className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700"
-        onClick={() => setAbierto('whatsapp')}
-      >
-        <MessageSquare className="mr-1.5 h-4 w-4" />
-        WhatsApp
-      </Button>
-      <Button variant="outline" size="sm" onClick={() => setAbierto('correo')}>
-        <Mail className="mr-1.5 h-4 w-4" />
-        Correo
-      </Button>
-      <Button variant="outline" size="sm" onClick={c.descargarPdf}>
-        <Download className="mr-1.5 h-4 w-4" />
-        Descargar PDF
-      </Button>
+      <BotonesDocumento
+        onImprimir={onImprimir}
+        onWhatsApp={() => setAbierto('whatsapp')}
+        onCorreo={() => setAbierto('correo')}
+        onPdf={c.descargarPdf}
+        disabled={disabled}
+        className={className}
+      />
 
       <Dialog open={abierto === 'correo'} onOpenChange={(open) => !open && setAbierto('none')}>
         <DialogContent className="max-w-sm">

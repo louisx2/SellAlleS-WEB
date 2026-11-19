@@ -6,7 +6,7 @@ import { useReactToPrint } from 'react-to-print';
 import { useSales } from '@/context/sales-provider';
 import { useAuth } from '@/context/auth-provider';
 import { Button } from '@/components/ui/button';
-import { Printer, ArrowLeft, Loader2, RefreshCw, FilePlus2, QrCode } from 'lucide-react';
+import { ArrowLeft, Loader2, RefreshCw, FilePlus2, QrCode } from 'lucide-react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card';
 import { ReceiptBarcode, ReceiptContent, ReceiptEcf, ReceiptHeader, ReceiptItems, ReceiptTotals } from '@/components/pos/receipt-content';
@@ -273,12 +273,13 @@ export default function SaleReceiptClient() {
               onCheckedChange={setIncluirDatosCliente}
             />
         </CardContent>
-        <CardFooter className="flex-wrap justify-end gap-2 print:hidden">
-            <Button variant="outline" size="sm" onClick={handlePrint}>
-                <Printer className="mr-1.5 h-4 w-4" />
-                Imprimir
-            </Button>
-            <CompartirDocumento sale={sale} documento="factura" pdfRef={pdfContentRef} />
+        <CardFooter className="print:hidden">
+            <CompartirDocumento
+              sale={sale}
+              documento="factura"
+              pdfRef={pdfContentRef}
+              onImprimir={handlePrint}
+            />
         </CardFooter>
       </Card>
 
