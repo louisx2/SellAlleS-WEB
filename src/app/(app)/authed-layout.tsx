@@ -55,7 +55,7 @@ const coreNavItems: NavItem[] = [
 const featuresNavItems: NavItem[] = [
   { href: '/pos', icon: ShoppingCart, label: 'Carrito', module: 'pos', permission: 'pos' },
   { href: '/quotes', icon: FileText, label: 'Cotizaciones', module: 'quotes', permission: 'quotes' },
-  { href: '/services', icon: Wrench, label: 'Servicios', module: 'services', permission: 'services' },
+  { href: '/services', icon: Wrench, label: 'Taller', module: 'services', permission: 'services' },
   { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', module: 'credit', permission: 'credit' },
   { href: '/payables', icon: ReceiptText, label: 'Cuentas por Pagar', module: 'payables', permission: 'payables' },
   { href: '/financing', icon: Landmark, label: 'Financiamientos', module: 'financing', permission: 'financing' },
@@ -70,6 +70,7 @@ const reportsNavItems = [
     { href: '/reports/top-products', label: 'Productos Estrella' },
     { href: '/reports/top-customers', label: 'Clientes Estrella' },
     { href: '/reports/comisiones', label: 'Comisiones por Vendedor' },
+    { href: '/reports/taller', label: 'Taller' },
     { href: '/reports/date-range', label: 'Ingresos por Fechas' },
     { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
     { href: '/reports/cobros', label: 'Cobros Recibidos' },
@@ -92,7 +93,7 @@ const adminNavItems: NavItem[] = [
     { href: '/users', icon: Users, label: 'Usuarios', permission: 'users' },
     { href: '/branches', icon: Store, label: 'Sucursales', permission: 'branches' },
     { href: '/roles', icon: Shield, label: 'Roles', permission: 'roles' },
-    { href: '/service-types', icon: PenTool, label: 'Tipos de Servicio', module: 'services', permission: 'service-types' },
+    { href: '/service-types', icon: PenTool, label: 'Configuración del Taller', module: 'services', permission: 'service-types' },
     { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', permission: 'suscripcion' },
     { href: '/settings', icon: Settings, label: 'Ajustes', permission: 'company-profile' },
 ];
@@ -312,6 +313,8 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     if (slug === 'anulados-608' && !profile.isFormalized) return false;
     // Comisiones existe solo con el módulo encendido (Plataforma → Módulos).
     if (slug === 'comisiones' && !isModuleEnabled('commissions')) return false;
+    // El del taller, solo con el módulo encendido.
+    if (slug === 'taller' && !isModuleEnabled('services')) return false;
     return isReportVisible(effectivePermissions, slug);
   });
 

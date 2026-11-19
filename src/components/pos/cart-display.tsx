@@ -53,8 +53,10 @@ const priceSuffix = (item: CartItem) =>
 
 // Lo que se pide del producto en unidades base, sumando todas sus líneas (2 paquetes
 // + 7 sueltas) contra el stock, que también está en unidades base.
+// Una pieza de un caso del taller ya salió del inventario: no se compara.
 const exceedsStock = (item: CartItem, items: CartItem[]) =>
-  item.product.tracksStock && roundQty(baseQtyInCart(item.product.id, items)) > item.product.stock;
+  !item.serviceItemId
+  && item.product.tracksStock && roundQty(baseQtyInCart(item.product.id, items)) > item.product.stock;
 
 function CartItemImage({ image, alt }: { image?: string | null, alt: string }) {
     const [imageLoaded, setImageLoaded] = useState(false);
@@ -217,6 +219,13 @@ export function CartDisplay() {
                             )}
                           </Button>
                         </div>
+                        {cart.serviceId && (
+                          <p className="mt-2 rounded-md bg-primary/10 px-2 py-1 text-xs">
+                            Cobrando el caso{' '}
+                            <span className="font-semibold">#{String(cart.serviceNumber ?? '').padStart(4, '0')}</span>{' '}
+                            del taller. Puedes sumar otros artículos.
+                          </p>
+                        )}
                         {cart.selectedCustomer?.id !== '0' && cart.selectedCustomer?.creditBalance > 0 && (
                           <Badge variant="destructive" className="mt-2">
                             Deuda: {formatCurrency(cart.selectedCustomer.creditBalance)}
@@ -290,7 +299,13 @@ export function CartDisplay() {
                                         {item.presentation && ` · ${presentationLabel(item.presentation, getUnit(item.product.unit).short)}`}
                                       </p>
                                       {item.isQuick && <Badge variant="secondary">Rápida</Badge>}
+                                      {item.serviceItemId && <Badge variant="secondary">Taller</Badge>}
                                     </div>
+                                    {item.serviceItemId ? (
+                                      <p className="text-xs text-muted-foreground">
+                                        Cantidad: {formatQuantity(item.quantity, item.product.unit)} · viene del caso
+                                      </p>
+                                    ) : (
                                     <div className="flex items-center gap-1.5">
                                       <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => updateQuantity(item.cartItemId, roundQty(item.quantity - 1))}>
                                         <MinusCircle className="h-4 w-4" />
@@ -310,6 +325,7 @@ export function CartDisplay() {
                                         <PlusCircle className="h-4 w-4" />
                                       </Button>
                                     </div>
+                                    )}
                                     <div>
                                       {isDiscounted ? (
                                         <div className="block">

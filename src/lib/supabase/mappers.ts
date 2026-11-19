@@ -603,6 +603,8 @@ export const saleToRow = (s: Omit<Sale, 'id'>, branchUuid: string | null) => ({
   coupon_id: isUuid(s.couponId) ? s.couponId : null,
   // Solo si se eligió otro vendedor en el cobro; sin él la base pone a quien cobra.
   ...(isUuid(s.sellerId) ? { seller_id: s.sellerId } : {}),
+  // Venta de un caso del taller: la base comprueba sus líneas y lo marca cobrado.
+  ...(isUuid(s.serviceId) ? { service_id: s.serviceId } : {}),
 });
 
 // ---------- Coupon (fidelidad) ----------
@@ -686,43 +688,91 @@ export const saleItemToRow = (item: CartItem, saleId: string) => ({
   unit: item.product.unit ?? DEFAULT_UNIT_CODE,
 });
 
-// ---------- Services ----------
+// ---------- Taller (services) ----------
+// Para leer un servicio del catálogo con su artículo: select('*, products(price, itbis)').
 export const rowToServiceType = (r: any): import('@/lib/types').ServiceType => ({
   id: r.id,
   name: r.name,
   description: r.description ?? undefined,
   basePrice: Number(r.base_price ?? 0),
+  branchId: r.branch_id ?? undefined,
+  productId: r.product_id ?? undefined,
+  equipmentTypeId: r.equipment_type_id ?? undefined,
+  partCategoryId: r.part_category_id ?? undefined,
+  warrantyDays: r.warranty_days ?? undefined,
+  isActive: r.is_active ?? true,
+  position: Number(r.position ?? 0),
+  price: Number(r.products?.price ?? r.base_price ?? 0),
+  itbis: !!r.products?.itbis,
 });
 
-export const serviceTypeToRow = (s: Partial<import('@/lib/types').ServiceType>) => ({
-  name: s.name,
-  description: s.description ?? null,
-  base_price: s.basePrice ?? 0,
+export const rowToEquipmentType = (r: any): import('@/lib/types').EquipmentType => ({
+  id: r.id,
+  name: r.name,
+  serialLabel: r.serial_label ?? 'Serie',
+  asksPassword: !!r.asks_password,
+  extraFields: Array.isArray(r.extra_fields) ? r.extra_fields : [],
+  position: Number(r.position ?? 0),
+  isActive: r.is_active ?? true,
+});
+
+export const rowToChecklistItem = (r: any): import('@/lib/types').ChecklistItem => ({
+  id: r.id,
+  equipmentTypeId: r.equipment_type_id ?? undefined,
+  label: r.label,
+  required: !!r.required,
+  requiredQuick: !!r.required_quick,
+  position: Number(r.position ?? 0),
+  isActive: r.is_active ?? true,
+});
+
+export const rowToTallerSettings = (r: any): import('@/lib/types').TallerSettings => ({
+  branchId: r.branch_id,
+  partsLocationId: r.parts_location_id ?? undefined,
+  hidePartsInPos: !!r.hide_parts_in_pos,
+  terms: r.terms ?? undefined,
+  defaultWarrantyDays: r.default_warranty_days ?? undefined,
 });
 
 export const rowToServiceItem = (r: any): import('@/lib/types').ServiceItem => ({
   id: r.id,
   serviceId: r.service_id,
-  product: r.products ? rowToProduct(r.products) : {} as any,
+  kind: r.kind === 'labor' ? 'labor' : 'part',
+  serviceTypeId: r.service_type_id ?? undefined,
+  product: r.products ? rowToProduct(r.products) : ({ id: r.product_id, name: '' } as any),
   quantity: Number(r.quantity),
   price: Number(r.price),
-  cost: Number(r.cost),
+  cost: Number(r.cost ?? 0),
 });
 
-export const serviceItemToRow = (item: Omit<import('@/lib/types').ServiceItem, 'id' | 'product'>) => ({
-  service_id: item.serviceId,
-  product_id: (item as any).productId || null, // When sending to DB we just need product_id
-  quantity: item.quantity,
-  price: item.price,
-  cost: item.cost,
+export const rowToServiceEvent = (r: any): import('@/lib/types').ServiceEvent => ({
+  id: r.id,
+  kind: r.kind,
+  fromStatus: r.from_status ?? undefined,
+  toStatus: r.to_status ?? undefined,
+  fromUser: r.from_user ?? undefined,
+  toUser: r.to_user ?? undefined,
+  note: r.note ?? undefined,
+  visibleToCustomer: !!r.visible_to_customer,
+  createdBy: r.created_by ?? undefined,
+  createdByName: r.created_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
 });
+
+/** Columnas para leer un caso con su cliente, técnico y sucursal. `profiles`
+ *  va por la FK de `assigned_to`: services tiene tres FK a profiles. */
+export const SERVICE_SELECT =
+  '*, customers(id,name,phone,email,rnc,ncf_type,discount_percentage,credit_balance,loyalty_purchase_count), ' +
+  'profiles!services_assigned_to_fkey(id,name,email,role), branches(name)';
 
 export const rowToService = (r: any): import('@/lib/types').Service => ({
   id: r.id,
-  branchId: r.branches?.name ?? '',
+  number: Number(r.number ?? 0),
+  branchId: r.branch_id,
+  branchName: r.branches?.name ?? '',
   customerId: r.customer_id ?? undefined,
   customer: r.customers ? rowToCustomer(r.customers) : undefined,
-  serviceTypeId: r.service_type_id,
+  serviceTypeId: r.service_type_id ?? undefined,
   serviceType: r.service_types ? rowToServiceType(r.service_types) : undefined,
   assignedTo: r.assigned_to ?? undefined,
   assignedUser: r.profiles ? {
@@ -732,33 +782,51 @@ export const rowToService = (r: any): import('@/lib/types').Service => ({
     role: r.profiles.role,
     branch: ''
   } : undefined,
-  description: r.description,
+  description: r.description ?? '',
   status: r.status,
-  laborPrice: Number(r.labor_price),
-  partsTotal: Number(r.parts_total),
-  total: Number(r.total),
-  paymentStatus: r.payment_status,
-  amountPaid: Number(r.amount_paid),
+  laborPrice: Number(r.labor_price ?? 0),
+  partsTotal: Number(r.parts_total ?? 0),
+  total: Number(r.total ?? 0),
+  paymentStatus: r.payment_status === 'paid' ? 'paid' : 'pending',
+  amountPaid: Number(r.amount_paid ?? 0),
+  saleId: r.sale_id ?? undefined,
   createdAt: new Date(r.created_at),
   completedAt: r.completed_at ? new Date(r.completed_at) : undefined,
+  equipmentTypeId: r.equipment_type_id ?? undefined,
+  equipmentBrand: r.equipment_brand ?? undefined,
+  equipmentModel: r.equipment_model ?? undefined,
+  equipmentSerial: r.equipment_serial ?? undefined,
+  equipmentPassword: r.equipment_password ?? undefined,
+  equipmentDetails: r.equipment_details && typeof r.equipment_details === 'object' ? r.equipment_details : {},
+  accessories: r.accessories ?? undefined,
+  intakeChecklist: Array.isArray(r.intake_checklist)
+    ? r.intake_checklist.map((c: any) => ({ itemId: c.item_id, label: c.label, answer: c.answer, note: c.note ?? undefined }))
+    : [],
+  diagnosis: r.diagnosis ?? undefined,
+  broughtByName: r.brought_by_name ?? undefined,
+  broughtByPhone: r.brought_by_phone ?? undefined,
+  receivedBy: r.received_by ?? undefined,
+  receivedByName: r.received_by_name ?? undefined,
+  estimate: r.estimate != null ? Number(r.estimate) : undefined,
+  promisedAt: r.promised_at ? new Date(r.promised_at) : undefined,
+  isQuick: !!r.is_quick,
+  statusChangedAt: new Date(r.status_changed_at ?? r.created_at),
+  readyAt: r.ready_at ? new Date(r.ready_at) : undefined,
+  deliveredAt: r.delivered_at ? new Date(r.delivered_at) : undefined,
+  deliveredBy: r.delivered_by ?? undefined,
+  deliveredByName: r.delivered_by_name ?? undefined,
+  pickedUpByName: r.picked_up_by_name ?? undefined,
+  outcome: r.outcome ?? undefined,
+  trackingCode: r.tracking_code ?? '',
+  warrantyOfServiceId: r.warranty_of_service_id ?? undefined,
+  warrantySaleId: r.warranty_sale_id ?? undefined,
+  warrantyUntil: r.warranty_until ?? undefined,
   items: r.service_items ? r.service_items.map(rowToServiceItem) : undefined,
 });
 
-export const serviceToRow = (s: Partial<import('@/lib/types').Service>, branchUuid?: string) => {
-  const row: any = {
-    customer_id: isUuid(s.customerId) ? s.customerId : null,
-    service_type_id: s.serviceTypeId,
-    assigned_to: isUuid(s.assignedTo) ? s.assignedTo : null,
-    description: s.description,
-    status: s.status,
-    labor_price: s.laborPrice,
-    payment_status: s.paymentStatus,
-    amount_paid: s.amountPaid,
-  };
-  if (branchUuid) row.branch_id = branchUuid;
-  if (s.completedAt) row.completed_at = s.completedAt.toISOString();
-  return row;
-};
+/** Copia de los chequeos tal como se guarda en services.intake_checklist. */
+export const checklistToRow = (answers: import('@/lib/types').ChecklistAnswer[]) =>
+  answers.map((a) => ({ item_id: a.itemId, label: a.label, answer: a.answer, note: a.note?.trim() || null }));
 
 // ---------- Préstamos (dominio independiente de ventas/financiamiento) ----------
 export const rowToLoanInstallment = (r: any): LoanInstallment => ({

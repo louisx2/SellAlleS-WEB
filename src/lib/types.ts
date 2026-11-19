@@ -246,7 +246,7 @@ export type PermissionResource =
   | 'dashboard' | 'pos' | 'sales' | 'quotes' | 'services' | 'credit' | 'financing'
   | 'prestamos' | 'caja' | 'expenses' | 'payables' | 'reports' | 'products' | 'customers'
   | 'suppliers' | 'company-profile' | 'users' | 'branches' | 'roles' | 'suscripcion'
-  | 'service-types' | 'quick-sales';
+  | 'service-types' | 'quick-sales' | 'services-all';
 
 // reports_visible: slugs de src/lib/permissions.ts#REPORT_ITEMS que este rol
 // puede ver dentro de "Reportes"; ausente = todos visibles.
@@ -287,6 +287,9 @@ export type CartItem = {
   // `quantity` cuenta presentaciones. Con presentación, `product.price` es el
   // precio de la presentación, es decir, el precio de lista de la línea.
   presentation?: LinePresentation;
+  // Línea de un caso del taller (service_items.id). Su cantidad viene del caso y
+  // no cambia en el POS; si es pieza, ya salió del inventario al agregarla al caso.
+  serviceItemId?: string;
 };
 
 export type Cart = {
@@ -295,6 +298,9 @@ export type Cart = {
   selectedCustomer: Customer;
   quoteId?: string; // si el carrito viene de una cotización cargada
   coupon?: Coupon; // cupón de fidelidad seleccionado para esta venta
+  // Caso del taller que se está cobrando (y su número, para mostrarlo).
+  serviceId?: string;
+  serviceNumber?: number;
 };
 
 // Plan de financiamiento tal como queda grabado en la venta. Lo arma el
@@ -482,6 +488,7 @@ export type Sale = {
   // de ncf_sequences. Sin esto toda venta gastaría un NCF autorizado por DGII.
   ncfRequested?: boolean;
   quoteId?: string; // cotización de origen (se marca convertida al cobrar)
+  serviceId?: string; // caso del taller que se cobra (la base lo marca cobrado)
   couponId?: string; // cupón de fidelidad canjeado en esta venta
   coupon?: Coupon; // objeto completo, solo para mostrarlo en el recibo (no se persiste aparte de couponId)
   // Venta anulada con nota de crédito (RPC annul_sale). La venta no se borra:
@@ -957,34 +964,114 @@ export type VoidSupplierPaymentResult = SupplierPaymentResult & {
   cashReturned: boolean;
 };
 
+// ---------- Taller (módulo de servicios) ----------
+// Servicio del catálogo del taller. Cada uno tiene su artículo de servicio en la
+// sucursal (`productId`): de ahí salen precio e ITBIS, y así se cobra en el POS.
 export type ServiceType = {
     id: string;
     name: string;
     description?: string;
     basePrice: number;
+    branchId?: string;
+    productId?: string;
+    equipmentTypeId?: string;
+    partCategoryId?: string;
+    warrantyDays?: number;
+    isActive: boolean;
+    position: number;
+    /** Precio e ITBIS vigentes, del artículo de servicio. */
+    price: number;
+    itbis: boolean;
 };
 
-export type ServiceStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
+export type ServiceStatus =
+  | 'received' | 'diagnosing' | 'awaiting_approval' | 'awaiting_parts' | 'in_repair'
+  | 'ready' | 'not_repaired' | 'delivered' | 'cancelled';
 export type PaymentStatus = 'pending' | 'paid';
+
+export type EquipmentExtraField = { key: string; label: string; type: 'text' | 'number' };
+
+export type EquipmentType = {
+    id: string;
+    name: string;
+    serialLabel: string;
+    asksPassword: boolean;
+    extraFields: EquipmentExtraField[];
+    position: number;
+    isActive: boolean;
+};
+
+export type ChecklistItem = {
+    id: string;
+    /** undefined = aplica a todos los tipos de equipo. */
+    equipmentTypeId?: string;
+    label: string;
+    required: boolean;
+    requiredQuick: boolean;
+    position: number;
+    isActive: boolean;
+};
+
+/** Sí / No / No se pudo probar. */
+export type ChecklistAnswerValue = 'si' | 'no' | 'np';
+export type ChecklistAnswer = {
+    itemId: string;
+    label: string;
+    answer: ChecklistAnswerValue;
+    note?: string;
+};
+
+export type TallerSettings = {
+    branchId: string;
+    partsLocationId?: string;
+    hidePartsInPos: boolean;
+    terms?: string;
+    defaultWarrantyDays?: number;
+};
+
+export type Technician = { id: string; profileId: string; name: string };
+
+export type ServiceItemKind = 'labor' | 'part';
 
 export type ServiceItem = {
     id: string;
     serviceId: string;
+    kind: ServiceItemKind;
+    serviceTypeId?: string;
     product: Product;
     quantity: number;
     price: number;
     cost: number;
 };
 
+export type ServiceEventKind = 'created' | 'status' | 'assigned' | 'note' | 'charged' | 'charge_voided';
+export type ServiceEvent = {
+    id: string;
+    kind: ServiceEventKind;
+    fromStatus?: ServiceStatus;
+    toStatus?: ServiceStatus;
+    fromUser?: string;
+    toUser?: string;
+    note?: string;
+    visibleToCustomer: boolean;
+    createdBy?: string;
+    createdByName?: string;
+    createdAt: Date;
+};
+
 export type Service = {
     id: string;
+    number: number;
+    /** UUID de la sucursal. */
     branchId: string;
+    branchName: string;
     customerId?: string;
     customer?: Customer;
-    serviceTypeId: string;
+    serviceTypeId?: string;
     serviceType?: ServiceType;
     assignedTo?: string;
     assignedUser?: User;
+    /** Falla reportada por el cliente. */
     description: string;
     status: ServiceStatus;
     laborPrice: number;
@@ -992,7 +1079,40 @@ export type Service = {
     total: number;
     paymentStatus: PaymentStatus;
     amountPaid: number;
+    saleId?: string;
     createdAt: Date;
     completedAt?: Date;
+    equipmentTypeId?: string;
+    equipmentBrand?: string;
+    equipmentModel?: string;
+    equipmentSerial?: string;
+    equipmentPassword?: string;
+    equipmentDetails: Record<string, string>;
+    accessories?: string;
+    intakeChecklist: ChecklistAnswer[];
+    diagnosis?: string;
+    broughtByName?: string;
+    broughtByPhone?: string;
+    receivedBy?: string;
+    receivedByName?: string;
+    estimate?: number;
+    promisedAt?: Date;
+    isQuick: boolean;
+    statusChangedAt: Date;
+    readyAt?: Date;
+    deliveredAt?: Date;
+    deliveredBy?: string;
+    deliveredByName?: string;
+    pickedUpByName?: string;
+    outcome?: 'repaired' | 'not_repaired';
+    /** Código del enlace público de seguimiento (/seguimiento?c=…). */
+    trackingCode: string;
+    /** Reingreso por garantía de otro caso, o de una venta. */
+    warrantyOfServiceId?: string;
+    warrantySaleId?: string;
+    /** Hasta cuándo cubre la garantía de este caso (se fija al entregarlo). */
+    warrantyUntil?: string;
     items?: ServiceItem[];
 };
+
+export type ServicePhoto = { id: string; path: string; createdAt: Date; url?: string };

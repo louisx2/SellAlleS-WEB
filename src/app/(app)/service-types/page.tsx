@@ -1,66 +1,48 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
 import { PageHeader } from '@/components/page-header';
-import { ServiceTypeDataTable } from '@/components/services/service-type-data-table';
-import { createServiceTypeColumns } from '@/components/services/service-type-columns';
-import { ServiceTypeDialog } from '@/components/services/service-type-dialog';
-import { Button } from '@/components/ui/button';
-import { PlusCircle } from 'lucide-react';
-import { supabase } from '@/lib/supabase/client';
-import { rowToServiceType } from '@/lib/supabase/mappers';
-import type { ServiceType } from '@/lib/types';
-import { useToast } from '@/hooks/use-toast';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Skeleton } from '@/components/ui/skeleton';
+import { usePermission } from '@/hooks/use-permission';
+import { useTallerConfig } from '@/components/taller/use-taller-config';
+import { GeneralTab } from '@/components/taller/config/general-tab';
+import { EquipmentTab } from '@/components/taller/config/equipment-tab';
+import { ChecklistTab } from '@/components/taller/config/checklist-tab';
+import { CatalogTab } from '@/components/taller/config/catalog-tab';
+import { TechniciansTab } from '@/components/taller/config/technicians-tab';
 
-export default function ServiceTypesPage() {
-  const [serviceTypes, setServiceTypes] = useState<ServiceType[]>([]);
-  const { toast } = useToast();
-
-  const loadData = useCallback(async () => {
-    const { data, error } = await supabase
-      .from('service_types')
-      .select('*')
-      .order('name');
-    
-    if (error) {
-        console.error(error);
-        toast({ title: 'Error cargando tipos de servicio', variant: 'destructive' });
-        return;
-    }
-    if (data) {
-        setServiceTypes(data.map(rowToServiceType));
-    }
-  }, [toast]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('¿Estás seguro de que deseas eliminar este tipo de servicio?')) return;
-    const { error } = await supabase.from('service_types').delete().eq('id', id);
-    if (error) {
-        console.error(error);
-        toast({ title: 'Error al eliminar', variant: 'destructive' });
-    } else {
-        toast({ title: 'Tipo de servicio eliminado' });
-        loadData();
-    }
-  };
-
-  const columns = createServiceTypeColumns(loadData, handleDelete);
+// Configuración del Taller. La ruta conserva el nombre viejo (/service-types)
+// para no romper los permisos ni los enlaces guardados.
+export default function TallerConfigPage() {
+  const config = useTallerConfig();
+  const canEdit = usePermission('service-types', 'edit');
 
   return (
     <div>
-      <PageHeader title="Tipos de Servicio">
-        <ServiceTypeDialog onSuccess={loadData}>
-          <Button>
-            <PlusCircle className="mr-2 h-4 w-4" />
-            Añadir Tipo de Servicio
-          </Button>
-        </ServiceTypeDialog>
-      </PageHeader>
-      <ServiceTypeDataTable columns={columns} data={serviceTypes} />
+      <PageHeader title="Configuración del Taller" />
+      {config.loading ? (
+        <div className="space-y-3">
+          <Skeleton className="h-10 w-full max-w-xl" />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      ) : (
+        <Tabs defaultValue={config.equipmentTypes.length === 0 ? 'equipos' : 'general'}>
+          <div className="overflow-x-auto pb-1">
+            <TabsList>
+              <TabsTrigger value="general">General</TabsTrigger>
+              <TabsTrigger value="equipos">Tipos de equipo</TabsTrigger>
+              <TabsTrigger value="chequeos">Chequeos</TabsTrigger>
+              <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
+              <TabsTrigger value="tecnicos">Técnicos</TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="general"><GeneralTab config={config} canEdit={canEdit} /></TabsContent>
+          <TabsContent value="equipos"><EquipmentTab config={config} canEdit={canEdit} /></TabsContent>
+          <TabsContent value="chequeos"><ChecklistTab config={config} canEdit={canEdit} /></TabsContent>
+          <TabsContent value="catalogo"><CatalogTab config={config} canEdit={canEdit} /></TabsContent>
+          <TabsContent value="tecnicos"><TechniciansTab config={config} canEdit={canEdit} /></TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }

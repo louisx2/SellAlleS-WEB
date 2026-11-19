@@ -231,6 +231,9 @@ export function SalesProvider({ children }: { children: ReactNode }) {
         // rechaza la línea si ya no son las de hoy (carrito guardado u otra tableta),
         // porque el precio de la línea es el de la presentación vieja. No mueve stock.
         units_per: item.presentation?.units ?? null,
+        // Línea de un caso del taller: la base comprueba que sea del caso y no
+        // vuelve a descontar la pieza (salió del inventario al agregarla al caso).
+        service_item_id: item.serviceItemId ?? null,
       })),
     });
     if (error) throw error;

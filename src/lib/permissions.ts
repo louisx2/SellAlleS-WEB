@@ -17,7 +17,8 @@ export const PERMISSION_RESOURCES: { key: PermissionResource; label: string; act
   { key: 'pos', label: 'Carrito (POS)' },
   { key: 'sales', label: 'Movimientos (Ventas)' },
   { key: 'quotes', label: 'Cotizaciones' },
-  { key: 'services', label: 'Servicios' },
+  { key: 'services', label: 'Taller' },
+  { key: 'services-all', label: 'Taller: ver todos los casos (sin esto, solo los suyos y los sin asignar)', actions: ['view'] },
   { key: 'credit', label: 'Cuentas por Cobrar' },
   { key: 'financing', label: 'Financiamientos' },
   { key: 'prestamos', label: 'Préstamos' },
@@ -33,7 +34,7 @@ export const PERMISSION_RESOURCES: { key: PermissionResource; label: string; act
   { key: 'branches', label: 'Sucursales' },
   { key: 'roles', label: 'Roles' },
   { key: 'suscripcion', label: 'Mi Suscripción' },
-  { key: 'service-types', label: 'Tipos de Servicio' },
+  { key: 'service-types', label: 'Configuración del Taller' },
   { key: 'quick-sales', label: 'Ventas rápidas (fuera de inventario)', actions: ['create'] },
 ];
 
@@ -62,6 +63,7 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
   reports: 'reports',
   suppliers: 'suppliers',
   'service-types': 'services',
+  'services-all': 'services',
   'quick-sales': 'quick-sales',
 };
 
@@ -73,6 +75,7 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'top-products', label: 'Productos Estrella (más vendidos)' },
   { slug: 'top-customers', label: 'Clientes Estrella' },
   { slug: 'comisiones', label: 'Comisiones por Vendedor' },
+  { slug: 'taller', label: 'Taller (técnicos, tiempos, piezas)' },
   { slug: 'date-range', label: 'Ingresos por Fechas' },
   { slug: 'receivables', label: 'Cuentas por Cobrar' },
   { slug: 'inventory', label: 'Valorización de Inventario' },
@@ -96,7 +99,10 @@ export const DEFAULT_CASHIER_PERMISSIONS: RolePermissions = {
   dashboard: ['view'],
   pos: ['view', 'create'],
   quotes: ['view', 'create'],
-  services: ['view', 'create'],
+  // El mostrador ingresa, ve todos los casos, cobra y entrega. Un técnico se
+  // arma como rol propio sin 'services-all' (ve los suyos y los sin asignar).
+  services: ['view', 'create', 'edit'],
+  'services-all': ['view'],
   caja: ['view', 'create'],
   'quick-sales': ['create'],
 };

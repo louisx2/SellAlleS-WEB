@@ -61,6 +61,7 @@ export default function ReportsDashboardPage() {
   );
   const showQuickSalesReport = isModuleEnabled('quick-sales') && isReportVisible(effectivePermissions, 'ventas-rapidas');
   const showCommissionsReport = isModuleEnabled('commissions') && isReportVisible(effectivePermissions, 'comisiones');
+  const showTallerReport = isModuleEnabled('services') && isReportVisible(effectivePermissions, 'taller');
 
   // --- Filtrado por Sucursal (las ventas anuladas no cuentan como ingreso) ---
   const filteredSales = React.useMemo(() => {
@@ -369,6 +370,20 @@ export default function ReportsDashboardPage() {
                     <CardDescription className="text-3xs mt-1">Lo que gana cada vendedor</CardDescription>
                   </div>
                   <ArrowRight className="h-4 w-4 text-emerald-500 group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {showTallerReport && (
+            <Link href="/reports/taller">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold">Taller</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Técnicos, tiempos, piezas y equipos</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
                 </CardHeader>
               </Card>
             </Link>
