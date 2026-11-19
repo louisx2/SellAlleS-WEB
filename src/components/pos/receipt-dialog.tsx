@@ -26,7 +26,6 @@ import {
 } from '@/components/sharing/compartir-documento';
 import { useCompartirDocumento } from '@/hooks/use-compartir-documento';
 import { esperarQrEcf } from '@/lib/ecf';
-import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface ReceiptDialogProps {
   sale: Sale | null;
@@ -79,27 +78,35 @@ function ReceiptDialogDeVenta({
       <DialogContent className="max-w-md flex flex-col h-[90vh] p-0 [&>button]:hidden">
         {activeScreen === 'receipt' && (
           <>
-            <DialogHeader className="p-6 pb-2">
-                {/* Radix exige un título; el recibo ya lleva su encabezado. */}
-                <DialogTitle className="sr-only">Recibo de la venta</DialogTitle>
-                <ReceiptHeader sale={sale} showCustomerInfo={incluirDatosCliente} />
-            </DialogHeader>
+            {/* Todo el recibo se desplaza junto; solo los botones quedan fijos
+                abajo. Antes solo la lista de artículos tenía scroll: con logo,
+                datos del cliente y los totales de un financiamiento, lo fijo no
+                cabía en el 90 % de la pantalla, la lista quedaba en alto 0 (no se
+                veían los artículos) y totales y botones se salían por debajo de
+                la ventana, sin poder alcanzar "Cerrar". */}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <DialogHeader className="p-6 pb-2">
+                  {/* Radix exige un título; el recibo ya lleva su encabezado. */}
+                  <DialogTitle className="sr-only">Recibo de la venta</DialogTitle>
+                  <ReceiptHeader sale={sale} showCustomerInfo={incluirDatosCliente} />
+              </DialogHeader>
 
-            <ScrollArea className="flex-grow px-6">
-                <ReceiptItems sale={sale} />
-            </ScrollArea>
+              <div className="px-6">
+                  <ReceiptItems sale={sale} />
+              </div>
 
-            <div className="px-6 pb-6 border-t pt-4">
-              <ReceiptTotals sale={sale} />
-              <IncluirDatosCliente
-                className="mt-4"
-                customer={sale.customer}
-                checked={incluirDatosCliente}
-                onCheckedChange={setIncluirDatosCliente}
-              />
+              <div className="px-6 pb-6 border-t pt-4 mt-2">
+                <ReceiptTotals sale={sale} />
+                <IncluirDatosCliente
+                  className="mt-4"
+                  customer={sale.customer}
+                  checked={incluirDatosCliente}
+                  onCheckedChange={setIncluirDatosCliente}
+                />
+              </div>
             </div>
 
-            <DialogFooter className="flex-col gap-2 p-4 border-t bg-secondary/50 sm:flex-col sm:space-x-0">
+            <DialogFooter className="shrink-0 flex-col gap-2 p-4 border-t bg-secondary/50 sm:flex-col sm:space-x-0">
               {/* Misma botonera que el detalle de la venta y los documentos
                   del financiamiento; WhatsApp y Correo abren las pantallas de
                   este mismo diálogo. */}
