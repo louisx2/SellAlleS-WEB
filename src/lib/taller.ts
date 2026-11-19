@@ -96,10 +96,16 @@ export function whatsappPhone(phone?: string | null): string {
   return p;
 }
 
-/** Enlace público de seguimiento. Va en el dominio de la app (no en el de
- *  Supabase), y lo que protege el caso es el código, como en las facturas. */
-export function trackingUrl(code: string, origin: string): string {
-  return `${origin.replace(/\/$/, '')}/seguimiento?c=${encodeURIComponent(code)}`;
+/** Dominio de los enlaces públicos: el mismo de los comprobantes. */
+export const ENLACE_BASE = 'https://sellalles.com';
+
+/** Enlace público de seguimiento, con el mismo formato que el de las facturas:
+ *  sellalles.com/<empresa>/c/<código>. El nombre de la empresa es decorativo (le
+ *  dice al cliente de quién es antes de abrirlo); lo que protege el caso es el
+ *  código. La función `c` lo reconoce (10 caracteres) y redirige a la página
+ *  /seguimiento de la app. */
+export function trackingUrl(code: string, empresaSlug: string): string {
+  return `${ENLACE_BASE}/${empresaSlug || 'taller'}/c/${encodeURIComponent(code)}`;
 }
 
 /** Mensaje para avisarle al cliente cómo va su equipo. */

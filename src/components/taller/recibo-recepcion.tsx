@@ -10,7 +10,8 @@ import { Separator } from '@/components/ui/separator';
 import { Printer } from 'lucide-react';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
-import { ANSWER_LABEL, caseNumber, equipmentLabel, trackingUrl } from '@/lib/taller';
+import { ANSWER_LABEL, caseNumber, equipmentLabel } from '@/lib/taller';
+import { useEnlaceSeguimiento } from './use-enlace-seguimiento';
 import type { EquipmentType, Service, TallerSettings } from '@/lib/types';
 
 const fecha = (d: Date) => d.toLocaleString('es-DO', { dateStyle: 'short', timeStyle: 'short' });
@@ -29,16 +30,17 @@ function Cuerpo({ service, equipmentType, settings }: {
   const extra = equipmentType?.extraFields ?? [];
   // QR con el enlace de seguimiento: el cliente lo escanea y ve cómo va su equipo.
   const [qr, setQr] = useState<string | null>(null);
+  const enlace = useEnlaceSeguimiento()(service.trackingCode);
   useEffect(() => {
-    if (!service.trackingCode) return;
+    if (!enlace) return;
     let vivo = true;
     (async () => {
       const QRCode = (await import('qrcode')).default;
-      const url = await QRCode.toDataURL(trackingUrl(service.trackingCode, window.location.origin), { margin: 1, width: 200 });
+      const url = await QRCode.toDataURL(enlace, { margin: 1, width: 200 });
       if (vivo) setQr(url);
     })().catch(() => {});
     return () => { vivo = false; };
-  }, [service.trackingCode]);
+  }, [enlace]);
   return (
     <div className="text-left space-y-1 text-black">
       {profile.ticketLogoUrl && (

@@ -169,10 +169,12 @@ recibo). Así el taller entra en caja, reportes, 607, comisiones y e-CF sin dupl
   estado con el texto para el cliente, pasos, avance con las notas marcadas como
   visibles, total si está listo y por cobrar, garantía, y botones de llamar y
   WhatsApp. Nada de IMEI, clave, notas internas ni nombres del personal.
-- **Decisión mía:** no va por la función `c` (`sellalles.com/<empresa>/c/<código>`)
-  porque Supabase sirve como `text/plain` todo HTML que devuelve una Edge Function:
-  la página saldría como código. (Esto ya pasa hoy con las páginas de error de los
-  enlaces de factura: queda anotado como seguimiento aparte.)
+- **El enlace que recibe el cliente** tiene el mismo formato que el de las facturas,
+  con el nombre configurable de la empresa: `sellalles.com/<empresa>/c/<código>`
+  (pedido de Louis). La función `c` reconoce los códigos de 10 caracteres y redirige
+  (302) a la página de la app. La página no puede servirse desde la función porque
+  Supabase reescribe a `text/plain` todo HTML de una Edge Function (eso ya pasa hoy
+  con las páginas de error de los enlaces de factura: seguimiento aparte).
 - En el caso: botón **Enlace** (copia) y **Avisar** (WhatsApp con el estado y el
   enlace). El recibo de recepción imprime un **QR** con el enlace.
 - Avisos automáticos por WhatsApp quedan fuera: necesitan la API de pago de Meta.

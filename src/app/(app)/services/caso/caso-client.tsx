@@ -29,7 +29,7 @@ import { formatQuantity } from '@/lib/units';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import {
   ANSWER_LABEL, caseNumber, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
-  fmtDate, MANUAL_STATUSES, mensajeDeEstado, SERVICE_STATUS, trackingUrl, warrantyActive, whatsappPhone,
+  fmtDate, MANUAL_STATUSES, mensajeDeEstado, SERVICE_STATUS, warrantyActive, whatsappPhone,
 } from '@/lib/taller';
 import type { Product, Service, ServiceEvent, ServiceItem, ServiceStatus } from '@/lib/types';
 import { StatusBadge } from '@/components/taller/status-badge';
@@ -39,6 +39,7 @@ import { Historial } from '@/components/taller/historial';
 import { ReciboRecepcionDialog } from '@/components/taller/recibo-recepcion';
 import { abrirCobroDelCaso } from '@/components/taller/cobrar';
 import { FotosDelCaso } from '@/components/taller/fotos';
+import { useEnlaceSeguimiento } from '@/components/taller/use-enlace-seguimiento';
 
 const NINGUNO = 'none';
 const fecha = (d?: Date) => (d ? d.toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
@@ -121,6 +122,7 @@ export default function CasoClient() {
   useRealtimeReload('services', load);
 
   const profile = useTicketProfile(service?.branchName);
+  const enlaceDe = useEnlaceSeguimiento();
   const equipmentType = config.equipmentTypes.find((t) => t.id === service?.equipmentTypeId);
   const labor = items.filter((i) => i.kind === 'labor');
   const parts = items.filter((i) => i.kind === 'part');
@@ -269,7 +271,7 @@ export default function CasoClient() {
   const phone = service.customer?.phone || service.broughtByPhone;
   const contactName = service.customer?.name ?? service.broughtByName;
   const waPhone = whatsappPhone(phone);
-  const enlace = typeof window !== 'undefined' && service.trackingCode ? trackingUrl(service.trackingCode, window.location.origin) : undefined;
+  const enlace = enlaceDe(service.trackingCode);
   const copiarEnlace = async () => {
     if (!enlace) return;
     try { await navigator.clipboard.writeText(enlace); toast({ title: 'Enlace copiado', description: 'Pégalo en el chat del cliente.' }); }

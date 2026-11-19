@@ -69,7 +69,8 @@ test('teléfono para WhatsApp: los 10 dígitos de RD llevan el 1', () => {
 });
 
 test('enlace de seguimiento y mensaje al cliente', () => {
-  assert.equal(trackingUrl('Ab3x', 'https://app.sellalles.com/'), 'https://app.sellalles.com/seguimiento?c=Ab3x');
+  assert.equal(trackingUrl('Ab3xYz7kQp', 'delmastechnology'), 'https://sellalles.com/delmastechnology/c/Ab3xYz7kQp');
+  assert.equal(trackingUrl('Ab3xYz7kQp', ''), 'https://sellalles.com/taller/c/Ab3xYz7kQp');
   const s = { number: 42, status: 'ready', equipmentBrand: 'Samsung', equipmentModel: 'A15', total: 1500, paymentStatus: 'pending' };
   const m = mensajeDeEstado(s, 'Pedro Pérez', 'DelmasTechnology', 'https://x/seguimiento?c=1');
   assert.match(m, /^Hola Pedro, te escribimos de DelmasTechnology sobre Samsung A15 \(caso #0042\): ¡Ya está listo!/);
