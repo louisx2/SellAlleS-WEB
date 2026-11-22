@@ -270,9 +270,10 @@ test('isPrefixOfLongerCode', () => {
   assert.equal(isPrefixOfLongerCode('ZZZ', lista), false);
 });
 
-// Formulario del producto: su código no puede ser el de una presentación de otro
-// producto de la sucursal (el escaneo no sabría cuál es). Dos productos con el mismo
-// código siguen permitidos, como antes de las presentaciones.
+// Formulario del producto: su código no puede ser el de otro producto ni el de una
+// presentación de otro producto de la sucursal (el escaneo no sabría cuál es).
+// Si al editar no cambia el código (`originalCode`), no se compara con otros productos
+// para no trabar la edición de repetidos antiguos.
 test('productCodeError', () => {
   const productos = [
     galletas(), // g1: código 7501, presentaciones 7501-12 y 7501-288
@@ -290,14 +291,26 @@ test('productCodeError', () => {
     productCodeError('7501-12', undefined, productos),
     'El código «7501-12» ya lo usa la presentación «Paquete» de «Galletas» en esta sucursal.',
   );
-  // El código de otro producto no se bloquea aquí.
-  assert.equal(productCodeError(' j-1 ', undefined, productos), null);
-  assert.equal(productCodeError('7501', 'j1', productos), null);
+  // El código de otro producto también se bloquea (al crear o al cambiar el código).
+  assert.equal(
+    productCodeError(' j-1 ', undefined, productos),
+    'El código «j-1» ya lo tiene «Jabón» en esta sucursal.',
+  );
+  assert.equal(
+    productCodeError('7501', 'j1', productos, 'J-1'),
+    'El código «7501» ya lo tiene «Galletas» en esta sucursal.',
+  );
+  // Si al editar un repetido viejo no cambia su código, se permite guardar.
+  assert.equal(productCodeError('7501', 'j1', productos, ' 7501 '), null);
   // El producto que se edita no choca consigo mismo (sus presentaciones las revisa validateDrafts).
   assert.equal(productCodeError('7501-12', 'g1', productos), null);
-  // Sin presentaciones en la sucursal no hay nada que bloquear.
+  assert.equal(productCodeError('7501', 'g1', productos), null);
+  // Sin presentaciones sigue bloqueando códigos de otros productos.
   const sinPresentaciones = productos.map((p) => ({ ...p, presentations: [] }));
-  assert.equal(productCodeError('7501', 'j1', sinPresentaciones), null);
+  assert.equal(
+    productCodeError('7501', 'j1', sinPresentaciones, 'J-1'),
+    'El código «7501» ya lo tiene «Galletas» en esta sucursal.',
+  );
   assert.equal(productCodeError('7501-288', 'j1', sinPresentaciones), null);
 });
 

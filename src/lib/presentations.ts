@@ -153,15 +153,18 @@ export function isPrefixOfLongerCode(term: string, products: Product[]): boolean
   return products.some((p) => longer(p.code) || (p.presentations ?? []).some((x) => longer(x.code)));
 }
 
-// Código del producto en el formulario: no puede ser el de una presentación de otro
-// producto de la sucursal (el escaneo no sabría cuál es). Dos productos con el mismo
-// código siguen permitidos, como antes de las presentaciones. `selfId` es el producto
-// que se edita (ausente al crear): sus presentaciones las revisa `validateDrafts`
-// contra este mismo código. Primer error o null.
+// Código del producto en el formulario: no puede ser el de otro producto de la
+// sucursal ni el de una presentación de otro producto (el escaneo no sabría cuál es).
+// `selfId` es el producto que se edita (ausente al crear): sus presentaciones las
+// revisa `validateDrafts` contra este mismo código. `originalCode` es el código que
+// tenía al abrir el formulario: si no cambia, no se compara con otros productos,
+// para no trabar la edición de los repetidos que ya existían (la base aplica la
+// misma regla en trg_impedir_codigo_producto_repetido). Primer error o null.
 export function productCodeError(
   code: string,
   selfId: string | undefined,
   products: readonly CsvCodeOwner[],
+  originalCode?: string,
 ): string | null {
   const key = codeKey(code);
   if (key === '') return null;
@@ -173,6 +176,12 @@ export function productCodeError(
     if (presentation) {
       return `El código «${shown}» ya lo usa la presentación «${presentation.name}» de «${p.name}» en esta sucursal.`;
     }
+  }
+
+  const sinCambio = selfId !== undefined && codeKey(originalCode) === key;
+  if (!sinCambio) {
+    const repetido = others.find((p) => codeKey(p.code) === key);
+    if (repetido) return `El código «${shown}» ya lo tiene «${repetido.name}» en esta sucursal.`;
   }
   return null;
 }
