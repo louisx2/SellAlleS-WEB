@@ -80,7 +80,7 @@ function buildTakenCodes(products: Product[], selfId: string | undefined, ownCod
 
 export function ProductDialog({ product, children, open: openProp, onOpenChange: onOpenChangeProp }: ProductDialogProps) {
   const { toast } = useToast();
-  const { products, addProduct, updateProduct, savePresentations } = useProducts();
+  const { products, addProduct, updateProduct, savePresentations, archivedWithCode } = useProducts();
   const { suppliers } = useSuppliers();
   const { categories } = useCategories();
   const { locations } = useLocations();
@@ -126,6 +126,12 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   const [drafts, setDrafts] = useState<PresentationDraft[]>(() => draftsOf(product));
   const [soldLoose, setSoldLoose] = useState(product ? isSoldLoose(product) : true);
   const [codeInput, setCodeInput] = useState(product?.code ?? '');
+  // El aviso de código en uso sale al salir del campo (o al intentar guardar), no
+  // mientras se teclea; desde ahí se actualiza al corregir. `codigoOcupado` es lo
+  // que dijo la base (un archivado, o el trigger al guardar) para ese código.
+  const [codeTouched, setCodeTouched] = useState(false);
+  const [codigoOcupado, setCodigoOcupado] = useState<{ key: string; message: string } | null>(null);
+  const codeRef = useRef<HTMLInputElement>(null);
   const [nameInput, setNameInput] = useState(product?.name ?? '');
   const [costInput, setCostInput] = useState(product?.cost != null ? String(product.cost) : '');
 
@@ -242,6 +248,8 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     setDrafts(draftsOf(product));
     setSoldLoose(product ? isSoldLoose(product) : true);
     setCodeInput(product?.code ?? '');
+    setCodeTouched(false);
+    setCodigoOcupado(null);
     setNameInput(product?.name ?? '');
     setCostInput(product?.cost != null ? String(product.cost) : '');
     setPriceInput(product?.price != null ? String(product.price) : '');
@@ -274,14 +282,39 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     () => (open ? buildTakenCodes(products, selfId, codeInput, nameInput) : new Map<string, string>()),
     [open, products, selfId, codeInput, nameInput],
   );
-  // El código del producto no puede ser el de una presentación de otro producto: el
-  // escaneo no sabría cuál es. La base solo vigila las presentaciones, así que el aviso
-  // (y el bloqueo al guardar) está aquí. Dos productos con el mismo código siguen
-  // permitidos, como antes.
+  // El código del producto no puede ser el de otro producto ni el de una
+  // presentación de otro producto: el escaneo no sabría cuál es. La base aplica
+  // la misma regla (trg_impedir_codigo_producto_repetido); aquí va el aviso
+  // inmediato. Si al editar no se cambia el código, no se compara con otros
+  // productos, para no trabar los repetidos que ya existían.
+  const originalCode = product?.code ?? created?.code;
   const codeWarning = useMemo(
-    () => (open ? productCodeError(codeInput, selfId, products) : null),
-    [open, products, selfId, codeInput],
+    () => (open ? productCodeError(codeInput, selfId, products, originalCode) : null),
+    [open, products, selfId, codeInput, originalCode],
   );
+  const keyOf = (code?: string) => (code ?? '').trim().toLowerCase();
+  // Lo que dijo la base solo vale mientras el código siga siendo ese.
+  const ocupadoPara = (code: string) =>
+    codigoOcupado && codigoOcupado.key === keyOf(code) ? codigoOcupado.message : null;
+  const codeMessage = codeTouched ? (codeWarning ?? ocupadoPara(codeInput)) : null;
+
+  // Al salir del campo se muestra el aviso y, si los activos no lo tienen, se
+  // pregunta a la base por los archivados. Si al editar no cambió el código, no
+  // se pregunta: los repetidos de antes se pueden seguir editando.
+  const onCodeBlur = async (value: string) => {
+    setCodeTouched(true);
+    const key = keyOf(value);
+    if (key === '' || (selfId !== undefined && key === keyOf(originalCode))) return;
+    if (productCodeError(value, selfId, products, originalCode)) return;
+    if (codigoOcupado?.key === key) return;
+    const archivado = await archivedWithCode(value);
+    // Si mientras tanto se cambió el código, la respuesta ya no aplica.
+    if (!archivado || keyOf(codeRef.current?.value) !== key) return;
+    setCodigoOcupado({
+      key,
+      message: `El código «${value.trim()}» es de un artículo archivado («${archivado}»). Restáuralo desde Archivados en lugar de crear otro.`,
+    });
+  };
   const handleDraftsChange = (next: PresentationDraft[]) => {
     setDrafts(next);
     if (next.length === 0) setSoldLoose(true);
@@ -417,9 +450,12 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
 
     // El código y las presentaciones se validan antes de guardar nada: si algo está
     // mal, no se guarda ni el producto. Un producto sin inventario se guarda en 'und'.
-    const codeError = productCodeError((formData.get('code') as string) ?? '', selfId, products);
+    const codigo = (formData.get('code') as string) ?? '';
+    const codeError = productCodeError(codigo, selfId, products, originalCode) ?? ocupadoPara(codigo);
     if (codeError) {
-      toast({ title: 'Revisa el código', description: codeError, variant: 'destructive' });
+      setCodeTouched(true);
+      codeRef.current?.focus();
+      toast({ title: 'Código en uso', description: `${codeError} No se puede guardar con un código en uso.`, variant: 'destructive' });
       return;
     }
     const presentationError = validateDrafts(drafts, {
@@ -490,11 +526,20 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
         saved = await addProduct(productData);
         setCreated(saved);
       }
-    } catch (error) {
+    } catch (error: any) {
        console.error("Failed to save product: ", error);
+       // La base rechaza los códigos repetidos (también contra archivados, que el
+       // formulario no ve) con un mensaje listo para enseñar.
+       const codigoRepetido = typeof error?.hint === 'string' && error.hint.startsWith('codigo_duplicado');
+       if (codigoRepetido) {
+         // El aviso queda también debajo del campo, hasta que se cambie el código.
+         setCodigoOcupado({ key: keyOf(productData.code), message: error.message });
+         setCodeTouched(true);
+         codeRef.current?.focus();
+       }
        toast({
-         title: 'Error al guardar',
-         description: 'No se pudo guardar el producto. Inténtalo de nuevo.',
+         title: codigoRepetido ? 'Código en uso' : 'Error al guardar',
+         description: codigoRepetido ? error.message : 'No se pudo guardar el producto. Inténtalo de nuevo.',
          variant: 'destructive',
        });
        return;
@@ -611,8 +656,23 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
 
             <div className="flex flex-col gap-2">
               <Label htmlFor="code">Código</Label>
-              <Input id="code" name="code" defaultValue={product?.code} onChange={(e) => setCodeInput(e.target.value)} required />
-              {codeWarning && <p className="text-xs text-destructive">{codeWarning}</p>}
+              <Input
+                id="code"
+                name="code"
+                ref={codeRef}
+                defaultValue={product?.code}
+                onChange={(e) => setCodeInput(e.target.value)}
+                onBlur={(e) => onCodeBlur(e.target.value)}
+                aria-invalid={!!codeMessage}
+                aria-describedby={codeMessage ? 'code-error' : undefined}
+                className={cn(codeMessage && 'border-destructive focus-visible:ring-destructive')}
+                required
+              />
+              {codeMessage && (
+                <p id="code-error" role="alert" className="text-xs text-destructive">
+                  {codeMessage} No se puede guardar con un código en uso.
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="categoryId">Categoría</Label>

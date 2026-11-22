@@ -39,6 +39,8 @@ interface ProductContextType {
   archivedProducts: (Product & { archivedAt?: string | null })[];
   loadArchived: () => Promise<void>;
   restoreProduct: (id: string) => Promise<void>;
+  /** Nombre del archivado de esta sucursal que tiene ese código, o null. */
+  archivedWithCode: (code: string) => Promise<string | null>;
   bulkImportProducts: (items: BulkImportItem[], onProgress?: (done: number, total: number) => void) => Promise<BulkImportResult>;
   /**
    * Guarda el estado completo de las presentaciones del producto (las que no vengan
@@ -196,6 +198,20 @@ export function ProductProvider({ children }: { children: ReactNode }) {
     await load();
   };
 
+  // El formulario solo conoce los activos, pero un archivado también ocupa su
+  // código (trg_impedir_codigo_producto_repetido). Esto le deja avisarlo al salir
+  // del campo, sin cargar todos los archivados. Sin mayúsculas, como la base; un
+  // `*` lo trata PostgREST como comodín, así que ese caso queda para el trigger.
+  const archivedWithCode = useCallback(async (code: string): Promise<string | null> => {
+    const term = code.trim();
+    if (!activeBranchId || term === '' || term.includes('*')) return null;
+    const pattern = term.replace(/[\\%_]/g, (c) => `\\${c}`);
+    const { data, error } = await supabase.from('products').select('name')
+      .eq('branch_id', activeBranchId).eq('is_active', false).ilike('code', pattern).limit(1);
+    if (error || !data?.length) return null;
+    return data[0].name ?? null;
+  }, [activeBranchId]);
+
   // Importación por lote: inserta los nuevos en tandas y actualiza los emparejados
   // por código uno a uno. company_id lo pone la base (default current_company_id()).
   // Las presentaciones del CSV se escriben al final, todas juntas, con una sola
@@ -331,7 +347,7 @@ export function ProductProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, bulkImportProducts, savePresentations, archivedProducts, loadArchived, restoreProduct, reload: load, loading }}>
+    <ProductContext.Provider value={{ products, updateStock, addProduct, updateProduct, deleteProduct, bulkImportProducts, savePresentations, archivedProducts, loadArchived, restoreProduct, archivedWithCode, reload: load, loading }}>
       {children}
     </ProductContext.Provider>
   );
