@@ -16,7 +16,7 @@ import { useSales } from '@/context/sales-provider';
 import { useCustomers } from '@/context/customer-provider';
 import { formatCurrency } from '@/lib/utils';
 import {
-  FREQUENCY_LABEL, INTEREST_MODE_LABEL, installmentLabel, monthsFor, rateLabel,
+  FREQUENCY_LABEL, FREQUENCY_OPTIONS, INTEREST_MODE_LABEL, installmentLabel, maxInstallments, monthsFor, rateLabel,
   type InterestMode, type PaymentFrequency,
 } from '@/lib/frequency';
 import type { Sale } from '@/lib/types';
@@ -29,7 +29,6 @@ interface AmendFinancingDialogProps {
   onAmended?: () => void;
 }
 
-const MAX_INSTALLMENTS = 60;
 
 // Corregir un plan mal digitado (la tasa que iba 7 y se tecleó 8). No es
 // renegociar: el abono inicial y la mora no se tocan, y las fechas tampoco
@@ -74,7 +73,7 @@ export function AmendFinancingDialog({ sale, open, onOpenChange, onAmended }: Am
   const numericRate = Number(rate);
   const isRateInvalid = rate === '' || Number.isNaN(numericRate) || numericRate < 0 || numericRate > 100;
   const isInstallmentsInvalid =
-    installments === '' || !Number.isInteger(n) || n < 1 || n > MAX_INSTALLMENTS;
+    installments === '' || !Number.isInteger(n) || n < 1 || n > maxInstallments(frequency);
 
   // Vista previa. El monto que queda grabado lo calcula el servidor con
   // `financing_plan`; esto replica la misma fórmula solo para mostrarla.
@@ -216,7 +215,7 @@ export function AmendFinancingDialog({ sale, open, onOpenChange, onAmended }: Am
                     onFocus={(e) => e.target.select()}
                   />
                   {isInstallmentsInvalid && (
-                    <p className="text-xs text-destructive">Entre 1 y {MAX_INSTALLMENTS} cuotas.</p>
+                    <p className="text-xs text-destructive">Entre 1 y {maxInstallments(frequency)} cuotas.</p>
                   )}
                 </div>
               </div>
@@ -227,9 +226,7 @@ export function AmendFinancingDialog({ sale, open, onOpenChange, onAmended }: Am
                   <Select value={frequency} onValueChange={(v: PaymentFrequency) => setFrequency(v)}>
                     <SelectTrigger id="amend-frequency"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="weekly">{FREQUENCY_LABEL.weekly}</SelectItem>
-                      <SelectItem value="biweekly">{FREQUENCY_LABEL.biweekly}</SelectItem>
-                      <SelectItem value="monthly">{FREQUENCY_LABEL.monthly}</SelectItem>
+                      {FREQUENCY_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

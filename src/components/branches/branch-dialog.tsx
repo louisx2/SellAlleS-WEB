@@ -21,7 +21,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { formatPhone } from '@/lib/format';
 import {
   FREQUENCY_LABEL,
+  FREQUENCY_OPTIONS,
   INTEREST_MODE_LABEL,
+  maxInstallments,
   type InterestMode,
   type PaymentFrequency,
 } from '@/lib/frequency';
@@ -235,6 +237,8 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
     const rateOverride = pct(finRate);
     const moraOverride = pct(finMora);
     const cuotasOverride = pct(finCuotas);
+    // El tope depende de la frecuencia que va a usar la sucursal (la suya o la de la empresa).
+    const maxCuotasSucursal = maxInstallments(finFreq === HEREDA ? profile.financingDefaultFrequency : finFreq);
     const graciaOverride = pct(finMoraGracia);
     const topeOverride = pct(finMoraTope);
     const fueraDeRango = [rateOverride, moraOverride].some(
@@ -264,10 +268,10 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
       });
       return;
     }
-    if (cuotasOverride !== undefined && (!Number.isInteger(cuotasOverride) || cuotasOverride < 1 || cuotasOverride > 60)) {
+    if (cuotasOverride !== undefined && (!Number.isInteger(cuotasOverride) || cuotasOverride < 1 || cuotasOverride > maxCuotasSucursal)) {
       toast({
         title: 'Cuotas inválidas',
-        description: 'La cantidad de cuotas por defecto debe ir de 1 a 60.',
+        description: `La cantidad de cuotas por defecto debe ir de 1 a ${maxCuotasSucursal}.`,
         variant: 'destructive',
       });
       return;
@@ -437,9 +441,7 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
                             <SelectItem value={HEREDA}>
                               Como la empresa ({FREQUENCY_LABEL[profile.financingDefaultFrequency]})
                             </SelectItem>
-                            <SelectItem value="weekly">{FREQUENCY_LABEL.weekly}</SelectItem>
-                            <SelectItem value="biweekly">{FREQUENCY_LABEL.biweekly}</SelectItem>
-                            <SelectItem value="monthly">{FREQUENCY_LABEL.monthly}</SelectItem>
+                            {FREQUENCY_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -449,7 +451,7 @@ export function BranchDialog({ branch, children, open: controlledOpen, onOpenCha
                           id="branch-fin-cuotas"
                           type="number"
                           min="1"
-                          max="60"
+                          max={maxInstallments(finFreq === HEREDA ? profile.financingDefaultFrequency : finFreq)}
                           step="1"
                           value={finCuotas}
                           onChange={(e) => setFinCuotas(e.target.value)}

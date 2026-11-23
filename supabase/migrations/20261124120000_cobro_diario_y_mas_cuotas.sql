@@ -35,6 +35,18 @@ alter table public.branches add constraint branches_financing_default_frequency_
   check (financing_default_frequency is null
          or financing_default_frequency = any (array['daily', 'daily_all', 'weekly', 'biweekly', 'monthly']));
 
+-- Las cuotas por defecto de empresa y sucursal suben al tope más alto (312). La
+-- frecuencia por defecto vive en otra columna (y en la sucursal puede heredarse
+-- de la empresa), así que el tope exacto por frecuencia lo pone la pantalla.
+alter table public.companies drop constraint companies_financing_default_installments_check;
+alter table public.companies add constraint companies_financing_default_installments_check
+  check (financing_default_installments >= 1 and financing_default_installments <= 312);
+
+alter table public.branches drop constraint branches_financing_default_installments_check;
+alter table public.branches add constraint branches_financing_default_installments_check
+  check (financing_default_installments is null
+         or (financing_default_installments >= 1 and financing_default_installments <= 312));
+
 -- 2. Tope de cuotas por frecuencia (espejo: maxInstallments en src/lib/frequency.ts)
 
 create or replace function public.max_installments(p_freq text)

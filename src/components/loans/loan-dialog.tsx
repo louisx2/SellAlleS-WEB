@@ -17,9 +17,9 @@ import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency } from '@/lib/utils';
 import { CustomerSearchDialog } from '@/components/pos/customer-search-dialog';
-// FREQUENCY_LABEL y PER_MONTH viven en lib/frequency.ts, compartidos con
-// Financiamiento: el prorrateo de la tasa mensual es el mismo cálculo.
-import { FREQUENCY_LABEL, PER_MONTH } from '@/lib/frequency';
+// El calendario, las etiquetas y el tope viven en lib/frequency.ts, compartidos
+// con Financiamiento: el prorrateo de la tasa mensual es el mismo cálculo.
+import { FREQUENCY_LABEL, FREQUENCY_OPTIONS, maxInstallments, monthsFor } from '@/lib/frequency';
 import type { Customer, LoanFrequency } from '@/lib/types';
 import { HandCoins, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -71,7 +71,7 @@ export function LoanDialog({ children }: LoanDialogProps) {
     if (p <= 0 || n <= 0) {
       return { interest: 0, total: p, installmentAmount: 0, months: 0 };
     }
-    const months = n / PER_MONTH[frequency];
+    const months = monthsFor(frequency, n, 'monthly_prorated');
     const interest = p * (rate / 100) * months;
     const total = p + interest;
     return { interest, total, installmentAmount: total / n, months };
@@ -79,7 +79,7 @@ export function LoanDialog({ children }: LoanDialogProps) {
 
   const nInstallments = Number(installments) || 0;
   const isPrincipalInvalid = !principal || Number(principal) <= 0;
-  const isInstallmentsInvalid = nInstallments < 1 || nInstallments > 60;
+  const isInstallmentsInvalid = nInstallments < 1 || nInstallments > maxInstallments(frequency);
   const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isInstallmentsInvalid && preview.installmentAmount > 0;
 
   const handleSubmit = async () => {
@@ -161,20 +161,18 @@ export function LoanDialog({ children }: LoanDialogProps) {
                 <Select value={frequency} onValueChange={(v) => setFrequency(v as LoanFrequency)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="weekly">Semanal</SelectItem>
-                    <SelectItem value="biweekly">Quincenal</SelectItem>
-                    <SelectItem value="monthly">Mensual</SelectItem>
+                    {FREQUENCY_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="installments">Cantidad de cuotas</Label>
                 <Input
-                  id="installments" type="number" min="1" max="60" step="1"
+                  id="installments" type="number" min="1" max={maxInstallments(frequency)} step="1"
                   value={installments}
                   onChange={(e) => setInstallments(e.target.value)}
                 />
-                {isInstallmentsInvalid && installments !== '' && <p className="text-xs text-destructive">Entre 1 y 60 cuotas.</p>}
+                {isInstallmentsInvalid && installments !== '' && <p className="text-xs text-destructive">Entre 1 y {maxInstallments(frequency)} cuotas.</p>}
               </div>
             </div>
 

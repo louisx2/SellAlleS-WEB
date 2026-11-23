@@ -123,7 +123,11 @@ select pg_temp.igual((select count(*)::int from pending_due_reminders(400) r
                      0, 'avisos de planes diarios');
 
 -- La frecuencia por defecto de empresa y sucursal acepta las diarias
-update companies set financing_default_frequency = 'daily' where id = '00000000-0000-0000-0000-0000000000aa';
-update branches set financing_default_frequency = 'daily_all' where id = '00000000-0000-0000-0000-0000000000b1';
+update companies set financing_default_frequency = 'daily', financing_default_installments = 240
+ where id = '00000000-0000-0000-0000-0000000000aa';
+update branches set financing_default_frequency = 'daily_all', financing_default_installments = 312
+ where id = '00000000-0000-0000-0000-0000000000b1';
+select pg_temp.debe_fallar($$update companies set financing_default_installments = 313
+                             where id = '00000000-0000-0000-0000-0000000000aa'$$, '%financing_default_installments%');
 
 select 'ok';
