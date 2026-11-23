@@ -2,7 +2,10 @@
 
 // Precio acordado de una sucursal (branches.cuota_mensual). Reemplaza la
 // tarifa del plan solo para esa sucursal y rige para todas sus cuotas, también
-// las ya vencidas: la cuenta no guarda historial de precios.
+// las ya vencidas: la cuenta no guarda historial de precios. Con fecha de fin
+// (branches.cuota_mensual_hasta) vale solo para las cuotas hasta ese día y las
+// siguientes pagan la tarifa: así se da un descuento de unos meses sin que,
+// al terminar, se recalculen las cuotas que ya se cobraron con descuento.
 
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -15,7 +18,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { formatCurrency } from '@/lib/utils';
-import type { PrecioSucursal } from '@/components/admin/cobros-fila';
+import { fmtDate, type PrecioSucursal } from '@/components/admin/cobros-fila';
 
 export function PrecioSucursalDialog({ sucursal, onClose, onDone }: {
   sucursal: PrecioSucursal | null;
@@ -24,10 +27,14 @@ export function PrecioSucursalDialog({ sucursal, onClose, onDone }: {
 }) {
   const { toast } = useToast();
   const [precio, setPrecio] = useState<number | ''>('');
+  const [hasta, setHasta] = useState('');
   const [guardando, setGuardando] = useState(false);
 
   useEffect(() => {
-    if (sucursal) setPrecio(sucursal.precio ?? '');
+    if (sucursal) {
+      setPrecio(sucursal.precio ?? '');
+      setHasta(sucursal.hasta ?? '');
+    }
   }, [sucursal]);
 
   const guardar = async (valor: number | null) => {
@@ -37,7 +44,9 @@ export function PrecioSucursalDialog({ sucursal, onClose, onDone }: {
       return;
     }
     setGuardando(true);
-    const { error } = await supabase.rpc('poner_cuota_de_sucursal', { p_branch_id: sucursal.id, p_cuota: valor });
+    const { error } = await supabase.rpc('poner_cuota_de_sucursal', {
+      p_branch_id: sucursal.id, p_cuota: valor, p_hasta: valor == null || !hasta ? null : hasta,
+    });
     setGuardando(false);
     if (error) {
       toast({ title: 'No se pudo guardar', description: error.message, variant: 'destructive' });
@@ -49,7 +58,7 @@ export function PrecioSucursalDialog({ sucursal, onClose, onDone }: {
         ? `${sucursal.nombre} vuelve a pagar la tarifa del plan (${formatCurrency(sucursal.tarifa)}).`
         : valor === 0
           ? `${sucursal.nombre} ya no se cobra.`
-          : `${sucursal.nombre} paga ${formatCurrency(valor)} al mes.`,
+          : `${sucursal.nombre} paga ${formatCurrency(valor)} al mes${hasta ? ` hasta la cuota del ${fmtDate(hasta)}` : ''}.`,
     });
     onDone();
     onClose();
@@ -76,6 +85,14 @@ export function PrecioSucursalDialog({ sucursal, onClose, onDone }: {
             onChange={(e) => setPrecio(e.target.value === '' ? '' : Number(e.target.value))}
           />
           <p className="text-xs text-muted-foreground">0 = no se le cobra.</p>
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ps-hasta">Hasta (opcional)</Label>
+          <Input id="ps-hasta" type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} />
+          <p className="text-xs text-muted-foreground">
+            Vale para las cuotas que vencen hasta ese día; las siguientes pagan la tarifa del plan
+            {sucursal ? ` (${formatCurrency(sucursal.tarifa)})` : ''}. Vacío: sin fin.
+          </p>
         </div>
         <DialogFooter className="gap-2 sm:justify-between">
           <Button

@@ -112,6 +112,15 @@ export function sumarMeses(ymd: string, n: number): string {
   return `${ny}-${dos(nm + 1)}-${dos(Math.min(d, ultimo))}`;
 }
 
+/** Meses que cubre una cuota según el ciclo. */
+export const mesesDeCiclo = (ciclo: BillingCycle): number => (ciclo === 'annual' ? 12 : 1);
+
+/** Fecha de la última cuota con precio especial cuando vale para las primeras
+ *  `cuotas` cuotas desde `primerCobro` (lo mismo que calcula activar_empresa). */
+export function finPrecioEspecial(primerCobro: string, cuotas: number, ciclo: BillingCycle): string {
+  return sumarMeses(primerCobro, (Math.max(cuotas, 1) - 1) * mesesDeCiclo(ciclo));
+}
+
 // ── Cuenta ─────────────────────────────────────────────────────────────────
 
 export interface CuentaSucursal {
@@ -131,8 +140,12 @@ export interface CuentaSucursal {
   pendientes: number;
   /** Fecha de su cuota más vieja sin cubrir. */
   debeDesde: string | null;
-  /** Paga un precio acordado (branches.cuota_mensual), no la tarifa del plan. */
+  /** Su próxima cuota va con precio acordado (branches.cuota_mensual), no con
+   *  la tarifa del plan. */
   precioEspecial: boolean;
+  /** Último día de cuota con el precio especial; después, la tarifa del plan.
+   *  null = sin fin (o sin precio especial). */
+  precioEspecialHasta: string | null;
 }
 
 export interface CobroEmpresa {
@@ -208,6 +221,7 @@ export function cuentaDesdeJson(j: any): CobroEmpresa {
       pendientes: num(c.pendientes),
       debeDesde: texto(c.debe_desde),
       precioEspecial: !!c.precio_especial,
+      precioEspecialHasta: texto(c.precio_especial_hasta),
     })),
     cargado: num(j?.cargado),
     pagado: num(j?.pagado),

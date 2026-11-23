@@ -9,42 +9,24 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Building2, Store, Pencil, Boxes, LogIn, ChevronDown, ChevronRight, Search, Filter,
-  Ban, Power, Trash2, MoreHorizontal, Users, PlusCircle, Receipt, Shield, FileCheck,
+  Building2, Store, LogIn, ChevronDown, ChevronRight, Search, Filter, Users, PlusCircle,
 } from 'lucide-react';
+import { MenuEmpresa, MenuSucursal, type AccionesEmpresa } from '@/components/admin/empresa-menus';
 import type { Company } from '@/lib/types';
 import { ECF_AMBIENTE_NOMBRE, type AmbienteEcf, type EstadoEcfConfig } from '@/lib/ecf';
 import { esMotivoSuspension, MOTIVO_SUSPENSION_INFO } from '@/lib/suspension';
 import { BUSINESS_TYPE_PRESETS, type BusinessType } from '@/lib/business-types';
 import { useAuth } from '@/context/auth-provider';
 
-const getSectorLabel = (type: string | null | undefined): string => {
+export const getSectorLabel = (type: string | null | undefined): string => {
   if (!type) return 'No especificado';
   const preset = BUSINESS_TYPE_PRESETS[type as BusinessType];
   return preset ? preset.label : type;
 };
 
-interface CompaniesDataTableProps {
+interface CompaniesDataTableProps extends AccionesEmpresa {
   companies: Company[];
   loading: boolean;
-  onEditCompany: (c: Company) => void;
-  onModulesCompany: (c: Company) => void;
-  onEcfCompany?: (c: Company) => void;
-  onEnterCompany: (c: Company) => void;
-  onEnterBranch: (companyId: string, companyName: string, branchId: string, branchName: string) => void;
-  onEditBranch: (b: { id: string; name: string; location: string; companyId: string }) => void;
-  onToggleStatus?: (c: Company) => void;
-  onDeleteCompany?: (c: Company) => void;
-  onDeleteBranch?: (b: { id: string; name: string; companyId: string }) => void;
-  onAddBranch?: (c: Company) => void;
-  onManageUsers?: (c: Company) => void;
-  onManagePayments?: (c: Company) => void;
-  onManageRoles?: (c: Company) => void;
-  onToggleBranchStatus?: (b: { id: string; name: string; isActive: boolean }) => void;
   getPlanName: (companyId: string) => string;
   // Usuarios que hoy ocupan cada sucursal, por branch_id. Viene del RPC
   // company_branch_user_counts; si aún no cargó, no se muestra el conteo.
@@ -61,7 +43,7 @@ export interface EcfDeEmpresa {
 
 // La etiqueta de e-CF sale de ecf_config, no de ncf_enabled: ncf_enabled es el
 // interruptor "Emitir comprobantes (NCF)" del perfil y no dice nada del e-CF.
-const ECF_ETIQUETA: Record<EstadoEcfConfig, string> = {
+export const ECF_ETIQUETA: Record<EstadoEcfConfig, string> = {
   activa: 'e-CF activo',
   preparacion: 'e-CF en preparación',
   suspendida: 'e-CF suspendido',
@@ -102,27 +84,12 @@ const getPlanBadge = (name: string) => {
   );
 };
 
-export function CompaniesDataTable({
-  companies,
-  loading,
-  onEditCompany,
-  onModulesCompany,
-  onEcfCompany,
-  onEnterCompany,
-  onEnterBranch,
-  onEditBranch,
-  onToggleStatus,
-  onDeleteCompany,
-  onDeleteBranch,
-  onAddBranch,
-  onManageUsers,
-  onManagePayments,
-  onManageRoles,
-  onToggleBranchStatus,
-  getPlanName,
-  branchUserCounts,
-  ecfPorEmpresa,
-}: CompaniesDataTableProps) {
+export function CompaniesDataTable(props: CompaniesDataTableProps) {
+  const {
+    companies, loading, getPlanName, branchUserCounts, ecfPorEmpresa,
+    onEnterCompany, onEnterBranch, onAddBranch,
+  } = props;
+  const acciones: AccionesEmpresa = props;
   const { appUser } = useAuth();
   const [expandedCompanies, setExpandedCompanies] = useState<string[]>([]);
   const [search, setSearch] = useState('');
@@ -294,46 +261,7 @@ export function CompaniesDataTable({
                                   <LogIn className="mr-1 h-3 w-3" /> Entrar
                                 </Button>
                                 {appUser?.isSuperAdmin && (
-                                  <DropdownMenu modal={false}>
-                                    <DropdownMenuTrigger asChild>
-                                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
-                                        <MoreHorizontal className="h-3.5 w-3.5" />
-                                      </Button>
-                                    </DropdownMenuTrigger>
-                                    <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
-                                      <DropdownMenuItem onClick={() => onEditBranch({ id: b.id, name: b.name, location: b.location ?? '', companyId: c.id })}>
-                                        <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
-                                      </DropdownMenuItem>
-                                      {onManageUsers && (
-                                        <DropdownMenuItem onClick={() => onManageUsers(c)}>
-                                          <Users className="mr-2 h-3.5 w-3.5" /> Gestionar usuarios
-                                        </DropdownMenuItem>
-                                      )}
-                                      <DropdownMenuItem onClick={() => onModulesCompany(c)}>
-                                        <Boxes className="mr-2 h-3.5 w-3.5" /> Módulos
-                                      </DropdownMenuItem>
-                                      {onToggleBranchStatus && (
-                                        <DropdownMenuItem onClick={() => onToggleBranchStatus({ id: b.id, name: b.name, isActive: b.is_active })}>
-                                          {b.is_active ? (
-                                            <><Ban className="mr-2 h-3.5 w-3.5 text-destructive" /> Desactivar sucursal</>
-                                          ) : (
-                                            <><Power className="mr-2 h-3.5 w-3.5 text-emerald-600" /> Reactivar sucursal</>
-                                          )}
-                                        </DropdownMenuItem>
-                                      )}
-                                      {onDeleteBranch && (
-                                        <>
-                                          <DropdownMenuSeparator />
-                                          <DropdownMenuItem
-                                            className="text-destructive focus:text-destructive"
-                                            onClick={() => onDeleteBranch({ id: b.id, name: b.name, companyId: c.id })}
-                                          >
-                                            <Trash2 className="mr-2 h-3.5 w-3.5" /> Eliminar sucursal
-                                          </DropdownMenuItem>
-                                        </>
-                                      )}
-                                    </DropdownMenuContent>
-                                  </DropdownMenu>
+                                  <MenuSucursal company={c} sucursal={b} acciones={acciones} />
                                 )}
                               </div>
                             </div>
@@ -411,69 +339,7 @@ export function CompaniesDataTable({
                       <Button variant="default" size="sm" className="h-8" onClick={() => onEnterCompany(c)}>
                         <LogIn className="mr-2 h-4 w-4" /> Entrar
                       </Button>
-                      {appUser?.isSuperAdmin && (
-                        <DropdownMenu modal={false}>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="icon" className="h-8 w-8">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>{c.name}</DropdownMenuLabel>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => onEditCompany(c)}>
-                              <Pencil className="mr-2 h-4 w-4" /> Editar empresa
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => onModulesCompany(c)}>
-                              <Boxes className="mr-2 h-4 w-4" /> Módulos
-                            </DropdownMenuItem>
-                            {onEcfCompany && (
-                              <DropdownMenuItem onClick={() => onEcfCompany(c)}>
-                                <FileCheck className="mr-2 h-4 w-4" /> Facturación electrónica
-                              </DropdownMenuItem>
-                            )}
-                            {onAddBranch && (
-                              <DropdownMenuItem onClick={() => onAddBranch(c)}>
-                                <PlusCircle className="mr-2 h-4 w-4" /> Agregar sucursal
-                              </DropdownMenuItem>
-                            )}
-                            {onManageUsers && (
-                              <DropdownMenuItem onClick={() => onManageUsers(c)}>
-                                <Users className="mr-2 h-4 w-4" /> Gestionar usuarios
-                              </DropdownMenuItem>
-                            )}
-                            {onManagePayments && (
-                              <DropdownMenuItem onClick={() => onManagePayments(c)}>
-                                <Receipt className="mr-2 h-4 w-4" /> Pagos de suscripción
-                              </DropdownMenuItem>
-                            )}
-                            {onManageRoles && (
-                              <DropdownMenuItem onClick={() => onManageRoles(c)}>
-                                <Shield className="mr-2 h-4 w-4" /> Gestionar roles
-                              </DropdownMenuItem>
-                            )}
-                            {onToggleStatus && (
-                              <>
-                                <DropdownMenuSeparator />
-                                {c.status === 'suspended' ? (
-                                  <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-emerald-600 focus:text-emerald-700">
-                                    <Power className="mr-2 h-4 w-4" /> Reactivar empresa
-                                  </DropdownMenuItem>
-                                ) : (
-                                  <DropdownMenuItem onClick={() => onToggleStatus(c)} className="text-destructive focus:text-destructive">
-                                    <Ban className="mr-2 h-4 w-4" /> Suspender empresa
-                                  </DropdownMenuItem>
-                                )}
-                              </>
-                            )}
-                            {onDeleteCompany && (
-                              <DropdownMenuItem onClick={() => onDeleteCompany(c)} className="text-destructive focus:text-destructive">
-                                <Trash2 className="mr-2 h-4 w-4" /> Eliminar empresa
-                              </DropdownMenuItem>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
+                      {appUser?.isSuperAdmin && <MenuEmpresa company={c} acciones={acciones} />}
                     </div>
                   </TableCell>
                 </TableRow>
