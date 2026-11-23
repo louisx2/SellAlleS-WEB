@@ -92,8 +92,9 @@ export function detalleEstado(c: CobroEmpresa): string | null {
   }
 }
 
-/** Una sucursal a la que se le cambia el precio desde Cobros. */
-export interface PrecioSucursal { id: string; nombre: string; precio: number | null; tarifa: number }
+/** Una sucursal a la que se le cambia el precio desde Cobros. hasta: último
+ *  día de cuota con ese precio (null = sin fin). */
+export interface PrecioSucursal { id: string; nombre: string; precio: number | null; hasta: string | null; tarifa: number }
 
 export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas, onEditarPrecio }: {
   fila: Fila;
@@ -116,6 +117,8 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas, on
     const v = (company.branches ?? []).find((b) => b.id === branchId)?.cuota_mensual;
     return v != null ? Number(v) : null;
   };
+  const hastaDe = (branchId: string): string | null =>
+    (company.branches ?? []).find((b) => b.id === branchId)?.cuota_mensual_hasta ?? null;
   const tarifa = cobro.tarifaPorSucursal;
   // Sucursales activas que no generan cuotas porque su precio es 0.
   const gratis = tarifa != null
@@ -241,15 +244,21 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas, on
                       <span className="flex min-w-0 items-center gap-2">
                         <Store className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                         <span className="truncate">{c.nombre}</span>
-                        {c.precioEspecial && (
+                        {c.precioEspecial ? (
                           <Badge variant="outline" className="border-violet-300 bg-violet-50 px-1.5 py-0 text-[10px] text-violet-800 dark:border-violet-900 dark:bg-violet-950 dark:text-violet-300">
-                            precio especial
+                            precio especial{c.precioEspecialHasta ? ` hasta ${fmtDate(c.precioEspecialHasta)}` : ''}
                           </Badge>
+                        ) : c.precioEspecialHasta && (
+                          <span className="text-[10px] text-muted-foreground">precio especial hasta {fmtDate(c.precioEspecialHasta)}</span>
                         )}
                       </span>
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
                         <span>
-                          se cobra desde {fmtDate(c.desde)} · {cuotas(c.cuotas)} de {formatCurrency(c.cuota)} = {formatCurrency(c.cargado)} · próxima {fmtDate(c.proximaCuota)}
+                          {/* Con fecha de fin las cuotas no valen todas lo mismo:
+                              se da el total y el monto de la que sigue. */}
+                          se cobra desde {fmtDate(c.desde)} · {c.precioEspecialHasta
+                            ? `${cuotas(c.cuotas)} = ${formatCurrency(c.cargado)} · próxima ${fmtDate(c.proximaCuota)} de ${formatCurrency(c.cuota)}`
+                            : `${cuotas(c.cuotas)} de ${formatCurrency(c.cuota)} = ${formatCurrency(c.cargado)} · próxima ${fmtDate(c.proximaCuota)}`}
                           {c.pendientes > 0 && (
                             <span className={cn('font-medium', color.texto)}> · debe {cuotas(c.pendientes)} desde {fmtDate(c.debeDesde)}</span>
                           )}
@@ -258,7 +267,7 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas, on
                           <Button
                             type="button" size="icon" variant="ghost" className="h-6 w-6 shrink-0"
                             title="Cambiar el precio de esta sucursal" aria-label={`Cambiar el precio de ${c.nombre}`}
-                            onClick={() => onEditarPrecio({ id: c.branchId!, nombre: c.nombre, precio: precioDe(c.branchId!), tarifa })}
+                            onClick={() => onEditarPrecio({ id: c.branchId!, nombre: c.nombre, precio: precioDe(c.branchId!), hasta: hastaDe(c.branchId!), tarifa })}
                           >
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
@@ -280,7 +289,7 @@ export function FilaEmpresa({ fila, abierta, onToggle, onPagar, onSoloVentas, on
                         <Button
                           type="button" size="icon" variant="ghost" className="h-6 w-6 shrink-0"
                           title="Cambiar el precio de esta sucursal" aria-label={`Cambiar el precio de ${b.name}`}
-                          onClick={() => onEditarPrecio({ id: b.id, nombre: b.name, precio: precioDe(b.id), tarifa: tarifa! })}
+                          onClick={() => onEditarPrecio({ id: b.id, nombre: b.name, precio: precioDe(b.id), hasta: hastaDe(b.id), tarifa: tarifa! })}
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </Button>

@@ -68,7 +68,7 @@ export default function CobrosPage() {
       { data: reps },
     ] = await Promise.all([
       supabase.from('companies')
-        .select('*, branches!branches_company_id_fkey(id, name, location, is_active, max_users, created_at, cuota_mensual)')
+        .select('*, branches!branches_company_id_fkey(id, name, location, is_active, max_users, created_at, cuota_mensual, cuota_mensual_hasta)')
         .order('name'),
       supabase.from('plans').select('id, name, monthly_price, annual_price_per_month'),
       supabase.from('subscriptions').select('company_id, plan_id, custom_monthly_price, billing_cycle'),

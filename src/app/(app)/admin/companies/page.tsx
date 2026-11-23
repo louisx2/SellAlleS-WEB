@@ -16,6 +16,7 @@ import {
 } from '@/components/admin/platform-insights';
 import type { Company } from '@/lib/types';
 import { companyMonthlyRevenue, type BillingCycle } from '@/lib/subscription-pricing';
+import { hoyLocal } from '@/lib/subscription-status';
 
 interface Plan { id: string; name: string; price: number; monthly_price?: number | null; annual_price_per_month?: number | null; }
 interface Sub { id: string; company_id: string; plan_id: string | null; custom_monthly_price?: number | null; billing_cycle?: BillingCycle | null; }
@@ -54,7 +55,7 @@ export default function PlatformDashboardPage() {
       supabase.from('profiles').select('id, created_at, company_id'),
       // RLS: el super admin ve las ventas de todos los tenants.
       supabase.from('sales').select('company_id, total, created_at').gte('created_at', thirtyDaysAgo.toISOString()),
-      supabase.from('branches').select('company_id, cuota_mensual').eq('is_active', true),
+      supabase.from('branches').select('company_id, cuota_mensual, cuota_mensual_hasta').eq('is_active', true),
     ]);
 
     if (comps) setCompanies(comps as Company[]);
@@ -69,8 +70,12 @@ export default function PlatformDashboardPage() {
     }
     if (brs) {
       const precios: Record<string, (number | null)[]> = {};
-      (brs as { company_id: string; cuota_mensual: number | string | null }[]).forEach((b) => {
-        (precios[b.company_id] ??= []).push(b.cuota_mensual != null ? Number(b.cuota_mensual) : null);
+      const hoy = hoyLocal();
+      // Un precio especial con fecha de fin ya pasada no cuenta: esa sucursal
+      // vuelve a pagar la tarifa (igual que en _cuenta_de_suscripcion).
+      (brs as { company_id: string; cuota_mensual: number | string | null; cuota_mensual_hasta: string | null }[]).forEach((b) => {
+        const vigente = b.cuota_mensual != null && (!b.cuota_mensual_hasta || b.cuota_mensual_hasta >= hoy);
+        (precios[b.company_id] ??= []).push(vigente ? Number(b.cuota_mensual) : null);
       });
       setActiveBranches(precios);
     }

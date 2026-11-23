@@ -31,6 +31,10 @@ import { ManageCompanyUsersDialog } from '@/components/admin/manage-company-user
 import { SubscriptionPaymentsDialog } from '@/components/admin/subscription-payments-dialog';
 import { CompanyRolesDialog } from '@/components/admin/company-roles-dialog';
 import { SuspensionEmpresaDialog } from '@/components/admin/suspension-empresa-dialog';
+import { EmpresasPanel, type ActividadEmpresa } from '@/components/admin/empresas-panel';
+import { ActivarEmpresaDialog } from '@/components/admin/activar-empresa-dialog';
+import { cuentaDesdeJson, fechaLocal, hoyLocal, sumarDias, type CobroEmpresa } from '@/lib/subscription-status';
+import { fmtDate } from '@/components/admin/cobros-fila';
 import { createClient } from '@supabase/supabase-js';
 import type { Company } from '@/lib/types';
 import { BUSINESS_TYPE_PRESETS, OPTIONAL_VERTICALS, type BusinessType } from '@/lib/business-types';
@@ -61,6 +65,9 @@ const emptyForm = {
   // facturación (lib/bloqueo.ts). Vacías = nunca vence.
   trialEndsAt: '',
   paidUntil: '',
+  // Al pasar de Prueba a Activa desde Editar: día de la primera cuota. La
+  // prueba termina el día anterior (de ahí cobra la cuenta).
+  primerCobro: '',
 };
 
 /** timestamptz/date de la base -> yyyy-mm-dd para un <input type="date">. */
@@ -113,6 +120,12 @@ export default function CompaniesManagementPage() {
   const [paymentsFor, setPaymentsFor] = useState<Company | null>(null);
   const [rolesFor, setRolesFor] = useState<Company | null>(null);
   const [branchStatusTarget, setBranchStatusTarget] = useState<{ id: string; name: string; isActive: boolean } | null>(null);
+  // Panel del super admin: la cuenta de cada empresa (la misma de Cobros),
+  // cuántos usuarios tiene y sus ventas de los últimos 30 días.
+  const [cuentas, setCuentas] = useState<Record<string, CobroEmpresa>>({});
+  const [usuariosPorEmpresa, setUsuariosPorEmpresa] = useState<Record<string, number>>({});
+  const [actividad, setActividad] = useState<Record<string, ActividadEmpresa>>({});
+  const [activarFor, setActivarFor] = useState<Company | null>(null);
   // Compartir entre sucursales (por módulo). Default OFF: cada sucursal aislada.
 
   const esSuperAdmin = !!appUser?.isSuperAdmin;
@@ -177,6 +190,35 @@ export default function CompaniesManagementPage() {
       });
     }
     setEcfPorEmpresa(ecfMapa);
+
+    if (esSuperAdmin) {
+      const hace30 = new Date();
+      hace30.setDate(hace30.getDate() - 30);
+      // Si alguna falla, el panel sale igual: sin la etiqueta de cobro, sin
+      // usuarios o sin ventas.
+      const [{ data: ctas }, { data: pcs }, { data: vts }] = await Promise.all([
+        supabase.rpc('cuentas_de_suscripcion'),
+        supabase.from('profile_companies').select('company_id'),
+        // RLS: el super admin ve las ventas de todas las empresas.
+        supabase.from('sales').select('company_id, created_at').gte('created_at', hace30.toISOString()),
+      ]);
+      const mapaCuentas: Record<string, CobroEmpresa> = {};
+      ((ctas ?? []) as { company_id: string; cuenta: unknown }[]).forEach((c) => {
+        if (c.cuenta) mapaCuentas[c.company_id] = cuentaDesdeJson(c.cuenta);
+      });
+      setCuentas(mapaCuentas);
+      const usuarios: Record<string, number> = {};
+      ((pcs ?? []) as { company_id: string }[]).forEach((r) => { usuarios[r.company_id] = (usuarios[r.company_id] ?? 0) + 1; });
+      setUsuariosPorEmpresa(usuarios);
+      const act: Record<string, ActividadEmpresa> = {};
+      ((vts ?? []) as { company_id: string | null; created_at: string }[]).forEach((v) => {
+        if (!v.company_id) return;
+        const a = (act[v.company_id] ??= { ventas: 0, ultima: null });
+        a.ventas += 1;
+        if (!a.ultima || v.created_at > a.ultima) a.ultima = v.created_at;
+      });
+      setActividad(act);
+    }
 
     if (comps) setCompanies(comps as Company[]);
     if (pls) setPlans(pls as Plan[]);
@@ -248,6 +290,16 @@ export default function CompaniesManagementPage() {
     return plans.find((p) => p.id === sub.plan_id)?.name ?? '—';
   };
 
+  // "Pro · Mensual" para los planes por sucursal; el nombre a secas para los demás.
+  const planDe = (companyId: string) => {
+    const sub = subs[companyId];
+    const plan = plans.find((p) => p.id === sub?.plan_id);
+    if (!plan) return 'Sin plan';
+    return planRatePerBranch(plan, 'monthly')
+      ? `${plan.name} · ${BILLING_CYCLE_LABEL[sub?.billing_cycle ?? 'monthly']}`
+      : plan.name;
+  };
+
   const getPlanRates = (companyId: string) => {
     const sub = subs[companyId];
     const plan = plans.find((p) => p.id === sub?.plan_id);
@@ -279,12 +331,18 @@ export default function CompaniesManagementPage() {
       maxUsers: c.max_users ?? 2,
       customMonthlyPrice: subs[c.id]?.custom_monthly_price != null ? String(subs[c.id].custom_monthly_price) : '',
       billingCycle: subs[c.id]?.billing_cycle ?? 'monthly',
-      trialEndsAt: aInputFecha(c.trial_ends_at),
+      // En hora local: trial_ends_at es el final del día en RD (03:59 UTC del
+      // día siguiente); cortado como texto salía un día de más y, al guardar,
+      // corría un día el inicio del cobro.
+      trialEndsAt: c.trial_ends_at ? fechaLocal(c.trial_ends_at) : '',
       paidUntil: aInputFecha(c.paid_until),
+      primerCobro: '',
     });
     setExtraUsers([]);
     setOpen(true);
   };
+
+  const estadoOriginal = editingId ? companies.find((c) => c.id === editingId)?.status ?? null : null;
 
   const handleSave = async () => {
     if (!form.name.trim()) {
@@ -402,6 +460,15 @@ export default function CompaniesManagementPage() {
       }
     }
 
+    // De Prueba a Activa desde Editar: la prueba termina el día antes de la
+    // primera cuota. Sin esto la cuenta cobraba desde la fecha vieja.
+    const activando = !!editingId && estadoOriginal === 'trial' && form.status === 'active';
+    if (activando && !form.primerCobro) {
+      toast({ title: 'Falta la primera cuota', description: 'Elija el día de la primera cuota.', variant: 'destructive' });
+      return;
+    }
+    const finPrueba = activando ? sumarDias(form.primerCobro, -1) : form.trialEndsAt;
+
     setSaving(true);
     try {
       const payload = {
@@ -416,7 +483,7 @@ export default function CompaniesManagementPage() {
         business_type: form.businessType === 'otro' ? form.customBusinessType.trim() : form.businessType,
         // Se guarda el final del día elegido: "vence el 27" debe significar que
         // el 27 todavía puede trabajar, no que amanece bloqueado.
-        trial_ends_at: form.trialEndsAt ? new Date(`${form.trialEndsAt}T23:59:59`).toISOString() : null,
+        trial_ends_at: finPrueba ? new Date(`${finPrueba}T23:59:59`).toISOString() : null,
         paid_until: form.paidUntil || null,
         // max_users va aparte: al EDITAR no se toca desde aquí, porque el dueño del
         // dato es "Gestionar usuarios". Si se enviara, un cupo null (sin límite)
@@ -730,31 +797,61 @@ export default function CompaniesManagementPage() {
         )}
       </div>
 
-      <CompaniesDataTable
-        companies={companies}
-        loading={loading}
-        onEditCompany={openEdit}
-        onModulesCompany={setModulesFor}
-        onEcfCompany={setEcfFor}
-        onToggleStatus={setStatusTarget}
-        onEnterCompany={(c) => setImpersonatedCompany(c.id, c.name)}
-        onEnterBranch={(cId, cName, bId, bName) => {
-          setActiveBranch(bId, bName);
-          // Pasar la sucursal elegida: entra directo a ELLA (sin selector) en
-          // vez de caer en la primera sucursal activa de la empresa.
-          setImpersonatedCompany(cId, cName, { id: bId, name: bName });
-        }}
-        onEditBranch={setEditingBranch}
-        onDeleteCompany={setDeleteCompanyTarget}
-        onDeleteBranch={setDeleteBranchTarget}
-        onAddBranch={(c) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); }}
-        onManageUsers={setManageUsersFor}
-        onManagePayments={setPaymentsFor}
-        onManageRoles={setRolesFor}
-        onToggleBranchStatus={setBranchStatusTarget}
-        getPlanName={getPlanName}
-        branchUserCounts={branchUserCounts}
-        ecfPorEmpresa={ecfPorEmpresa}
+      {(() => {
+        const acciones = {
+          onEditCompany: openEdit,
+          onModulesCompany: setModulesFor,
+          onEcfCompany: setEcfFor,
+          onToggleStatus: setStatusTarget,
+          onEnterCompany: (c: Company) => setImpersonatedCompany(c.id, c.name),
+          onEnterBranch: (cId: string, cName: string, bId: string, bName: string) => {
+            setActiveBranch(bId, bName);
+            // Pasar la sucursal elegida: entra directo a ELLA (sin selector) en
+            // vez de caer en la primera sucursal activa de la empresa.
+            setImpersonatedCompany(cId, cName, { id: bId, name: bName });
+          },
+          onEditBranch: setEditingBranch,
+          onDeleteCompany: setDeleteCompanyTarget,
+          onDeleteBranch: setDeleteBranchTarget,
+          onAddBranch: (c: Company) => { setAddBranchFor(c); setNewBranchName(''); setNewBranchLocation(''); },
+          onManageUsers: setManageUsersFor,
+          onManagePayments: setPaymentsFor,
+          onManageRoles: setRolesFor,
+          onToggleBranchStatus: setBranchStatusTarget,
+        };
+        // El super admin ve el panel por estado; un dueño con varias empresas,
+        // la tabla de siempre.
+        return esSuperAdmin ? (
+          <EmpresasPanel
+            {...acciones}
+            companies={companies}
+            loading={loading}
+            cuentas={cuentas}
+            planDe={planDe}
+            usuariosPorEmpresa={usuariosPorEmpresa}
+            actividad={actividad}
+            branchUserCounts={branchUserCounts}
+            ecfPorEmpresa={ecfPorEmpresa}
+            onActivar={setActivarFor}
+          />
+        ) : (
+          <CompaniesDataTable
+            {...acciones}
+            companies={companies}
+            loading={loading}
+            getPlanName={getPlanName}
+            branchUserCounts={branchUserCounts}
+            ecfPorEmpresa={ecfPorEmpresa}
+          />
+        );
+      })()}
+
+      <ActivarEmpresaDialog
+        company={activarFor}
+        plans={plans.filter((p) => p.name !== 'Prueba')}
+        planActualId={activarFor ? subs[activarFor.id]?.plan_id ?? null : null}
+        onClose={() => setActivarFor(null)}
+        onDone={load}
       />
 
       <SubscriptionPaymentsDialog
@@ -848,14 +945,18 @@ export default function CompaniesManagementPage() {
                 <Label htmlFor="address">Dirección</Label>
                 <Input id="address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 items-start gap-4">
                 <div className="grid gap-2">
                   <Label>Estado</Label>
                   {/* Suspender y reactivar tienen su propio diálogo (motivo,
                       cómo queda, aviso por correo): aquí no se cambia. */}
                   <Select
                     value={form.status}
-                    onValueChange={(v) => setForm({ ...form, status: v as Company['status'] })}
+                    onValueChange={(v) => setForm({
+                      ...form,
+                      status: v as Company['status'],
+                      primerCobro: v === 'active' && estadoOriginal === 'trial' ? (form.primerCobro || hoyLocal()) : form.primerCobro,
+                    })}
                     disabled={form.status === 'suspended'}
                   >
                     <SelectTrigger><SelectValue /></SelectTrigger>
@@ -870,6 +971,19 @@ export default function CompaniesManagementPage() {
                       ? 'Para reactivarla, use "Reactivar empresa" en el menú de la lista.'
                       : 'Para suspenderla, use "Suspender empresa" en el menú de la lista.'}
                   </p>
+                  {estadoOriginal === 'trial' && form.status === 'active' && (
+                    <div className="grid gap-1.5 rounded-md border border-primary/40 bg-primary/5 p-2 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <Label htmlFor="primerCobro">Primera cuota</Label>
+                      <Input
+                        id="primerCobro" type="date" value={form.primerCobro}
+                        onChange={(e) => setForm({ ...form, primerCobro: e.target.value })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Se le cobra desde ese día{form.primerCobro ? ` (la prueba termina el ${fmtDate(sumarDias(form.primerCobro, -1))})` : ''}.
+                        Para descuentos, use <strong>Activar</strong> en la lista.
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <div className="grid gap-2">
                   <Label>Plan</Label>
@@ -954,12 +1068,15 @@ export default function CompaniesManagementPage() {
                   <Input
                     id="trialEndsAt"
                     type="date"
-                    value={form.trialEndsAt}
+                    value={estadoOriginal === 'trial' && form.status === 'active' && form.primerCobro ? sumarDias(form.primerCobro, -1) : form.trialEndsAt}
                     onChange={(e) => setForm({ ...form, trialEndsAt: e.target.value })}
+                    disabled={estadoOriginal === 'trial' && form.status === 'active'}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Solo aplica mientras el estado sea <strong>Prueba</strong>. Al crear se llena sola
-                    con los días configurados en Configuración de la Plataforma.
+                    En <strong>Prueba</strong>, el último día de la prueba. En una empresa
+                    <strong> activa</strong>, la primera cuota se cobra el día siguiente: moverla
+                    mueve el inicio del cobro. Al crear se llena sola con los días configurados
+                    en Configuración de la Plataforma.
                   </p>
                 </div>
                 <div className="grid gap-2">
