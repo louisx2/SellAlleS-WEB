@@ -1,11 +1,13 @@
 // Antigüedad de cartera: cuánto se debe por cliente, repartido en tramos de
-// días de atraso. Junta préstamos, financiamientos y crédito simple. Los tramos
-// cortos al principio son para negocios que cobran por semana o por día.
+// días de atraso. Junta préstamos, financiamientos y crédito simple. Cada cuota
+// pendiente va al tramo de su propio atraso (lo que no ha vencido, a "Por
+// vencer"), así "Vencido" es solo lo vencido. Los tramos cortos al principio son
+// para negocios que cobran por semana o por día.
 
 export type Tramo = 'al_dia' | 'd1_7' | 'd8_15' | 'd16_30' | 'd31_60' | 'd61_90' | 'd90_mas';
 
 export const TRAMOS: { key: Tramo; label: string }[] = [
-  { key: 'al_dia', label: 'Al día' },
+  { key: 'al_dia', label: 'Por vencer' },
   { key: 'd1_7', label: '1–7' },
   { key: 'd8_15', label: '8–15' },
   { key: 'd16_30', label: '16–30' },
@@ -24,6 +26,25 @@ export function tramoDe(diasAtraso: number): Tramo {
   return 'd90_mas';
 }
 
+const DIA_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Lo pendiente de cada cuota sin pagar, con sus días de atraso a `hoy` (0 si
+ * todavía no vence). Las fechas `yyyy-mm-dd` se leen en hora local.
+ */
+export function partidasPendientes(
+  cuotas: { dueDate: string; amount: number; paidAmount: number; status: string }[],
+  hoy: Date,
+): { monto: number; diasAtraso: number }[] {
+  const dia = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()).getTime();
+  return cuotas
+    .filter((c) => c.status !== 'paid' && c.amount - c.paidAmount > 0)
+    .map((c) => ({
+      monto: round2(c.amount - c.paidAmount),
+      diasAtraso: Math.max(Math.round((dia - new Date(c.dueDate + 'T00:00:00').getTime()) / DIA_MS), 0),
+    }));
+}
+
 export interface CuentaCartera {
   id: string;
   tipo: 'prestamo' | 'financiamiento' | 'credito';
@@ -31,7 +52,7 @@ export interface CuentaCartera {
   cliente: string;
   telefono: string;
   saldo: number;
-  /** Días desde la cuota vencida más vieja; null = crédito simple sin plan de cuotas. */
+  /** Días de atraso de esta partida (una cuota o el saldo entero); null = crédito simple sin plan de cuotas. */
   diasAtraso: number | null;
 }
 

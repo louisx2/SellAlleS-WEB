@@ -9,7 +9,7 @@ import {
   addPeriods, firstDueAnchor, FREQUENCY_OPTIONS, installmentLabel, maxInstallments, monthsFor,
 } from '../../src/lib/frequency.ts';
 import { lateFeeModeHelp, lateFeePeriodDays } from '../../src/lib/late-fee.ts';
-import { cuotasParaTicket } from '../../src/lib/plan-largo.ts';
+import { cuotasParaTicket, ventanaDeCuotas } from '../../src/lib/plan-largo.ts';
 
 // Noviembre de 2026: sáb 21, dom 22, lun 23, vie 27, sáb 28, lun 30.
 const nov = (d) => new Date(2026, 10, d);
@@ -81,4 +81,31 @@ test('plan lun–sáb con primer pago elegido en domingo arranca el lunes, sin r
   assert.equal(ymd(firstDueAnchor('daily', nov(23))), '2026-11-23');
   assert.equal(ymd(firstDueAnchor('daily_all', nov(22))), '2026-11-22');
   assert.equal(ymd(firstDueAnchor('weekly', nov(22))), '2026-11-22');
+});
+
+test('el ticket de un plan largo ya saldado lleva todas las cuotas', () => {
+  const pagado = Array.from({ length: 30 }, (_, i) => ({ n: i + 1, status: 'paid' }));
+  const t = cuotasParaTicket(pagado);
+  assert.equal(t.mostrar.length, 30);
+  assert.equal(t.restantes, 0);
+});
+
+const plan = (total, pagadas) => Array.from({ length: total }, (_, i) => ({ n: i + 1, status: i < pagadas ? 'paid' : 'pending' }));
+
+test('la tabla de un plan largo arranca en la próxima cuota a cobrar', () => {
+  const v = ventanaDeCuotas(plan(312, 50));
+  assert.deepEqual([v.visibles[0].n, v.visibles.at(-1).n], [51, 74]);
+  assert.equal(v.ocultas, 288);
+});
+
+test('cerca del final la ventana se corre para llenar 24 filas', () => {
+  const v = ventanaDeCuotas(plan(30, 20));
+  assert.deepEqual([v.visibles[0].n, v.visibles.at(-1).n], [7, 30]);
+  assert.equal(v.ocultas, 6);
+});
+
+test('un plan corto o recién empezado se ve desde la primera', () => {
+  assert.equal(ventanaDeCuotas(plan(24, 3)).ocultas, 0);
+  assert.equal(ventanaDeCuotas(plan(24, 3)).visibles.length, 24);
+  assert.deepEqual(ventanaDeCuotas(plan(40, 0)).visibles.map((c) => c.n).slice(0, 2), [1, 2]);
 });

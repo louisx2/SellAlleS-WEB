@@ -16,11 +16,14 @@ import type { Loan } from '@/lib/types';
 // Ticket/contrato del préstamo: datos del cliente, términos y el cronograma de
 // cuotas. Imprimible en papel térmico (misma clase que el recibo). Un plan de
 // más de 24 cuotas (cobro diario o semanal largo) imprime solo las próximas 12.
-function TicketBody({ loan }: { loan: Loan }) {
+function TicketBody({ loan, compacto = false }: { loan: Loan; compacto?: boolean }) {
   // Perfil de la sucursal del préstamo (branchId es UUID), con herencia de la empresa.
   const profile = useTicketProfile(loan.branchId);
   const interest = loan.totalWithInterest - loan.principal;
-  const cuotas = cuotasParaTicket(loan.installments ?? []);
+  // En pantalla, el plan completo; en el papel térmico, recortado.
+  const cuotas = compacto
+    ? cuotasParaTicket(loan.installments ?? [])
+    : { mostrar: loan.installments ?? [], restantes: 0 };
   const ultima = loan.installments?.[loan.installments.length - 1];
 
   return (
@@ -176,7 +179,7 @@ export function LoanTicketDialog({ loan, isOpen, onOpenChange }: LoanTicketDialo
         {/* Copia oculta para impresión térmica */}
         <div className="hidden">
           <div ref={printRef} className="receipt-container">
-            <TicketBody loan={loan} />
+            <TicketBody loan={loan} compacto />
           </div>
         </div>
       </DialogContent>

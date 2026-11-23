@@ -10,12 +10,14 @@ import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { calculateFinancingStatus, formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
-import { agruparCartera, TRAMOS, type CuentaCartera } from '@/lib/antiguedad';
+import { agruparCartera, partidasPendientes, TRAMOS, type CuentaCartera } from '@/lib/antiguedad';
 import { AlertTriangle, Users, Wallet } from 'lucide-react';
 
 // Antigüedad de cartera: lo que se debe por cliente en tramos de días de
-// atraso, sumando préstamos, financiamientos y crédito simple. Los días salen
-// de la cuota vencida más vieja, igual que en Cuentas por Cobrar.
+// atraso, sumando préstamos, financiamientos y crédito simple. Cada cuota
+// pendiente cae en el tramo de su propio atraso; lo que no ha vencido va a
+// "Por vencer". Sin cuotas en la base (crédito simple, planes viejos) cuenta el
+// saldo entero.
 const DIA_MS = 24 * 60 * 60 * 1000;
 
 function diasDesde(fecha: Date | null, atrasado: boolean, hoy: Date): number {
@@ -35,15 +37,23 @@ export default function AntiguedadCarteraPage() {
 
     for (const s of financingSales) {
       if (s.cancelledAt) continue;
-      const st = calculateFinancingStatus(s, profile.lateFeeRate, profile.lateFeeGraceDays);
-      // Crédito simple: no hay cuotas ni fecha de vencimiento que medir.
-      const sinPlan = !s.financingDetails && !(s.installments?.length);
-      cuentas.push({
-        id: s.id,
-        tipo: s.paymentMethod === 'financing' ? 'financiamiento' : 'credito',
+      const base = {
+        tipo: (s.paymentMethod === 'financing' ? 'financiamiento' : 'credito') as CuentaCartera['tipo'],
         clienteId: s.customerId ?? s.customer?.id ?? s.id,
         cliente: s.customer?.name ?? 'Cliente',
         telefono: s.customer?.phone ?? '',
+      };
+      if (s.installments?.length) {
+        partidasPendientes(s.installments, hoy).forEach((p, i) =>
+          cuentas.push({ ...base, id: `${s.id}-${i}`, saldo: p.monto, diasAtraso: p.diasAtraso }));
+        continue;
+      }
+      const st = calculateFinancingStatus(s, profile.lateFeeRate, profile.lateFeeGraceDays);
+      // Crédito simple: no hay cuotas ni fecha de vencimiento que medir.
+      const sinPlan = !s.financingDetails;
+      cuentas.push({
+        ...base,
+        id: s.id,
         saldo: st.pendingBalance,
         diasAtraso: sinPlan ? null : diasDesde(st.nextDueDate, st.isOverdue, hoy),
       });
@@ -51,16 +61,19 @@ export default function AntiguedadCarteraPage() {
 
     for (const l of loans) {
       if (l.status !== 'active') continue;
-      const st = calculateLoanStatus(l, profile.loanLateFeeRate, profile.loanLateFeeGraceDays);
-      cuentas.push({
-        id: l.id,
-        tipo: 'prestamo',
+      const base = {
+        tipo: 'prestamo' as const,
         clienteId: l.customerId,
         cliente: l.customer?.name ?? 'Cliente',
         telefono: l.customer?.phone ?? '',
-        saldo: st.pendingBalance,
-        diasAtraso: diasDesde(st.nextDueDate, st.isOverdue, hoy),
-      });
+      };
+      if (l.installments?.length) {
+        partidasPendientes(l.installments, hoy).forEach((p, i) =>
+          cuentas.push({ ...base, id: `${l.id}-${i}`, saldo: p.monto, diasAtraso: p.diasAtraso }));
+        continue;
+      }
+      const st = calculateLoanStatus(l, profile.loanLateFeeRate, profile.loanLateFeeGraceDays);
+      cuentas.push({ ...base, id: l.id, saldo: st.pendingBalance, diasAtraso: diasDesde(st.nextDueDate, st.isOverdue, hoy) });
     }
 
     return agruparCartera(cuentas);
@@ -104,7 +117,7 @@ export default function AntiguedadCarteraPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-destructive">{formatCurrency(totales.vencido)}</div>
-            <p className="text-xs text-muted-foreground">{pctVencido}% de la cartera</p>
+            <p className="text-xs text-muted-foreground">{pctVencido}% de la cartera · solo cuotas ya vencidas</p>
           </CardContent>
         </Card>
         <Card className="min-w-0">

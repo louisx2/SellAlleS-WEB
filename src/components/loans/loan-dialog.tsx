@@ -53,9 +53,10 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const [disbursementMethod, setDisbursementMethod] = useState<DisbursementMethod>('cash');
   const [disbursementReference, setDisbursementReference] = useState('');
   const [saving, setSaving] = useState(false);
-  const { cashBlocked } = useCaja();
+  const { cashBlocked, loading: cajaLoading } = useCaja();
   // `cashBlocked` es de la sucursal activa; para otra sucursal avisa la base.
-  const cashDisabled = cashBlocked && branchId === appUser?.activeBranchId;
+  // Mientras la caja carga, `cashBlocked` vale true sin serlo: no se decide nada.
+  const cashDisabled = !cajaLoading && cashBlocked && branchId === appUser?.activeBranchId;
 
   const activeBranches = useMemo(() => branches.filter((b) => b.isActive), [branches]);
 

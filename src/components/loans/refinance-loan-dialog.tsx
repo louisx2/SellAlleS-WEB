@@ -56,10 +56,11 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
   const [disbursementMethod, setDisbursementMethod] = useState<DisbursementMethod>('cash');
   const [disbursementReference, setDisbursementReference] = useState('');
   const [saving, setSaving] = useState(false);
-  const { cashBlocked } = useCaja();
+  const { cashBlocked, loading: cajaLoading } = useCaja();
   const { appUser } = useAuth();
   // `cashBlocked` es de la sucursal activa; para otra sucursal avisa la base.
-  const cashDisabled = cashBlocked && loan.branchId === appUser?.activeBranchId;
+  // Mientras la caja carga, `cashBlocked` vale true sin serlo: no se decide nada.
+  const cashDisabled = !cajaLoading && cashBlocked && loan.branchId === appUser?.activeBranchId;
 
   useEffect(() => {
     if (cashDisabled && disbursementMethod === 'cash') setDisbursementMethod('transfer');

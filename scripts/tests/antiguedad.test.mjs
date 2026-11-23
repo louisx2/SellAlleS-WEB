@@ -3,12 +3,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { agruparCartera, tramoDe, TRAMOS } from '../../src/lib/antiguedad.ts';
+import { agruparCartera, partidasPendientes, tramoDe, TRAMOS } from '../../src/lib/antiguedad.ts';
 
 const cuenta = (o) => ({ id: 'x', tipo: 'prestamo', clienteId: 'c1', cliente: 'Juan', telefono: '809', saldo: 0, diasAtraso: 0, ...o });
 
 test('tramos en el orden del reporte', () => {
-  assert.deepEqual(TRAMOS.map((t) => t.label), ['Al día', '1–7', '8–15', '16–30', '31–60', '61–90', '+90']);
+  assert.deepEqual(TRAMOS.map((t) => t.label), ['Por vencer', '1–7', '8–15', '16–30', '31–60', '61–90', '+90']);
 });
 
 test('días de atraso a su tramo, con los bordes', () => {
@@ -59,4 +59,21 @@ test('primero el cliente con más días de atraso', () => {
     cuenta({ id: 'b', clienteId: 'c2', cliente: 'Beto', saldo: 100, diasAtraso: 45 }),
   ]);
   assert.deepEqual(filas.map((f) => f.cliente), ['Beto', 'Ana']);
+});
+
+test('cada cuota pendiente va a su propio tramo: lo vencido es solo lo vencido', () => {
+  const hoy = new Date(2026, 10, 23);
+  const partidas = partidasPendientes([
+    { dueDate: '2026-11-21', amount: 200, paidAmount: 50, status: 'partial' }, // 2 días, faltan 150
+    { dueDate: '2026-11-22', amount: 200, paidAmount: 0, status: 'pending' },  // 1 día
+    { dueDate: '2026-11-23', amount: 200, paidAmount: 0, status: 'pending' },  // vence hoy
+    { dueDate: '2026-11-24', amount: 200, paidAmount: 0, status: 'pending' },  // por vencer
+    { dueDate: '2026-11-20', amount: 200, paidAmount: 200, status: 'paid' },   // pagada
+  ], hoy);
+  assert.deepEqual(partidas, [
+    { monto: 150, diasAtraso: 2 }, { monto: 200, diasAtraso: 1 }, { monto: 200, diasAtraso: 0 }, { monto: 200, diasAtraso: 0 },
+  ]);
+  const { totales } = agruparCartera(partidas.map((p, i) => cuenta({ id: `p${i}`, saldo: p.monto, diasAtraso: p.diasAtraso })));
+  assert.equal(totales.vencido, 350);
+  assert.equal(totales.al_dia, 400);
 });
