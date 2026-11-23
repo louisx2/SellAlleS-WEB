@@ -23,6 +23,9 @@ import { VoidLoanPaymentDialog } from '@/components/loans/void-loan-payment-dial
 import { RefinanceLoanDialog } from '@/components/loans/refinance-loan-dialog';
 import { ArrowLeft, DollarSign, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
+// Un plan largo (cobro diario, semanal de 2 años) se muestra plegado.
+const CUOTAS_VISIBLES = 24;
+
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
   card: 'Tarjeta',
@@ -66,6 +69,7 @@ export default function LoanDetailClient() {
   const [voiding, setVoiding] = useState<LoanPayment | null>(null);
   const [isRefinanceOpen, setRefinanceOpen] = useState(false);
   const [refinancings, setRefinancings] = useState<Refinancing[]>([]);
+  const [verTodasLasCuotas, setVerTodasLasCuotas] = useState(false);
 
   const loan = loans.find((l) => l.id === loanId);
   // Anular un abono o refinanciar es cosa de administradores: las RPC lo exigen igual.
@@ -318,7 +322,7 @@ export default function LoanDetailClient() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loan.installments.map((cuota) => {
+                {(verTodasLasCuotas ? loan.installments : loan.installments.slice(0, CUOTAS_VISIBLES)).map((cuota) => {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
                   // Vencida = la que ya devenga mora, con la gracia del préstamo
                   // ya descontada. Misma cuenta que hace la base al cobrar.
@@ -357,6 +361,11 @@ export default function LoanDetailClient() {
                 })}
               </TableBody>
             </Table>
+            {!verTodasLasCuotas && loan.installments.length > CUOTAS_VISIBLES && (
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setVerTodasLasCuotas(true)}>
+                Ver las {loan.installments.length - CUOTAS_VISIBLES} cuotas restantes
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}

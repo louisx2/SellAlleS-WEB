@@ -30,6 +30,9 @@ import { RescheduleInstallmentsDialog } from '@/components/financing/reschedule-
 import { RefinanceFinancingDialog } from '@/components/financing/refinance-financing-dialog';
 import { ArrowLeft, CalendarClock, DollarSign, FileText, ListChecks, Pencil, Printer, RefreshCw, Undo2 } from 'lucide-react';
 
+// Un plan largo (cobro diario, semanal de 2 años) se muestra plegado.
+const CUOTAS_VISIBLES = 24;
+
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
   card: 'Tarjeta',
@@ -57,6 +60,7 @@ export default function FinancingDetailClient() {
   const [isAmendOpen, setAmendOpen] = useState(false);
   const [voiding, setVoiding] = useState<CreditPayment | null>(null);
   const [isRescheduleOpen, setRescheduleOpen] = useState(false);
+  const [verTodasLasCuotas, setVerTodasLasCuotas] = useState(false);
   const [refinancings, setRefinancings] = useState<Refinancing[]>([]);
   const [isRefinanceOpen, setRefinanceOpen] = useState(false);
 
@@ -350,7 +354,7 @@ export default function FinancingDetailClient() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sale.installments.map((cuota) => {
+                {(verTodasLasCuotas ? sale.installments : sale.installments.slice(0, CUOTAS_VISIBLES)).map((cuota) => {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
                   // Vencida = la que ya devenga mora, con la gracia del plan ya
                   // descontada. Misma cuenta que hace la base al cobrar.
@@ -399,6 +403,11 @@ export default function FinancingDetailClient() {
                 })}
               </TableBody>
             </Table>
+            {!verTodasLasCuotas && sale.installments.length > CUOTAS_VISIBLES && (
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setVerTodasLasCuotas(true)}>
+                Ver las {sale.installments.length - CUOTAS_VISIBLES} cuotas restantes
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
