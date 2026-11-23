@@ -17,10 +17,12 @@ import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency } from '@/lib/utils';
 import { CustomerSearchDialog } from '@/components/pos/customer-search-dialog';
+import { DisbursementFields } from '@/components/loans/disbursement-fields';
+import { useCaja } from '@/context/caja-provider';
 // El calendario, las etiquetas y el tope viven en lib/frequency.ts, compartidos
 // con Financiamiento: el prorrateo de la tasa mensual es el mismo cálculo.
 import { FREQUENCY_LABEL, FREQUENCY_OPTIONS, maxInstallments, monthsFor } from '@/lib/frequency';
-import type { Customer, LoanFrequency } from '@/lib/types';
+import type { Customer, DisbursementMethod, LoanFrequency } from '@/lib/types';
 import { HandCoins, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -48,7 +50,12 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const [frequency, setFrequency] = useState<LoanFrequency>('monthly');
   const [installments, setInstallments] = useState<string>('12');
   const [notes, setNotes] = useState('');
+  const [disbursementMethod, setDisbursementMethod] = useState<DisbursementMethod>('cash');
+  const [disbursementReference, setDisbursementReference] = useState('');
   const [saving, setSaving] = useState(false);
+  const { cashBlocked } = useCaja();
+  // `cashBlocked` es de la sucursal activa; para otra sucursal avisa la base.
+  const cashDisabled = cashBlocked && branchId === appUser?.activeBranchId;
 
   const activeBranches = useMemo(() => branches.filter((b) => b.isActive), [branches]);
 
@@ -61,8 +68,15 @@ export function LoanDialog({ children }: LoanDialogProps) {
       setFrequency('monthly');
       setInstallments('12');
       setNotes('');
+      setDisbursementMethod('cash');
+      setDisbursementReference('');
     }
   }, [open, appUser?.activeBranchId, profile.defaultLoanInterestRate]);
+
+  // Sin caja abierta no se ofrece el efectivo.
+  useEffect(() => {
+    if (cashDisabled && disbursementMethod === 'cash') setDisbursementMethod('transfer');
+  }, [cashDisabled, disbursementMethod]);
 
   const preview = useMemo(() => {
     const p = Number(principal) || 0;
@@ -94,6 +108,8 @@ export function LoanDialog({ children }: LoanDialogProps) {
         installmentsCount: nInstallments,
         paymentFrequency: frequency,
         notes: notes.trim() || undefined,
+        disbursementMethod,
+        disbursementReference: disbursementMethod === 'transfer' ? disbursementReference.trim() || undefined : undefined,
       });
       toast({ title: 'Préstamo creado', description: `${formatCurrency(Number(principal))} a ${customer.name}.` });
       setOpen(false);
@@ -175,6 +191,15 @@ export function LoanDialog({ children }: LoanDialogProps) {
                 {isInstallmentsInvalid && installments !== '' && <p className="text-xs text-destructive">Entre 1 y {maxInstallments(frequency)} cuotas.</p>}
               </div>
             </div>
+
+            <DisbursementFields
+              idPrefix="loan"
+              method={disbursementMethod}
+              onMethodChange={setDisbursementMethod}
+              reference={disbursementReference}
+              onReferenceChange={setDisbursementReference}
+              cashDisabled={cashDisabled}
+            />
 
             <div className="grid gap-2">
               <Label htmlFor="notes">Notas (opcional)</Label>

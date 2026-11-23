@@ -283,6 +283,13 @@ export default function LoanDetailClient() {
               <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
             </div>
           </div>
+          {loan.disbursementMethod && (
+            <p className="mt-4 text-sm text-muted-foreground border-t pt-3">
+              {loan.disbursementMethod === 'cash'
+                ? 'Entregado en efectivo'
+                : `Entregado por transferencia${loan.disbursementReference ? ` (ref. ${loan.disbursementReference})` : ''}`}
+            </p>
+          )}
           {loan.notes && (
             <p className="mt-4 text-sm text-muted-foreground border-t pt-3">Notas: {loan.notes}</p>
           )}

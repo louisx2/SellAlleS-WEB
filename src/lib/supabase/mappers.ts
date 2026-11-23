@@ -874,6 +874,8 @@ export const rowToLoan = (r: any): Loan => ({
   refinancedFromId: r.refinanced_from_id ?? undefined,
   carriedOverAmount: Number(r.carried_over_amount ?? 0),
   firstDueDate: r.first_due_date ?? undefined,
+  disbursementMethod: r.disbursement_method ?? undefined,
+  disbursementReference: r.disbursement_reference ?? undefined,
   notes: r.notes ?? undefined,
   userName: r.user_name ?? undefined,
   createdAt: new Date(r.created_at),
@@ -892,6 +894,7 @@ export const rowToLoan = (r: any): Loan => ({
 export const loanToRow = (l: {
   branchId: string; customerId: string; principal: number; interestRate: number;
   installmentsCount: number; paymentFrequency: string; notes?: string; userName?: string;
+  disbursementMethod?: string; disbursementReference?: string;
 }) => ({
   branch_id: l.branchId,
   customer_id: l.customerId,
@@ -901,6 +904,8 @@ export const loanToRow = (l: {
   payment_frequency: l.paymentFrequency,
   notes: l.notes ?? null,
   user_name: l.userName ?? null,
+  disbursement_method: l.disbursementMethod ?? null,
+  disbursement_reference: l.disbursementReference ?? null,
 });
 
 export const rowToLoanPaymentResult = (r: any): LoanPaymentResult => ({

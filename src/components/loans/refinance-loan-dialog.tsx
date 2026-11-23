@@ -21,7 +21,10 @@ import { fetchRefinanceQuote, previewRefinancePlan, refinanceBase } from '@/lib/
 import { RefinanceQuoteSummary } from '@/components/refinance/refinance-quote-summary';
 import { RefinanceOptions } from '@/components/refinance/refinance-options';
 import { RefinanceComparison } from '@/components/refinance/refinance-comparison';
-import type { Loan, RefinanceBaseMode, RefinanceLateFeeAction, RefinanceQuote } from '@/lib/types';
+import { DisbursementFields } from '@/components/loans/disbursement-fields';
+import { useCaja } from '@/context/caja-provider';
+import { useAuth } from '@/context/auth-provider';
+import type { DisbursementMethod, Loan, RefinanceBaseMode, RefinanceLateFeeAction, RefinanceQuote } from '@/lib/types';
 
 interface RefinanceLoanDialogProps {
   loan: Loan;
@@ -50,7 +53,17 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
   const [frequency, setFrequency] = useState<PaymentFrequency>('monthly');
   const [firstDue, setFirstDue] = useState('');
   const [reason, setReason] = useState('');
+  const [disbursementMethod, setDisbursementMethod] = useState<DisbursementMethod>('cash');
+  const [disbursementReference, setDisbursementReference] = useState('');
   const [saving, setSaving] = useState(false);
+  const { cashBlocked } = useCaja();
+  const { appUser } = useAuth();
+  // `cashBlocked` es de la sucursal activa; para otra sucursal avisa la base.
+  const cashDisabled = cashBlocked && loan.branchId === appUser?.activeBranchId;
+
+  useEffect(() => {
+    if (cashDisabled && disbursementMethod === 'cash') setDisbursementMethod('transfer');
+  }, [cashDisabled, disbursementMethod]);
 
   // Cada vez que se abre, la cotización de hoy y los términos del préstamo.
   useEffect(() => {
@@ -113,6 +126,10 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
         reason: reason.trim(),
         expectedBalance: quote.pendingBalance,
         expectedLateFee: quote.lateFeeDue,
+        disbursementMethod: numericAdditional > 0 ? disbursementMethod : undefined,
+        disbursementReference: numericAdditional > 0 && disbursementMethod === 'transfer'
+          ? disbursementReference.trim() || undefined
+          : undefined,
       });
       toast({
         title: 'Préstamo refinanciado',
@@ -177,9 +194,20 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
                 onFocus={(e) => e.target.select()}
               />
               <p className="text-xs text-muted-foreground">
-                0 si solo se cambian los términos. Se suma al capital del préstamo nuevo y no pasa por caja.
+                0 si solo se cambian los términos. Se suma al capital del préstamo nuevo; en efectivo sale de la caja.
               </p>
             </div>
+
+            {numericAdditional > 0 && (
+              <DisbursementFields
+                idPrefix="refi"
+                method={disbursementMethod}
+                onMethodChange={setDisbursementMethod}
+                reference={disbursementReference}
+                onReferenceChange={setDisbursementReference}
+                cashDisabled={cashDisabled}
+              />
+            )}
 
             <Separator />
 

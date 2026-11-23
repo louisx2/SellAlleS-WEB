@@ -694,6 +694,9 @@ export type LoanPayment = {
 // etiquetas viven en lib/frequency.ts, compartidos con Financiamiento.
 export type LoanFrequency = PaymentFrequency;
 
+// Cómo se entregó el dinero de un préstamo. En efectivo sale de la caja.
+export type DisbursementMethod = 'cash' | 'transfer';
+
 export type Loan = {
   id: string;
   companyId?: string;
@@ -715,6 +718,9 @@ export type Loan = {
   carriedOverAmount: number;
   // Primera cuota elegida (yyyy-mm-dd); ausente = un período tras el desembolso.
   firstDueDate?: string;
+  // Ausente en los préstamos anteriores a 2026-11-24 (sin registro).
+  disbursementMethod?: DisbursementMethod;
+  disbursementReference?: string;
   notes?: string;
   userName?: string;
   createdAt: Date;
