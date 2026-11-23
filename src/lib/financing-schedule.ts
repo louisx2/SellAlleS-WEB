@@ -1,5 +1,5 @@
 import { addDays, format } from 'date-fns';
-import { addPeriods, type PaymentFrequency } from '@/lib/frequency';
+import { addPeriods, firstDueAnchor, type PaymentFrequency } from '@/lib/frequency';
 import type { FinancingInstallment } from '@/lib/types';
 
 // Calendario de un plan de financiamiento: el primer pago elegido al vender y
@@ -30,7 +30,7 @@ export function firstDueBounds(saleDay: Date): { min: string; max: string } {
 export function scheduleDueDate(
   saleDay: Date, freq: PaymentFrequency, k: number, firstDue?: Date | null,
 ): Date {
-  return firstDue ? addPeriods(firstDue, freq, k - 1) : addPeriods(saleDay, freq, k);
+  return firstDue ? addPeriods(firstDueAnchor(freq, firstDue), freq, k - 1) : addPeriods(saleDay, freq, k);
 }
 
 export type RescheduleRow = {

@@ -75,6 +75,16 @@ function addWorkdays(base: Date, k: number): Date {
   return addDays(lunes, Math.floor(pos / 6) * 7 + (pos % 6));
 }
 
+/**
+ * Desde dónde se cuentan las cuotas de un plan con primer pago elegido. En un
+ * plan de lunes a sábado, un domingo elegido pasa al lunes: si no, la cuota 1
+ * caería en domingo y la 2 el mismo lunes. Espejo de
+ * `financing_schedule_due_date` en la base.
+ */
+export function firstDueAnchor(freq: PaymentFrequency, firstDue: Date): Date {
+  return freq === 'daily' && firstDue.getDay() === 0 ? addDays(firstDue, 1) : firstDue;
+}
+
 /** Fecha de la cuota número `k` (1-based) de un plan que arranca en `base`. */
 export function addPeriods(base: Date, freq: PaymentFrequency, k: number): Date {
   if (freq === 'daily') return addWorkdays(base, k);

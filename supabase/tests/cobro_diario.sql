@@ -38,7 +38,14 @@ select pg_temp.igual(financing_due_date('2026-11-22', 'daily', 1), date '2026-11
 select pg_temp.igual(financing_due_date('2026-11-23', 'daily', 5), date '2026-11-28', 'lun + 5 hábiles');
 select pg_temp.igual(financing_due_date('2026-11-23', 'daily', 6), date '2026-11-30', 'lun + 6 hábiles');
 select pg_temp.igual(financing_due_date('2026-11-27', 'daily', 2), date '2026-11-30', 'vie + 2 hábiles');
-select pg_temp.igual(financing_due_date('2026-11-22', 'daily', 0), date '2026-11-22', 'k = 0');
+select pg_temp.igual(financing_due_date('2026-11-23', 'daily', 0), date '2026-11-23', 'k = 0 en lunes');
+select pg_temp.igual(financing_due_date('2026-11-22', 'daily', 0), date '2026-11-22', 'k = 0 en domingo');
+-- Un primer pago elegido en domingo: el plan lun–sáb arranca el lunes y sigue el
+-- martes; "todos los días" sí cobra ese domingo.
+select pg_temp.igual(financing_schedule_due_date('2026-11-20', '2026-11-22', 'daily', 1), date '2026-11-23', 'primer pago domingo, cuota 1');
+select pg_temp.igual(financing_schedule_due_date('2026-11-20', '2026-11-22', 'daily', 2), date '2026-11-24', 'primer pago domingo, cuota 2');
+select pg_temp.igual(financing_schedule_due_date('2026-11-20', '2026-11-22', 'daily_all', 1), date '2026-11-22', 'primer pago domingo, todos los días');
+select pg_temp.igual(financing_schedule_due_date('2026-11-20', '2026-11-23', 'daily', 2), date '2026-11-24', 'primer pago lunes, cuota 2');
 select pg_temp.igual(financing_due_date('2026-11-21', 'daily_all', 1), date '2026-11-22', 'todos los días');
 
 -- Regresión: semanal, quincenal y mensual no cambian

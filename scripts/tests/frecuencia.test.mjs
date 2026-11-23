@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  addPeriods, FREQUENCY_OPTIONS, installmentLabel, maxInstallments, monthsFor,
+  addPeriods, firstDueAnchor, FREQUENCY_OPTIONS, installmentLabel, maxInstallments, monthsFor,
 } from '../../src/lib/frequency.ts';
 import { lateFeeModeHelp, lateFeePeriodDays } from '../../src/lib/late-fee.ts';
 import { cuotasParaTicket } from '../../src/lib/plan-largo.ts';
@@ -71,4 +71,14 @@ test('el ticket de un plan largo lleva las próximas 12 sin pagar', () => {
   const t = cuotasParaTicket(largo);
   assert.deepEqual(t.mostrar.map((c) => c.n), [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
   assert.equal(t.restantes, 35); // 47 sin pagar − 12
+});
+
+test('plan lun–sáb con primer pago elegido en domingo arranca el lunes, sin repetir fecha', () => {
+  const ancla = firstDueAnchor('daily', nov(22));
+  assert.equal(ymd(addPeriods(ancla, 'daily', 0)), '2026-11-23'); // cuota 1
+  assert.equal(ymd(addPeriods(ancla, 'daily', 1)), '2026-11-24'); // cuota 2
+  // Otro día de la semana no se mueve, y "todos los días" sí cobra el domingo elegido.
+  assert.equal(ymd(firstDueAnchor('daily', nov(23))), '2026-11-23');
+  assert.equal(ymd(firstDueAnchor('daily_all', nov(22))), '2026-11-22');
+  assert.equal(ymd(firstDueAnchor('weekly', nov(22))), '2026-11-22');
 });

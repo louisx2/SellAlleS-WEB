@@ -77,6 +77,11 @@ select pg_temp.igual((select disbursement_reference from loans where id = '00000
 select pg_temp.prestamo('00000000-0000-0000-0000-0000000000d5', 5000, null);
 select pg_temp.igual(pg_temp.movimientos('00000000-0000-0000-0000-0000000000d5'), 0, 'movimientos sin forma');
 
+-- Una sucursal de otra empresa se rechaza antes de tocar su caja.
+select pg_temp.debe_fallar(format($q$insert into loans (company_id, branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency, disbursement_method)
+  values ('00000000-0000-0000-0000-0000000000aa', %L, '00000000-0000-0000-0000-0000000000d2', 5000, 5, 12, 'monthly', 'transfer')$q$,
+  (select id from branches where company_id <> '00000000-0000-0000-0000-0000000000aa' limit 1)), '%Sucursal no válida%');
+
 -- Forma no válida.
 select pg_temp.debe_fallar($$select pg_temp.prestamo('00000000-0000-0000-0000-0000000000d6', 5000, 'cheque')$$,
                            '%disbursement_method%');
