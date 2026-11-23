@@ -118,6 +118,13 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 
 ## Entrega 1 — Motor común
 
+> **Estado (2026-11-23):** construida en la rama `claude/motoprestamos`. Migraciones
+> `20261124120000`, `20261124130000` y `20261124140000` (correcciones de la revisión: primer
+> pago en domingo y sucursal de otra empresa) **aplicadas en producción**. Front sin
+> fusionar; falta la prueba en pantalla. Cambios respecto a lo de abajo: "Al día" se
+> llama "Por vencer" y cada cuota va al tramo de su propio atraso; el ticket y el plan
+> térmico se recortan solo en papel; las tablas arrancan en la próxima cuota a cobrar.
+
 ### Cobro diario
 
 - Dos frecuencias nuevas en préstamos y financiamiento, al lado de semanal, quincenal y mensual:
