@@ -10,10 +10,12 @@
 
 export type GrupoEmpresa = 'prueba_vencida' | 'prueba' | 'activas' | 'suspendidas';
 
+// En este orden salen las tarjetas del resumen y las secciones. Las activas
+// primero: son los clientes (lo pidió Louis el 2026-11-23).
 export const GRUPOS_EMPRESA: { key: GrupoEmpresa; label: string; descripcion: string }[] = [
+  { key: 'activas', label: 'Activas', descripcion: 'Clientes que pagan; la etiqueta dice cómo van con sus cuotas' },
   { key: 'prueba_vencida', label: 'Prueba vencida', descripcion: 'Terminaron la prueba sin activarse: solo pueden facturar' },
   { key: 'prueba', label: 'En prueba', descripcion: 'Dentro de los días de prueba gratis' },
-  { key: 'activas', label: 'Activas', descripcion: 'Clientes que pagan; la etiqueta dice cómo van con sus cuotas' },
   { key: 'suspendidas', label: 'Suspendidas', descripcion: 'No pueden operar hasta que se reactiven' },
 ];
 

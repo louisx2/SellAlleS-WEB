@@ -3,10 +3,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { grupoDeEmpresa, compararEnGrupo } from '../../src/lib/grupos-empresa.ts';
+import { grupoDeEmpresa, compararEnGrupo, GRUPOS_EMPRESA } from '../../src/lib/grupos-empresa.ts';
 import { finPrecioEspecial, sumarMeses } from '../../src/lib/subscription-status.ts';
 
 const AHORA = Date.parse('2026-11-23T15:00:00Z');
+
+test('las activas salen primero, luego las pruebas y al final las suspendidas', () => {
+  assert.deepEqual(GRUPOS_EMPRESA.map((g) => g.key), ['activas', 'prueba_vencida', 'prueba', 'suspendidas']);
+});
 
 test('una empresa en prueba con la fecha pasada es prueba vencida', () => {
   assert.equal(grupoDeEmpresa({ status: 'trial', trialEndsAt: '2026-09-01T03:59:59Z' }, AHORA), 'prueba_vencida');
