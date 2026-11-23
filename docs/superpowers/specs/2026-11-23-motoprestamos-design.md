@@ -191,6 +191,13 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 
 ## Entrega 2 — Módulo base
 
+> Se construye en tres partes que se fusionan por separado: **2A** vehículos e inventario por
+> chasis (módulo, ficha, venta y anulación por chasis, reportes de vehículos); **2B** garantía
+> en préstamos, matrículas en custodia y datos del cliente; **2C** contrato, configuración
+> general, fotos y portal. El stock de un artículo-vehículo es derivado: lo recalcula la base
+> con las unidades disponibles y bloquea cualquier otro cambio (así quedan fuera compras,
+> transferencias y ajustes manuales sin tocarlos uno por uno).
+
 ### Catálogo, rubro y menú
 
 - Módulo `motoprestamos`, "Motopréstamos", apagado por defecto. Necesita Préstamos y
