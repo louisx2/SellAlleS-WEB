@@ -465,7 +465,7 @@ begin
        values ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-00000000cf05', 1000, 5, 3, 'weekly', %L)$q$,
     '00000000-0000-0000-0000-00000000cf47'), '%solo lo pone una refinanciación%');
 
-  assert not has_function_privilege('anon', 'public.refinance_loan(uuid,text,text,numeric,numeric,integer,text,date,text,numeric,numeric)', 'EXECUTE'), 'anon puede refinanciar préstamos';
+  assert not has_function_privilege('anon', 'public.refinance_loan(uuid,text,text,numeric,numeric,integer,text,date,text,numeric,numeric,text,text)', 'EXECUTE'), 'anon puede refinanciar préstamos';
 
   -- Permisos: otra empresa no lo ve; un cajero de la empresa no puede.
   perform set_config('request.jwt.claims', '{"sub":"cc56c633-4b6c-4a8e-a7e8-6ee3a1934566","role":"authenticated"}', true);
