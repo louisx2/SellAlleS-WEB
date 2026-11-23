@@ -21,7 +21,7 @@ import { DisbursementFields } from '@/components/loans/disbursement-fields';
 import { useCaja } from '@/context/caja-provider';
 // El calendario, las etiquetas y el tope viven en lib/frequency.ts, compartidos
 // con Financiamiento: el prorrateo de la tasa mensual es el mismo cálculo.
-import { FREQUENCY_LABEL, FREQUENCY_OPTIONS, maxInstallments, monthsFor } from '@/lib/frequency';
+import { FREQUENCY_LABEL, FREQUENCY_OPTIONS, installmentLabel, maxInstallments, monthsFor } from '@/lib/frequency';
 import type { Customer, DisbursementMethod, LoanFrequency } from '@/lib/types';
 import { HandCoins, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -211,7 +211,7 @@ export function LoanDialog({ children }: LoanDialogProps) {
 
             <div className="space-y-2 text-sm">
               <div className="flex justify-between items-center text-lg font-bold bg-secondary p-3 rounded-md">
-                <span className="text-primary">Cuota {FREQUENCY_LABEL[frequency].toLowerCase()}:</span>
+                <span className="text-primary">{installmentLabel(frequency)}:</span>
                 <span className="text-primary">{formatCurrency(preview.installmentAmount)}</span>
               </div>
               <div className="flex justify-between"><span>Prestas:</span><span>{formatCurrency(Number(principal) || 0)}</span></div>
