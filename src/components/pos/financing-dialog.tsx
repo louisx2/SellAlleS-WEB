@@ -20,9 +20,11 @@ import { useCaja } from '@/context/caja-provider';
 import { useFinancingSettings } from '@/hooks/use-financing-settings';
 import {
   FREQUENCY_LABEL,
+  FREQUENCY_OPTIONS,
   INTEREST_MODE_LABEL,
   addPeriods,
   installmentLabel,
+  maxInstallments,
   monthsFor,
   rateLabel,
   type InterestMode,
@@ -46,9 +48,6 @@ interface FinancingDialogProps {
   }) => void;
 }
 
-// Mismo tope que valida la base. Antes era un desplegable de 3/6/9/12/18/24,
-// que con frecuencia quincenal se queda corto: 26 quincenas son un año.
-const MAX_INSTALLMENTS = 60;
 
 export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCredit, onFinancingComplete }: FinancingDialogProps) {
   const { cashBlocked } = useCaja();
@@ -90,14 +89,14 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
 
   const nInstallments = Number(installments) || 0;
   const isInstallmentsInvalid =
-    installments === '' || !Number.isInteger(nInstallments) || nInstallments < 1 || nInstallments > MAX_INSTALLMENTS;
+    installments === '' || !Number.isInteger(nInstallments) || nInstallments < 1 || nInstallments > maxInstallments(frequency);
 
   const { amountToFinance, installmentAmount, totalWithInterest, totalFinanced, months } = useMemo(() => {
     const dp = Number(downPayment) || 0;
     const rate = Number(interestRate) || 0;
     const principal = totalAmount - dp;
 
-    if (principal <= 0 || nInstallments <= 0 || nInstallments > MAX_INSTALLMENTS) {
+    if (principal <= 0 || nInstallments <= 0 || nInstallments > maxInstallments(frequency)) {
       return { amountToFinance: principal, installmentAmount: 0, totalWithInterest: totalAmount, totalFinanced: 0, months: 0 };
     }
 
@@ -235,9 +234,7 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
                     <Select value={frequency} onValueChange={(v: PaymentFrequency) => setFrequency(v)}>
                         <SelectTrigger id="financing-frequency"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                            <SelectItem value="weekly">{FREQUENCY_LABEL.weekly}</SelectItem>
-                            <SelectItem value="biweekly">{FREQUENCY_LABEL.biweekly}</SelectItem>
-                            <SelectItem value="monthly">{FREQUENCY_LABEL.monthly}</SelectItem>
+                            {FREQUENCY_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>)}
                         </SelectContent>
                     </Select>
                 </div>
@@ -255,7 +252,7 @@ export function FinancingDialog({ isOpen, onOpenChange, totalAmount, availableCr
                         onFocus={(e) => e.target.select()}
                     />
                     {isInstallmentsInvalid && (
-                      <p className="text-xs text-destructive">Entre 1 y {MAX_INSTALLMENTS} cuotas.</p>
+                      <p className="text-xs text-destructive">Entre 1 y {maxInstallments(frequency)} cuotas.</p>
                     )}
                 </div>
             </div>

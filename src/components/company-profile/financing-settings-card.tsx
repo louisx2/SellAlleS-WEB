@@ -10,7 +10,9 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import {
   FREQUENCY_LABEL,
+  FREQUENCY_OPTIONS,
   INTEREST_MODE_LABEL,
+  maxInstallments,
   type InterestMode,
   type PaymentFrequency,
 } from '@/lib/frequency';
@@ -75,10 +77,10 @@ export function FinancingSettingsCard() {
       toast({ title: 'Mora inválida', description: mora.error, variant: 'destructive' });
       return;
     }
-    if (!Number.isInteger(n) || n < 1 || n > 60) {
+    if (!Number.isInteger(n) || n < 1 || n > maxInstallments(frequency)) {
       toast({
         title: 'Cuotas inválidas',
-        description: 'La cantidad de cuotas por defecto debe ir de 1 a 60.',
+        description: `La cantidad de cuotas por defecto debe ir de 1 a ${maxInstallments(frequency)}.`,
         variant: 'destructive',
       });
       return;
@@ -183,9 +185,7 @@ export function FinancingSettingsCard() {
             <Select value={frequency} onValueChange={(v: PaymentFrequency) => setFrequency(v)}>
               <SelectTrigger id="company-frequency"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="weekly">{FREQUENCY_LABEL.weekly}</SelectItem>
-                <SelectItem value="biweekly">{FREQUENCY_LABEL.biweekly}</SelectItem>
-                <SelectItem value="monthly">{FREQUENCY_LABEL.monthly}</SelectItem>
+                {FREQUENCY_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -195,7 +195,7 @@ export function FinancingSettingsCard() {
               id="company-installments"
               type="number"
               min="1"
-              max="60"
+              max={maxInstallments(frequency)}
               step="1"
               value={installments}
               onChange={(e) => setInstallments(e.target.value)}

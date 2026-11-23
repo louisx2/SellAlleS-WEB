@@ -55,7 +55,7 @@ export function PaymentPlanDialog({ sale, isOpen, onOpenChange }: PaymentPlanDia
         {/* Copia oculta para impresión */}
         <div className="hidden">
           <div ref={printRef} className="receipt-container">
-            <PaymentPlanContent sale={freshSale} />
+            <PaymentPlanContent sale={freshSale} compacto />
           </div>
         </div>
 

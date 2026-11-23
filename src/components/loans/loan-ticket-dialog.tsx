@@ -9,15 +9,22 @@ import { Printer } from 'lucide-react';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
+import { cuotasParaTicket } from '@/lib/plan-largo';
 import type { Loan } from '@/lib/types';
 
 
-// Ticket/contrato del préstamo: datos del cliente, términos y el cronograma
-// completo de cuotas. Imprimible en papel térmico (misma clase que el recibo).
-function TicketBody({ loan }: { loan: Loan }) {
+// Ticket/contrato del préstamo: datos del cliente, términos y el cronograma de
+// cuotas. Imprimible en papel térmico (misma clase que el recibo). Un plan de
+// más de 24 cuotas (cobro diario o semanal largo) imprime solo las próximas 12.
+function TicketBody({ loan, compacto = false }: { loan: Loan; compacto?: boolean }) {
   // Perfil de la sucursal del préstamo (branchId es UUID), con herencia de la empresa.
   const profile = useTicketProfile(loan.branchId);
   const interest = loan.totalWithInterest - loan.principal;
+  // En pantalla, el plan completo; en el papel térmico, recortado.
+  const cuotas = compacto
+    ? cuotasParaTicket(loan.installments ?? [])
+    : { mostrar: loan.installments ?? [], restantes: 0 };
+  const ultima = loan.installments?.[loan.installments.length - 1];
 
   return (
     <div className="text-left space-y-1">
@@ -107,7 +114,7 @@ function TicketBody({ loan }: { loan: Loan }) {
               </tr>
             </thead>
             <tbody>
-              {loan.installments.map((c) => (
+              {cuotas.mostrar.map((c) => (
                 <tr key={c.id}>
                   <td>{c.number}</td>
                   <td>{new Date(c.dueDate + 'T00:00:00').toLocaleDateString('es-DO')}</td>
@@ -116,6 +123,11 @@ function TicketBody({ loan }: { loan: Loan }) {
               ))}
             </tbody>
           </table>
+          {cuotas.restantes > 0 && ultima && (
+            <p className="text-xs mt-1">
+              … y {cuotas.restantes} cuotas más. Última: {new Date(ultima.dueDate + 'T00:00:00').toLocaleDateString('es-DO')}
+            </p>
+          )}
         </>
       )}
       {loan.notes && (
@@ -167,7 +179,7 @@ export function LoanTicketDialog({ loan, isOpen, onOpenChange }: LoanTicketDialo
         {/* Copia oculta para impresión térmica */}
         <div className="hidden">
           <div ref={printRef} className="receipt-container">
-            <TicketBody loan={loan} />
+            <TicketBody loan={loan} compacto />
           </div>
         </div>
       </DialogContent>

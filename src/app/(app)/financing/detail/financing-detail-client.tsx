@@ -29,6 +29,9 @@ import { AmendFinancingDialog } from '@/components/financing/amend-financing-dia
 import { RescheduleInstallmentsDialog } from '@/components/financing/reschedule-installments-dialog';
 import { RefinanceFinancingDialog } from '@/components/financing/refinance-financing-dialog';
 import { ArrowLeft, CalendarClock, DollarSign, FileText, ListChecks, Pencil, Printer, RefreshCw, Undo2 } from 'lucide-react';
+// Un plan largo (cobro diario, semanal de 2 años) se muestra desde la próxima cuota a cobrar.
+import { ventanaDeCuotas } from '@/lib/plan-largo';
+
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -57,6 +60,9 @@ export default function FinancingDetailClient() {
   const [isAmendOpen, setAmendOpen] = useState(false);
   const [voiding, setVoiding] = useState<CreditPayment | null>(null);
   const [isRescheduleOpen, setRescheduleOpen] = useState(false);
+  const [verTodasLasCuotas, setVerTodasLasCuotas] = useState(false);
+  // Otra cuenta, otra vez plegada.
+  useEffect(() => setVerTodasLasCuotas(false), [saleId]);
   const [refinancings, setRefinancings] = useState<Refinancing[]>([]);
   const [isRefinanceOpen, setRefinanceOpen] = useState(false);
 
@@ -350,7 +356,7 @@ export default function FinancingDetailClient() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sale.installments.map((cuota) => {
+                {(verTodasLasCuotas ? sale.installments : ventanaDeCuotas(sale.installments).visibles).map((cuota) => {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
                   // Vencida = la que ya devenga mora, con la gracia del plan ya
                   // descontada. Misma cuenta que hace la base al cobrar.
@@ -399,6 +405,11 @@ export default function FinancingDetailClient() {
                 })}
               </TableBody>
             </Table>
+            {!verTodasLasCuotas && ventanaDeCuotas(sale.installments).ocultas > 0 && (
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setVerTodasLasCuotas(true)}>
+                Ver todas las cuotas ({sale.installments.length})
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}

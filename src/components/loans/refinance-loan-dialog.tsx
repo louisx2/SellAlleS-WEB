@@ -15,13 +15,16 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { useLoans } from '@/context/loan-provider';
 import { formatCurrency } from '@/lib/utils';
-import { FREQUENCY_LABEL, type PaymentFrequency } from '@/lib/frequency';
+import { FREQUENCY_LABEL, FREQUENCY_OPTIONS, maxInstallments, type PaymentFrequency } from '@/lib/frequency';
 import { MAX_FIRST_DUE_DAYS, parseYmd, toYmd } from '@/lib/financing-schedule';
 import { fetchRefinanceQuote, previewRefinancePlan, refinanceBase } from '@/lib/refinance';
 import { RefinanceQuoteSummary } from '@/components/refinance/refinance-quote-summary';
 import { RefinanceOptions } from '@/components/refinance/refinance-options';
 import { RefinanceComparison } from '@/components/refinance/refinance-comparison';
-import type { Loan, RefinanceBaseMode, RefinanceLateFeeAction, RefinanceQuote } from '@/lib/types';
+import { DisbursementFields } from '@/components/loans/disbursement-fields';
+import { useCaja } from '@/context/caja-provider';
+import { useAuth } from '@/context/auth-provider';
+import type { DisbursementMethod, Loan, RefinanceBaseMode, RefinanceLateFeeAction, RefinanceQuote } from '@/lib/types';
 
 interface RefinanceLoanDialogProps {
   loan: Loan;
@@ -31,7 +34,6 @@ interface RefinanceLoanDialogProps {
   onRefinanced: (newLoanId: string) => void;
 }
 
-const MAX_INSTALLMENTS = 60;
 
 // Refinanciar un préstamo es cerrarlo y abrir uno nuevo con lo que se debe:
 // alargar el plazo, bajar la cuota o renovarlo entregando dinero adicional
@@ -51,7 +53,18 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
   const [frequency, setFrequency] = useState<PaymentFrequency>('monthly');
   const [firstDue, setFirstDue] = useState('');
   const [reason, setReason] = useState('');
+  const [disbursementMethod, setDisbursementMethod] = useState<DisbursementMethod>('cash');
+  const [disbursementReference, setDisbursementReference] = useState('');
   const [saving, setSaving] = useState(false);
+  const { cashBlocked, loading: cajaLoading } = useCaja();
+  const { appUser } = useAuth();
+  // `cashBlocked` es de la sucursal activa; para otra sucursal avisa la base.
+  // Mientras la caja carga, `cashBlocked` vale true sin serlo: no se decide nada.
+  const cashDisabled = !cajaLoading && cashBlocked && loan.branchId === appUser?.activeBranchId;
+
+  useEffect(() => {
+    if (cashDisabled && disbursementMethod === 'cash') setDisbursementMethod('transfer');
+  }, [cashDisabled, disbursementMethod]);
 
   // Cada vez que se abre, la cotización de hoy y los términos del préstamo.
   useEffect(() => {
@@ -80,7 +93,7 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
   const numericRate = Number(rate);
   const numericAdditional = additional === '' ? 0 : Number(additional);
   const isRateInvalid = rate === '' || Number.isNaN(numericRate) || numericRate < 0 || numericRate > 100;
-  const isInstallmentsInvalid = installments === '' || !Number.isInteger(n) || n < 1 || n > MAX_INSTALLMENTS;
+  const isInstallmentsInvalid = installments === '' || !Number.isInteger(n) || n < 1 || n > maxInstallments(frequency);
   const isAdditionalInvalid = Number.isNaN(numericAdditional) || numericAdditional < 0;
   // Igual que trg_before_loan_checks: después de hoy y a no más de 90 días.
   const minFirstDue = quote ? toYmd(addDays(parseYmd(quote.today), 1)) : '';
@@ -114,6 +127,10 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
         reason: reason.trim(),
         expectedBalance: quote.pendingBalance,
         expectedLateFee: quote.lateFeeDue,
+        disbursementMethod: numericAdditional > 0 ? disbursementMethod : undefined,
+        disbursementReference: numericAdditional > 0 && disbursementMethod === 'transfer'
+          ? disbursementReference.trim() || undefined
+          : undefined,
       });
       toast({
         title: 'Préstamo refinanciado',
@@ -178,9 +195,20 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
                 onFocus={(e) => e.target.select()}
               />
               <p className="text-xs text-muted-foreground">
-                0 si solo se cambian los términos. Se suma al capital del préstamo nuevo y no pasa por caja.
+                0 si solo se cambian los términos. Se suma al capital del préstamo nuevo; en efectivo sale de la caja.
               </p>
             </div>
+
+            {numericAdditional > 0 && (
+              <DisbursementFields
+                idPrefix="refi"
+                method={disbursementMethod}
+                onMethodChange={setDisbursementMethod}
+                reference={disbursementReference}
+                onReferenceChange={setDisbursementReference}
+                cashDisabled={cashDisabled}
+              />
+            )}
 
             <Separator />
 
@@ -219,16 +247,14 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
                   <Select value={frequency} onValueChange={(v: PaymentFrequency) => setFrequency(v)}>
                     <SelectTrigger id="refi-frequency"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="weekly">{FREQUENCY_LABEL.weekly}</SelectItem>
-                      <SelectItem value="biweekly">{FREQUENCY_LABEL.biweekly}</SelectItem>
-                      <SelectItem value="monthly">{FREQUENCY_LABEL.monthly}</SelectItem>
+                      {FREQUENCY_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               {isRateInvalid && <p className="text-xs text-destructive">La tasa debe ir de 0 a 100.</p>}
               {isInstallmentsInvalid && (
-                <p className="text-xs text-destructive">Entre 1 y {MAX_INSTALLMENTS} cuotas.</p>
+                <p className="text-xs text-destructive">Entre 1 y {maxInstallments(frequency)} cuotas.</p>
               )}
 
               <div className="space-y-2">

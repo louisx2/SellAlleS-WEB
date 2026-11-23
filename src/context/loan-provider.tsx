@@ -1,7 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { Loan, LoanFrequency, LoanPaymentResult, PaymentMethod, RefinanceBaseMode, RefinanceLateFeeAction, VoidLoanPaymentResult } from '@/lib/types';
+import type { DisbursementMethod, Loan, LoanFrequency, LoanPaymentResult, PaymentMethod, RefinanceBaseMode, RefinanceLateFeeAction, VoidLoanPaymentResult } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
 import { rowToLoan, loanToRow, rowToLoanPaymentResult } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
@@ -15,6 +15,8 @@ interface NewLoanInput {
   installmentsCount: number;
   paymentFrequency: LoanFrequency;
   notes?: string;
+  disbursementMethod: DisbursementMethod;
+  disbursementReference?: string;
 }
 
 interface LoanContextType {
@@ -36,8 +38,11 @@ export type RefinanceLoanInput = {
   baseMode: RefinanceBaseMode;
   /** null cuando no hay mora pendiente. */
   lateFeeAction: RefinanceLateFeeAction | null;
-  /** Dinero nuevo que se le entrega al cliente (no pasa por caja). */
+  /** Dinero nuevo que se le entrega al cliente; en efectivo sale de la caja. */
   additional: number;
+  /** Cómo se entrega el adicional (solo cuenta si es mayor que 0). */
+  disbursementMethod?: DisbursementMethod;
+  disbursementReference?: string;
   interestRate: number;
   installments: number;
   frequency: LoanFrequency;
@@ -166,6 +171,8 @@ export function LoanProvider({ children }: { children: ReactNode }) {
       p_reason: input.reason,
       p_expected_balance: input.expectedBalance,
       p_expected_late_fee: input.expectedLateFee,
+      p_disbursement_method: input.disbursementMethod ?? null,
+      p_disbursement_reference: input.disbursementReference || null,
     });
     if (error) throw error;
     await load();

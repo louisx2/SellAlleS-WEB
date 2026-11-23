@@ -27,6 +27,8 @@ export function lateFeeModeHelp(mode: LateFeeMode, rate: number, freq: PaymentFr
     case 'daily':
       return `${r}% mensual del saldo vencido, prorrateado por día (${round2(r / 30)}% diario). Crece mientras no paga y se detiene el día que abona.`;
     case 'per_period':
+      // En un plan diario el período es un día: no hay "días que cuestan lo mismo".
+      if (PERIOD_DAYS[freq] === 1) return `${r}% del saldo vencido por cada día de atraso.`;
       return `${r}% del saldo vencido por cada ${PERIOD_NOUN[freq]} de atraso cumplido. Un día tarde cuesta lo mismo que ${PERIOD_DAYS[freq] - 1} días.`;
     default:
       return `${r}% de la cuota, una sola vez. No crece con el tiempo.`;
@@ -34,6 +36,8 @@ export function lateFeeModeHelp(mode: LateFeeMode, rate: number, freq: PaymentFr
 }
 
 const PERIOD_NOUN: Record<PaymentFrequency, string> = {
+  daily: 'día',
+  daily_all: 'día',
   weekly: 'semana',
   biweekly: 'quincena',
   monthly: 'mes',
@@ -44,7 +48,7 @@ const PERIOD_NOUN: Record<PaymentFrequency, string> = {
  * prorratea, no cae en fecha fija como la cuota. Igual que
  * `late_fee_period_days` en la base.
  */
-export const PERIOD_DAYS: Record<PaymentFrequency, number> = { weekly: 7, biweekly: 14, monthly: 30 };
+export const PERIOD_DAYS: Record<PaymentFrequency, number> = { daily: 1, daily_all: 1, weekly: 7, biweekly: 14, monthly: 30 };
 
 export function lateFeePeriodDays(freq?: PaymentFrequency | null): number {
   return PERIOD_DAYS[freq ?? 'monthly'] ?? 30;

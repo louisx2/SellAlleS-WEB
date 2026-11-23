@@ -7,14 +7,17 @@ import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { parseYmd, scheduleDueDate } from '@/lib/financing-schedule';
 import { formatLineQty } from '@/lib/line-format';
 import type { Sale } from '@/lib/types';
+import { cuotasParaTicket } from '@/lib/plan-largo';
 
 interface PaymentPlanContentProps {
   sale: Sale;
+  /** Copia para el papel térmico: con más de 24 cuotas, solo las próximas 12. */
+  compacto?: boolean;
 }
 
 // Cronograma de cuotas imprimible. Usa las cuotas reales de la base
 // (sale.installments); si aún no están cargadas, estima desde el plan.
-export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
+export function PaymentPlanContent({ sale, compacto = false }: PaymentPlanContentProps) {
   // Perfil de la sucursal de la venta (branchId guarda el nombre), con herencia de la empresa.
   const profile = useTicketProfile(sale.branchId);
   const fin = sale.financingDetails;
@@ -45,6 +48,9 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
         paidAmount: 0,
         status: 'pending' as const,
       }));
+
+  // En pantalla y en el PDF va el plan completo; en el térmico, recortado.
+  const filas = compacto ? cuotasParaTicket(rows) : { mostrar: rows, restantes: 0 };
 
   return (
     <div className="text-left space-y-1">
@@ -146,7 +152,7 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((cuota) => (
+          {filas.mostrar.map((cuota) => (
             <tr key={cuota.number} className="border-b border-dotted border-foreground/20">
               <td className="py-1">{cuota.number}</td>
               <td className="py-1">{cuota.dueDate.toLocaleDateString('es-DO')}</td>
@@ -158,6 +164,11 @@ export function PaymentPlanContent({ sale }: PaymentPlanContentProps) {
           ))}
         </tbody>
       </table>
+      {filas.restantes > 0 && rows.length > 0 && (
+        <p className="text-xs pt-1">
+          … y {filas.restantes} cuotas más. Última: {rows[rows.length - 1].dueDate.toLocaleDateString('es-DO')}
+        </p>
+      )}
       {/* Una debajo de la otra: lado a lado, en un ticket de 80 mm, cada firma
           quedaba en menos de la mitad del ancho y no cabía. */}
       <div className="pt-10 flex flex-col gap-10 text-xs text-center">

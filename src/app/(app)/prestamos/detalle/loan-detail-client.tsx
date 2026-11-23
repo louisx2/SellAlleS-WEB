@@ -22,6 +22,9 @@ import { LoanTicketDialog } from '@/components/loans/loan-ticket-dialog';
 import { VoidLoanPaymentDialog } from '@/components/loans/void-loan-payment-dialog';
 import { RefinanceLoanDialog } from '@/components/loans/refinance-loan-dialog';
 import { ArrowLeft, DollarSign, Printer, RefreshCw, Undo2 } from 'lucide-react';
+// Un plan largo (cobro diario, semanal de 2 años) se muestra desde la próxima cuota a cobrar.
+import { ventanaDeCuotas } from '@/lib/plan-largo';
+
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -66,6 +69,9 @@ export default function LoanDetailClient() {
   const [voiding, setVoiding] = useState<LoanPayment | null>(null);
   const [isRefinanceOpen, setRefinanceOpen] = useState(false);
   const [refinancings, setRefinancings] = useState<Refinancing[]>([]);
+  const [verTodasLasCuotas, setVerTodasLasCuotas] = useState(false);
+  // Otra cuenta, otra vez plegada.
+  useEffect(() => setVerTodasLasCuotas(false), [loanId]);
 
   const loan = loans.find((l) => l.id === loanId);
   // Anular un abono o refinanciar es cosa de administradores: las RPC lo exigen igual.
@@ -283,6 +289,13 @@ export default function LoanDetailClient() {
               <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
             </div>
           </div>
+          {loan.disbursementMethod && (
+            <p className="mt-4 text-sm text-muted-foreground border-t pt-3">
+              {loan.disbursementMethod === 'cash'
+                ? 'Entregado en efectivo'
+                : `Entregado por transferencia${loan.disbursementReference ? ` (ref. ${loan.disbursementReference})` : ''}`}
+            </p>
+          )}
           {loan.notes && (
             <p className="mt-4 text-sm text-muted-foreground border-t pt-3">Notas: {loan.notes}</p>
           )}
@@ -311,7 +324,7 @@ export default function LoanDetailClient() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {loan.installments.map((cuota) => {
+                {(verTodasLasCuotas ? loan.installments : ventanaDeCuotas(loan.installments).visibles).map((cuota) => {
                   const dueDate = new Date(cuota.dueDate + 'T00:00:00');
                   // Vencida = la que ya devenga mora, con la gracia del préstamo
                   // ya descontada. Misma cuenta que hace la base al cobrar.
@@ -350,6 +363,11 @@ export default function LoanDetailClient() {
                 })}
               </TableBody>
             </Table>
+            {!verTodasLasCuotas && ventanaDeCuotas(loan.installments).ocultas > 0 && (
+              <Button variant="ghost" size="sm" className="mt-2" onClick={() => setVerTodasLasCuotas(true)}>
+                Ver todas las cuotas ({loan.installments.length})
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}

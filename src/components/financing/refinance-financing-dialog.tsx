@@ -17,7 +17,7 @@ import { useSales } from '@/context/sales-provider';
 import { useCustomers } from '@/context/customer-provider';
 import { formatCurrency } from '@/lib/utils';
 import {
-  FREQUENCY_LABEL, INTEREST_MODE_LABEL, rateLabel, type InterestMode, type PaymentFrequency,
+  FREQUENCY_LABEL, FREQUENCY_OPTIONS, INTEREST_MODE_LABEL, maxInstallments, rateLabel, type InterestMode, type PaymentFrequency,
 } from '@/lib/frequency';
 import { MAX_FIRST_DUE_DAYS, parseYmd, toYmd } from '@/lib/financing-schedule';
 import { fetchRefinanceQuote, previewRefinancePlan, refinanceBase } from '@/lib/refinance';
@@ -34,7 +34,6 @@ interface RefinanceFinancingDialogProps {
   onRefinanced?: () => void;
 }
 
-const MAX_INSTALLMENTS = 60;
 
 // Refinanciar es renegociar, no corregir: lo pagado se queda, lo que se debe
 // pasa a un plan nuevo que arranca hoy, con otra tasa, otras cuotas u otra
@@ -84,7 +83,7 @@ export function RefinanceFinancingDialog({ sale, open, onOpenChange, onRefinance
   const n = Number(installments) || 0;
   const numericRate = Number(rate);
   const isRateInvalid = rate === '' || Number.isNaN(numericRate) || numericRate < 0 || numericRate > 100;
-  const isInstallmentsInvalid = installments === '' || !Number.isInteger(n) || n < 1 || n > MAX_INSTALLMENTS;
+  const isInstallmentsInvalid = installments === '' || !Number.isInteger(n) || n < 1 || n > maxInstallments(frequency);
   // La primera cuota, si se elige, tiene que caer después de hoy (hoy de la
   // empresa) y a no más de 90 días, igual que al vender a plazos.
   const minFirstDue = quote ? toYmd(addDays(parseYmd(quote.today), 1)) : '';
@@ -204,7 +203,7 @@ export function RefinanceFinancingDialog({ sale, open, onOpenChange, onRefinance
                     onFocus={(e) => e.target.select()}
                   />
                   {isInstallmentsInvalid && (
-                    <p className="text-xs text-destructive">Entre 1 y {MAX_INSTALLMENTS} cuotas.</p>
+                    <p className="text-xs text-destructive">Entre 1 y {maxInstallments(frequency)} cuotas.</p>
                   )}
                 </div>
               </div>
@@ -215,9 +214,7 @@ export function RefinanceFinancingDialog({ sale, open, onOpenChange, onRefinance
                   <Select value={frequency} onValueChange={(v: PaymentFrequency) => setFrequency(v)}>
                     <SelectTrigger id="refi-frequency"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="weekly">{FREQUENCY_LABEL.weekly}</SelectItem>
-                      <SelectItem value="biweekly">{FREQUENCY_LABEL.biweekly}</SelectItem>
-                      <SelectItem value="monthly">{FREQUENCY_LABEL.monthly}</SelectItem>
+                      {FREQUENCY_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

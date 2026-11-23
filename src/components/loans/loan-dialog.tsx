@@ -17,10 +17,12 @@ import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { formatCurrency } from '@/lib/utils';
 import { CustomerSearchDialog } from '@/components/pos/customer-search-dialog';
-// FREQUENCY_LABEL y PER_MONTH viven en lib/frequency.ts, compartidos con
-// Financiamiento: el prorrateo de la tasa mensual es el mismo cálculo.
-import { FREQUENCY_LABEL, PER_MONTH } from '@/lib/frequency';
-import type { Customer, LoanFrequency } from '@/lib/types';
+import { DisbursementFields } from '@/components/loans/disbursement-fields';
+import { useCaja } from '@/context/caja-provider';
+// El calendario, las etiquetas y el tope viven en lib/frequency.ts, compartidos
+// con Financiamiento: el prorrateo de la tasa mensual es el mismo cálculo.
+import { FREQUENCY_LABEL, FREQUENCY_OPTIONS, maxInstallments, monthsFor } from '@/lib/frequency';
+import type { Customer, DisbursementMethod, LoanFrequency } from '@/lib/types';
 import { HandCoins, User } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -48,7 +50,13 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const [frequency, setFrequency] = useState<LoanFrequency>('monthly');
   const [installments, setInstallments] = useState<string>('12');
   const [notes, setNotes] = useState('');
+  const [disbursementMethod, setDisbursementMethod] = useState<DisbursementMethod>('cash');
+  const [disbursementReference, setDisbursementReference] = useState('');
   const [saving, setSaving] = useState(false);
+  const { cashBlocked, loading: cajaLoading } = useCaja();
+  // `cashBlocked` es de la sucursal activa; para otra sucursal avisa la base.
+  // Mientras la caja carga, `cashBlocked` vale true sin serlo: no se decide nada.
+  const cashDisabled = !cajaLoading && cashBlocked && branchId === appUser?.activeBranchId;
 
   const activeBranches = useMemo(() => branches.filter((b) => b.isActive), [branches]);
 
@@ -61,8 +69,15 @@ export function LoanDialog({ children }: LoanDialogProps) {
       setFrequency('monthly');
       setInstallments('12');
       setNotes('');
+      setDisbursementMethod('cash');
+      setDisbursementReference('');
     }
   }, [open, appUser?.activeBranchId, profile.defaultLoanInterestRate]);
+
+  // Sin caja abierta no se ofrece el efectivo.
+  useEffect(() => {
+    if (cashDisabled && disbursementMethod === 'cash') setDisbursementMethod('transfer');
+  }, [cashDisabled, disbursementMethod]);
 
   const preview = useMemo(() => {
     const p = Number(principal) || 0;
@@ -71,7 +86,7 @@ export function LoanDialog({ children }: LoanDialogProps) {
     if (p <= 0 || n <= 0) {
       return { interest: 0, total: p, installmentAmount: 0, months: 0 };
     }
-    const months = n / PER_MONTH[frequency];
+    const months = monthsFor(frequency, n, 'monthly_prorated');
     const interest = p * (rate / 100) * months;
     const total = p + interest;
     return { interest, total, installmentAmount: total / n, months };
@@ -79,7 +94,7 @@ export function LoanDialog({ children }: LoanDialogProps) {
 
   const nInstallments = Number(installments) || 0;
   const isPrincipalInvalid = !principal || Number(principal) <= 0;
-  const isInstallmentsInvalid = nInstallments < 1 || nInstallments > 60;
+  const isInstallmentsInvalid = nInstallments < 1 || nInstallments > maxInstallments(frequency);
   const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isInstallmentsInvalid && preview.installmentAmount > 0;
 
   const handleSubmit = async () => {
@@ -94,6 +109,8 @@ export function LoanDialog({ children }: LoanDialogProps) {
         installmentsCount: nInstallments,
         paymentFrequency: frequency,
         notes: notes.trim() || undefined,
+        disbursementMethod,
+        disbursementReference: disbursementMethod === 'transfer' ? disbursementReference.trim() || undefined : undefined,
       });
       toast({ title: 'Préstamo creado', description: `${formatCurrency(Number(principal))} a ${customer.name}.` });
       setOpen(false);
@@ -161,22 +178,29 @@ export function LoanDialog({ children }: LoanDialogProps) {
                 <Select value={frequency} onValueChange={(v) => setFrequency(v as LoanFrequency)}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="weekly">Semanal</SelectItem>
-                    <SelectItem value="biweekly">Quincenal</SelectItem>
-                    <SelectItem value="monthly">Mensual</SelectItem>
+                    {FREQUENCY_OPTIONS.map((f) => <SelectItem key={f} value={f}>{FREQUENCY_LABEL[f]}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="installments">Cantidad de cuotas</Label>
                 <Input
-                  id="installments" type="number" min="1" max="60" step="1"
+                  id="installments" type="number" min="1" max={maxInstallments(frequency)} step="1"
                   value={installments}
                   onChange={(e) => setInstallments(e.target.value)}
                 />
-                {isInstallmentsInvalid && installments !== '' && <p className="text-xs text-destructive">Entre 1 y 60 cuotas.</p>}
+                {isInstallmentsInvalid && installments !== '' && <p className="text-xs text-destructive">Entre 1 y {maxInstallments(frequency)} cuotas.</p>}
               </div>
             </div>
+
+            <DisbursementFields
+              idPrefix="loan"
+              method={disbursementMethod}
+              onMethodChange={setDisbursementMethod}
+              reference={disbursementReference}
+              onReferenceChange={setDisbursementReference}
+              cashDisabled={cashDisabled}
+            />
 
             <div className="grid gap-2">
               <Label htmlFor="notes">Notas (opcional)</Label>

@@ -62,6 +62,7 @@ export default function ReportsDashboardPage() {
   const showQuickSalesReport = isModuleEnabled('quick-sales') && isReportVisible(effectivePermissions, 'ventas-rapidas');
   const showCommissionsReport = isModuleEnabled('commissions') && isReportVisible(effectivePermissions, 'comisiones');
   const showTallerReport = isModuleEnabled('services') && isReportVisible(effectivePermissions, 'taller');
+  const showAgingReport = isReportVisible(effectivePermissions, 'antiguedad');
 
   // --- Filtrado por Sucursal (las ventas anuladas no cuentan como ingreso) ---
   const filteredSales = React.useMemo(() => {
@@ -396,6 +397,20 @@ export default function ReportsDashboardPage() {
                   <div>
                     <CardTitle className="text-sm font-bold">Cuentas por Cobrar</CardTitle>
                     <CardDescription className="text-3xs mt-1">Vencimientos y saldos pendientes</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {(hasCredit || hasFinancing || hasPrestamos) && showAgingReport && (
+            <Link href="/reports/antiguedad">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold">Antigüedad de Cartera</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Atrasos por tramos de días</CardDescription>
                   </div>
                   <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
                 </CardHeader>
