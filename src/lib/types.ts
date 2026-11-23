@@ -247,7 +247,7 @@ export type PermissionResource =
   | 'dashboard' | 'pos' | 'sales' | 'quotes' | 'services' | 'credit' | 'financing'
   | 'prestamos' | 'caja' | 'expenses' | 'payables' | 'reports' | 'products' | 'customers'
   | 'suppliers' | 'company-profile' | 'users' | 'branches' | 'roles' | 'suscripcion'
-  | 'service-types' | 'quick-sales' | 'services-all';
+  | 'service-types' | 'quick-sales' | 'services-all' | 'motos' | 'motos-config';
 
 // reports_visible: slugs de src/lib/permissions.ts#REPORT_ITEMS que este rol
 // puede ver dentro de "Reportes"; ausente = todos visibles.

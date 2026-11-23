@@ -36,6 +36,8 @@ export const PERMISSION_RESOURCES: { key: PermissionResource; label: string; act
   { key: 'suscripcion', label: 'Mi Suscripción' },
   { key: 'service-types', label: 'Configuración del Taller' },
   { key: 'quick-sales', label: 'Ventas rápidas (fuera de inventario)', actions: ['create'] },
+  { key: 'motos', label: 'Motopréstamos: vehículos' },
+  { key: 'motos-config', label: 'Motopréstamos: configuración', actions: ['view', 'edit'] },
 ];
 
 /** Acciones que admite un recurso: las suyas (`actions`) o las cuatro. */
@@ -65,6 +67,8 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
   'service-types': 'services',
   'services-all': 'services',
   'quick-sales': 'quick-sales',
+  motos: 'motoprestamos',
+  'motos-config': 'motoprestamos',
 };
 
 // Los reportes individuales (src/app/(app)/reports/*), controlables por

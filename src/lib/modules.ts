@@ -22,7 +22,8 @@ export type ModuleKey =
   | 'caja'
   | 'quick-sales'
   | 'ecf'
-  | 'commissions';
+  | 'commissions'
+  | 'motoprestamos';
 
 export interface AppModule {
   key: ModuleKey;
@@ -52,6 +53,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'caja',       label: 'Caja',               description: 'Control de efectivo por sucursal: apertura, cierre y movimientos. Al activarlo, no se puede cobrar en efectivo sin una caja abierta.', defaultEnabled: false },
   { key: 'quick-sales', label: 'Ventas Rápidas',    description: 'Vender en el POS artículos que no están en el inventario, con descripción o como monto libre.', defaultEnabled: true },
   { key: 'ecf',        label: 'Facturación Electrónica (e-CF)', description: 'Comprobantes fiscales electrónicos ante la DGII. Solo para empresas formalizadas; SellAlleS hace el alta.', defaultEnabled: false },
+  { key: 'motoprestamos', label: 'Motopréstamos', description: 'Motos con chasis, venta a cuotas y préstamos con la moto en garantía, matrículas en custodia y cobranza en la calle. Necesita Préstamos.', defaultEnabled: false },
   { key: 'commissions', label: 'Comisiones por Vendedor', description: 'Cada usuario tiene un % de comisión sobre lo que vende (sin ITBIS). En el cobro se elige el vendedor y hay un reporte de comisiones por período.', defaultEnabled: false },
 ];
 
@@ -74,6 +76,7 @@ const ROUTE_MODULE: Array<{ prefix: string; module: ModuleKey }> = [
   { prefix: '/service-types', module: 'services' },
   { prefix: '/prestamos', module: 'prestamos' },
   { prefix: '/caja',      module: 'caja' },
+  { prefix: '/motos',     module: 'motoprestamos' },
 ];
 
 export function moduleForRoute(pathname: string): ModuleKey | null {

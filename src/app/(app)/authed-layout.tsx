@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -60,6 +60,7 @@ const featuresNavItems: NavItem[] = [
   { href: '/payables', icon: ReceiptText, label: 'Cuentas por Pagar', module: 'payables', permission: 'payables' },
   { href: '/financing', icon: Landmark, label: 'Financiamientos', module: 'financing', permission: 'financing' },
   { href: '/prestamos', icon: HandCoins, label: 'Préstamos', module: 'prestamos', permission: 'prestamos' },
+  { href: '/motos', icon: Bike, label: 'Vehículos', module: 'motoprestamos', permission: 'motos' },
   { href: '/caja', icon: Coins, label: 'Caja', module: 'caja', permission: 'caja' },
   { href: '/expenses', icon: Wallet, label: 'Gastos', module: 'expenses', permission: 'expenses' },
 ];
@@ -94,6 +95,7 @@ const adminNavItems: NavItem[] = [
     { href: '/branches', icon: Store, label: 'Sucursales', permission: 'branches' },
     { href: '/roles', icon: Shield, label: 'Roles', permission: 'roles' },
     { href: '/service-types', icon: PenTool, label: 'Configuración del Taller', module: 'services', permission: 'service-types' },
+    { href: '/motos/config', icon: Settings2, label: 'Configuración de Motopréstamos', module: 'motoprestamos', permission: 'motos-config' },
     { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', permission: 'suscripcion' },
     { href: '/settings', icon: Settings, label: 'Ajustes', permission: 'company-profile' },
 ];
