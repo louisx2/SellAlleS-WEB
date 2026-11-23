@@ -237,7 +237,7 @@ export function RefinanceLoanDialog({ loan, open, onOpenChange, onRefinanced }: 
                     value={installments}
                     onChange={(e) => {
                       const v = e.target.value;
-                      if (/^\d{0,2}$/.test(v)) setInstallments(v);
+                      if (/^\d{0,3}$/.test(v)) setInstallments(v); // hasta 312 cuotas en cobro diario
                     }}
                     onFocus={(e) => e.target.select()}
                   />
