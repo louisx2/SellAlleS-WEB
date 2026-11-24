@@ -1,4 +1,4 @@
-import type { Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
+import type { Vehicle, VehicleEvent, VehicleType, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
@@ -61,6 +61,7 @@ export const rowToProduct = (r: any): Product => ({
   branchId: r.branch_id ?? undefined,
   soldLoose: r.sold_loose ?? true,
   presentations: (r.product_presentations ?? []).map(rowToPresentation),
+  isVehicle: r.is_vehicle ?? false,
 });
 // `sold_loose` no viaja aquí a propósito: solo lo escriben `save_product_presentations`
 // e `import_product_presentations`, que lo guardan junto con las presentaciones en la
@@ -91,6 +92,8 @@ export const productToRow = (p: Partial<Product>) => ({
   // envía cuando quien llama lo aporta (alta e importación). Mandarlo como null
   // en una edición rompía TODA edición: la columna es NOT NULL.
   ...(p.branchId !== undefined ? { branch_id: p.branchId } : {}),
+  // Igual que es_servicio: solo si quien llama lo aporta (la importación no lo conoce).
+  ...(p.isVehicle !== undefined ? { is_vehicle: p.isVehicle } : {}),
 });
 
 // ---------- Product Category ----------
@@ -992,3 +995,82 @@ export const rowToSubscriptionPayment = (r: any): SubscriptionPayment => ({
   invoiceItbis: Number(r.invoice_itbis ?? 0),
 });
 
+
+// ---------- Motopréstamos: vehículos ----------
+const numOrUndef = (x: any) => (x != null ? Number(x) : undefined);
+
+export const rowToVehicleType = (r: any): VehicleType => ({
+  id: r.id,
+  name: r.name,
+  extraFields: Array.isArray(r.extra_fields) ? r.extra_fields : [],
+  position: Number(r.position ?? 0),
+  isActive: r.is_active ?? true,
+});
+
+export const rowToVehicle = (r: any): Vehicle => ({
+  id: r.id,
+  branchId: r.branch_id,
+  vehicleTypeId: r.vehicle_type_id ?? undefined,
+  origin: r.origin,
+  productId: r.product_id ?? undefined,
+  productName: r.products?.name ?? undefined,
+  productPrice: numOrUndef(r.products?.price),
+  customerId: r.customer_id ?? undefined,
+  customerName: r.customers?.name ?? undefined,
+  customerPhone: r.customers?.phone ?? undefined,
+  saleId: r.sale_id ?? undefined,
+  brand: r.brand ?? undefined,
+  model: r.model ?? undefined,
+  year: r.year ?? undefined,
+  color: r.color ?? undefined,
+  chassis: r.chassis ?? undefined,
+  engineNumber: r.engine_number ?? undefined,
+  plate: r.plate ?? undefined,
+  registrationNumber: r.registration_number ?? undefined,
+  cc: r.cc ?? undefined,
+  extra: r.extra ?? {},
+  condition: r.condition ?? 'nuevo',
+  cost: numOrUndef(r.cost),
+  price: numOrUndef(r.price),
+  status: r.status,
+  registrationStatus: r.registration_status ?? 'no_aplica',
+  registrationLocation: r.registration_location ?? undefined,
+  registrationSince: r.registration_since ? new Date(r.registration_since) : undefined,
+  notes: r.notes ?? undefined,
+  createdByName: r.created_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
+  updatedAt: new Date(r.updated_at ?? r.created_at),
+});
+
+const textoVehiculo = (s: string) => s.trim() || null;
+
+/** Solo los campos que el usuario puede escribir; estado, venta y dueño los pone la base. */
+export const vehicleToRow = (v: Partial<Vehicle>) => ({
+  ...(v.vehicleTypeId !== undefined ? { vehicle_type_id: v.vehicleTypeId || null } : {}),
+  ...(v.brand !== undefined ? { brand: textoVehiculo(v.brand) } : {}),
+  ...(v.model !== undefined ? { model: textoVehiculo(v.model) } : {}),
+  ...(v.year !== undefined ? { year: v.year || null } : {}),
+  ...(v.color !== undefined ? { color: textoVehiculo(v.color) } : {}),
+  ...(v.chassis !== undefined ? { chassis: textoVehiculo(v.chassis) } : {}),
+  ...(v.engineNumber !== undefined ? { engine_number: textoVehiculo(v.engineNumber) } : {}),
+  ...(v.plate !== undefined ? { plate: textoVehiculo(v.plate) } : {}),
+  ...(v.registrationNumber !== undefined ? { registration_number: textoVehiculo(v.registrationNumber) } : {}),
+  ...(v.cc !== undefined ? { cc: textoVehiculo(v.cc) } : {}),
+  ...(v.extra !== undefined ? { extra: v.extra } : {}),
+  ...(v.condition !== undefined ? { condition: v.condition } : {}),
+  ...(v.cost !== undefined ? { cost: v.cost } : {}),
+  ...(v.price !== undefined ? { price: v.price } : {}),
+  ...(v.registrationLocation !== undefined ? { registration_location: textoVehiculo(v.registrationLocation) } : {}),
+  ...(v.notes !== undefined ? { notes: textoVehiculo(v.notes) } : {}),
+});
+
+export const rowToVehicleEvent = (r: any): VehicleEvent => ({
+  id: r.id,
+  kind: r.kind,
+  fromStatus: r.from_status ?? undefined,
+  toStatus: r.to_status ?? undefined,
+  note: r.note ?? undefined,
+  saleId: r.sale_id ?? undefined,
+  createdByName: r.created_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
+});

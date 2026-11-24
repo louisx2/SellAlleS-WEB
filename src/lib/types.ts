@@ -1,3 +1,4 @@
+import type { RegistrationStatus, VehicleCondition, VehicleOrigin, VehicleStatus } from '@/lib/motos';
 import type { UnitCode } from './units';
 import type { InterestMode, PaymentFrequency } from './frequency';
 import type { LateFeeMode } from './late-fee';
@@ -54,6 +55,9 @@ export type Product = {
   // carritos anteriores a las presentaciones no cambian.
   soldLoose?: boolean;
   presentations?: ProductPresentation[];
+  // Motopréstamos: cada unidad es un vehículo con su chasis y el stock lo
+  // calcula la base con las unidades disponibles.
+  isVehicle?: boolean;
 };
 
 export type ProductCategory = {
@@ -291,6 +295,8 @@ export type CartItem = {
   // Línea de un caso del taller (service_items.id). Su cantidad viene del caso y
   // no cambia en el POS; si es pieza, ya salió del inventario al agregarla al caso.
   serviceItemId?: string;
+  // Línea de un vehículo (vehicles.id): cantidad 1, no se fusiona con otras.
+  vehicleId?: string;
 };
 
 export type Cart = {
@@ -1123,3 +1129,60 @@ export type Service = {
 };
 
 export type ServicePhoto = { id: string; path: string; createdAt: Date; url?: string };
+
+// ---------- Motopréstamos: vehículos ----------
+export type VehicleExtraField = { key: string; label: string; type: 'text' | 'number' };
+
+export type VehicleType = {
+  id: string;
+  name: string;
+  extraFields: VehicleExtraField[];
+  position: number;
+  isActive: boolean;
+};
+
+export type Vehicle = {
+  id: string;
+  branchId: string;
+  vehicleTypeId?: string;
+  origin: VehicleOrigin;
+  productId?: string;
+  productName?: string;
+  productPrice?: number;
+  customerId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  saleId?: string;
+  brand?: string;
+  model?: string;
+  year?: number;
+  color?: string;
+  chassis?: string;
+  engineNumber?: string;
+  plate?: string;
+  registrationNumber?: string;
+  cc?: string;
+  extra: Record<string, string | number>;
+  condition: VehicleCondition;
+  cost?: number;
+  price?: number;
+  status: VehicleStatus;
+  registrationStatus: RegistrationStatus;
+  registrationLocation?: string;
+  registrationSince?: Date;
+  notes?: string;
+  createdByName?: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type VehicleEvent = {
+  id: string;
+  kind: 'ingreso' | 'venta' | 'venta_anulada' | 'cambio_estado' | 'matricula' | 'edicion' | 'baja';
+  fromStatus?: string;
+  toStatus?: string;
+  note?: string;
+  saleId?: string;
+  createdByName?: string;
+  createdAt: Date;
+};
