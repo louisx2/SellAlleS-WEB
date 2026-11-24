@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -63,6 +63,9 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: P
   const [nota, setNota] = useState('');
   const [saving, setSaving] = useState(false);
   const [hecho, setHecho] = useState<CobroDeRuta | null>(null);
+  // Uno por cobro: si la respuesta se pierde por la señal y se toca otra vez, la
+  // base devuelve el abono que ya quedó en vez de crear otro.
+  const requestId = useRef('');
 
   // Al abrir (no en cada recarga de la lista): la cuenta que más toca y su sugerido.
   useEffect(() => {
@@ -74,6 +77,7 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: P
     setReferencia('');
     setNota('');
     setHecho(null);
+    requestId.current = crypto.randomUUID();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -89,7 +93,7 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: P
     if (!listo || !opcion || valor === undefined) return;
     setSaving(true);
     try {
-      const r = await onCobrar({ tipo: opcion.tipo, id: opcion.id, monto: valor, metodo, referencia, nota });
+      const r = await onCobrar({ tipo: opcion.tipo, id: opcion.id, monto: valor, metodo, referencia, nota, requestId: requestId.current });
       setHecho(r);
       toast({ title: 'Abono registrado', description: `${formatCurrency(valor)} de ${nombre}.` });
     } catch (e: any) {
@@ -116,6 +120,11 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: P
               {hecho.mora > 0 && (<><dt className="text-muted-foreground">Mora</dt><dd className="text-right">{formatCurrency(hecho.mora)}</dd></>)}
               {hecho.saldo != null && (<><dt className="text-muted-foreground">Le queda debiendo</dt><dd className="text-right font-medium">{formatCurrency(hecho.saldo)}</dd></>)}
             </dl>
+            {hecho.repetido && (
+              <p className="rounded-md bg-muted p-2 text-sm">
+                Este cobro ya se había registrado (se perdió la respuesta). No se cobró dos veces.
+              </p>
+            )}
             {hecho.enCalle && (
               <p className="rounded-md bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
                 Este efectivo queda a tu cargo hasta que lo entregues en el cuadre.

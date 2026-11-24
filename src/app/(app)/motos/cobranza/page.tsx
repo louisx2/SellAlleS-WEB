@@ -9,7 +9,6 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { MessageCircle, Phone } from 'lucide-react';
 import { useAuth } from '@/context/auth-provider';
-import { useCustomers } from '@/context/customer-provider';
 import { usePermission } from '@/hooks/use-permission';
 import { useCobranza, useCuentasDeCobro } from '@/hooks/use-cobranza';
 import { useVehiculos } from '@/hooks/use-vehiculos';
@@ -29,11 +28,12 @@ const fechaCorta = (iso: string) => new Date(`${iso}T00:00:00`).toLocaleDateStri
 export default function CobranzaPage() {
   const { appUser } = useAuth();
   const verTodas = usePermission('cobranza-all', 'view');
-  const { customers } = useCustomers();
   const { vehicles } = useVehiculos();
   const cobranza = useCobranza();
-  const cuentas = useCuentasDeCobro();
-  const { cobradores, asignaciones, visitasRecientes, abonos, miCobrador, loading } = cobranza;
+  const datos = useCuentasDeCobro();
+  const { cuentas, clientes } = datos;
+  const { cobradores, asignaciones, promesas: visitasConPromesa, visitasDeHoy, abonos, miCobrador } = cobranza;
+  const loading = cobranza.loading || datos.loading;
   const [elegido, setElegido] = useState<string>('');
   const [ordenarPor, setOrdenarPor] = useState<'orden' | 'atraso'>('orden');
   const [cobrar, setCobrar] = useState<ParadaDeRuta | null>(null);
@@ -42,17 +42,17 @@ export default function CobranzaPage() {
   const hoy = hoyLocal();
   const cobradorId = elegido || miCobrador?.id || '';
   const cobrador = cobradores.find((c) => c.id === cobradorId);
-  const cliente = (id: string) => customers.find((c) => c.id === id);
+  const cliente = (id: string) => clientes.get(id);
 
   const paradas = useMemo(() => {
     const asignados = asignaciones
       .filter((a) => a.collectorId === cobradorId)
-      .map((a) => ({ customerId: a.customerId, orden: a.orden, nombre: customers.find((c) => c.id === a.customerId)?.name }));
-    const promesas: Promesa[] = visitasRecientes
-      .filter((v) => v.outcome === 'promesa' && v.promiseDate)
+      .map((a) => ({ customerId: a.customerId, orden: a.orden, nombre: clientes.get(a.customerId)?.name }));
+    const promesas: Promesa[] = visitasConPromesa
+      .filter((v) => v.promiseDate)
       .map((v) => ({ customerId: v.customerId, fecha: v.promiseDate!, monto: v.promiseAmount }));
     return rutaDelDia(cuentas, asignados, promesas, hoy, ordenarPor);
-  }, [asignaciones, cobradorId, customers, visitasRecientes, cuentas, hoy, ordenarPor]);
+  }, [asignaciones, cobradorId, clientes, visitasConPromesa, cuentas, hoy, ordenarPor]);
 
   const resumen = useMemo(() => resumenDelCobrador(
     abonos.filter((a) => a.collectorId === cobradorId).map((a) => ({
@@ -65,11 +65,11 @@ export default function CobranzaPage() {
   // La última visita de hoy de cada cliente, para marcar lo ya visitado.
   const visitadoHoy = useMemo(() => {
     const m = new Map<string, string>();
-    for (const v of visitasRecientes) {
+    for (const v of visitasDeHoy) {
       if (fechaLocal(v.createdAt) === hoy && !m.has(v.customerId)) m.set(v.customerId, TEXTO_RESULTADO[v.outcome]);
     }
     return m;
-  }, [visitasRecientes, hoy]);
+  }, [visitasDeHoy, hoy]);
 
   const porCobrar = paradas.reduce((s, p) => s + p.sugerido, 0);
   const puedeCobrar = !!miCobrador;
@@ -193,7 +193,7 @@ export default function CobranzaPage() {
         nombre={cobrar ? cliente(cobrar.customerId)?.name ?? 'Cliente' : ''}
         open={!!cobrar}
         onOpenChange={(o) => !o && setCobrar(null)}
-        onCobrar={cobranza.registrarAbono}
+        onCobrar={async (a) => { const r = await cobranza.registrarAbono(a); await datos.reload(); return r; }}
       />
       <VisitaDialog
         customerId={visita?.customerId ?? null}

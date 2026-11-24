@@ -195,6 +195,8 @@ begin
   p2 := (cobranza_registrar_abono('prestamo', '00000000-0000-0000-0000-00000000e611', null, 200, 'cash', null, null))->>'payment_id';
   perform pg_temp.como(yo);
   r := close_caja_session(s2, 0, null);
+  perform pg_temp.igual((select (breakdown->>'movementsIn')::numeric from caja_sessions where id = s2), 450::numeric, 'el cierre cuenta la entrega');
+  perform pg_temp.igual((select (breakdown->>'loanCashPayments')::numeric from caja_sessions where id = s2), 0::numeric, 'y no los abonos de la calle');
   r := void_loan_payment(p2, 'prueba');
   perform pg_temp.igual((r->>'cash_returned')::boolean, false, 'sin caja: no sale nada');
 
@@ -203,9 +205,24 @@ begin
   perform pg_temp.como(cc56);
   p3 := (cobranza_registrar_abono('prestamo', '00000000-0000-0000-0000-00000000e611', null, 100, 'cash', null, null))->>'payment_id';
   perform pg_temp.como(yo);
-  ent := cobranza_recibir_entrega('00000000-0000-0000-0000-00000000e6c1', 100, null);
+  -- El cajero contó con un esperado que ya no es: la base lo rechaza.
+  perform pg_temp.debe_fallar($q$select cobranza_recibir_entrega('00000000-0000-0000-0000-00000000e6c1', 100, null, 300)$q$, '%cambió%');
+  ent := cobranza_recibir_entrega('00000000-0000-0000-0000-00000000e6c1', 100, null, 100);
+  perform pg_temp.igual((ent->>'expected')::numeric, 100::numeric, 'el anulado no se espera');
   perform pg_temp.igual((select caja_movement_id from collector_settlements where id = (ent->>'settlement_id')::uuid), null::uuid, 'entrega sin caja');
   perform pg_temp.igual((select settlement_id from loan_payments where id = p3), (ent->>'settlement_id')::uuid, 'liquidado sin caja');
+
+  -- Sin señal, el cobrador repite el cobro: con el mismo identificador no se cobra dos veces.
+  perform pg_temp.como(cc56);
+  r := cobranza_registrar_abono('prestamo', '00000000-0000-0000-0000-00000000e611', null, 75, 'cash', null, null, '00000000-0000-0000-0000-00000000e6f1');
+  ent := cobranza_registrar_abono('prestamo', '00000000-0000-0000-0000-00000000e611', null, 75, 'cash', null, null, '00000000-0000-0000-0000-00000000e6f1');
+  perform pg_temp.igual((ent->>'repetido')::boolean, true, 'cobro repetido');
+  perform pg_temp.igual((ent->>'payment_id')::uuid, (r->>'payment_id')::uuid, 'el mismo abono');
+  perform pg_temp.igual((select count(*)::int from loan_payments where loan_id = '00000000-0000-0000-0000-00000000e611' and amount = 75), 1, 'un solo abono');
+  perform pg_temp.como(yo);
+
+  -- Un cobrador con abonos o entregas no se puede borrar (ni su usuario, que arrastra la fila).
+  perform pg_temp.debe_fallar($q$delete from collectors where id = '00000000-0000-0000-0000-00000000e6c1'$q$, '%violates foreign key%');
 end $$;
 
 -- Abono general del cliente: reparte entre sus ventas a crédito, queda en la calle.

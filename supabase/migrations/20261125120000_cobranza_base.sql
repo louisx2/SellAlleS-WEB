@@ -84,6 +84,7 @@ create table public.collection_visits (
   promise_amount  numeric(14,2) check (promise_amount is null or promise_amount > 0),
   note            text,
   payment_id      uuid,
+  request_id      uuid,
   created_by      uuid references public.profiles(id) on delete set null default auth.uid(),
   created_by_name text,
   created_at      timestamptz not null default clock_timestamp(),
@@ -91,6 +92,8 @@ create table public.collection_visits (
 );
 create index collection_visits_customer_idx on public.collection_visits(branch_id, customer_id, created_at);
 create index collection_visits_promesas_idx on public.collection_visits(branch_id, promise_date) where outcome = 'promesa';
+-- El identificador del cobro que manda el teléfono: repetirlo (sin señal) no cobra dos veces.
+create unique index collection_visits_request_uq on public.collection_visits(request_id) where request_id is not null;
 
 -- 5. Entregas del cobrador ------------------------------------------------------------------
 
@@ -98,7 +101,7 @@ create table public.collector_settlements (
   id               uuid primary key default gen_random_uuid(),
   company_id       uuid not null default public.current_company_id() references public.companies(id) on delete cascade,
   branch_id        uuid not null references public.branches(id) on delete cascade,
-  collector_id     uuid not null references public.collectors(id) on delete cascade,
+  collector_id     uuid not null references public.collectors(id) on delete restrict,
   expected         numeric(14,2) not null,
   received         numeric(14,2) not null check (received >= 0),
   difference       numeric(14,2) generated always as (received - expected) stored,
@@ -112,15 +115,18 @@ create index collector_settlements_collector_idx on public.collector_settlements
 
 -- 6. Abonos en la calle ------------------------------------------------------------------------
 -- en_calle: efectivo en el bolsillo del cobrador hasta la entrega (settlement_id).
+-- `restrict`: un cobrador con abonos o entregas no se borra (tampoco su usuario, que
+-- arrastra la fila de collectors); se desmarca. Si no, el efectivo en la calle se
+-- quedaría sin dueño y las entregas desaparecerían.
 
 alter table public.loan_payments
-  add column collector_id  uuid references public.collectors(id) on delete set null,
+  add column collector_id  uuid references public.collectors(id) on delete restrict,
   add column en_calle      boolean not null default false,
-  add column settlement_id uuid references public.collector_settlements(id) on delete set null;
+  add column settlement_id uuid references public.collector_settlements(id) on delete restrict;
 alter table public.credit_payments
-  add column collector_id  uuid references public.collectors(id) on delete set null,
+  add column collector_id  uuid references public.collectors(id) on delete restrict,
   add column en_calle      boolean not null default false,
-  add column settlement_id uuid references public.collector_settlements(id) on delete set null;
+  add column settlement_id uuid references public.collector_settlements(id) on delete restrict;
 create index loan_payments_en_mano_idx on public.loan_payments(collector_id) where en_calle and settlement_id is null;
 create index credit_payments_en_mano_idx on public.credit_payments(collector_id) where en_calle and settlement_id is null;
 

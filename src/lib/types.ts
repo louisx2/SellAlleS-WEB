@@ -1288,7 +1288,7 @@ export type EntregaDeCobrador = {
 };
 
 /** Lo que devuelve un cobro de la ruta, para mostrarlo al terminar. */
-export type CobroDeRuta = { paymentId: string; aplicado: number; mora: number; saldo: number | null; enCalle: boolean };
+export type CobroDeRuta = { paymentId: string; aplicado: number; mora: number; saldo: number | null; enCalle: boolean; repetido?: boolean };
 
 /** Lo que devuelve recibir una entrega. */
 export type EntregaRecibida = { settlementId: string; expected: number; received: number; difference: number; payments: number };

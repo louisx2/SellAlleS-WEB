@@ -9,7 +9,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Search } from 'lucide-react';
-import { useCustomers } from '@/context/customer-provider';
 import { useToast } from '@/hooks/use-toast';
 import { useCobranza, useCuentasDeCobro } from '@/hooks/use-cobranza';
 import { formatCurrency } from '@/lib/utils';
@@ -21,9 +20,9 @@ const SIN_ZONA = '__sin_zona__';
 // cobrador y orden de visita. Se eligen varios y se asignan o se quitan.
 export default function AsignarCarteraPage() {
   const { toast } = useToast();
-  const { customers } = useCustomers();
-  const { cobradores, asignaciones, asignar, quitarAsignacion, ordenar, loading } = useCobranza();
-  const cuentas = useCuentasDeCobro();
+  const { cobradores, asignaciones, asignar, quitarAsignacion, ordenar, loading: cargandoCartera } = useCobranza();
+  const { cuentas, clientes, loading: cargandoCuentas } = useCuentasDeCobro();
+  const loading = cargandoCartera || cargandoCuentas;
   const [q, setQ] = useState('');
   const [zona, setZona] = useState('todas');
   const [atraso, setAtraso] = useState<Atraso>('todos');
@@ -42,7 +41,7 @@ export default function AsignarCarteraPage() {
       porCliente.set(c.customerId, f);
     }
     return [...porCliente.entries()].map(([customerId, f]) => {
-      const cliente = customers.find((c) => c.id === customerId);
+      const cliente = clientes.get(customerId);
       const asignacion = asignaciones.find((a) => a.customerId === customerId);
       return {
         customerId, ...f,
@@ -53,7 +52,7 @@ export default function AsignarCarteraPage() {
         cobrador: cobradores.find((c) => c.id === asignacion?.collectorId)?.name,
       };
     }).sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'));
-  }, [cuentas, customers, asignaciones, cobradores]);
+  }, [cuentas, clientes, asignaciones, cobradores]);
 
   const zonas = useMemo(() => [...new Set(filas.map((f) => f.zona).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es')), [filas]);
 

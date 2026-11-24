@@ -20,12 +20,12 @@ interface Props {
   usaCaja: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onRecibir: (collectorId: string, recibido: number, nota?: string) => Promise<EntregaRecibida>;
+  onRecibir: (collectorId: string, recibido: number, nota: string | undefined, esperado: number) => Promise<EntregaRecibida>;
 }
 
 // Recibir la entrega del cobrador: se cuenta el efectivo y se declara lo
-// recibido. La diferencia queda a su cargo y sale en el historial; la base
-// vuelve a sumar lo esperado al confirmar.
+// recibido. La diferencia queda a su cargo y sale en el historial. Se manda lo
+// esperado que vio el cajero: si cambió mientras contaba, la base lo rechaza.
 export function EntregaDialog({ cobrador, esperado, abonos, usaCaja, open, onOpenChange, onRecibir }: Props) {
   const { toast } = useToast();
   const [recibido, setRecibido] = useState('');
@@ -48,7 +48,7 @@ export function EntregaDialog({ cobrador, esperado, abonos, usaCaja, open, onOpe
     if (!listo || valor === undefined) return;
     setSaving(true);
     try {
-      const r = await onRecibir(cobrador.id, valor, nota);
+      const r = await onRecibir(cobrador.id, valor, nota, esperado);
       toast({
         title: 'Entrega recibida',
         description: r.difference === 0

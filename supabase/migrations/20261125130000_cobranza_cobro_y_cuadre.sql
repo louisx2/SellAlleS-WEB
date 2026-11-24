@@ -423,7 +423,7 @@ $$;
 
 create or replace function public.cobranza_registrar_abono(
   p_tipo text, p_id uuid, p_branch_id uuid, p_amount numeric, p_method text,
-  p_reference text default null, p_notes text default null)
+  p_reference text default null, p_notes text default null, p_request_id uuid default null)
 returns jsonb
 language plpgsql
 security definer
@@ -439,6 +439,23 @@ declare
 begin
   if p_method not in ('cash', 'transfer') then
     raise exception 'Método de pago no válido.';
+  end if;
+  -- Sin señal el cobrador repite el cobro con el mismo identificador: se devuelve
+  -- el abono que ya quedó, no se crea otro. El candado ordena dos envíos a la vez.
+  if p_request_id is not null then
+    perform pg_advisory_xact_lock(hashtextextended(p_request_id::text, 0));
+    select v.payment_id into v_pago from public.collection_visits v
+     where v.request_id = p_request_id and v.company_id = public.current_company_id();
+    if found then
+      return coalesce(
+        (select jsonb_build_object('payment_id', id, 'amount', amount, 'late_fee_paid', late_fee_paid,
+                                   'principal_paid', amount - late_fee_paid, 'en_calle', en_calle)
+           from public.loan_payments where id = v_pago),
+        (select jsonb_build_object('payment_id', id, 'amount', amount, 'late_fee_paid', late_fee_paid,
+                                   'principal_paid', amount - late_fee_paid, 'en_calle', en_calle)
+           from public.credit_payments where id = v_pago),
+        jsonb_build_object('payment_id', v_pago)) || jsonb_build_object('repetido', true);
+    end if;
   end if;
   if p_tipo = 'prestamo' then
     select branch_id, customer_id, company_id into v_branch, v_customer, v_company from public.loans where id = p_id;
@@ -473,8 +490,8 @@ begin
     update public.credit_payments set collector_id = v_cobrador, en_calle = (p_method = 'cash') where id = v_pago;
   end if;
 
-  insert into public.collection_visits (company_id, branch_id, customer_id, collector_id, outcome, note, payment_id, created_by_name)
-  values (v_company, v_branch, v_customer, v_cobrador, 'pago', nullif(btrim(coalesce(p_notes, '')), ''), v_pago,
+  insert into public.collection_visits (company_id, branch_id, customer_id, collector_id, outcome, note, payment_id, request_id, created_by_name)
+  values (v_company, v_branch, v_customer, v_cobrador, 'pago', nullif(btrim(coalesce(p_notes, '')), ''), v_pago, p_request_id,
           (select name from public.profiles where id = auth.uid()));
 
   return v_res || jsonb_build_object('payment_id', v_pago, 'en_calle', p_method = 'cash');
@@ -517,7 +534,7 @@ $$;
 
 -- 8. Recibir la entrega del cobrador ----------------------------------------------------------------
 
-create or replace function public.cobranza_recibir_entrega(p_collector_id uuid, p_received numeric, p_note text default null)
+create or replace function public.cobranza_recibir_entrega(p_collector_id uuid, p_received numeric, p_note text default null, p_expected numeric default null)
 returns jsonb
 language plpgsql
 security definer
@@ -532,6 +549,10 @@ declare
   v_set      uuid;
   v_usuario  text := (select name from public.profiles where id = auth.uid());
   v_nombre   text;
+  v_ids_prestamo  uuid[];
+  v_ids_venta     uuid[];
+  v_suma_prestamo numeric;
+  v_suma_venta    numeric;
 begin
   if p_received is null or p_received < 0 then
     raise exception 'El monto recibido no puede ser negativo.';
@@ -544,27 +565,26 @@ begin
     raise exception 'No tienes permiso para recibir entregas de cobradores.';
   end if;
 
-  -- Bloqueados: un abono que se anula o se entrega a la vez espera.
-  perform 1 from public.loan_payments
-   where collector_id = v_col.id and branch_id = v_col.branch_id and method = 'cash'
-     and en_calle and settlement_id is null and voided_at is null
-   for update;
-  perform 1 from public.credit_payments
-   where collector_id = v_col.id and branch_id = v_col.branch_id and method = 'cash'
-     and en_calle and settlement_id is null and voided_at is null
-   for update;
-
-  select coalesce(sum(x.amount), 0), count(*) into v_expected, v_cuantos from (
-    select amount from public.loan_payments
+  -- Se bloquean y se guardan los abonos pendientes: la suma y la liquidación usan
+  -- exactamente esos (uno que entre o se anule a la vez espera o queda fuera).
+  select coalesce(array_agg(id), '{}'), coalesce(sum(amount), 0) into v_ids_prestamo, v_suma_prestamo from (
+    select id, amount from public.loan_payments
      where collector_id = v_col.id and branch_id = v_col.branch_id and method = 'cash'
        and en_calle and settlement_id is null and voided_at is null
-    union all
-    select amount from public.credit_payments
+     for update) x;
+  select coalesce(array_agg(id), '{}'), coalesce(sum(amount), 0) into v_ids_venta, v_suma_venta from (
+    select id, amount from public.credit_payments
      where collector_id = v_col.id and branch_id = v_col.branch_id and method = 'cash'
        and en_calle and settlement_id is null and voided_at is null
-  ) x;
+     for update) x;
+  v_expected := v_suma_prestamo + v_suma_venta;
+  v_cuantos := cardinality(v_ids_prestamo) + cardinality(v_ids_venta);
   if v_cuantos = 0 then
     raise exception 'Este cobrador no tiene abonos en efectivo sin entregar.';
+  end if;
+  -- El cajero contó contra lo que vio: si cambió mientras contaba, que lo vea.
+  if p_expected is not null and round(p_expected, 2) <> round(v_expected, 2) then
+    raise exception 'Lo cobrado cambió mientras contabas: ahora son RD$%. Vuelve a abrir la entrega.', to_char(v_expected, 'FM999,999,990.00');
   end if;
 
   select name into v_nombre from public.profiles where id = v_col.profile_id;
@@ -591,12 +611,8 @@ begin
      nullif(btrim(coalesce(p_note, '')), ''), v_mov, v_usuario)
   returning id into v_set;
 
-  update public.loan_payments set settlement_id = v_set
-   where collector_id = v_col.id and branch_id = v_col.branch_id and method = 'cash'
-     and en_calle and settlement_id is null and voided_at is null;
-  update public.credit_payments set settlement_id = v_set
-   where collector_id = v_col.id and branch_id = v_col.branch_id and method = 'cash'
-     and en_calle and settlement_id is null and voided_at is null;
+  update public.loan_payments set settlement_id = v_set where id = any(v_ids_prestamo);
+  update public.credit_payments set settlement_id = v_set where id = any(v_ids_venta);
 
   return jsonb_build_object(
     'settlement_id', v_set,
@@ -625,9 +641,9 @@ create policy vehicles_select on public.vehicles
 
 revoke execute on function public.cobranza_control_de_ruta(uuid, uuid) from public, anon, authenticated;
 grant execute on function public.cobranza_control_de_ruta(uuid, uuid) to service_role;
-revoke execute on function public.cobranza_registrar_abono(text, uuid, uuid, numeric, text, text, text) from public, anon;
+revoke execute on function public.cobranza_registrar_abono(text, uuid, uuid, numeric, text, text, text, uuid) from public, anon;
 revoke execute on function public.cobranza_registrar_visita(uuid, uuid, text, date, numeric, text) from public, anon;
-revoke execute on function public.cobranza_recibir_entrega(uuid, numeric, text) from public, anon;
-grant execute on function public.cobranza_registrar_abono(text, uuid, uuid, numeric, text, text, text) to authenticated, service_role;
+revoke execute on function public.cobranza_recibir_entrega(uuid, numeric, text, numeric) from public, anon;
+grant execute on function public.cobranza_registrar_abono(text, uuid, uuid, numeric, text, text, text, uuid) to authenticated, service_role;
 grant execute on function public.cobranza_registrar_visita(uuid, uuid, text, date, numeric, text) to authenticated, service_role;
-grant execute on function public.cobranza_recibir_entrega(uuid, numeric, text) to authenticated, service_role;
+grant execute on function public.cobranza_recibir_entrega(uuid, numeric, text, numeric) to authenticated, service_role;

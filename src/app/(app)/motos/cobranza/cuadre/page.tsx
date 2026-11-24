@@ -5,11 +5,10 @@ import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { useCustomers } from '@/context/customer-provider';
 import { useCaja } from '@/context/caja-provider';
 import { useModules } from '@/context/modules-provider';
 import { usePermission } from '@/hooks/use-permission';
-import { useCobranza } from '@/hooks/use-cobranza';
+import { useCobranza, useCuentasDeCobro } from '@/hooks/use-cobranza';
 import { formatCurrency, cn } from '@/lib/utils';
 import { EntregaDialog } from '@/components/motos/cobranza/entrega-dialog';
 import type { Cobrador } from '@/lib/types';
@@ -19,7 +18,7 @@ const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-DO', { day: 
 // Cuadre de los cobradores de la sucursal: el efectivo que cobró cada uno y
 // todavía no entregó, recibir la entrega y el historial de entregas.
 export default function CuadreCobradoresPage() {
-  const { customers } = useCustomers();
+  const { clientes } = useCuentasDeCobro();
   const { isOpen, branchUsesCaja } = useCaja();
   const { isModuleEnabled } = useModules();
   const puedeRecibir = usePermission('cobranza-cuadre', 'create');
@@ -27,7 +26,7 @@ export default function CuadreCobradoresPage() {
   const [recibir, setRecibir] = useState<Cobrador | null>(null);
 
   const usaCaja = isModuleEnabled('caja') && branchUsesCaja === true;
-  const nombreCliente = (id: string) => customers.find((c) => c.id === id)?.name ?? 'Cliente';
+  const nombreCliente = (id: string) => clientes.get(id)?.name ?? 'Cliente';
   const nombreCobrador = (id: string) => cobradores.find((c) => c.id === id)?.name ?? 'Cobrador';
 
   const porCobrador = useMemo(() => cobradores
