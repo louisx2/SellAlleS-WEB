@@ -206,6 +206,18 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 > la suite. Front sin fusionar. Diferencias con lo de abajo: el cajero ve las unidades con
 > `pos:view` para elegir el chasis; el selector se abre desde el carrito, así que sale por
 > tarjeta, búsqueda o código igual.
+>
+> **Estado 2B (2026-11-24):** construida en la rama `claude/motoprestamos-entrega-2b` (sobre
+> 2A). Migraciones `20261124180000_motos_datos_del_cliente` y
+> `20261124190000_motos_garantia_y_matriculas` **aplicadas en producción**, con las suites
+> `motos_clientes.sql` y `motos_garantia.sql` pasando contra lo aplicado. Diferencias con lo de
+> abajo: el enlace préstamo ↔ moto es `vehicles.loan_id` (como `sale_id`), no la tabla
+> `loan_collaterals` (el historial queda en `vehicle_events.loan_id`); el préstamo sin
+> garantía sigue por el insert de siempre y la RPC `motos_crear_prestamo` solo se usa con
+> garantía; saldar, anular el abono y refinanciar los resuelven triggers sobre `loans` y
+> `sales` (no se tocaron las funciones de abonos ni de refinanciación); la venta de una moto
+> que después se dio en garantía ya no se puede anular. Pasan a 2C: exigir garante, custodia
+> por defecto, fotos de la cédula, contrato y portal.
 
 ### Catálogo, rubro y menú
 
