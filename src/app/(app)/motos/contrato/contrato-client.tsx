@@ -9,7 +9,7 @@ import { ArrowLeft, Printer } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { useMotosAjustes } from '@/hooks/use-motos-ajustes';
-import { CONTRATO_BASE, garantesComoTexto, llenarContrato, montoRD, type TipoContrato } from '@/lib/contrato';
+import { CONTRATO_BASE, garantesComoTexto, llenarContrato, montoRD, tasaComoTexto, type TipoContrato } from '@/lib/contrato';
 import { ContratoDocumento, type CuotaDelPlan } from '@/components/motos/contrato-documento';
 
 // Cómo se leen las frecuencias dentro del texto ("52 cuotas semanales").
@@ -75,7 +75,6 @@ export default function ContratoClient() {
         .sort((a, b) => a.installment_number - b.installment_number)
         .map((x) => ({ numero: x.installment_number, fecha: dia(x.due_date), monto: Number(x.amount) }));
       const frecuencia = esVenta ? (fd.frequency ?? 'monthly') : c.payment_frequency;
-      const tasa = esVenta ? fd.interestRate : c.interest_rate;
 
       setDatos({
         plan,
@@ -90,9 +89,16 @@ export default function ContratoClient() {
           cuotas: plan.length ? String(plan.length) : (esVenta ? fd.installments : c.installments_count)?.toString(),
           frecuencia: FRECUENCIA[frecuencia] ?? '',
           cuota: montoRD(plan[0]?.monto ?? (esVenta ? fd.installmentAmount : undefined)),
-          tasa: tasa != null ? `${Number(tasa)}%` : undefined,
+          // Con su unidad: un financiamiento con interés por cuota no es "mensual".
+          tasa: esVenta
+            ? tasaComoTexto(fd.interestRate != null ? Number(fd.interestRate) : undefined, fd.interestMode)
+            : tasaComoTexto(Number(c.interest_rate), 'monthly_prorated'),
           total: montoRD(esVenta ? Number(fd.totalWithInterest ?? c.total) : Number(c.total_with_interest)),
           primera_cuota: plan[0]?.fecha,
+          // La fecha del contrato es la de la venta o el préstamo, no la de imprimir.
+          fecha: new Date(c.created_at).toLocaleDateString('es-DO', {
+            day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Santo_Domingo',
+          }),
           garantes: garantesComoTexto((garantes ?? []).map((g: any) => ({ name: g.name, idDoc: g.id_doc ?? undefined, phone: g.phone ?? undefined }))),
         },
       });
@@ -107,7 +113,6 @@ export default function ContratoClient() {
       ...datos.valores,
       'empresa.nombre': profile.name, 'empresa.rnc': profile.rnc, 'empresa.direccion': profile.address,
       'empresa.telefono': profile.phone,
-      fecha: new Date().toLocaleDateString('es-DO', { day: 'numeric', month: 'long', year: 'numeric' }),
     });
   }, [datos, cargandoAjustes, tipo, ajustes.contractSale, ajustes.contractLoan, profile.name, profile.rnc, profile.address, profile.phone]);
 

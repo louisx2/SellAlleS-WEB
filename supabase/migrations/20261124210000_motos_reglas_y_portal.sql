@@ -17,9 +17,13 @@ stable
 security definer
 set search_path = public
 as $$
+  -- Los valores por defecto van por nombre: una columna nueva en motos_settings
+  -- no rompe esta función (ni, con ella, toda venta de motos).
   select coalesce(
     (select s from public.motos_settings s where s.company_id = p_company),
-    (p_company, true, false, true, false, null::text, null::text, now())::public.motos_settings);
+    jsonb_populate_record(null::public.motos_settings, jsonb_build_object(
+      'company_id', p_company, 'custody_financed_sale', true, 'custody_cash_sale', false,
+      'custody_loan', true, 'require_guarantor', false)));
 $$;
 
 -- 2. Vender una moto: custodia según los ajustes y garante si se exige ----------------
@@ -63,7 +67,10 @@ begin
 
   v_aj := public.motos_ajuste(v_sale.company_id);
   v_a_plazo := v_sale.payment_status::text in ('credit', 'in_financing');
+  -- Como en los préstamos: solo con el módulo encendido (un ajuste viejo no traba
+  -- a quien apagó el módulo).
   if v_a_plazo and v_aj.require_guarantor
+     and public.is_module_enabled(v_sale.company_id, 'motoprestamos', false)
      and not exists (select 1 from public.customer_guarantors g where g.customer_id = v_sale.customer_id) then
     raise exception 'Este cliente no tiene garante y el negocio lo exige para financiar o prestar. Agrégalo en el expediente del cliente.';
   end if;
@@ -262,3 +269,7 @@ revoke execute on function public.motos_ajuste(uuid) from public, anon, authenti
 grant execute on function public.motos_ajuste(uuid) to service_role;
 revoke execute on function public.motos_exigir_garante() from public, anon, authenticated;
 grant execute on function public.motos_exigir_garante() to service_role;
+-- El portal la llama desde el servidor (portal-data, service role). Lo vivo ya es
+-- así; se deja escrito para que un create or replace futuro no lo cambie.
+revoke execute on function public.resolve_portal_customers(text) from public, anon, authenticated;
+grant execute on function public.resolve_portal_customers(text) to service_role;

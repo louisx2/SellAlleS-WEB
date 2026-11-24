@@ -32,10 +32,14 @@ export function ContratosTab({ canEdit }: { canEdit: boolean }) {
   const [textos, setTextos] = useState<Record<TipoContrato, string>>({ venta: CONTRATO_BASE.venta, prestamo: CONTRATO_BASE.prestamo });
   const [saving, setSaving] = useState(false);
   const area = useRef<HTMLTextAreaElement>(null);
+  const iniciado = useRef(false);
 
-  // Al cargar los ajustes: lo guardado, o el texto base.
+  // Solo la primera carga llena las cajas (lo guardado, o el texto base). Guardar
+  // recarga los ajustes: si esto corriera otra vez, borraría lo que se está
+  // editando en el otro contrato.
   useEffect(() => {
-    if (loading) return;
+    if (loading || iniciado.current) return;
+    iniciado.current = true;
     setTextos({ venta: ajustes.contractSale ?? CONTRATO_BASE.venta, prestamo: ajustes.contractLoan ?? CONTRATO_BASE.prestamo });
   }, [loading, ajustes.contractSale, ajustes.contractLoan]);
 

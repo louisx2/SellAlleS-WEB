@@ -222,9 +222,37 @@ begin
   perform pg_temp.igual((select l->'vehicles'->0->>'plate' from jsonb_array_elements(b->'loans') l where l->>'id' = l_moto::text), 'P-777', 'placa en el préstamo');
   perform pg_temp.igual((select l->'vehicles'->0->>'registrationStatus' from jsonb_array_elements(b->'loans') l where l->>'id' = l_moto::text), 'lista_para_entregar', 'matrícula del préstamo');
   perform pg_temp.igual((select l->'vehicles' from jsonb_array_elements(b->'loans') l where l->>'id' = l_sin_moto::text), '[]'::jsonb, 'préstamo sin moto');
+  perform pg_temp.igual((select jsonb_array_length(l->'installments') from jsonb_array_elements(b->'loans') l where l->>'id' = l_moto::text), 4, 'cuotas en el portal');
+  perform pg_temp.igual((select jsonb_array_length(l->'payments') from jsonb_array_elements(b->'loans') l where l->>'id' = l_moto::text), 1, 'abonos en el portal');
   perform pg_temp.igual(jsonb_array_length(b->'registrationsReady'), 1, 'matrículas listas');
   perform pg_temp.igual(b->'registrationsReady'->0->>'plate', 'P-777', 'matrícula lista del cliente');
   perform pg_temp.igual(position('P-3' in b::text), 0, 'no salen motos de otro cliente');
+end $$;
+
+-- ---------------------------------------------------------------------------
+-- 3. Revisión final: ajustes con columnas nuevas, módulo apagado y portal
+-- ---------------------------------------------------------------------------
+
+-- La función del portal solo la llama el servidor (portal-data).
+select pg_temp.igual(has_function_privilege('anon', 'public.resolve_portal_customers(text)', 'EXECUTE'), false, 'anon y portal');
+select pg_temp.igual(has_function_privilege('authenticated', 'public.resolve_portal_customers(text)', 'EXECUTE'), false, 'authenticated y portal');
+
+do $$
+begin
+  -- Con el módulo apagado, un ajuste viejo de «exigir garante» no traba la venta
+  -- financiada de una moto (igual que los préstamos).
+  update company_modules set enabled = false
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'motoprestamos';
+  perform pg_temp.vender('00000000-0000-0000-0000-00000000e515', '00000000-0000-0000-0000-00000000e520', 'financing');
+  perform pg_temp.igual(pg_temp.matricula('00000000-0000-0000-0000-00000000e515'), 'en_custodia', 'financiada con el módulo apagado');
+  update company_modules set enabled = true
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'motoprestamos';
+
+  -- Una columna nueva en los ajustes (p. ej. el texto de WhatsApp de la entrega 3)
+  -- no rompe la lectura de los ajustes, con o sin fila.
+  alter table motos_settings add column prueba_columna_nueva text;
+  perform pg_temp.igual((motos_ajuste('00000000-0000-0000-0000-0000000000aa')).require_guarantor, true, 'ajustes con fila y columna nueva');
+  perform pg_temp.igual((motos_ajuste('b463d8b5-b589-4194-b0c3-2a912b58b7c9')).custody_loan, true, 'ajustes por defecto con columna nueva');
 end $$;
 
 select 'ok';

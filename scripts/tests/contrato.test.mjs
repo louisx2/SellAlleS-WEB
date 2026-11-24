@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  CONTRATO_BASE, MARCADORES, garantesComoTexto, llenarContrato, marcadoresDesconocidos, montoRD,
+  CONTRATO_BASE, MARCADORES, garantesComoTexto, llenarContrato, marcadoresDesconocidos, montoRD, tasaComoTexto,
 } from '../../src/lib/contrato.ts';
 
 const texto = (segmentos) => segmentos.map((s) => (s.tipo === 'texto' ? s.texto : '[PLAN]')).join('');
@@ -55,4 +55,24 @@ test('garantes en una línea, con o sin cédula', () => {
     'Juana Pérez, cédula 001-0000000-1, tel. 809-555-0001; Pedro Gómez',
   );
   assert.equal(garantesComoTexto([]), '');
+});
+
+// Revisión final 2C: marcadores con espacios o mayúsculas se llenan; los mal
+// escritos (con espacios por dentro, números o guiones) se avisan.
+test('marcadores con espacios o mayúsculas se llenan; los mal escritos se avisan', () => {
+  assert.equal(texto(llenarContrato('{ cliente.nombre } paga {CUOTA}{plan }', { 'cliente.nombre': 'Ana', cuota: 'RD$100.00' })),
+    'Ana paga RD$100.00[PLAN]');
+  assert.deepEqual(marcadoresDesconocidos('{cliente. nombre} {monto1} {cliente-nombre} { cuota }'),
+    ['{cliente. nombre}', '{monto1}', '{cliente-nombre}']);
+});
+
+// La tasa lleva su unidad: un financiamiento por cuota no es "mensual".
+test('la tasa lleva su unidad según cómo se cobra el interés', () => {
+  assert.equal(tasaComoTexto(5, 'monthly_prorated'), '5% mensual');
+  assert.equal(tasaComoTexto(5, undefined), '5% mensual');
+  assert.equal(tasaComoTexto(2.5, 'per_installment'), '2.5% por cuota');
+  assert.equal(tasaComoTexto(undefined, 'monthly_prorated'), '');
+  for (const tipo of ['venta', 'prestamo']) {
+    assert.doesNotMatch(CONTRATO_BASE[tipo], /\{tasa\} mensual/, tipo);
+  }
 });

@@ -66,7 +66,8 @@ export default function MotosConfigPage() {
           <TabsTrigger value="contratos">Contratos</TabsTrigger>
           <TabsTrigger value="general">General</TabsTrigger>
         </TabsList>
-        <TabsContent value="contratos"><ContratosTab canEdit={canEdit} /></TabsContent>
+        {/* Montada siempre: cambiar de pestaña no pierde lo escrito en un contrato. */}
+        <TabsContent value="contratos" forceMount className="data-[state=inactive]:hidden"><ContratosTab canEdit={canEdit} /></TabsContent>
         <TabsContent value="general"><GeneralTab canEdit={canEdit} /></TabsContent>
         <TabsContent value="tipos">
       <Card>

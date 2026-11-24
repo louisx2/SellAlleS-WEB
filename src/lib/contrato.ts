@@ -28,7 +28,7 @@ export const MARCADORES: { clave: string; descripcion: string }[] = [
   { clave: 'cuotas', descripcion: 'Cantidad de cuotas' },
   { clave: 'frecuencia', descripcion: 'Frecuencia de las cuotas (semanales, mensuales…)' },
   { clave: 'cuota', descripcion: 'Monto de cada cuota' },
-  { clave: 'tasa', descripcion: 'Interés mensual' },
+  { clave: 'tasa', descripcion: 'Interés con su unidad (5% mensual, 5% por cuota)' },
   { clave: 'total', descripcion: 'Total a pagar' },
   { clave: 'primera_cuota', descripcion: 'Fecha de la primera cuota' },
   { clave: 'fecha', descripcion: 'Fecha del contrato' },
@@ -37,7 +37,11 @@ export const MARCADORES: { clave: string; descripcion: string }[] = [
 ];
 
 const CONOCIDAS = new Set(MARCADORES.map((m) => m.clave));
-const MARCADOR = /\{([\p{L}_.]+)\}/gu;
+// Todo lo que va entre llaves (sin saltos de línea) es un marcador: así se avisa
+// también de los mal escritos ({monto1}, {cliente-nombre}). Espacios en los
+// bordes y mayúsculas no cuentan.
+const MARCADOR = /\{([^{}\n]+)\}/gu;
+const claveDe = (crudo: string) => crudo.trim().toLowerCase();
 const HUECO = '________';
 
 const AVISO = 'Este es un modelo de referencia. Revíselo con su abogado antes de usarlo.';
@@ -53,7 +57,7 @@ ${PARTES}, en lo adelante EL VENDEDOR; ${CLIENTE}, en lo adelante EL COMPRADOR, 
 
 PRIMERO: EL VENDEDOR vende a EL COMPRADOR, bajo la modalidad de venta condicional, el vehículo ${MOTO}.
 
-SEGUNDO: El precio de venta es de {monto}. EL COMPRADOR entrega un inicial de {inicial} y se obliga a pagar el resto en {cuotas} cuotas {frecuencia} de {cuota} cada una, con un interés de {tasa} mensual, para un total de {total}. La primera cuota vence el {primera_cuota}, según el plan siguiente:
+SEGUNDO: El precio de venta es de {monto}. EL COMPRADOR entrega un inicial de {inicial} y se obliga a pagar el resto en {cuotas} cuotas {frecuencia} de {cuota} cada una, con un interés de {tasa}, para un total de {total}. La primera cuota vence el {primera_cuota}, según el plan siguiente:
 
 {plan}
 
@@ -77,7 +81,7 @@ ${PARTES}, en lo adelante EL ACREEDOR; ${CLIENTE}, en lo adelante EL DEUDOR, se 
 
 PRIMERO: EL ACREEDOR presta a EL DEUDOR la suma de {monto}, que EL DEUDOR declara haber recibido.
 
-SEGUNDO: EL DEUDOR pagará {cuotas} cuotas {frecuencia} de {cuota} cada una, con un interés de {tasa} mensual, para un total de {total}. La primera cuota vence el {primera_cuota}, según el plan siguiente:
+SEGUNDO: EL DEUDOR pagará {cuotas} cuotas {frecuencia} de {cuota} cada una, con un interés de {tasa}, para un total de {total}. La primera cuota vence el {primera_cuota}, según el plan siguiente:
 
 {plan}
 
@@ -106,7 +110,7 @@ export function llenarContrato(plantilla: string, valores: Record<string, string
   for (const m of plantilla.matchAll(MARCADOR)) {
     texto += plantilla.slice(desde, m.index);
     desde = (m.index ?? 0) + m[0].length;
-    const clave = m[1];
+    const clave = claveDe(m[1]);
     if (clave === 'plan') {
       if (texto) segmentos.push({ tipo: 'texto', texto });
       segmentos.push({ tipo: 'plan' });
@@ -126,7 +130,7 @@ export function llenarContrato(plantilla: string, valores: Record<string, string
 export function marcadoresDesconocidos(plantilla: string): string[] {
   const vistos: string[] = [];
   for (const m of plantilla.matchAll(MARCADOR)) {
-    if (!CONOCIDAS.has(m[1]) && !vistos.includes(m[0])) vistos.push(m[0]);
+    if (!CONOCIDAS.has(claveDe(m[1])) && !vistos.includes(m[0])) vistos.push(m[0]);
   }
   return vistos;
 }
@@ -144,4 +148,11 @@ export function garantesComoTexto(garantes: { name: string; idDoc?: string; phon
     .map((g) => [g.name.trim(), g.idDoc?.trim() ? `cédula ${g.idDoc.trim()}` : '', g.phone?.trim() ? `tel. ${g.phone.trim()}` : '']
       .filter(Boolean).join(', '))
     .join('; ');
+}
+
+/** La tasa con su unidad: "5% mensual" o "5% por cuota" (financiamiento con
+ *  interés por cuota). Los préstamos usan tasa mensual. */
+export function tasaComoTexto(tasa: number | undefined | null, modo?: 'monthly_prorated' | 'per_installment'): string {
+  if (tasa == null || Number.isNaN(tasa)) return '';
+  return `${tasa}% ${modo === 'per_installment' ? 'por cuota' : 'mensual'}`;
 }
