@@ -113,4 +113,118 @@ select pg_temp.igual((select count(*)::int from vehicle_photos where vehicle_id 
 select pg_temp.igual((select count(*)::int from customer_photos where customer_id = '00000000-0000-0000-0000-00000000e503'), 0, 'fotos del cliente borradas');
 delete from motos_settings where company_id = '00000000-0000-0000-0000-0000000000aa';
 
+-- ---------------------------------------------------------------------------
+-- 2. Custodia por defecto, exigir garante y portal (Task 2)
+-- ---------------------------------------------------------------------------
+
+-- Vende por create_sale_with_items una moto (de contado o financiada).
+create function pg_temp.vender(p_vehicle uuid, p_customer uuid, p_method text) returns uuid
+language plpgsql as $$
+declare v_id uuid;
+begin
+  select s.id into v_id from create_sale_with_items(
+    jsonb_build_object(
+      'branch_id', '00000000-0000-0000-0000-0000000000b1', 'customer_id', p_customer,
+      'subtotal', 95000, 'itbis_amount', 0, 'total', 95000,
+      'payment_method', p_method,
+      'payment_status', case when p_method = 'financing' then 'in_financing' else 'paid' end,
+      'amount_paid', case when p_method = 'financing' then 0 else 95000 end,
+      'financing_details', case when p_method = 'financing'
+        then '{"interestRate":5,"installments":12,"frequency":"monthly","interestMode":"monthly_prorated"}'::jsonb end),
+    jsonb_build_array(jsonb_build_object(
+      'product_id', '00000000-0000-0000-0000-00000000e510', 'product_name', 'Moto', 'quantity', 1, 'price', 95000,
+      'itbis', false, 'unit', 'und', 'vehicle_id', p_vehicle))) s;
+  return v_id;
+end $$;
+
+-- Préstamo como lo crea el front (insert directo).
+create function pg_temp.prestamo(p_customer uuid) returns uuid
+language plpgsql as $$
+declare v_id uuid;
+begin
+  insert into loans (branch_id, customer_id, principal, interest_rate, installments_count, payment_frequency, disbursement_method)
+  values ('00000000-0000-0000-0000-0000000000b1', p_customer, 5000, 5, 2, 'monthly', 'transfer')
+  returning id into v_id;
+  return v_id;
+end $$;
+
+create function pg_temp.matricula(p_id uuid) returns text
+language sql as $$ select registration_status from vehicles where id = p_id $$;
+
+insert into company_modules (company_id, module_key, enabled)
+values ('00000000-0000-0000-0000-0000000000aa', 'motoprestamos', true), ('00000000-0000-0000-0000-0000000000aa', 'customer-portal', true)
+on conflict (company_id, module_key) do update set enabled = true;
+insert into products (id, company_id, branch_id, name, price, cost, stock, is_vehicle) values
+  ('00000000-0000-0000-0000-00000000e510', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'Prueba moto ajustes', 95000, 70000, 0, true);
+insert into vehicles (id, company_id, branch_id, origin, product_id, brand, model, chassis, plate) values
+  ('00000000-0000-0000-0000-00000000e511', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e510', 'Honda', 'C70', 'AJ-1', 'P-1'),
+  ('00000000-0000-0000-0000-00000000e512', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e510', 'Honda', 'C70', 'AJ-2', 'P-2'),
+  ('00000000-0000-0000-0000-00000000e513', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e510', 'Honda', 'C70', 'AJ-3', 'P-3'),
+  ('00000000-0000-0000-0000-00000000e514', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e510', 'Honda', 'C70', 'AJ-4', 'P-4'),
+  ('00000000-0000-0000-0000-00000000e515', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e510', 'Honda', 'C70', 'AJ-5', 'P-5'),
+  ('00000000-0000-0000-0000-00000000e516', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e510', 'Honda', 'C70', 'AJ-6', 'P-6');
+insert into customers (id, company_id, name, rnc) values
+  ('00000000-0000-0000-0000-00000000e520', '00000000-0000-0000-0000-0000000000aa', 'Prueba sin garante', null),
+  ('00000000-0000-0000-0000-00000000e521', '00000000-0000-0000-0000-0000000000aa', 'Prueba con garante', '99999999901');
+
+do $$
+declare
+  sin constant uuid := '00000000-0000-0000-0000-00000000e520';
+  con constant uuid := '00000000-0000-0000-0000-00000000e521';
+  l_vieja uuid; l_moto uuid; l_sin_moto uuid;
+  r jsonb; b jsonb;
+begin
+  -- Sin fila de ajustes: lo de siempre.
+  perform pg_temp.vender('00000000-0000-0000-0000-00000000e511', sin, 'cash');
+  perform pg_temp.igual(pg_temp.matricula('00000000-0000-0000-0000-00000000e511'), 'entregada', 'contado sin ajustes');
+  perform pg_temp.vender('00000000-0000-0000-0000-00000000e512', sin, 'financing');
+  perform pg_temp.igual(pg_temp.matricula('00000000-0000-0000-0000-00000000e512'), 'en_custodia', 'financiada sin ajustes');
+
+  -- Custodia en contado encendida y en financiada apagada.
+  insert into motos_settings (company_id, custody_cash_sale, custody_financed_sale)
+  values ('00000000-0000-0000-0000-0000000000aa', true, false);
+  perform pg_temp.vender('00000000-0000-0000-0000-00000000e513', sin, 'cash');
+  perform pg_temp.igual(pg_temp.matricula('00000000-0000-0000-0000-00000000e513'), 'lista_para_entregar', 'contado con custodia');
+  perform pg_temp.vender('00000000-0000-0000-0000-00000000e514', sin, 'financing');
+  perform pg_temp.igual(pg_temp.matricula('00000000-0000-0000-0000-00000000e514'), 'entregada', 'financiada sin custodia');
+
+  -- Exigir garante.
+  l_vieja := pg_temp.prestamo(sin);   -- antes de exigirlo
+  update motos_settings set require_guarantor = true, custody_cash_sale = false, custody_financed_sale = true
+   where company_id = '00000000-0000-0000-0000-0000000000aa';
+  perform pg_temp.debe_fallar(format('select pg_temp.prestamo(%L)', sin), '%no tiene garante%');
+  insert into customer_guarantors (company_id, customer_id, name)
+  values ('00000000-0000-0000-0000-0000000000aa', con, 'Garante de prueba');
+  l_sin_moto := pg_temp.prestamo(con);
+  r := refinance_loan(l_vieja, 'balance', null, 0, 5, 2, 'monthly', null, 'prueba');
+  perform pg_temp.igual((select status from loans where id = l_vieja), 'refinanced', 'refinanciación sin garante pasa');
+  perform pg_temp.debe_fallar(format('select pg_temp.vender(%L, %L, %L)', '00000000-0000-0000-0000-00000000e515', sin, 'financing'), '%no tiene garante%');
+  perform pg_temp.vender('00000000-0000-0000-0000-00000000e516', sin, 'cash');
+  perform pg_temp.igual(pg_temp.matricula('00000000-0000-0000-0000-00000000e516'), 'entregada', 'contado sin garante pasa');
+  update company_modules set enabled = false
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'motoprestamos';
+  perform pg_temp.prestamo(sin);  -- con el módulo apagado no se exige
+  update company_modules set enabled = true
+   where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'motoprestamos';
+
+  -- Portal: el préstamo con moto trae su moto; el otro, []; la matrícula lista sale arriba.
+  l_moto := motos_crear_prestamo(
+    jsonb_build_object('branch_id', '00000000-0000-0000-0000-0000000000b1', 'customer_id', con,
+      'principal', 10000, 'interest_rate', 10, 'installments_count', 4, 'payment_frequency', 'weekly',
+      'disbursement_method', 'transfer'),
+    jsonb_build_object('vehiculo', jsonb_build_object('brand', 'Suzuki', 'model', 'AX100', 'chassis', 'AJ-PORTAL', 'plate', 'P-777'),
+      'matricula_en_custodia', true));
+  perform register_loan_payment(l_moto, (select total_with_interest from loans where id = l_moto), 'transfer',
+                                '00000000-0000-0000-0000-0000000000b1', null, null);
+  r := resolve_portal_customers('99999999901');
+  perform pg_temp.igual(jsonb_array_length(r), 1, 'una empresa en el portal');
+  b := r->0;
+  perform pg_temp.igual((select l->'vehicles'->0->>'plate' from jsonb_array_elements(b->'loans') l where l->>'id' = l_moto::text), 'P-777', 'placa en el préstamo');
+  perform pg_temp.igual((select l->'vehicles'->0->>'registrationStatus' from jsonb_array_elements(b->'loans') l where l->>'id' = l_moto::text), 'lista_para_entregar', 'matrícula del préstamo');
+  perform pg_temp.igual((select l->'vehicles' from jsonb_array_elements(b->'loans') l where l->>'id' = l_sin_moto::text), '[]'::jsonb, 'préstamo sin moto');
+  perform pg_temp.igual(jsonb_array_length(b->'registrationsReady'), 1, 'matrículas listas');
+  perform pg_temp.igual(b->'registrationsReady'->0->>'plate', 'P-777', 'matrícula lista del cliente');
+  perform pg_temp.igual(position('P-3' in b::text), 0, 'no salen motos de otro cliente');
+end $$;
+
 select 'ok';
