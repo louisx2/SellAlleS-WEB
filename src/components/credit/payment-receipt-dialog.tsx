@@ -35,7 +35,8 @@ export interface PaymentReceiptData {
   saleId?: string; // presente cuando el abono fue a una venta específica
 }
 
-function ReceiptBody({ data }: { data: PaymentReceiptData }) {
+/** El recibo de abono, también lo usa la ruta del cobrador para imprimir y para el PDF. */
+export function ReceiptBody({ data }: { data: PaymentReceiptData }) {
   // Perfil de la sucursal donde se registró el abono, con herencia de la empresa.
   const profile = useTicketProfile(data.branchName);
   const { result } = data;

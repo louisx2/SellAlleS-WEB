@@ -107,21 +107,29 @@ export function useCobranza(branchId?: string) {
     });
     if (error) throw error;
     await reload();
+    const tipoAbono = abono.tipo === 'prestamo' ? 'prestamo' : 'venta';
     if ((data as any)?.repetido) {
+      // La respuesta del primer envío se perdió: no hay saldo de ese momento para el recibo.
       const r = data as any;
       return {
         paymentId: r.payment_id, aplicado: Number(r.principal_paid ?? 0), mora: Number(r.late_fee_paid ?? 0),
-        saldo: null, enCalle: !!r.en_calle, repetido: true,
+        saldo: null, enCalle: !!r.en_calle, repetido: true, tipoAbono,
       };
     }
     if (abono.tipo === 'prestamo') {
       const r = rowToLoanPaymentResult(data);
-      return { paymentId: r.paymentId, aplicado: r.principalPaid, mora: r.lateFeePaid, saldo: r.remainingBalance, enCalle: !!(data as any)?.en_calle };
+      return {
+        paymentId: r.paymentId, aplicado: r.principalPaid, mora: r.lateFeePaid, saldo: r.remainingBalance,
+        enCalle: !!(data as any)?.en_calle, tipoAbono,
+        recibo: { ...r, customerBalance: null },
+      };
     }
     const r = rowToPaymentResult(data);
+    const saldo = abono.tipo === 'cliente' ? r.customerBalance : r.remainingBalance;
     return {
-      paymentId: r.paymentId, aplicado: r.principalPaid, mora: r.lateFeePaid,
-      saldo: abono.tipo === 'cliente' ? r.customerBalance : r.remainingBalance, enCalle: !!(data as any)?.en_calle,
+      paymentId: r.paymentId, aplicado: r.principalPaid, mora: r.lateFeePaid, saldo, enCalle: !!(data as any)?.en_calle, tipoAbono,
+      // En el abono general el recibo dice la deuda total del cliente (como en Cuentas por Cobrar).
+      recibo: abono.tipo === 'cliente' ? { ...r, remainingBalance: r.customerBalance ?? r.remainingBalance } : r,
     };
   };
 
