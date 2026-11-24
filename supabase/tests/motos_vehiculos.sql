@@ -102,8 +102,9 @@ select pg_temp.debe_fallar($$insert into vehicles (company_id, branch_id, origin
   values ('00000000-0000-0000-0000-0000000000aa', '169fe6bb-91fa-4633-8e43-5a45e410e2b0', 'inventario',
           '00000000-0000-0000-0000-00000000e101', 'OTRASUC-1')$$, '%artículo-vehículo%');
 
--- La descripción de la línea de venta (espejo de vehicleLineName en src/lib/motos.ts).
-select pg_temp.igual(motos_descripcion(v), 'Honda CG 150 · 2025 · Azul · Chasis abc 123 · Motor M-1'::text, 'descripción completa')
+-- La descripción de la línea de venta (espejo de vehicleLineName en src/lib/motos.ts):
+-- chasis y motor antes que año y color, porque el e-CF corta el nombre a 80.
+select pg_temp.igual(motos_descripcion(v), 'Honda CG 150 · Chasis abc 123 · Motor M-1 · 2025 · Azul'::text, 'descripción completa')
   from vehicles v where v.id = '00000000-0000-0000-0000-00000000e111';
 select pg_temp.igual(motos_descripcion(v), 'Yamaha YBR · Chasis GAR-1'::text, 'descripción sin año ni motor')
   from vehicles v where v.id = '00000000-0000-0000-0000-00000000e113';

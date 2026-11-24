@@ -119,6 +119,13 @@ begin
   perform pg_temp.igual((select stock from products where id = '00000000-0000-0000-0000-00000000e201'), 2::numeric, 'stock tras anular (una vendida financiada)');
   perform pg_temp.igual((select count(*)::int from vehicle_events where vehicle_id = '00000000-0000-0000-0000-00000000e211' and kind = 'venta_anulada'), 1, 'evento de anulación');
 
+  -- Anular la financiada: también vuelve a disponible y el stock sube.
+  update ecf_documentos set estado = 'rechazado' where sale_id = s_cuotas;
+  perform annul_sale(s_cuotas, 'prueba', null);
+  perform pg_temp.igual((select status from vehicles where id = '00000000-0000-0000-0000-00000000e212'), 'disponible'::text, 'financiada anulada');
+  perform pg_temp.igual((select registration_status from vehicles where id = '00000000-0000-0000-0000-00000000e212'), 'no_aplica'::text, 'matrícula de la financiada anulada');
+  perform pg_temp.igual((select stock from products where id = '00000000-0000-0000-0000-00000000e201'), 3::numeric, 'stock tras anular la financiada');
+
   -- Regresión: un artículo normal se vende y se anula como siempre.
   select s.id into s_normal from create_sale_with_items(
     jsonb_build_object('branch_id', '00000000-0000-0000-0000-0000000000b1', 'customer_id', '00000000-0000-0000-0000-00000000e210',
@@ -129,6 +136,30 @@ begin
   update ecf_documentos set estado = 'rechazado' where sale_id = s_normal;
   perform annul_sale(s_normal, 'prueba', null);
   perform pg_temp.igual((select stock from products where id = '00000000-0000-0000-0000-00000000e202'), 5::numeric, 'stock normal tras anular');
+end $$;
+
+-- Borrar una empresa o una sucursal (súper admin): borra sus ventas, y la FK deja
+-- la venta de la unidad en null; el guardia no lo toma por un cambio a mano. La
+-- sucursal se lleva sus unidades.
+do $$
+declare
+  s uuid;
+begin
+  s := pg_temp.vender('00000000-0000-0000-0000-00000000e213', 'cash');
+  -- Mientras la venta exista, quitarla a mano sigue sin poderse.
+  perform pg_temp.debe_fallar($q$update vehicles set sale_id = null where id = '00000000-0000-0000-0000-00000000e213'$q$, '%lo hace el sistema%');
+  delete from ecf_documentos where sale_id = s;
+  delete from sales where id = s;
+  perform pg_temp.igual((select sale_id from vehicles where id = '00000000-0000-0000-0000-00000000e213'), null::uuid, 'venta borrada');
+
+  insert into branches (id, company_id, name) values
+    ('00000000-0000-0000-0000-00000000e2b2', '00000000-0000-0000-0000-0000000000aa', 'Prueba sucursal a borrar');
+  insert into products (id, company_id, branch_id, name, price, cost, stock, is_vehicle) values
+    ('00000000-0000-0000-0000-00000000e204', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000e2b2', 'Prueba moto sucursal', 1, 1, 0, true);
+  insert into vehicles (id, company_id, branch_id, origin, product_id, chassis) values
+    ('00000000-0000-0000-0000-00000000e215', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-00000000e2b2', 'inventario', '00000000-0000-0000-0000-00000000e204', 'V-5');
+  delete from branches where id = '00000000-0000-0000-0000-00000000e2b2';
+  perform pg_temp.igual((select count(*)::int from vehicles where id = '00000000-0000-0000-0000-00000000e215'), 0, 'la unidad se va con su sucursal');
 end $$;
 
 select 'ok' as resultado;
