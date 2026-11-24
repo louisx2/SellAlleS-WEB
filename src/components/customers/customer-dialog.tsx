@@ -24,6 +24,7 @@ import { formatPhone } from '@/lib/format';
 import type { NcfType } from '@/lib/types';
 import { cascadaCliente, digitosDeDocumento, faltanDatosCliente, type DatosRnc } from '@/lib/rnc';
 import { RncConDgii } from '@/components/dgii/rnc-con-dgii';
+import { useModules } from '@/context/modules-provider';
 
 interface CustomerDialogProps {
   customer?: Customer;
@@ -35,6 +36,9 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
   const { toast } = useToast();
   const { addCustomer, updateCustomer } = useCustomers();
   const { appUser } = useAuth();
+  const { isModuleEnabled } = useModules();
+  // Datos para cobrar en la calle: solo con el módulo Motopréstamos.
+  const conCobranza = isModuleEnabled('motoprestamos');
   const isEditMode = !!customer;
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -125,6 +129,14 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
       creditLimit: creditLimitRaw ? Number(creditLimitRaw) : null, // vacío = sin límite
       discountPercentage,
       loyaltyPurchaseCount: customer?.loyaltyPurchaseCount ?? 0, // Preserve existing counter
+      // Sin el módulo no se mandan (customerToRow los omite) y no se borran.
+      ...(conCobranza ? {
+        nickname: (formData.get('nickname') as string) ?? '',
+        workplace: (formData.get('workplace') as string) ?? '',
+        zone: (formData.get('zone') as string) ?? '',
+        collectionAddress: (formData.get('collectionAddress') as string) ?? '',
+        collectionReference: (formData.get('collectionReference') as string) ?? '',
+      } : {}),
     }
 
     setSaving(true);
@@ -282,6 +294,23 @@ export function CustomerDialog({ customer, children, onSuccess }: CustomerDialog
                 por mayor). Un precio puesto a mano en el carrito manda sobre este descuento.
               </p>
             </div>
+            {conCobranza && (
+              <>
+                <p className="text-sm font-medium pt-2">Datos de cobranza</p>
+                {([
+                  ['nickname', 'Apodo', customer?.nickname, 'Cómo le dicen'],
+                  ['workplace', 'Trabajo o parada', customer?.workplace, 'Dónde trabaja o en qué parada está'],
+                  ['zone', 'Sector o zona', customer?.zone, 'La usa la cobranza para armar rutas'],
+                  ['collectionAddress', 'Dirección de cobro', customer?.collectionAddress, 'Si no es la misma de arriba'],
+                  ['collectionReference', 'Cómo llegar', customer?.collectionReference, 'Frente al colmado, casa verde…'],
+                ] as const).map(([id, label, valor, placeholder]) => (
+                  <div key={id} className="grid grid-cols-4 items-center gap-4">
+                    <Label htmlFor={id} className="text-right">{label}</Label>
+                    <Input id={id} name={id} defaultValue={valor ?? ''} placeholder={placeholder} className="col-span-3" />
+                  </div>
+                ))}
+              </>
+            )}
              <div className="grid grid-cols-4 items-start gap-4">
               <Label htmlFor="notes" className="text-right pt-2">
                 Notas

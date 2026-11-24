@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { MoreHorizontal, Pencil, Trash2, History } from 'lucide-react';
+import { useState } from 'react';
+import { MoreHorizontal, Pencil, Trash2, History, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -15,6 +16,8 @@ import { CustomerDialog } from './customer-dialog';
 import type { Customer } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { DialogTrigger } from '@/components/ui/dialog';
+import { useModules } from '@/context/modules-provider';
+import { GarantesDialog } from './garantes-dialog';
 
 interface CustomerActionsProps {
   customer: Customer;
@@ -22,7 +25,10 @@ interface CustomerActionsProps {
 
 export function CustomerActions({ customer }: CustomerActionsProps) {
   const { toast } = useToast();
-  
+  const { isModuleEnabled } = useModules();
+  const conGarantes = isModuleEnabled('motoprestamos');
+  const [garantesOpen, setGarantesOpen] = useState(false);
+
   const handleDelete = () => {
     toast({
       title: 'Acción no implementada',
@@ -32,6 +38,7 @@ export function CustomerActions({ customer }: CustomerActionsProps) {
   };
 
   return (
+    <>
     <CustomerDialog customer={customer}>
       <DropdownMenu modal={false}>
         <DropdownMenuTrigger asChild>
@@ -55,6 +62,12 @@ export function CustomerActions({ customer }: CustomerActionsProps) {
                 <span>Editar</span>
             </DropdownMenuItem>
           </DialogTrigger>
+          {conGarantes && (
+            <DropdownMenuItem onSelect={() => setGarantesOpen(true)}>
+              <Users className="mr-2 h-4 w-4" />
+              <span>Garantes y referencias</span>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={handleDelete} className="text-destructive">
             <Trash2 className="mr-2 h-4 w-4" />
             <span>Eliminar</span>
@@ -62,5 +75,7 @@ export function CustomerActions({ customer }: CustomerActionsProps) {
         </DropdownMenuContent>
       </DropdownMenu>
     </CustomerDialog>
+    {conGarantes && <GarantesDialog customer={customer} open={garantesOpen} onOpenChange={setGarantesOpen} />}
+    </>
   );
 }
