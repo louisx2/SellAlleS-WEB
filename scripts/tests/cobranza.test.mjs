@@ -225,3 +225,22 @@ test('resumen de entregas por cobrador, en centavos exactos', () => {
     { collectorId: 'Y', entregas: 1, esperado: 500, recibido: 450, diferencia: -50 },
   ]);
 });
+
+import { rangoDelPeriodo, efectividad } from '../../src/lib/cobranza.ts';
+
+test('rangos de los períodos de los reportes (la semana empieza el lunes)', () => {
+  assert.deepEqual(rangoDelPeriodo('hoy', HOY), { desde: HOY, hasta: HOY });
+  assert.deepEqual(rangoDelPeriodo('semana', HOY), { desde: '2026-11-23', hasta: HOY });
+  assert.deepEqual(rangoDelPeriodo('semana', '2026-11-29'), { desde: '2026-11-23', hasta: '2026-11-29' });
+  assert.deepEqual(rangoDelPeriodo('mes', HOY), { desde: '2026-11-01', hasta: HOY });
+  assert.deepEqual(rangoDelPeriodo('mes_pasado', HOY), { desde: '2026-10-01', hasta: '2026-10-31' });
+  assert.deepEqual(rangoDelPeriodo('mes_pasado', '2026-01-15'), { desde: '2025-12-01', hasta: '2025-12-31' });
+  assert.deepEqual(rangoDelPeriodo('30', HOY), { desde: '2026-10-27', hasta: HOY });
+});
+
+test('efectividad: cobrado entre por cobrar, sin tope; sin nada por cobrar no hay', () => {
+  assert.equal(efectividad(500, 1000), 50);
+  assert.equal(efectividad(1500, 1000), 150);
+  assert.equal(efectividad(1, 3), 33);
+  assert.equal(efectividad(100, 0), null);
+});

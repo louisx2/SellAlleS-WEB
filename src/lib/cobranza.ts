@@ -186,6 +186,28 @@ export function avisosDelDia(cuentas: CuentaDeCobro[], hoy: string, clientes?: S
     ORDEN_AVISO[x.motivo] - ORDEN_AVISO[y.motivo] || y.diasAtraso - x.diasAtraso || x.customerId.localeCompare(y.customerId));
 }
 
+export type Periodo = 'hoy' | 'semana' | 'mes' | 'mes_pasado' | '30';
+
+/** El rango de un período de los reportes, en fechas locales. La semana empieza
+ *  el lunes. */
+export function rangoDelPeriodo(periodo: Periodo, hoy: string): { desde: string; hasta: string } {
+  const d = new Date(`${hoy}T00:00:00`);
+  const ymd = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  if (periodo === 'hoy') return { desde: hoy, hasta: hoy };
+  if (periodo === 'semana') return { desde: sumarDias(hoy, -((d.getDay() + 6) % 7)), hasta: hoy };
+  if (periodo === 'mes') return { desde: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), hasta: hoy };
+  if (periodo === 'mes_pasado') {
+    return { desde: ymd(new Date(d.getFullYear(), d.getMonth() - 1, 1)), hasta: ymd(new Date(d.getFullYear(), d.getMonth(), 0)) };
+  }
+  return { desde: sumarDias(hoy, -29), hasta: hoy };
+}
+
+/** Cobrado entre por cobrar, en %, sin tope (cobrar atrasos lo sube de 100).
+ *  Sin nada por cobrar no hay efectividad. */
+export function efectividad(cobrado: number, porCobrar: number): number | null {
+  return porCobrar > 0 ? Math.round((cobrado / porCobrar) * 100) : null;
+}
+
 /** Las entregas sumadas por cobrador, en centavos exactos (0.1 + 0.2 = 0.3). */
 export function resumenDeEntregas(entregas: { collectorId: string; expected: number; received: number; difference: number }[]) {
   const m = new Map<string, { collectorId: string; entregas: number; esperado: number; recibido: number; diferencia: number }>();
