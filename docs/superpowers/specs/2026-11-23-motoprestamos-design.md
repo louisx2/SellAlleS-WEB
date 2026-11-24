@@ -118,10 +118,9 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 
 ## Entrega 1 — Motor común
 
-> **Estado (2026-11-23):** construida en la rama `claude/motoprestamos`. Migraciones
+> **Estado (2026-11-23):** fusionada (PR #78 y #80) y desplegada. Migraciones
 > `20261124120000`, `20261124130000` y `20261124140000` (correcciones de la revisión: primer
-> pago en domingo y sucursal de otra empresa) **aplicadas en producción**. Front sin
-> fusionar; falta la prueba en pantalla. Cambios respecto a lo de abajo: "Al día" se
+> pago en domingo y sucursal de otra empresa) **aplicadas en producción**. Cambios respecto a lo de abajo: "Al día" se
 > llama "Por vencer" y cada cuota va al tramo de su propio atraso; el ticket y el plan
 > térmico se recortan solo en papel; las tablas arrancan en la próxima cuota a cobrar.
 
@@ -197,6 +196,16 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 > general, fotos y portal. El stock de un artículo-vehículo es derivado: lo recalcula la base
 > con las unidades disponibles y bloquea cualquier otro cambio (así quedan fuera compras,
 > transferencias y ajustes manuales sin tocarlos uno por uno).
+>
+> **Estado 2A (2026-11-24):** construida en la rama `claude/motoprestamos-entrega-2`.
+> Migraciones `20261124150000_motos_vehiculos` y `20261124160000_motos_venta_por_chasis`
+> **aplicadas en producción**, con las suites `motos_vehiculos.sql` y `motos_venta.sql`
+> pasando contra lo aplicado. Probada en pantalla en la demo (módulo, artículo-vehículo,
+> ingreso, chasis repetido, ficha, edición, baja, tipos, selector del POS, avisos de
+> cantidad y de cliente, reporte) sin cobrar: el cobro y la anulación por chasis los cubre
+> la suite. Front sin fusionar. Diferencias con lo de abajo: el cajero ve las unidades con
+> `pos:view` para elegir el chasis; el selector se abre desde el carrito, así que sale por
+> tarjeta, búsqueda o código igual.
 
 ### Catálogo, rubro y menú
 
