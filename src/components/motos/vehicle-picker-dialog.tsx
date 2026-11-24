@@ -9,34 +9,36 @@ import { Input } from '@/components/ui/input';
 import { useCart } from '@/context/cart-provider';
 import { useVehiculos } from '@/hooks/use-vehiculos';
 import { formatCurrency } from '@/lib/utils';
-import { matchesVehicle, vehicleLabel } from '@/lib/motos';
+import { unidadesParaElegir, vehicleLabel } from '@/lib/motos';
+import type { Product } from '@/lib/types';
 
 // El POS lo monta una vez. Cuando alguien agrega un artículo-vehículo (tarjeta,
 // búsqueda o código), el carrito no lo agrega suelto: deja el artículo en
 // `vehiclePickFor` y aquí se elige cuál unidad (chasis) sale.
 export function VehiclePickerHost() {
-  const { vehiclePickFor: product, closeVehiclePick, addVehicleItem, carts } = useCart();
+  const { vehiclePickFor, closeVehiclePick, addVehicleItem, carts } = useCart();
   const { vehicles, loading, reload } = useVehiculos();
   const [q, setQ] = useState('');
+  // El artículo se guarda mientras el diálogo se cierra: `vehiclePickFor` vuelve a
+  // null al elegir y, sin esto, la animación de salida muestra "de ." sin nombre.
+  const [product, setProduct] = useState<Product | null>(null);
 
   useEffect(() => {
-    if (product) { setQ(''); reload(); }
-  }, [product, reload]);
+    if (vehiclePickFor) { setProduct(vehiclePickFor); setQ(''); reload(); }
+  }, [vehiclePickFor, reload]);
 
   // Una unidad que ya está en algún carrito no se ofrece otra vez.
   const enCarritos = useMemo(
     () => new Set(carts.flatMap((c) => c.items.map((i) => i.vehicleId).filter(Boolean) as string[])),
     [carts],
   );
-  const opciones = useMemo(
-    () => vehicles
-      .filter((v) => v.productId === product?.id && v.status === 'disponible' && !enCarritos.has(v.id))
-      .filter((v) => matchesVehicle(v, q)),
+  const { opciones, aviso } = useMemo(
+    () => (product ? unidadesParaElegir(vehicles, product, enCarritos, q) : { opciones: [], aviso: null }),
     [vehicles, product, enCarritos, q],
   );
 
   return (
-    <Dialog open={!!product} onOpenChange={(o) => !o && closeVehiclePick()}>
+    <Dialog open={!!vehiclePickFor} onOpenChange={(o) => !o && closeVehiclePick()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Elige el chasis</DialogTitle>
@@ -46,10 +48,8 @@ export function VehiclePickerHost() {
         <div className="max-h-80 space-y-2 overflow-y-auto">
           {loading ? (
             <p className="py-6 text-center text-sm text-muted-foreground">Cargando unidades…</p>
-          ) : opciones.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              No hay unidades disponibles de {product?.name}. Ingrésalas desde Vehículos.
-            </p>
+          ) : aviso ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">{aviso}</p>
           ) : opciones.map((v) => (
             <button
               key={v.id}

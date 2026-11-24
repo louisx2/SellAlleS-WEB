@@ -30,7 +30,7 @@ test('el rubro Motopréstamos enciende sus módulos y siembra el tipo Motor', ()
 
 // --- Etiquetas y descripción de vehículos (src/lib/motos.ts) ---
 import {
-  matchesVehicle, normalizeChassis, REGISTRATION_STATUS_LABEL, VEHICLE_STATUS, vehicleLabel, vehicleLineName,
+  matchesVehicle, normalizeChassis, REGISTRATION_STATUS_LABEL, unidadesParaElegir, VEHICLE_STATUS, vehicleLabel, vehicleLineName,
 } from '../../src/lib/motos.ts';
 
 test('descripción de la línea igual que motos_descripcion en la base', () => {
@@ -66,6 +66,27 @@ test('búsqueda por chasis, placa, modelo o cliente', () => {
   assert.equal(matchesVehicle(v, 'perez'), true);
   assert.equal(matchesVehicle(v, 'yamaha'), false);
   assert.equal(matchesVehicle(v, ''), true);
+});
+
+test('selector de chasis: qué unidades ofrece y qué dice cuando no hay', () => {
+  const moto = { id: 'p1', name: 'Honda CG 150' };
+  const u = (id, o = {}) => ({ id, productId: 'p1', status: 'disponible', brand: 'Honda', model: 'CG 150', chassis: id, ...o });
+  const unidades = [u('A', { color: 'Roja' }), u('B', { color: 'Negra' }), u('C', { status: 'vendido' }), u('D', { productId: 'p2' })];
+
+  // Ofrece las disponibles de ese artículo que no están ya en un carrito.
+  const r = unidadesParaElegir(unidades, moto, new Set(['A']), '');
+  assert.deepEqual(r.opciones.map((v) => v.id), ['B']);
+  assert.equal(r.aviso, null);
+
+  // Sin unidades disponibles del artículo.
+  assert.equal(unidadesParaElegir([u('C', { status: 'vendido' })], moto, new Set(), '').aviso,
+    'No hay unidades disponibles de Honda CG 150. Ingrésalas desde Vehículos.');
+  // Las hay, pero todas están en un carrito: no es que falten.
+  assert.equal(unidadesParaElegir(unidades, moto, new Set(['A', 'B']), '').aviso,
+    'Las unidades disponibles de Honda CG 150 ya están en un carrito.');
+  // Las hay libres, pero la búsqueda no encuentra ninguna.
+  assert.equal(unidadesParaElegir(unidades, moto, new Set(), 'azul').aviso, 'Ninguna unidad coincide con «azul».');
+  assert.deepEqual(unidadesParaElegir(unidades, moto, new Set(), 'negra').opciones.map((v) => v.id), ['B']);
 });
 
 // --- Reportes de vehículos (src/lib/motos-reportes.ts) ---

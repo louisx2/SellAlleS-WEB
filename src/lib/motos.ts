@@ -75,3 +75,18 @@ export function matchesVehicle(
   );
   return pajar.includes(aguja);
 }
+
+/** Selector de chasis del POS: las unidades disponibles del artículo que no están
+ *  ya en un carrito y coinciden con la búsqueda. Si no queda ninguna, `aviso` dice
+ *  por qué: no hay, están todas en carritos, o la búsqueda no encuentra. */
+export function unidadesParaElegir<
+  V extends Describible & { id: string; productId?: string | null; status: VehicleStatus; plate?: string | null },
+>(vehicles: V[], product: { id: string; name: string }, enCarritos: Set<string>, q: string): { opciones: V[]; aviso: string | null } {
+  const disponibles = vehicles.filter((v) => v.productId === product.id && v.status === 'disponible');
+  const libres = disponibles.filter((v) => !enCarritos.has(v.id));
+  const opciones = libres.filter((v) => matchesVehicle(v, q));
+  if (opciones.length > 0) return { opciones, aviso: null };
+  if (disponibles.length === 0) return { opciones, aviso: `No hay unidades disponibles de ${product.name}. Ingrésalas desde Vehículos.` };
+  if (libres.length === 0) return { opciones, aviso: `Las unidades disponibles de ${product.name} ya están en un carrito.` };
+  return { opciones, aviso: `Ninguna unidad coincide con «${q.trim()}».` };
+}
