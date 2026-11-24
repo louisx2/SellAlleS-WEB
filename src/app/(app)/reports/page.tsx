@@ -62,6 +62,7 @@ export default function ReportsDashboardPage() {
   const showQuickSalesReport = isModuleEnabled('quick-sales') && isReportVisible(effectivePermissions, 'ventas-rapidas');
   const showCommissionsReport = isModuleEnabled('commissions') && isReportVisible(effectivePermissions, 'comisiones');
   const showTallerReport = isModuleEnabled('services') && isReportVisible(effectivePermissions, 'taller');
+  const showVehiculosReport = isModuleEnabled('motoprestamos') && isReportVisible(effectivePermissions, 'vehiculos');
   const showAgingReport = isReportVisible(effectivePermissions, 'antiguedad');
 
   // --- Filtrado por Sucursal (las ventas anuladas no cuentan como ingreso) ---
@@ -383,6 +384,20 @@ export default function ReportsDashboardPage() {
                   <div>
                     <CardTitle className="text-sm font-bold">Taller</CardTitle>
                     <CardDescription className="text-3xs mt-1">Técnicos, tiempos, piezas y equipos</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {showVehiculosReport && (
+            <Link href="/reports/vehiculos">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold">Vehículos</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Motos en inventario, vendidas a cuotas y ventas por modelo</CardDescription>
                   </div>
                   <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
                 </CardHeader>

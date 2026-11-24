@@ -67,3 +67,49 @@ test('búsqueda por chasis, placa, modelo o cliente', () => {
   assert.equal(matchesVehicle(v, 'yamaha'), false);
   assert.equal(matchesVehicle(v, ''), true);
 });
+
+// --- Reportes de vehículos (src/lib/motos-reportes.ts) ---
+import { carteraDeVehiculos, ventasDeVehiculos } from '../../src/lib/motos-reportes.ts';
+
+const veh = (o) => ({ status: 'disponible', brand: 'Honda', model: 'CG 150', cost: 0, ...o });
+
+test('cartera: unidades por estado, inventario a costo y vendidos a cuotas', () => {
+  const vehicles = [
+    veh({ id: 'a', cost: 50000 }),
+    veh({ id: 'b', cost: 60000 }),
+    veh({ id: 'c', status: 'vendido', saleId: 's-cuotas', cost: 70000 }),
+    veh({ id: 'd', status: 'vendido', saleId: 's-contado', cost: 65000 }),
+  ];
+  const saldos = new Map([['s-cuotas', { pendiente: 30000, atrasado: true }]]);
+  const c = carteraDeVehiculos(vehicles, saldos);
+  assert.equal(c.porEstado.disponible, 2);
+  assert.equal(c.porEstado.vendido, 2);
+  assert.equal(c.porEstado.baja, 0);
+  assert.equal(c.inventarioACosto, 110000);
+  assert.deepEqual(c.vendidosACuotas, { cantidad: 1, pendiente: 30000, atrasados: 1 });
+});
+
+test('ventas del período por modelo, contado frente a financiado', () => {
+  const vehicles = [
+    veh({ id: 'c', status: 'vendido', saleId: 's1' }),
+    veh({ id: 'd', status: 'vendido', saleId: 's2' }),
+    veh({ id: 'e', status: 'vendido', saleId: 's3', brand: 'Suzuki', model: 'GN 125' }),
+    veh({ id: 'f', status: 'vendido', saleId: 'vieja' }),
+  ];
+  const d = (dia) => new Date(2026, 10, dia);
+  const ventas = [
+    { id: 's1', createdAt: d(10), paymentMethod: 'cash' },
+    { id: 's2', createdAt: d(12), paymentMethod: 'financing', downPayment: 20000, installments: 52, frequency: 'weekly' },
+    { id: 's3', createdAt: d(15), paymentMethod: 'financing', downPayment: 10000, installments: 26, frequency: 'weekly' },
+    { id: 'vieja', createdAt: d(1), paymentMethod: 'cash' },
+  ];
+  const r = ventasDeVehiculos(vehicles, ventas, d(5), d(30));
+  assert.equal(r.contado, 1);
+  assert.equal(r.financiado, 2);
+  assert.equal(r.inicialPromedio, 15000);
+  assert.equal(r.plazoPromedio, 39);
+  assert.deepEqual(r.porModelo, [
+    { modelo: 'Honda CG 150', contado: 1, financiado: 1 },
+    { modelo: 'Suzuki GN 125', contado: 0, financiado: 1 },
+  ]);
+});

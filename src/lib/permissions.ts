@@ -80,6 +80,7 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'top-customers', label: 'Clientes Estrella' },
   { slug: 'comisiones', label: 'Comisiones por Vendedor' },
   { slug: 'taller', label: 'Taller (técnicos, tiempos, piezas)' },
+  { slug: 'vehiculos', label: 'Vehículos (cartera y ventas)' },
   { slug: 'date-range', label: 'Ingresos por Fechas' },
   { slug: 'receivables', label: 'Cuentas por Cobrar' },
   { slug: 'antiguedad', label: 'Antigüedad de Cartera' },

@@ -71,6 +71,7 @@ const ROUTE_MODULE: Array<{ prefix: string; module: ModuleKey }> = [
   // Antes que '/reports': gana la primera que coincide.
   { prefix: '/reports/comisiones', module: 'commissions' },
   { prefix: '/reports/taller', module: 'services' },
+  { prefix: '/reports/vehiculos', module: 'motoprestamos' },
   { prefix: '/reports',   module: 'reports' },
   { prefix: '/services',  module: 'services' },
   { prefix: '/service-types', module: 'services' },

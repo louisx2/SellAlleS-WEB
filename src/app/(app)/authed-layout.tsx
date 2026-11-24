@@ -72,9 +72,11 @@ const reportsNavItems = [
     { href: '/reports/top-customers', label: 'Clientes Estrella' },
     { href: '/reports/comisiones', label: 'Comisiones por Vendedor' },
     { href: '/reports/taller', label: 'Taller' },
+    { href: '/reports/vehiculos', label: 'Vehículos' },
     { href: '/reports/date-range', label: 'Ingresos por Fechas' },
     { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
     { href: '/reports/cobros', label: 'Cobros Recibidos' },
+    { href: '/reports/antiguedad', label: 'Antigüedad de Cartera' },
     { href: '/reports/inventory', label: 'Valorización de Inventario' },
     { href: '/reports/taxes', label: 'Impuestos' },
     { href: '/reports/ganancias', label: 'Reporte de Ganancias' },
@@ -317,6 +319,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     if (slug === 'comisiones' && !isModuleEnabled('commissions')) return false;
     // El del taller, solo con el módulo encendido.
     if (slug === 'taller' && !isModuleEnabled('services')) return false;
+    if (slug === 'vehiculos' && !isModuleEnabled('motoprestamos')) return false;
     return isReportVisible(effectivePermissions, slug);
   });
 
