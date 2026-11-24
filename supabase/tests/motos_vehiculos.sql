@@ -83,7 +83,7 @@ select pg_temp.igual(pg_temp.stock('00000000-0000-0000-0000-00000000e101'), 2::n
 
 -- Editar datos descriptivos queda en el historial.
 update vehicles set color = 'Azul', plate = 'K000001' where id = '00000000-0000-0000-0000-00000000e111';
-select pg_temp.igual((select count(*)::int from vehicle_events where vehicle_id = '00000000-0000-0000-0000-00000000e111' and kind = 'edicion'), 1, 'evento de edición');
+select pg_temp.igual((select note from vehicle_events where vehicle_id = '00000000-0000-0000-0000-00000000e111' and kind = 'edicion'), 'Cambió: color, placa'::text, 'evento de edición');
 
 -- El stock de un artículo-vehículo solo lo mueven sus unidades.
 select pg_temp.debe_fallar($$update products set stock = 5 where id = '00000000-0000-0000-0000-00000000e101'$$, '%las mueven sus unidades%');
