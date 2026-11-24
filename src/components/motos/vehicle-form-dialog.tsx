@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -76,13 +76,27 @@ export function VehicleFormDialog({
   const [saving, setSaving] = useState(false);
   const editando = !!vehicle;
 
+  // El formulario se llena solo al abrir. Los artículos se recargan solos (tiempo
+  // real, volver a la pestaña) y el vehículo de la ficha también: si el efecto
+  // corriera con cada recarga, borraría lo que se está escribiendo.
+  const yaAbierto = useRef(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open) { yaAbierto.current = false; return; }
+    if (yaAbierto.current) return;
+    yaAbierto.current = true;
     if (vehicle) { setForm(desde(vehicle)); return; }
     const pid = defaultProductId ?? (vehicleProducts.length === 1 ? vehicleProducts[0].id : '');
     const prod = vehicleProducts.find((p) => p.id === pid);
     setForm({ ...vacio(pid), cost: prod ? String(prod.cost) : '' });
   }, [open, vehicle, defaultProductId, vehicleProducts]);
+
+  // Si al abrir los artículos aún no habían cargado, se elige el único cuando
+  // lleguen, sin tocar nada de lo escrito.
+  useEffect(() => {
+    if (!open || vehicle || vehicleProducts.length !== 1) return;
+    const unico = vehicleProducts[0];
+    setForm((f) => (f.productId ? f : { ...f, productId: unico.id, cost: f.cost || String(unico.cost) }));
+  }, [open, vehicle, vehicleProducts]);
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
   const tipo = types.find((t) => t.id === form.vehicleTypeId);
