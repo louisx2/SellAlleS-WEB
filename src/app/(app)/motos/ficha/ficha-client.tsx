@@ -6,6 +6,7 @@ import { PageHeader } from '@/components/page-header';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -16,7 +17,9 @@ import { usePermission } from '@/hooks/use-permission';
 import { useProducts } from '@/context/product-provider';
 import { fetchVehicle, fetchVehicleEvents, useVehiculos } from '@/hooks/use-vehiculos';
 import { formatCurrency } from '@/lib/utils';
-import { REGISTRATION_STATUS_LABEL, VEHICLE_STATUS, vehicleLabel, type VehicleStatus } from '@/lib/motos';
+import { deudaDelVehiculo, REGISTRATION_STATUS_LABEL, VEHICLE_STATUS, vehicleLabel, type VehicleStatus } from '@/lib/motos';
+import { useSaldosDeVehiculos } from '@/hooks/use-saldos-de-vehiculos';
+import { EntregarMatriculaDialog } from '@/components/motos/entregar-matricula-dialog';
 import { VehicleStatusBadge } from '@/components/motos/vehicle-status-badge';
 import { VehicleFormDialog } from '@/components/motos/vehicle-form-dialog';
 import type { Vehicle, VehicleEvent } from '@/lib/types';
@@ -49,7 +52,10 @@ export default function FichaVehiculoClient() {
   const [motivo, setMotivo] = useState('');
   const canEdit = usePermission('motos', 'edit');
   const { products } = useProducts();
-  const { types, updateVehicle, darDeBaja } = useVehiculos({ branchId: vehicle?.branchId });
+  const { types, updateVehicle, darDeBaja, entregarMatricula } = useVehiculos({ branchId: vehicle?.branchId });
+  const { ventas, prestamos } = useSaldosDeVehiculos();
+  const [entregar, setEntregar] = useState(false);
+  const [ubicacion, setUbicacion] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined') setId(new URLSearchParams(window.location.search).get('id') ?? '');
@@ -67,6 +73,17 @@ export default function FichaVehiculoClient() {
   useEffect(() => { cargar(); }, [cargar]);
 
   const vehicleProducts = useMemo(() => products.filter((p) => p.isVehicle), [products]);
+
+  const guardarUbicacion = async () => {
+    if (!vehicle || ubicacion === null) return;
+    try {
+      await updateVehicle(vehicle.id, { registrationLocation: ubicacion });
+      setUbicacion(null);
+      await cargar();
+    } catch (e: any) {
+      toast({ title: 'No se pudo guardar', description: e?.message, variant: 'destructive' });
+    }
+  };
 
   const confirmarBaja = async () => {
     if (!vehicle || !motivo.trim()) return;
@@ -91,6 +108,9 @@ export default function FichaVehiculoClient() {
     </div>
   );
   const extra = Object.entries(vehicle.extra ?? {});
+  const deuda = deudaDelVehiculo(vehicle, ventas, prestamos);
+  const porPrestamo = (vehicle.status === 'en_garantia' || vehicle.status === 'liberado') && !!vehicle.loanId;
+  const enCustodia = vehicle.registrationStatus === 'en_custodia' || vehicle.registrationStatus === 'lista_para_entregar';
   const tipo = types.find((t) => t.id === vehicle.vehicleTypeId);
 
   return (
@@ -146,12 +166,51 @@ export default function FichaVehiculoClient() {
             {dato('Cliente', vehicle.customerName && (
               <span>{vehicle.customerName}{vehicle.customerPhone ? ` · ${vehicle.customerPhone}` : ''}</span>
             ))}
-            {vehicle.saleId && dato('Venta', (
+            {porPrestamo ? dato('Préstamo', (
+              <Link href={`/prestamos/detalle?id=${vehicle.loanId}`} className="underline underline-offset-2">Ver el préstamo</Link>
+            )) : vehicle.saleId && dato('Venta', (
               <Link href={`/sales/detail?id=${vehicle.saleId}`} className="underline underline-offset-2">Ver la venta</Link>
+            ))}
+            {deuda && dato('Saldo', (
+              <span>
+                {formatCurrency(deuda.pendiente)}
+                {deuda.atrasado && <span className="ml-2 rounded bg-red-100 px-1.5 py-0.5 text-xs text-red-800 dark:bg-red-900/60 dark:text-red-100">Atrasado</span>}
+              </span>
             ))}
             {dato('Matrícula', REGISTRATION_STATUS_LABEL[vehicle.registrationStatus])}
             {vehicle.registrationSince && dato('Desde', vehicle.registrationSince.toLocaleDateString('es-DO'))}
-            {vehicle.registrationLocation && dato('Guardada en', vehicle.registrationLocation)}
+            {(enCustodia || vehicle.registrationLocation) && (
+              ubicacion !== null ? (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="mat-ubicacion" className="text-xs text-muted-foreground">Guardada en</Label>
+                  <div className="flex gap-2">
+                    <Input id="mat-ubicacion" value={ubicacion} onChange={(e) => setUbicacion(e.target.value)} />
+                    <Button size="sm" onClick={guardarUbicacion}>Guardar</Button>
+                    <Button size="sm" variant="ghost" onClick={() => setUbicacion(null)}>Cancelar</Button>
+                  </div>
+                </div>
+              ) : dato('Guardada en', (
+                <span>
+                  {vehicle.registrationLocation || '—'}
+                  {canEdit && enCustodia && (
+                    <button type="button" className="ml-2 text-xs underline underline-offset-2" onClick={() => setUbicacion(vehicle.registrationLocation ?? '')}>
+                      cambiar
+                    </button>
+                  )}
+                </span>
+              ))
+            )}
+            {vehicle.registrationStatus === 'entregada' && vehicle.registrationDeliveredTo && dato('Entregada a', (
+              <span>
+                {vehicle.registrationDeliveredTo}{vehicle.registrationDeliveredDoc ? ` · ${vehicle.registrationDeliveredDoc}` : ''}
+                {vehicle.registrationDeliveredAt ? ` · ${vehicle.registrationDeliveredAt.toLocaleDateString('es-DO')}` : ''}
+              </span>
+            ))}
+            {canEdit && (enCustodia || vehicle.registrationStatus === 'entregada') && (
+              <Button variant="outline" size="sm" onClick={() => setEntregar(true)}>
+                {vehicle.registrationStatus === 'entregada' ? 'Constancia de entrega' : 'Entregar matrícula'}
+              </Button>
+            )}
           </CardContent>
         </Card>
 
@@ -188,6 +247,13 @@ export default function FichaVehiculoClient() {
         vehicleProducts={vehicleProducts}
         onCreate={async () => undefined}
         onUpdate={updateVehicle}
+      />
+
+      <EntregarMatriculaDialog
+        vehicle={vehicle}
+        open={entregar}
+        onOpenChange={setEntregar}
+        onEntregar={async (v, recibe, cedula, motivo) => { await entregarMatricula(v, recibe, cedula, motivo); await cargar(); }}
       />
 
       <Dialog open={baja} onOpenChange={setBaja}>
