@@ -300,8 +300,14 @@ export function CartDisplay() {
                                       </p>
                                       {item.isQuick && <Badge variant="secondary">Rápida</Badge>}
                                       {item.serviceItemId && <Badge variant="secondary">Taller</Badge>}
+                                      {item.vehicleId && <Badge variant="secondary">Vehículo</Badge>}
                                     </div>
-                                    {item.serviceItemId ? (
+                                    {item.product.isVehicle && !item.vehicleId && (
+                                      <p className="text-xs text-destructive">Falta elegir el chasis: quítalo y vuelve a agregarlo.</p>
+                                    )}
+                                    {item.vehicleId ? (
+                                      <p className="text-xs text-muted-foreground">1 unidad · cada moto va en su propia línea</p>
+                                    ) : item.serviceItemId ? (
                                       <p className="text-xs text-muted-foreground">
                                         Cantidad: {formatQuantity(item.quantity, item.product.unit)} · viene del caso
                                       </p>

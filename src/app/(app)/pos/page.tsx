@@ -2,6 +2,7 @@
 
 import { ProductSearch } from '@/components/pos/product-search';
 import { CartDisplay } from '@/components/pos/cart-display';
+import { VehiclePickerHost } from '@/components/motos/vehicle-picker-dialog';
 import { CartProvider } from '@/context/cart-provider';
 import { Sheet, SheetContent, SheetTrigger, SheetClose } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
@@ -61,6 +62,7 @@ function PosPageContent() {
         </aside>
       </div>
       <MobileCart />
+      <VehiclePickerHost />
     </>
   );
 }
