@@ -1,4 +1,4 @@
-import type { Vehicle, VehicleEvent, VehicleType, CustomerGuarantor, CustomerReference, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
+import type { Vehicle, VehicleEvent, VehicleType, CustomerGuarantor, CustomerReference, MotosSettings, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
@@ -1110,4 +1110,28 @@ export const rowToVehicleEvent = (r: any): VehicleEvent => ({
   loanId: r.loan_id ?? undefined,
   createdByName: r.created_by_name ?? undefined,
   createdAt: new Date(r.created_at),
+});
+
+// ---------- Motopréstamos: ajustes ----------
+export const MOTOS_SETTINGS_DEFAULT: MotosSettings = {
+  custodyFinancedSale: true, custodyCashSale: false, custodyLoan: true, requireGuarantor: false,
+};
+
+export const rowToMotosSettings = (r: any): MotosSettings => (r ? {
+  custodyFinancedSale: r.custody_financed_sale ?? true,
+  custodyCashSale: r.custody_cash_sale ?? false,
+  custodyLoan: r.custody_loan ?? true,
+  requireGuarantor: r.require_guarantor ?? false,
+  contractSale: r.contract_sale ?? undefined,
+  contractLoan: r.contract_loan ?? undefined,
+} : { ...MOTOS_SETTINGS_DEFAULT });
+
+/** Solo lo que viene; un contrato en '' o null vuelve al texto base. */
+export const motosSettingsToRow = (p: Partial<MotosSettings>) => ({
+  ...(p.custodyFinancedSale !== undefined ? { custody_financed_sale: p.custodyFinancedSale } : {}),
+  ...(p.custodyCashSale !== undefined ? { custody_cash_sale: p.custodyCashSale } : {}),
+  ...(p.custodyLoan !== undefined ? { custody_loan: p.custodyLoan } : {}),
+  ...(p.requireGuarantor !== undefined ? { require_guarantor: p.requireGuarantor } : {}),
+  ...('contractSale' in p ? { contract_sale: p.contractSale?.trim() || null } : {}),
+  ...('contractLoan' in p ? { contract_loan: p.contractLoan?.trim() || null } : {}),
 });

@@ -113,6 +113,20 @@ export type CustomerGuarantor = {
   relationship?: string;
 };
 
+/** Ajustes del módulo Motopréstamos (una fila por empresa; sin fila = por defecto). */
+export type MotosSettings = {
+  custodyFinancedSale: boolean;
+  custodyCashSale: boolean;
+  custodyLoan: boolean;
+  requireGuarantor: boolean;
+  /** Vacío = el texto base de src/lib/contrato.ts. */
+  contractSale?: string;
+  contractLoan?: string;
+};
+
+/** Foto de una moto o de la cédula de un cliente (bucket privado `motos`). */
+export type MotosPhoto = { id: string; path: string; createdAt: Date; url?: string };
+
 /** Referencia personal o comercial del cliente (Motopréstamos). */
 export type CustomerReference = {
   id: string;
