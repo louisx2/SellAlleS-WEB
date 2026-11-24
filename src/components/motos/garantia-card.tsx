@@ -7,6 +7,7 @@ import { fetchVehiculosDelPrestamo } from '@/hooks/use-vehiculos';
 import { useModules } from '@/context/modules-provider';
 import { vehicleLabel } from '@/lib/motos';
 import { RegistrationText, VehicleStatusBadge } from '@/components/motos/vehicle-status-badge';
+import { ContratoBoton } from '@/components/motos/contrato-boton';
 import type { Vehicle } from '@/lib/types';
 
 /** Las motos que respaldan el préstamo. No sale si no hay ninguna. */
@@ -23,7 +24,10 @@ export function GarantiaCard({ loanId }: { loanId: string }) {
   if (motos.length === 0) return null;
   return (
     <Card>
-      <CardHeader><CardTitle>Garantía</CardTitle></CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardTitle>Garantía</CardTitle>
+        <ContratoBoton tipo="prestamo" id={loanId} size="sm" />
+      </CardHeader>
       <CardContent className="space-y-3">
         {motos.map((v) => (
           <div key={v.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">

@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card'
 import { ReceiptBarcode, ReceiptContent, ReceiptEcf, ReceiptHeader, ReceiptItems, ReceiptTotals } from '@/components/pos/receipt-content';
 import { useToast } from '@/hooks/use-toast';
 import { SalePaymentsCard } from '@/components/sales/sale-payments-card';
+import { ContratoBoton } from '@/components/motos/contrato-boton';
 import { IncluirDatosCliente } from '@/components/pos/incluir-datos-cliente';
 import { CompartirDocumento } from '@/components/sharing/compartir-documento';
 import {
@@ -210,6 +211,10 @@ export default function SaleReceiptClient() {
                   Garantía al taller
                 </Link>
               </Button>
+            )}
+            {/* Motopréstamos: contrato de venta condicional de la moto vendida a plazo. */}
+            {(sale.paymentMethod === 'credit' || sale.paymentMethod === 'financing') && !sale.cancelledAt && (
+              <ContratoBoton tipo="venta" id={sale.id} verificar />
             )}
         </div>
       {sale.cancelledAt && (
