@@ -112,12 +112,23 @@ export default function CobranzaPage() {
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <Card><CardContent className="p-3"><p className="text-xs text-muted-foreground">Por cobrar</p><p className="font-semibold">{formatCurrency(porCobrar)}</p></CardContent></Card>
-          <Card><CardContent className="p-3"><p className="text-xs text-muted-foreground">Cobrado hoy</p><p className="font-semibold">{formatCurrency(resumen.cobradoHoy)}</p></CardContent></Card>
-          <Card><CardContent className="p-3"><p className="text-xs text-muted-foreground">En mano</p><p className="font-semibold">{formatCurrency(resumen.enMano)}</p>
-            {resumen.enManoDesde && resumen.enManoDesde < hoy && <p className="text-xs text-amber-700 dark:text-amber-300">desde el {fechaCorta(resumen.enManoDesde)}</p>}
-          </CardContent></Card>
+        {/* En el teléfono, una fila por número (tres columnas de 108 px no caben RD$18,400.00). */}
+        <div className="grid gap-2 sm:grid-cols-3 sm:text-center">
+          {[
+            { label: 'Por cobrar', valor: porCobrar },
+            { label: 'Cobrado hoy', valor: resumen.cobradoHoy },
+            { label: 'En mano', valor: resumen.enMano, desde: resumen.enManoDesde && resumen.enManoDesde < hoy ? resumen.enManoDesde : undefined },
+          ].map((s) => (
+            <Card key={s.label}>
+              <CardContent className="flex items-baseline justify-between gap-2 px-3 py-2 sm:block sm:p-3">
+                <p className="text-xs text-muted-foreground">{s.label}</p>
+                <div className="text-right sm:text-center">
+                  <p className="font-semibold">{formatCurrency(s.valor)}</p>
+                  {s.desde && <p className="text-xs text-amber-700 dark:text-amber-300">desde el {fechaCorta(s.desde)}</p>}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
         {verTodas && !puedeCobrar && (
           <p className="text-sm text-muted-foreground">Ves la ruta, pero no cobras desde aquí: no estás registrado como cobrador en esta sucursal.</p>
