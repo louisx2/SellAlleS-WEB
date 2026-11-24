@@ -134,6 +134,15 @@ begin
     '{"vehiculo":{"chassis":"G-200"}}'), '%Motopréstamos está apagado%');
   update company_modules set enabled = true
    where company_id = '00000000-0000-0000-0000-0000000000aa' and module_key = 'motoprestamos';
+  -- Admin de otra empresa (cc56c633, solo de b463) con el módulo encendido allá:
+  -- no presta con la sucursal ni el cliente de la demo.
+  insert into company_modules (company_id, module_key, enabled)
+  values ('b463d8b5-b589-4194-b0c3-2a912b58b7c9', 'motoprestamos', true)
+  on conflict (company_id, module_key) do update set enabled = true;
+  perform pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
+  perform pg_temp.debe_fallar(format('select pg_temp.prestamo(%L, %L)', b,
+    '{"vehiculo":{"chassis":"AJENO-1"}}'), '%no encontrado%');
+  perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
   perform pg_temp.igual((select count(*)::int from loans where customer_id = b), 0, 'sin préstamos de B');
 
   -- 3. Saldar: la moto se libera y la matrícula queda lista.
@@ -202,6 +211,19 @@ begin
                         and company_id = '00000000-0000-0000-0000-0000000000aa');
   update profiles set company_id = '00000000-0000-0000-0000-0000000000aa'
    where id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566';
+  -- Primero solo en "Sucursal Prueba": no puede prestar en la Principal.
+  insert into profile_branches (profile_id, company_id, branch_id, role_id)
+  select 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566', '00000000-0000-0000-0000-0000000000aa',
+         '169fe6bb-91fa-4633-8e43-5a45e410e2b0', 'd7bb7626-3aa0-4f4b-9b1b-eb61264a4b04'
+   where not exists (select 1 from profile_branches
+                      where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566'
+                        and branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0');
+  delete from profile_branches
+   where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and branch_id = '00000000-0000-0000-0000-0000000000b1';
+  perform pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
+  perform pg_temp.debe_fallar(format('select pg_temp.prestamo(%L, %L)', b,
+    '{"vehiculo":{"chassis":"OTRASUC-9"}}'), '%No tienes acceso%');
+  perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
   insert into profile_branches (profile_id, company_id, branch_id, role_id)
   select 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566', '00000000-0000-0000-0000-0000000000aa',
          '00000000-0000-0000-0000-0000000000b1', 'd7bb7626-3aa0-4f4b-9b1b-eb61264a4b04'
@@ -249,6 +271,23 @@ begin
   perform void_credit_payment((r->>'payment_id')::uuid, 'prueba');
   perform pg_temp.igual((select payment_status::text from sales where id = sr), 'credit', 'venta sin moto a crédito');
   perform pg_temp.igual((select count(*)::int from vehicle_events where sale_id = sr), 0, 'sin eventos en la venta');
+
+  -- 12. Una moto vendida y pagada que después respalda un préstamo: su venta ya
+  -- no se puede anular (la unidad se quedaría con el cliente, en garantía).
+  insert into vehicles (id, company_id, branch_id, origin, product_id, brand, model, chassis, cost) values
+    ('00000000-0000-0000-0000-00000000e406', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+     'inventario', '00000000-0000-0000-0000-00000000e403', 'Yamaha', 'YBR', 'GV-2', 70000);
+  select x.id into s from create_sale_with_items(
+    jsonb_build_object('branch_id', '00000000-0000-0000-0000-0000000000b1', 'customer_id', a,
+                       'subtotal', 95000, 'itbis_amount', 0, 'total', 95000,
+                       'payment_method', 'transfer', 'payment_status', 'paid', 'amount_paid', 95000),
+    jsonb_build_array(jsonb_build_object('product_id', '00000000-0000-0000-0000-00000000e403', 'product_name', 'Moto',
+      'quantity', 1, 'price', 95000, 'itbis', false, 'unit', 'und', 'vehicle_id', '00000000-0000-0000-0000-00000000e406'))) x;
+  perform pg_temp.prestamo(a, jsonb_build_object('vehicle_id', '00000000-0000-0000-0000-00000000e406', 'matricula_en_custodia', true));
+  perform pg_temp.igual((pg_temp.v('00000000-0000-0000-0000-00000000e406')).status, 'en_garantia', 'vendida y en garantía');
+  update ecf_documentos set estado = 'rechazado' where sale_id = s;
+  perform pg_temp.debe_fallar(format('select annul_sale(%L, %L, null)', s, 'prueba'), '%garantía de un préstamo%');
+  perform pg_temp.igual((select cancelled_at from sales where id = s), null::timestamptz, 'la venta sigue viva');
 end $$;
 
 select 'ok';

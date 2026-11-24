@@ -2,9 +2,10 @@
 -- Diseño: docs/superpowers/specs/2026-11-23-motoprestamos-design.md (Entrega 2)
 -- Plan:   docs/superpowers/plans/2026-11-24-motoprestamos-entrega-2b-garantia-matriculas.md (Task 2)
 --
--- Cambia dos funciones vivas, partiendo de pg_get_functiondef:
---   vehicles_before  db33a5f099fe6c40f9ec2d39fdf30f95
---   vehicles_after   e97ae77132d6f01defb00c63abe73860
+-- Cambia tres funciones vivas, partiendo de pg_get_functiondef:
+--   vehicles_before     db33a5f099fe6c40f9ec2d39fdf30f95
+--   vehicles_after      e97ae77132d6f01defb00c63abe73860
+--   motos_anular_venta  9e02e4f81fb39ba605fe30116ff3cbc2
 -- No toca abonos ni refinanciación (register_loan_payment, void_loan_payment,
 -- refinance_loan, register_sale_payment, void_credit_payment): lo que pasa con la
 -- moto al saldar, al anular un abono o al refinanciar lo hacen triggers sobre
@@ -416,6 +417,32 @@ $$;
 create trigger trg_motos_venta_saldada after update of payment_status on public.sales
   for each row when (old.payment_status is distinct from new.payment_status)
   execute function public.motos_venta_saldada();
+
+-- Anular la venta de una moto que después se dio en garantía dejaría la unidad
+-- con el cliente (en garantía o liberada) y una venta anulada: se rechaza. Desde lo
+-- vivo de motos_anular_venta (9e02e4f81fb39ba605fe30116ff3cbc2); el raise deshace
+-- annul_sale entero.
+create or replace function public.motos_anular_venta(p_sale_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (select 1 from public.vehicles
+              where sale_id = p_sale_id and status in ('en_garantia', 'liberado')) then
+    raise exception 'La moto de esta venta se usó después como garantía de un préstamo: no se puede anular la venta.';
+  end if;
+  perform set_config('motos.sistema', 'si', true);
+  perform set_config('motos.evento', 'venta_anulada', true);
+  update public.vehicles
+     set status = 'disponible', customer_id = null, sale_id = null,
+         registration_status = 'no_aplica', registration_since = null
+   where sale_id = p_sale_id and status = 'vendido';
+  perform set_config('motos.sistema', '', true);
+  perform set_config('motos.evento', '', true);
+end;
+$$;
 
 -- 5. Entregar la matrícula -------------------------------------------------------------
 -- Lista para entregar: quien edita vehículos la entrega. En custodia (deuda sin
