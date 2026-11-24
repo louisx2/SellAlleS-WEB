@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2, Route, ListChecks, Calculator } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2, Route, ListChecks, Calculator, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -64,6 +64,7 @@ const featuresNavItems: NavItem[] = [
   { href: '/motos', icon: Bike, label: 'Vehículos', module: 'motoprestamos', permission: 'motos' },
   { href: '/motos/matriculas', icon: FileCheck, label: 'Matrículas', module: 'motoprestamos', permission: 'motos' },
   { href: '/motos/cobranza', icon: Route, label: 'Cobranza', module: 'motoprestamos', permission: 'cobranza' },
+  { href: '/motos/cobranza/avisos', icon: MessageCircle, label: 'Avisos de cobro', module: 'motoprestamos', permission: 'cobranza' },
   { href: '/motos/cobranza/asignar', icon: ListChecks, label: 'Asignar cartera', module: 'motoprestamos', permission: 'cobranza-all' },
   { href: '/motos/cobranza/cuadre', icon: Calculator, label: 'Cuadre de cobradores', module: 'motoprestamos', permission: 'cobranza-cuadre' },
   { href: '/caja', icon: Coins, label: 'Caja', module: 'caja', permission: 'caja' },
