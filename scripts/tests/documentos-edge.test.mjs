@@ -75,3 +75,21 @@ test('consumidor final, sin comprobante, plan y estado: 15 días', () => {
   assert.equal(diasDeValidez('plan', 'B0100000012'), 15);
   assert.equal(diasDeValidez('estado', 'E310000000001'), 15);
 });
+
+import { rutaDelRecibo, abonoValido, NOMBRE_RECIBO, DIAS_RECIBO } from '../../supabase/functions/_shared/documentos.ts';
+
+test('recibo de abono: su propia ruta, nombre y 15 días', () => {
+  assert.equal(rutaDelRecibo('emp', '11111111-2222-3333-4444-555555555555'), 'emp/abonos/11111111-2222-3333-4444-555555555555.pdf');
+  assert.equal(NOMBRE_RECIBO, 'recibo-de-abono.pdf');
+  assert.equal(DIAS_RECIBO, 15);
+});
+
+test('abono válido: tipo préstamo o venta y un uuid; si no, nada', () => {
+  const id = '11111111-2222-3333-4444-555555555555';
+  assert.deepEqual(abonoValido({ tipo: 'prestamo', paymentId: id }), { tipo: 'prestamo', paymentId: id });
+  assert.deepEqual(abonoValido({ tipo: 'venta', paymentId: id }), { tipo: 'venta', paymentId: id });
+  assert.equal(abonoValido({ tipo: 'cliente', paymentId: id }), null);
+  assert.equal(abonoValido({ tipo: 'prestamo', paymentId: 'x' }), null);
+  assert.equal(abonoValido(undefined), null);
+  assert.equal(abonoValido('prestamo'), null);
+});

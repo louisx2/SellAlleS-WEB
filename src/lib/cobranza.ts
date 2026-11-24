@@ -134,6 +134,73 @@ export function rutaDelDia(
       : x.orden - y.orden || porNombre(x, y));
 }
 
+/** Un día más o menos sobre una fecha yyyy-mm-dd local. */
+function sumarDias(fecha: string, n: number): string {
+  const d = new Date(`${fecha}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export type MotivoDeAviso = 'manana' | 'hoy' | 'atrasado';
+
+export type Aviso = { customerId: string; motivo: MotivoDeAviso; diasAtraso: number; monto: number; fecha: string };
+
+const ORDEN_AVISO: Record<MotivoDeAviso, number> = { atrasado: 0, hoy: 1, manana: 2 };
+
+/**
+ * Los avisos de cuota del día, uno por cliente: algo atrasado, una cuota de hoy
+ * o una de mañana. El monto es lo que se le cobraría (cuota y mora, sin pasar de
+ * lo pendiente) de lo que ya toca; si solo es mañana, lo que falta de esa cuota.
+ * Con `clientes`, solo esos (la cartera del cobrador).
+ */
+export function avisosDelDia(cuentas: CuentaDeCobro[], hoy: string, clientes?: Set<string>): Aviso[] {
+  const manana = sumarDias(hoy, 1);
+  const porCliente = new Map<string, CuentaDeCobro[]>();
+  for (const c of cuentas) {
+    if (c.pendiente <= 0.005 || (clientes && !clientes.has(c.customerId))) continue;
+    porCliente.set(c.customerId, [...(porCliente.get(c.customerId) ?? []), c]);
+  }
+  const avisos: Aviso[] = [];
+  for (const [customerId, suyas] of porCliente) {
+    const tocan = suyas.filter(toca);
+    if (tocan.length > 0) {
+      const diasAtraso = Math.max(0, ...tocan.map((c) => c.diasAtraso));
+      avisos.push({
+        customerId,
+        motivo: diasAtraso > 0 ? 'atrasado' : 'hoy',
+        diasAtraso,
+        monto: centavos(tocan.reduce((s, c) => s + sugeridoDe(c), 0)),
+        fecha: diasAtraso > 0 ? sumarDias(hoy, -diasAtraso) : hoy,
+      });
+      continue;
+    }
+    const deManana = suyas.filter((c) => c.proximaFecha === manana);
+    if (deManana.length > 0) {
+      avisos.push({
+        customerId, motivo: 'manana', diasAtraso: 0, fecha: manana,
+        monto: centavos(deManana.reduce((s, c) => s + Math.min(c.pendiente, c.cuota), 0)),
+      });
+    }
+  }
+  return avisos.sort((x, y) =>
+    ORDEN_AVISO[x.motivo] - ORDEN_AVISO[y.motivo] || y.diasAtraso - x.diasAtraso || x.customerId.localeCompare(y.customerId));
+}
+
+/** Las entregas sumadas por cobrador, en centavos exactos (0.1 + 0.2 = 0.3). */
+export function resumenDeEntregas(entregas: { collectorId: string; expected: number; received: number; difference: number }[]) {
+  const m = new Map<string, { collectorId: string; entregas: number; esperado: number; recibido: number; diferencia: number }>();
+  const c = (n: number) => Math.round(n * 100);
+  for (const e of entregas) {
+    const f = m.get(e.collectorId) ?? { collectorId: e.collectorId, entregas: 0, esperado: 0, recibido: 0, diferencia: 0 };
+    f.entregas += 1;
+    f.esperado += c(e.expected);
+    f.recibido += c(e.received);
+    f.diferencia += c(e.difference);
+    m.set(e.collectorId, f);
+  }
+  return [...m.values()].map((f) => ({ ...f, esperado: f.esperado / 100, recibido: f.recibido / 100, diferencia: f.diferencia / 100 }));
+}
+
 export type AbonoDelCobrador = {
   monto: number;
   metodo: 'cash' | 'transfer';

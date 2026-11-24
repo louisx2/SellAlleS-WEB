@@ -145,3 +145,83 @@ test('cuenta sin plan de cuotas (crédito simple): todo lo pendiente, sin atraso
   assert.equal(c.venceHoy, false);
   assert.equal(c.proximaFecha, undefined);
 });
+
+import {
+  AVISO_BASE, RECIBO_BASE, MARCADORES_AVISO, MARCADORES_RECIBO,
+  llenarMensaje, marcadoresDesconocidosEn, estadoDeCuota, plantillaParaGuardar,
+} from '../../src/lib/cobranza-mensajes.ts';
+import { avisosDelDia, resumenDeEntregas } from '../../src/lib/cobranza.ts';
+
+test('llenar un mensaje: los marcadores conocidos se cambian; lo demás queda a la vista', () => {
+  assert.equal(llenarMensaje('Hola {cliente}, son {monto}.', { cliente: 'Juan', monto: 'RD$650.00' }), 'Hola Juan, son RD$650.00.');
+  assert.equal(llenarMensaje('Hola {clienteX}', { cliente: 'Juan' }), 'Hola {clienteX}');
+  assert.equal(llenarMensaje('Saldo {saldo}', { saldo: undefined }), 'Saldo {saldo}');
+  assert.equal(llenarMensaje('{ cliente }', { cliente: 'Ana' }), 'Ana');
+});
+
+test('marcadores desconocidos, sin repetir y en orden', () => {
+  assert.deepEqual(marcadoresDesconocidosEn('Hola {cliente} {nombre} {nombre} {x}', ['cliente']), ['nombre', 'x']);
+  assert.deepEqual(marcadoresDesconocidosEn(AVISO_BASE, MARCADORES_AVISO.map((m) => m.clave)), []);
+  assert.deepEqual(marcadoresDesconocidosEn(RECIBO_BASE, MARCADORES_RECIBO.map((m) => m.clave)), []);
+});
+
+test('estado de la cuota para el aviso', () => {
+  assert.equal(estadoDeCuota('manana', 0), 'vence mañana');
+  assert.equal(estadoDeCuota('hoy', 0), 'vence hoy');
+  assert.equal(estadoDeCuota('atrasado', 1), 'tiene 1 día de atraso');
+  assert.equal(estadoDeCuota('atrasado', 6), 'tiene 6 días de atraso');
+});
+
+test('plantilla para guardar: vacía o igual al texto base no se guarda', () => {
+  assert.equal(plantillaParaGuardar('   ', AVISO_BASE), null);
+  assert.equal(plantillaParaGuardar(undefined, AVISO_BASE), null);
+  assert.equal(plantillaParaGuardar(`  ${AVISO_BASE} `, AVISO_BASE), null);
+  assert.equal(plantillaParaGuardar('  Hola {cliente} ', AVISO_BASE), 'Hola {cliente}');
+});
+
+const cuentaAviso = (over = {}) => ({
+  tipo: 'prestamo', id: 'L1', customerId: 'C1', branchId: 'B1',
+  pendiente: 5000, cuota: 650, mora: 0, diasAtraso: 0, venceHoy: false, ...over,
+});
+
+test('avisos del día: mañana, hoy y atrasado, uno por cliente', () => {
+  const avisos = avisosDelDia([
+    cuentaAviso({ customerId: 'M', proximaFecha: '2026-11-26' }),
+    cuentaAviso({ customerId: 'H', venceHoy: true }),
+    cuentaAviso({ customerId: 'A', diasAtraso: 6, mora: 45 }),
+    cuentaAviso({ customerId: 'A', id: 'L2', venceHoy: true, cuota: 100 }),
+    cuentaAviso({ customerId: 'N', proximaFecha: '2026-11-30' }),
+  ], HOY);
+  assert.deepEqual(avisos.map((a) => [a.customerId, a.motivo, a.monto, a.fecha, a.diasAtraso]), [
+    ['A', 'atrasado', 795, '2026-11-19', 6],
+    ['H', 'hoy', 650, HOY, 0],
+    ['M', 'manana', 650, '2026-11-26', 0],
+  ]);
+});
+
+test('avisos: atrasados de más a menos días, y solo los clientes pedidos', () => {
+  const cuentas = [
+    cuentaAviso({ customerId: 'A', diasAtraso: 3 }),
+    cuentaAviso({ customerId: 'B', diasAtraso: 30 }),
+    cuentaAviso({ customerId: 'C', venceHoy: true }),
+  ];
+  assert.deepEqual(avisosDelDia(cuentas, HOY).map((a) => a.customerId), ['B', 'A', 'C']);
+  assert.deepEqual(avisosDelDia(cuentas, HOY, new Set(['A', 'C'])).map((a) => a.customerId), ['A', 'C']);
+});
+
+test('aviso de mañana: lo que falta de la cuota, sin pasar de lo pendiente', () => {
+  const [a] = avisosDelDia([cuentaAviso({ proximaFecha: '2026-11-26', cuota: 650, pendiente: 400 })], HOY);
+  assert.equal(a.monto, 400);
+});
+
+test('resumen de entregas por cobrador, en centavos exactos', () => {
+  const r = resumenDeEntregas([
+    { collectorId: 'X', expected: 0.1, received: 0.1, difference: 0 },
+    { collectorId: 'X', expected: 0.2, received: 0.1, difference: -0.1 },
+    { collectorId: 'Y', expected: 500, received: 450, difference: -50 },
+  ]);
+  assert.deepEqual(r, [
+    { collectorId: 'X', entregas: 2, esperado: 0.3, recibido: 0.2, diferencia: -0.1 },
+    { collectorId: 'Y', entregas: 1, esperado: 500, recibido: 450, diferencia: -50 },
+  ]);
+});
