@@ -65,7 +65,7 @@ export function CustomerActions({ customer }: CustomerActionsProps) {
           {conGarantes && (
             <DropdownMenuItem onSelect={() => setGarantesOpen(true)}>
               <Users className="mr-2 h-4 w-4" />
-              <span>Garantes y referencias</span>
+              <span>Expediente (cédula y garantes)</span>
             </DropdownMenuItem>
           )}
           <DropdownMenuItem onClick={handleDelete} className="text-destructive">
