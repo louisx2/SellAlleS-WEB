@@ -102,6 +102,10 @@ test('baseQtyInCart', () => {
   // Excluyendo la línea de paquetes (la que se está editando): quedan las 3 sueltas.
   assert.equal(baseQtyInCart('g1', items, 'a'), 3);
   assert.equal(baseQtyInCart('nada', items), 0);
+  // Una moto con su chasis no cuenta contra el stock de la foto del carrito: la
+  // unidad la controla la base, y la foto puede ser de antes de ingresar otra.
+  const motos = [line({ cartItemId: 'm1', quantity: 1, vehicleId: 'v1' }), line({ cartItemId: 'm2', quantity: 1, vehicleId: 'v2' })];
+  assert.equal(baseQtyInCart('g1', motos), 0);
 });
 
 test('maxAddable', () => {

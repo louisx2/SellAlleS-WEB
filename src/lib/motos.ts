@@ -42,16 +42,17 @@ export function vehicleLabel(v: Describible): string {
 
 /**
  * La descripción de la línea de venta, con chasis y motor. Espejo EXACTO de
- * `motos_descripcion` en la base, que es la que queda en la factura.
+ * `motos_descripcion` en la base, que es la que queda en la factura. Chasis y
+ * motor van antes que año y color: el e-CF corta el nombre a 80 caracteres.
  */
 export function vehicleLineName(v: Describible): string {
   const nombre = [limpio(v.brand), limpio(v.model)].filter(Boolean).join(' ');
   return [
     nombre,
-    v.year ? String(v.year) : '',
-    limpio(v.color),
     limpio(v.chassis) ? `Chasis ${limpio(v.chassis)}` : '',
     limpio(v.engineNumber) ? `Motor ${limpio(v.engineNumber)}` : '',
+    v.year ? String(v.year) : '',
+    limpio(v.color),
   ].filter(Boolean).join(' · ');
 }
 
@@ -74,6 +75,29 @@ export function matchesVehicle(
     [v.chassis, v.plate, v.brand, v.model, v.color, v.customerName, v.engineNumber].map(limpio).join(' '),
   );
   return pajar.includes(aguja);
+}
+
+/** Un monto escrito a mano: acepta comas de miles ("95,000"). Vacío = undefined;
+ *  lo que no sea un número válido, negativo o con coma decimal = NaN. */
+export function parseMonto(s: string): number | undefined {
+  const t = s.trim();
+  if (t === '') return undefined;
+  if (!/^\d{1,3}(,\d{3})*(\.\d+)?$|^\d+(\.\d+)?$/.test(t)) return NaN;
+  return Number(t.replace(/,/g, ''));
+}
+
+/** Por qué no se puede marcar todavía un artículo como vehículo. La base lo
+ *  rechaza igual; esto lo dice antes y con los pasos, porque con el interruptor
+ *  encendido el formulario esconde las existencias y las presentaciones. */
+export function motivoParaNoMarcarVehiculo(p: {
+  eraVehiculo: boolean; esVehiculo: boolean; stock: number; presentaciones: number;
+}): string | null {
+  if (p.eraVehiculo || !p.esVehiculo) return null;
+  if (p.stock !== 0) {
+    return `Tiene ${p.stock} en existencias. Apaga «Es un vehículo», pon las existencias en 0 y guarda; después márcalo e ingresa cada moto desde Vehículos.`;
+  }
+  if (p.presentaciones > 0) return 'Tiene presentaciones. Apaga «Es un vehículo», quítalas y guarda; después márcalo.';
+  return null;
 }
 
 /** Selector de chasis del POS: las unidades disponibles del artículo que no están

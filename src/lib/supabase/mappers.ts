@@ -77,7 +77,9 @@ export const productToRow = (p: Partial<Product>) => ({
   cost: p.cost,
   itbis: p.itbis ?? false,
   image: p.image ?? null,
-  stock: p.stock ?? 0,
+  // El stock de un artículo-vehículo lo cuenta la base con sus unidades: no se
+  // manda (con el diálogo abierto pudo venderse una y la foto quedaría vieja).
+  ...(p.isVehicle ? {} : { stock: p.stock ?? 0 }),
   unit: p.unit ?? DEFAULT_UNIT_CODE,
   tracks_stock: p.tracksStock ?? true,
   // Solo si quien llama lo aporta: la importación de inventario no lo conoce, y

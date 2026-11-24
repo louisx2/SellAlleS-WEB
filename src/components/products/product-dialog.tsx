@@ -37,6 +37,7 @@ import { useBranches } from '@/context/branch-provider';
 import { factorItbis, formatoPorcentaje, gananciaDelPrecio, precioConGanancia } from '@/lib/margen';
 import { desglosarPrecio, guardadoDesdeBase, guardadoDesdeFinal } from '@/lib/precio-itbis';
 import { ITBIS_RATE, cn, formatCurrency } from '@/lib/utils';
+import { motivoParaNoMarcarVehiculo } from '@/lib/motos';
 import { useModules } from '@/context/modules-provider';
 import { supabase } from '@/lib/supabase/client';
 import { ProductImage, SUFIJO_THUMB } from '@/components/products/product-image';
@@ -432,8 +433,13 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
 
     // Un producto sin inventario no pide existencias ni unidad: se guarda en
     // cero y las validaciones de cantidad no aplican.
-    if (isVehicle && drafts.length > 0) {
-      toast({ title: 'Un vehículo no lleva presentaciones', description: 'Quita las presentaciones antes de marcarlo como vehículo.', variant: 'destructive' });
+    // Marcarlo como vehículo pide existencias en 0 y sin presentaciones, y con el
+    // interruptor encendido esos campos no se ven: se dice qué hacer.
+    const noVehiculo = motivoParaNoMarcarVehiculo({
+      eraVehiculo: !!product?.isVehicle, esVehiculo: isVehicle, stock: product?.stock ?? 0, presentaciones: drafts.length,
+    });
+    if (noVehiculo) {
+      toast({ title: 'Todavía no se puede marcar como vehículo', description: noVehiculo, variant: 'destructive' });
       return;
     }
     if (tracksStock && !isVehicle) {
@@ -490,7 +496,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       price: parseFloat(formData.get('price') as string),
       cost: parseFloat(formData.get('cost') as string),
       itbis: formData.get('itbis') === 'on',
-      // Un vehículo manda las existencias que ya tiene: solo las mueven sus unidades.
+      // Un vehículo no manda existencias (productToRow las omite): las cuenta la base.
       stock: isVehicle ? (product?.stock ?? 0) : tracksStock ? normalizeQty(stockValue, unit) : 0,
       unit: tracksStock && !isVehicle ? unit : DEFAULT_UNIT_CODE,
       tracksStock: tracksStock || isVehicle,
@@ -548,9 +554,12 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
          setCodeTouched(true);
          codeRef.current?.focus();
        }
+       // Los rechazos de la base escritos para el usuario (P0001: raise exception),
+       // como los del guardia de vehículos, se muestran tal cual.
+       const mensajeDeLaBase = error?.code === 'P0001' && typeof error?.message === 'string';
        toast({
          title: codigoRepetido ? 'Código en uso' : 'Error al guardar',
-         description: codigoRepetido ? error.message : 'No se pudo guardar el producto. Inténtalo de nuevo.',
+         description: codigoRepetido || mensajeDeLaBase ? error.message : 'No se pudo guardar el producto. Inténtalo de nuevo.',
          variant: 'destructive',
        });
        return;
@@ -826,6 +835,12 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                       ? `Existencias: ${product?.stock ?? 0} ${(product?.stock ?? 0) === 1 ? 'unidad disponible' : 'unidades disponibles'} (se ingresan desde Vehículos).`
                       : 'Para motos y otros vehículos: cada unidad se ingresa con su chasis y se elige al vender.'}
                   </p>
+                  {(() => {
+                    const aviso = motivoParaNoMarcarVehiculo({
+                      eraVehiculo: !!product?.isVehicle, esVehiculo: isVehicle, stock: product?.stock ?? 0, presentaciones: drafts.length,
+                    });
+                    return aviso ? <p className="mt-1 text-xs font-medium text-destructive">{aviso}</p> : null;
+                  })()}
                 </div>
                 <Switch checked={isVehicle} onCheckedChange={setIsVehicle} />
               </div>

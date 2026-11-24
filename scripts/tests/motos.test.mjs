@@ -30,13 +30,15 @@ test('el rubro Motopréstamos enciende sus módulos y siembra el tipo Motor', ()
 
 // --- Etiquetas y descripción de vehículos (src/lib/motos.ts) ---
 import {
-  matchesVehicle, normalizeChassis, REGISTRATION_STATUS_LABEL, unidadesParaElegir, VEHICLE_STATUS, vehicleLabel, vehicleLineName,
+  matchesVehicle, motivoParaNoMarcarVehiculo, normalizeChassis, parseMonto, REGISTRATION_STATUS_LABEL, unidadesParaElegir,
+  VEHICLE_STATUS, vehicleLabel, vehicleLineName,
 } from '../../src/lib/motos.ts';
 
+// Chasis y motor antes que año y color: el e-CF corta el nombre a 80 caracteres.
 test('descripción de la línea igual que motos_descripcion en la base', () => {
   assert.equal(
     vehicleLineName({ brand: 'Honda', model: 'CG 150', year: 2025, color: 'Azul', chassis: 'abc 123', engineNumber: 'M-1' }),
-    'Honda CG 150 · 2025 · Azul · Chasis abc 123 · Motor M-1');
+    'Honda CG 150 · Chasis abc 123 · Motor M-1 · 2025 · Azul');
   assert.equal(vehicleLineName({ brand: 'Yamaha', model: 'YBR', chassis: 'GAR-1' }), 'Yamaha YBR · Chasis GAR-1');
   assert.equal(vehicleLineName({ brand: 'Honda', model: 'CG 150', chassis: 'V-2', engineNumber: 'E-2' }), 'Honda CG 150 · Chasis V-2 · Motor E-2');
   assert.equal(vehicleLineName({ brand: '  ', model: 'CG 150', color: ' ', chassis: ' V-9 ' }), 'CG 150 · Chasis V-9');
@@ -87,6 +89,29 @@ test('selector de chasis: qué unidades ofrece y qué dice cuando no hay', () =>
   // Las hay libres, pero la búsqueda no encuentra ninguna.
   assert.equal(unidadesParaElegir(unidades, moto, new Set(), 'azul').aviso, 'Ninguna unidad coincide con «azul».');
   assert.deepEqual(unidadesParaElegir(unidades, moto, new Set(), 'negra').opciones.map((v) => v.id), ['B']);
+});
+
+test('montos de la unidad: con comas de miles, vacío o inválido', () => {
+  assert.equal(parseMonto('95,000'), 95000);
+  assert.equal(parseMonto(' 1,250.50 '), 1250.5);
+  assert.equal(parseMonto('70000'), 70000);
+  assert.equal(parseMonto(''), undefined);
+  assert.equal(parseMonto('   '), undefined);
+  assert.ok(Number.isNaN(parseMonto('95.000,00')));
+  assert.ok(Number.isNaN(parseMonto('abc')));
+  assert.ok(Number.isNaN(parseMonto('-5')));
+});
+
+test('marcar un artículo como vehículo: dice qué hacer antes, con los campos a la vista', () => {
+  const base = { eraVehiculo: false, esVehiculo: true, stock: 0, presentaciones: 0 };
+  assert.equal(motivoParaNoMarcarVehiculo(base), null);
+  // Ya era vehículo o no se marca: nada que avisar.
+  assert.equal(motivoParaNoMarcarVehiculo({ ...base, eraVehiculo: true, stock: 3 }), null);
+  assert.equal(motivoParaNoMarcarVehiculo({ ...base, esVehiculo: false, stock: 3 }), null);
+  assert.equal(motivoParaNoMarcarVehiculo({ ...base, stock: 5 }),
+    'Tiene 5 en existencias. Apaga «Es un vehículo», pon las existencias en 0 y guarda; después márcalo e ingresa cada moto desde Vehículos.');
+  assert.equal(motivoParaNoMarcarVehiculo({ ...base, presentaciones: 2 }),
+    'Tiene presentaciones. Apaga «Es un vehículo», quítalas y guarda; después márcalo.');
 });
 
 // --- Reportes de vehículos (src/lib/motos-reportes.ts) ---

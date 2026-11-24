@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import type { Product, Vehicle, VehicleType } from '@/lib/types';
 import type { NewVehicleInput, VehiclePatch } from '@/hooks/use-vehiculos';
+import { parseMonto } from '@/lib/motos';
 
 const SIN_TIPO = 'sin-tipo';
 
@@ -101,17 +102,34 @@ export function VehicleFormDialog({
       toast({ title: 'Año inválido', variant: 'destructive' });
       return;
     }
-    const num = (s: string) => (s.trim() === '' ? undefined : Number(s));
+    // "95,000" vale; lo que no sea un monto se avisa en vez de guardarse vacío.
+    const cost = parseMonto(form.cost);
+    const price = parseMonto(form.price);
+    const malo = Number.isNaN(cost) ? 'Costo de la unidad' : Number.isNaN(price) ? 'Precio propio' : null;
+    if (malo) {
+      toast({ title: `${malo}: monto inválido`, description: 'Escribe solo el número, por ejemplo 95,000 o 95000.', variant: 'destructive' });
+      return;
+    }
     const extra: Record<string, string | number> = {};
     for (const f of tipo?.extraFields ?? []) {
       const val = (form.extra[f.key] ?? '').trim();
-      if (val) extra[f.key] = f.type === 'number' ? Number(val) : val;
+      if (!val) continue;
+      if (f.type === 'number') {
+        const n = parseMonto(val);
+        if (n === undefined || Number.isNaN(n)) {
+          toast({ title: `${f.label}: número inválido`, variant: 'destructive' });
+          return;
+        }
+        extra[f.key] = n;
+      } else {
+        extra[f.key] = val;
+      }
     }
     const datos: VehiclePatch = {
       vehicleTypeId: form.vehicleTypeId === SIN_TIPO ? '' : form.vehicleTypeId,
       brand: form.brand, model: form.model, year, color: form.color, chassis: form.chassis,
       engineNumber: form.engineNumber, plate: form.plate, registrationNumber: form.registrationNumber, cc: form.cc,
-      condition: form.condition, cost: num(form.cost), price: num(form.price), notes: form.notes, extra,
+      condition: form.condition, cost, price, notes: form.notes, extra,
     };
     setSaving(true);
     try {
