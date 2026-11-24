@@ -29,6 +29,8 @@ const EVENTO: Record<VehicleEvent['kind'], string> = {
   matricula: 'Matrícula',
   edicion: 'Editado',
   baja: 'Dado de baja',
+  garantia: 'En garantía de un préstamo',
+  liberacion: 'Liberado',
 };
 
 const estado = (s?: string) =>

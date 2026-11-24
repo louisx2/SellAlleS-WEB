@@ -94,6 +94,32 @@ export type Customer = {
   createdByName?: string;
   /** UUID de la sucursal dueña. Vacío = de la empresa, visible desde todas. */
   branchId?: string;
+  // Datos de cobranza (módulo Motopréstamos).
+  nickname?: string;
+  workplace?: string;
+  zone?: string;
+  collectionAddress?: string;
+  collectionReference?: string;
+};
+
+/** Garante o fiador del cliente (Motopréstamos). */
+export type CustomerGuarantor = {
+  id: string;
+  customerId: string;
+  name: string;
+  idDoc?: string;
+  phone?: string;
+  address?: string;
+  relationship?: string;
+};
+
+/** Referencia personal o comercial del cliente (Motopréstamos). */
+export type CustomerReference = {
+  id: string;
+  customerId: string;
+  name: string;
+  phone?: string;
+  relationship?: string;
 };
 
 export type CouponStatus = 'active' | 'redeemed' | 'expired';
@@ -1170,6 +1196,12 @@ export type Vehicle = {
   registrationStatus: RegistrationStatus;
   registrationLocation?: string;
   registrationSince?: Date;
+  /** Préstamo que la tiene en garantía (o el último, si ya se liberó). */
+  loanId?: string;
+  registrationDeliveredTo?: string;
+  registrationDeliveredDoc?: string;
+  registrationDeliveredAt?: Date;
+  registrationDeliveredByName?: string;
   notes?: string;
   createdByName?: string;
   createdAt: Date;
@@ -1178,11 +1210,12 @@ export type Vehicle = {
 
 export type VehicleEvent = {
   id: string;
-  kind: 'ingreso' | 'venta' | 'venta_anulada' | 'cambio_estado' | 'matricula' | 'edicion' | 'baja';
+  kind: 'ingreso' | 'venta' | 'venta_anulada' | 'cambio_estado' | 'matricula' | 'edicion' | 'baja' | 'garantia' | 'liberacion';
   fromStatus?: string;
   toStatus?: string;
   note?: string;
   saleId?: string;
+  loanId?: string;
   createdByName?: string;
   createdAt: Date;
 };

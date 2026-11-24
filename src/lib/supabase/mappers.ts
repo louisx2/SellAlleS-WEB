@@ -1,4 +1,4 @@
-import type { Vehicle, VehicleEvent, VehicleType, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
+import type { Vehicle, VehicleEvent, VehicleType, CustomerGuarantor, CustomerReference, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
@@ -128,6 +128,11 @@ export const rowToCustomer = (r: any): Customer => ({
   createdBy: r.created_by,
   createdByName: r.profiles?.name || undefined,
   branchId: r.branch_id ?? undefined,
+  nickname: r.nickname ?? undefined,
+  workplace: r.workplace ?? undefined,
+  zone: r.zone ?? undefined,
+  collectionAddress: r.collection_address ?? undefined,
+  collectionReference: r.collection_reference ?? undefined,
 });
 // branch_id tampoco se manda: lo pone addCustomer al crear y no debe cambiar al
 // editar — moverlo de sucursal es otra cosa, no un renombrado.
@@ -140,6 +145,30 @@ export const customerToRow = (c: Partial<Customer>) => ({
   ncf_type: c.ncfType ?? 'consumer',
   notes: c.notes ?? null, credit_limit: c.creditLimit ?? null,
   discount_percentage: c.discountPercentage ?? 0,
+  // Datos de cobranza: solo si vienen, para que una edición desde otra pantalla
+  // (o sin el módulo Motopréstamos) no los borre.
+  ...(c.nickname !== undefined ? { nickname: c.nickname.trim() || null } : {}),
+  ...(c.workplace !== undefined ? { workplace: c.workplace.trim() || null } : {}),
+  ...(c.zone !== undefined ? { zone: c.zone.trim() || null } : {}),
+  ...(c.collectionAddress !== undefined ? { collection_address: c.collectionAddress.trim() || null } : {}),
+  ...(c.collectionReference !== undefined ? { collection_reference: c.collectionReference.trim() || null } : {}),
+});
+
+export const rowToGuarantor = (r: any): CustomerGuarantor => ({
+  id: r.id, customerId: r.customer_id, name: r.name, idDoc: r.id_doc ?? undefined,
+  phone: r.phone ?? undefined, address: r.address ?? undefined, relationship: r.relationship ?? undefined,
+});
+export const guarantorToRow = (g: Omit<CustomerGuarantor, 'id'>) => ({
+  customer_id: g.customerId, name: g.name.trim(), id_doc: g.idDoc?.trim() || null,
+  phone: g.phone?.trim() || null, address: g.address?.trim() || null, relationship: g.relationship?.trim() || null,
+});
+export const rowToReference = (r: any): CustomerReference => ({
+  id: r.id, customerId: r.customer_id, name: r.name,
+  phone: r.phone ?? undefined, relationship: r.relationship ?? undefined,
+});
+export const referenceToRow = (x: Omit<CustomerReference, 'id'>) => ({
+  customer_id: x.customerId, name: x.name.trim(),
+  phone: x.phone?.trim() || null, relationship: x.relationship?.trim() || null,
 });
 
 // ---------- Branch ----------
@@ -1038,6 +1067,11 @@ export const rowToVehicle = (r: any): Vehicle => ({
   registrationStatus: r.registration_status ?? 'no_aplica',
   registrationLocation: r.registration_location ?? undefined,
   registrationSince: r.registration_since ? new Date(r.registration_since) : undefined,
+  loanId: r.loan_id ?? undefined,
+  registrationDeliveredTo: r.registration_delivered_to ?? undefined,
+  registrationDeliveredDoc: r.registration_delivered_doc ?? undefined,
+  registrationDeliveredAt: r.registration_delivered_at ? new Date(r.registration_delivered_at) : undefined,
+  registrationDeliveredByName: r.registration_delivered_by_name ?? undefined,
   notes: r.notes ?? undefined,
   createdByName: r.created_by_name ?? undefined,
   createdAt: new Date(r.created_at),
@@ -1073,6 +1107,7 @@ export const rowToVehicleEvent = (r: any): VehicleEvent => ({
   toStatus: r.to_status ?? undefined,
   note: r.note ?? undefined,
   saleId: r.sale_id ?? undefined,
+  loanId: r.loan_id ?? undefined,
   createdByName: r.created_by_name ?? undefined,
   createdAt: new Date(r.created_at),
 });
