@@ -89,6 +89,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   // Solo se pregunta con el módulo de e-CF encendido; sin él, el formulario no
   // toca el campo y el producto conserva lo que ya tenía.
   const showEsServicio = isModuleEnabled('ecf');
+  const showVehicle = isModuleEnabled('motoprestamos') || !!product?.isVehicle;
 
   const isEditMode = !!product;
   // Aviso al crear: lo mismo ya tiene existencias en otra sucursal. Mientras
@@ -118,6 +119,9 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
   // Platos preparados, servicios y tarifas: se venden siempre y no llevan
   // existencias, así que el formulario esconde stock, unidad y mayoreo.
   const [tracksStock, setTracksStock] = useState(product?.tracksStock ?? true);
+  // Motopréstamos: cada unidad se ingresa con su chasis y la base calcula las
+  // existencias, así que el formulario no las pide.
+  const [isVehicle, setIsVehicle] = useState(product?.isVehicle ?? false);
 
   // Presentaciones (paquete, caja…): viven en estado de React; el resto del
   // formulario se lee con FormData. Código, nombre y costo son campos sin controlar,
@@ -256,6 +260,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
     setAplicaItbis(!!product?.itbis);
     setAvisoCobro(null);
     setWholesaleInput(product?.wholesalePrice != null ? String(product.wholesalePrice) : '');
+    setIsVehicle(product?.isVehicle ?? false);
     escribiendo.current = null;
     {
       // Lo tecleado y cancelado no reaparece: las casillas vuelven al precio guardado.
@@ -427,7 +432,11 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
 
     // Un producto sin inventario no pide existencias ni unidad: se guarda en
     // cero y las validaciones de cantidad no aplican.
-    if (tracksStock) {
+    if (isVehicle && drafts.length > 0) {
+      toast({ title: 'Un vehículo no lleva presentaciones', description: 'Quita las presentaciones antes de marcarlo como vehículo.', variant: 'destructive' });
+      return;
+    }
+    if (tracksStock && !isVehicle) {
       if (!Number.isFinite(stockValue) || stockValue < 0) {
         toast({ title: 'Existencias inválidas', description: 'Escribe una cantidad válida mayor o igual que cero.', variant: 'destructive' });
         return;
@@ -481,13 +490,15 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
       price: parseFloat(formData.get('price') as string),
       cost: parseFloat(formData.get('cost') as string),
       itbis: formData.get('itbis') === 'on',
-      stock: tracksStock ? normalizeQty(stockValue, unit) : 0,
-      unit: tracksStock ? unit : DEFAULT_UNIT_CODE,
-      tracksStock,
+      // Un vehículo manda las existencias que ya tiene: solo las mueven sus unidades.
+      stock: isVehicle ? (product?.stock ?? 0) : tracksStock ? normalizeQty(stockValue, unit) : 0,
+      unit: tracksStock && !isVehicle ? unit : DEFAULT_UNIT_CODE,
+      tracksStock: tracksStock || isVehicle,
+      ...(showVehicle ? { isVehicle } : {}),
       ...(showEsServicio ? { esServicio: formData.get('esServicio') === 'on' } : {}),
       locationId: (locationId && locationId !== 'none') ? locationId : undefined,
-      wholesalePrice: tracksStock && formData.get('wholesalePrice') ? parseFloat(formData.get('wholesalePrice') as string) : undefined,
-      wholesaleMinQuantity: !tracksStock || minQtyValue === undefined ? undefined : normalizeQty(minQtyValue, unit),
+      wholesalePrice: tracksStock && !isVehicle && formData.get('wholesalePrice') ? parseFloat(formData.get('wholesalePrice') as string) : undefined,
+      wholesaleMinQuantity: !tracksStock || isVehicle || minQtyValue === undefined ? undefined : normalizeQty(minQtyValue, unit),
       image: imageUrl.trim() || 'placeholder',
     };
 
@@ -803,10 +814,24 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
                   no descuentan inventario y nunca aparecen agotados.
                 </p>
               </div>
-              <Switch checked={tracksStock} onCheckedChange={setTracksStock} />
+              <Switch checked={tracksStock || isVehicle} disabled={isVehicle} onCheckedChange={setTracksStock} />
             </div>
 
-            {tracksStock && (
+            {showVehicle && (
+              <div className="flex items-center justify-between gap-4 rounded-lg border p-3 md:col-span-2">
+                <div>
+                  <p className="text-sm font-medium">Es un vehículo (cada unidad con su chasis)</p>
+                  <p className="text-xs text-muted-foreground">
+                    {isVehicle
+                      ? `Existencias: ${product?.stock ?? 0} ${(product?.stock ?? 0) === 1 ? 'unidad disponible' : 'unidades disponibles'} (se ingresan desde Vehículos).`
+                      : 'Para motos y otros vehículos: cada unidad se ingresa con su chasis y se elige al vender.'}
+                  </p>
+                </div>
+                <Switch checked={isVehicle} onCheckedChange={setIsVehicle} />
+              </div>
+            )}
+
+            {tracksStock && !isVehicle && (
             <>
             <div className="flex flex-col gap-2">
               <Label htmlFor="stock">Existencias ({getUnit(unit).short})</Label>
@@ -882,7 +907,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
               </Select>
             </div>
 
-            {tracksStock && (
+            {tracksStock && !isVehicle && (
               <>
                 <div className="flex flex-col gap-2">
                   <Label htmlFor="wholesalePrice">Precio Mayoreo</Label>
@@ -909,7 +934,7 @@ export function ProductDialog({ product, children, open: openProp, onOpenChange:
               </>
             )}
 
-            <div className="md:col-span-2">
+            <div className={isVehicle ? 'hidden' : 'md:col-span-2'}>
               <PresentationsEditor
                 unit={tracksStock ? unit : DEFAULT_UNIT_CODE}
                 cost={parseFloat(costInput)}
