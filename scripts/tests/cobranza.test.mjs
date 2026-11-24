@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { rutaDelDia, resumenDelCobrador, TEXTO_RESULTADO } from '../../src/lib/cobranza.ts';
+import { rutaDelDia, resumenDelCobrador, cuentaDesdeCuotas, TEXTO_RESULTADO } from '../../src/lib/cobranza.ts';
 
 const HOY = '2026-11-25';
 
@@ -113,4 +113,35 @@ test('el texto de cada resultado de visita', () => {
     pago: 'Pagó', no_estaba: 'No estaba', no_tenia: 'No tenía', promesa: 'Prometió pagar',
     se_nego: 'Se negó', moto_no_aparece: 'La moto no aparece',
   });
+});
+
+const base = { tipo: 'prestamo', id: 'L1', customerId: 'C1', branchId: 'B1', pendiente: 3000, mora: 45 };
+const cuotaDe = (dueDate, amount, paidAmount = 0) => ({ dueDate, amount, paidAmount, status: paidAmount >= amount ? 'paid' : paidAmount > 0 ? 'partial' : 'pending' });
+
+test('cuenta desde sus cuotas: lo vencido más la de hoy, días de atraso y la próxima', () => {
+  const c = cuentaDesdeCuotas({ ...base, cuotas: [
+    cuotaDe('2026-11-18', 650, 650), cuotaDe('2026-11-19', 650, 100), cuotaDe(HOY, 650), cuotaDe('2026-12-02', 650),
+  ] }, HOY);
+  assert.equal(c.cuota, 1200);
+  assert.equal(c.diasAtraso, 6);
+  assert.equal(c.venceHoy, true);
+  assert.equal(c.proximaFecha, '2026-12-02');
+  assert.equal(c.mora, 45);
+  assert.equal(c.pendiente, 3000);
+});
+
+test('cuenta al día: la cuota es lo que falta de la próxima', () => {
+  const c = cuentaDesdeCuotas({ ...base, mora: 0, cuotas: [cuotaDe('2026-11-20', 650, 650), cuotaDe('2026-11-27', 650, 200.5)] }, HOY);
+  assert.equal(c.cuota, 449.5);
+  assert.equal(c.diasAtraso, 0);
+  assert.equal(c.venceHoy, false);
+  assert.equal(c.proximaFecha, '2026-11-27');
+});
+
+test('cuenta sin plan de cuotas (crédito simple): todo lo pendiente, sin atraso', () => {
+  const c = cuentaDesdeCuotas({ ...base, tipo: 'venta', mora: 0, cuotas: [] }, HOY);
+  assert.equal(c.cuota, 3000);
+  assert.equal(c.diasAtraso, 0);
+  assert.equal(c.venceHoy, false);
+  assert.equal(c.proximaFecha, undefined);
 });

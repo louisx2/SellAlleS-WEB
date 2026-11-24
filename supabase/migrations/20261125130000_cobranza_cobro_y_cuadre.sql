@@ -2,7 +2,7 @@
 -- Diseño: docs/superpowers/specs/2026-11-23-motoprestamos-design.md (Entrega 3)
 -- Plan:   docs/superpowers/plans/2026-11-24-motoprestamos-entrega-3a-cobranza-y-cuadre.md (Task 2)
 --
--- Cambia cuatro funciones vivas, partiendo de pg_get_functiondef (solo las líneas
+-- Amplía la política vehicles_select (el cobrador ve la moto). Cambia cuatro funciones vivas, partiendo de pg_get_functiondef (solo las líneas
 -- necesarias):
 --   caja_blocks_cash     93ab593dd439b34128ea03dd405f3bba  (deja pasar el cobro de la ruta)
 --   close_caja_session   563589c0924270e3bbb312352bbfbd7d  (no cuenta los abonos en la calle)
@@ -608,7 +608,20 @@ begin
 end;
 $$;
 
--- 9. Grants --------------------------------------------------------------------------------------------
+-- 9. El cobrador ve las motos de su sucursal (la placa en la ruta) -------------------------
+-- vehicles_select viva (20261124150000_motos_vehiculos.sql) más cobranza:view. Solo lectura:
+-- crear y editar siguen pidiendo el permiso motos.
+
+drop policy vehicles_select on public.vehicles;
+create policy vehicles_select on public.vehicles
+  for select using (
+    ((company_id = public.current_company_id())
+     and (public.motos_tiene_permiso(branch_id, 'motos', 'view')
+          or public.motos_tiene_permiso(branch_id, 'pos', 'view')
+          or public.cobranza_tengo_permiso(branch_id, 'cobranza', 'view')))
+    or public.is_super_admin());
+
+-- 10. Grants --------------------------------------------------------------------------------------------
 
 revoke execute on function public.cobranza_control_de_ruta(uuid, uuid) from public, anon, authenticated;
 grant execute on function public.cobranza_control_de_ruta(uuid, uuid) to service_role;

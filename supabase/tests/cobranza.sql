@@ -226,4 +226,20 @@ begin
   perform pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
 end $$;
 
+-- ---------------------------------------------------------------------------
+-- 3. El cobrador ve las motos de su sucursal (la placa en la ruta)
+-- ---------------------------------------------------------------------------
+insert into products (id, company_id, branch_id, name, price, cost, stock, is_vehicle) values
+  ('00000000-0000-0000-0000-00000000e630', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'Prueba moto cobranza', 95000, 70000, 0, true);
+insert into vehicles (id, company_id, branch_id, origin, product_id, brand, model, chassis, cost) values
+  ('00000000-0000-0000-0000-00000000e631', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1',
+   'inventario', '00000000-0000-0000-0000-00000000e630', 'Yamaha', 'YBR', 'COB-1', 70000);
+set local role authenticated;
+select pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
+select pg_temp.igual((select count(*)::int from vehicles where id = '00000000-0000-0000-0000-00000000e631'), 1, 'el cobrador ve la moto');
+with u as (update vehicles set plate = 'X' where id = '00000000-0000-0000-0000-00000000e631' returning id)
+select pg_temp.igual((select count(*)::int from u), 0, 'el cobrador no edita la moto');
+reset role;
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+
 select 'ok';

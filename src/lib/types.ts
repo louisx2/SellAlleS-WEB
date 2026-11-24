@@ -1,4 +1,5 @@
 import type { RegistrationStatus, VehicleCondition, VehicleOrigin, VehicleStatus } from '@/lib/motos';
+import type { ResultadoVisita } from '@/lib/cobranza';
 import type { UnitCode } from './units';
 import type { InterestMode, PaymentFrequency } from './frequency';
 import type { LateFeeMode } from './late-fee';
@@ -291,7 +292,8 @@ export type PermissionResource =
   | 'dashboard' | 'pos' | 'sales' | 'quotes' | 'services' | 'credit' | 'financing'
   | 'prestamos' | 'caja' | 'expenses' | 'payables' | 'reports' | 'products' | 'customers'
   | 'suppliers' | 'company-profile' | 'users' | 'branches' | 'roles' | 'suscripcion'
-  | 'service-types' | 'quick-sales' | 'services-all' | 'motos' | 'motos-config';
+  | 'service-types' | 'quick-sales' | 'services-all' | 'motos' | 'motos-config'
+  | 'cobranza' | 'cobranza-all' | 'cobranza-cuadre';
 
 // reports_visible: slugs de src/lib/permissions.ts#REPORT_ITEMS que este rol
 // puede ver dentro de "Reportes"; ausente = todos visibles.
@@ -1233,3 +1235,60 @@ export type VehicleEvent = {
   createdByName?: string;
   createdAt: Date;
 };
+
+// ---------- Cobranza en la calle (Motopréstamos 3A) ----------
+
+/** Un usuario marcado como cobrador en una sucursal. */
+export type Cobrador = { id: string; branchId: string; profileId: string; name: string; isActive: boolean };
+
+/** Cliente de la cartera de un cobrador, con su orden de visita. */
+export type AsignacionDeCartera = { id: string; branchId: string; customerId: string; collectorId: string; orden: number };
+
+export type VisitaDeCobro = {
+  id: string;
+  branchId: string;
+  customerId: string;
+  collectorId?: string;
+  outcome: ResultadoVisita;
+  promiseDate?: string;
+  promiseAmount?: number;
+  note?: string;
+  paymentId?: string;
+  createdByName?: string;
+  createdAt: string;
+};
+
+/** Abono cobrado por un cobrador (préstamo o venta). `enCalle`: efectivo que
+ *  sigue en su bolsillo hasta la entrega (`settlementId`). */
+export type AbonoDeCobrador = {
+  id: string;
+  tipo: 'prestamo' | 'venta';
+  collectorId: string;
+  customerId: string;
+  cuentaId?: string;
+  amount: number;
+  method: string;
+  date: string;
+  enCalle: boolean;
+  settlementId?: string;
+  voided: boolean;
+};
+
+/** Entrega del cobrador: lo esperado (sus abonos en efectivo) contra lo recibido. */
+export type EntregaDeCobrador = {
+  id: string;
+  collectorId: string;
+  expected: number;
+  received: number;
+  difference: number;
+  note?: string;
+  receivedByName?: string;
+  cajaMovementId?: string;
+  createdAt: string;
+};
+
+/** Lo que devuelve un cobro de la ruta, para mostrarlo al terminar. */
+export type CobroDeRuta = { paymentId: string; aplicado: number; mora: number; saldo: number | null; enCalle: boolean };
+
+/** Lo que devuelve recibir una entrega. */
+export type EntregaRecibida = { settlementId: string; expected: number; received: number; difference: number; payments: number };

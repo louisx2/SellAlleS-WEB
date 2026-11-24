@@ -38,6 +38,9 @@ export const PERMISSION_RESOURCES: { key: PermissionResource; label: string; act
   { key: 'quick-sales', label: 'Ventas rápidas (fuera de inventario)', actions: ['create'] },
   { key: 'motos', label: 'Motopréstamos: vehículos' },
   { key: 'motos-config', label: 'Motopréstamos: configuración', actions: ['view', 'edit'] },
+  { key: 'cobranza', label: 'Motopréstamos: cobrar en la calle (su ruta)', actions: ['view', 'create'] },
+  { key: 'cobranza-all', label: 'Motopréstamos: ver y asignar la cartera de todos los cobradores', actions: ['view'] },
+  { key: 'cobranza-cuadre', label: 'Motopréstamos: recibir la entrega de los cobradores', actions: ['view', 'create'] },
 ];
 
 /** Acciones que admite un recurso: las suyas (`actions`) o las cuatro. */
@@ -69,6 +72,9 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
   'quick-sales': 'quick-sales',
   motos: 'motoprestamos',
   'motos-config': 'motoprestamos',
+  cobranza: 'motoprestamos',
+  'cobranza-all': 'motoprestamos',
+  'cobranza-cuadre': 'motoprestamos',
 };
 
 // Los reportes individuales (src/app/(app)/reports/*), controlables por

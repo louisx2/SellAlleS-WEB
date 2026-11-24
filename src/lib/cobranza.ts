@@ -47,6 +47,41 @@ export type ParadaDeRuta = {
 
 const centavos = (n: number) => Math.round(n * 100) / 100;
 
+const diasEntre = (desde: string, hasta: string) =>
+  Math.round((new Date(`${hasta}T00:00:00`).getTime() - new Date(`${desde}T00:00:00`).getTime()) / 86_400_000);
+
+export type CuotaDeCobro = { dueDate: string; amount: number; paidAmount: number; status: 'pending' | 'partial' | 'paid' };
+
+/**
+ * Arma la cuenta de la ruta desde las cuotas del plan. `pendiente` y `mora` los
+ * da el cálculo de siempre (calculateLoanStatus / calculateFinancingStatus).
+ * La cuota es lo que falta de las vencidas más la de hoy; si no hay nada
+ * vencido, lo que falta de la próxima. Sin plan (crédito simple), todo lo
+ * pendiente y sin atraso: solo entra a la ruta por una promesa.
+ */
+export function cuentaDesdeCuotas(
+  c: Omit<CuentaDeCobro, 'cuota' | 'diasAtraso' | 'venceHoy' | 'proximaFecha'> & { cuotas: CuotaDeCobro[] },
+  hoy: string,
+): CuentaDeCobro {
+  const { cuotas, ...cuenta } = c;
+  const abiertas = cuotas
+    .filter((q) => q.status !== 'paid' && q.amount - q.paidAmount > 0.005)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const falta = (q: CuotaDeCobro) => q.amount - q.paidAmount;
+  const tocan = abiertas.filter((q) => q.dueDate <= hoy);
+  const vencida = abiertas.find((q) => q.dueDate < hoy);
+  const cuota = cuotas.length === 0
+    ? cuenta.pendiente
+    : tocan.length > 0 ? tocan.reduce((s, q) => s + falta(q), 0) : abiertas[0] ? falta(abiertas[0]) : 0;
+  return {
+    ...cuenta,
+    cuota: centavos(cuota),
+    diasAtraso: vencida ? diasEntre(vencida.dueDate, hoy) : 0,
+    venceHoy: abiertas.some((q) => q.dueDate === hoy),
+    proximaFecha: abiertas.find((q) => q.dueDate > hoy)?.dueDate,
+  };
+}
+
 /** Lo que se le sugiere cobrar a una cuenta: la cuota más la mora, sin pasarse de lo pendiente. */
 const sugeridoDe = (c: CuentaDeCobro) => Math.min(c.pendiente, c.cuota + c.mora);
 
