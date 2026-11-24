@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ContratosTab } from '@/components/motos/config/contratos-tab';
 import { GeneralTab } from '@/components/motos/config/general-tab';
+import { CobradoresTab } from '@/components/motos/config/cobradores-tab';
 import { Pencil, Plus, Trash } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { usePermission } from '@/hooks/use-permission';
@@ -27,7 +28,8 @@ type Draft = { id?: string; name: string; extraFields: VehicleExtraField[]; isAc
 
 // Configuración de Motopréstamos: tipos de vehículo (Motor, Pasola, Carro… con
 // sus campos extra, como los tipos de equipo del Taller), los textos de los
-// contratos y los ajustes generales (custodia de la matrícula y garante).
+// contratos, los ajustes generales (custodia de la matrícula y garante) y los
+// cobradores de la sucursal.
 export default function MotosConfigPage() {
   const { toast } = useToast();
   const canEdit = usePermission('motos-config', 'edit');
@@ -65,10 +67,12 @@ export default function MotosConfigPage() {
           <TabsTrigger value="tipos">Tipos de vehículo</TabsTrigger>
           <TabsTrigger value="contratos">Contratos</TabsTrigger>
           <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="cobradores">Cobradores</TabsTrigger>
         </TabsList>
         {/* Montada siempre: cambiar de pestaña no pierde lo escrito en un contrato. */}
         <TabsContent value="contratos" forceMount className="data-[state=inactive]:hidden"><ContratosTab canEdit={canEdit} /></TabsContent>
         <TabsContent value="general"><GeneralTab canEdit={canEdit} /></TabsContent>
+        <TabsContent value="cobradores"><CobradoresTab canEdit={canEdit} /></TabsContent>
         <TabsContent value="tipos">
       <Card>
         <CardHeader className="flex flex-row items-start justify-between space-y-0">
