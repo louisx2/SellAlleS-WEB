@@ -1,5 +1,6 @@
 import type { RegistrationStatus, VehicleCondition, VehicleOrigin, VehicleStatus } from '@/lib/motos';
 import type { ResultadoVisita } from '@/lib/cobranza';
+import type { EstadoDeRecuperacion } from '@/lib/motos-recuperacion';
 import type { UnitCode } from './units';
 import type { InterestMode, PaymentFrequency } from './frequency';
 import type { LateFeeMode } from './late-fee';
@@ -546,6 +547,10 @@ export type Sale = {
   // Venta anulada con nota de crédito (RPC annul_sale). La venta no se borra:
   // los reportes de ingresos la filtran y el 607 la reporta junto a su NC.
   cancelledAt?: Date;
+  // Venta de una moto recuperada (Motopréstamos 4A): queda en 'paid' y el
+  // saldo que no se cobró se dio de baja. La pantalla la muestra «Recuperada».
+  recoveredAt?: Date;
+  writtenOffAmount?: number;
   // El e-CF vigente de la venta (el más reciente que nadie ha reemplazado).
   // undefined = la venta no lleva comprobante electrónico.
   ecf?: EcfDocumento;
@@ -723,13 +728,17 @@ export type LoanInstallment = {
   paidAt?: string;
 };
 
+// 'dacion': el negocio se quedó la moto en garantía como pago (Motopréstamos 4A).
+// No entra dinero: no cuenta en la caja ni en los cobros.
+export type LoanPaymentMethod = PaymentMethod | 'dacion';
+
 export type LoanPayment = {
   id: string;
   loanId: string;
   customerId: string;
   amount: number;
   lateFeePaid: number;
-  method: PaymentMethod;
+  method: LoanPaymentMethod;
   reference?: string;   // identificador de transferencia/tarjeta
   notes?: string;
   userName?: string;
@@ -773,6 +782,8 @@ export type Loan = {
   // Ausente en los préstamos anteriores a 2026-11-24 (sin registro).
   disbursementMethod?: DisbursementMethod;
   disbursementReference?: string;
+  // Saldo dado de baja al liquidar la garantía (el préstamo queda 'cancelled').
+  writtenOffAmount?: number;
   notes?: string;
   userName?: string;
   createdAt: Date;
@@ -1229,7 +1240,8 @@ export type Vehicle = {
 
 export type VehicleEvent = {
   id: string;
-  kind: 'ingreso' | 'venta' | 'venta_anulada' | 'cambio_estado' | 'matricula' | 'edicion' | 'baja' | 'garantia' | 'liberacion';
+  kind: 'ingreso' | 'venta' | 'venta_anulada' | 'cambio_estado' | 'matricula' | 'edicion' | 'baja' | 'garantia' | 'liberacion'
+    | 'incautacion' | 'devolucion' | 'liquidacion' | 'recuperacion';
   fromStatus?: string;
   toStatus?: string;
   note?: string;
@@ -1237,6 +1249,39 @@ export type VehicleEvent = {
   loanId?: string;
   createdByName?: string;
   createdAt: Date;
+};
+
+/** Una recuperación de moto (Motopréstamos 4A): venta recuperada o garantía
+ *  incautada → devuelta o liquidada. Se escribe solo por las RPC. */
+export type VehicleRecovery = {
+  id: string;
+  branchId: string;
+  vehicleId: string;
+  kind: 'venta' | 'garantia';
+  saleId?: string;
+  loanId?: string;
+  status: EstadoDeRecuperacion;
+  /** yyyy-mm-dd */
+  recoveredOn: string;
+  reason?: string;
+  conditionNote?: string;
+  debtAtRecovery?: number;
+  /** Valor con que la moto vuelve al inventario (venta recuperada o dación). */
+  reentryValue?: number;
+  writtenOff: number;
+  refunded: number;
+  refundMethod?: 'cash' | 'transfer';
+  liquidationMode?: 'tercero' | 'dacion';
+  /** Lo que pagó el tercero o el valor de la dación. */
+  proceeds?: number;
+  /** La parte que se aplicó al préstamo. */
+  applied?: number;
+  shortfallAction?: 'deuda' | 'baja';
+  paymentId?: string;
+  note?: string;
+  createdByName?: string;
+  createdAt: Date;
+  closedAt?: Date;
 };
 
 // ---------- Cobranza en la calle (Motopréstamos 3A) ----------

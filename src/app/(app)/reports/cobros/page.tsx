@@ -109,6 +109,8 @@ export default function CobrosReportPage() {
         ? supabase
             .from('loan_payments')
             .select('*, customers(name), branches(name)')
+            // La dación en pago (la moto como pago) no es dinero cobrado.
+            .neq('method', 'dacion')
             .gte('date', range.from.toISOString())
             .lte('date', range.to.toISOString())
             .order('date', { ascending: false })

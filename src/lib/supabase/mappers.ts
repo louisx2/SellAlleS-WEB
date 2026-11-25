@@ -1,4 +1,4 @@
-import type { Cobrador, AsignacionDeCartera, VisitaDeCobro, AbonoDeCobrador, EntregaDeCobrador, Vehicle, VehicleEvent, VehicleType, CustomerGuarantor, CustomerReference, MotosSettings, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
+import type { VehicleRecovery, Cobrador, AsignacionDeCartera, VisitaDeCobro, AbonoDeCobrador, EntregaDeCobrador, Vehicle, VehicleEvent, VehicleType, CustomerGuarantor, CustomerReference, MotosSettings, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
@@ -586,6 +586,8 @@ export const rowToSale = (r: any): Sale => ({
   quoteId: r.quote_id ?? undefined,
   couponId: r.coupon_id ?? undefined,
   cancelledAt: r.cancelled_at ? new Date(r.cancelled_at) : undefined,
+  recoveredAt: r.recovered_at ? new Date(r.recovered_at) : undefined,
+  writtenOffAmount: r.written_off_amount != null ? Number(r.written_off_amount) : undefined,
   // El embed trae todos los documentos de la venta (el rechazado y el que lo
   // reemplazó): solo cuenta el vigente.
   ecf: documentoVigente((r.ecf_documentos ?? []).map(rowToEcfDocumento)),
@@ -911,6 +913,7 @@ export const rowToLoan = (r: any): Loan => ({
   firstDueDate: r.first_due_date ?? undefined,
   disbursementMethod: r.disbursement_method ?? undefined,
   disbursementReference: r.disbursement_reference ?? undefined,
+  writtenOffAmount: r.written_off_amount != null ? Number(r.written_off_amount) : undefined,
   notes: r.notes ?? undefined,
   userName: r.user_name ?? undefined,
   createdAt: new Date(r.created_at),
@@ -1099,6 +1102,33 @@ export const vehicleToRow = (v: Partial<Vehicle>) => ({
   ...(v.price !== undefined ? { price: v.price } : {}),
   ...(v.registrationLocation !== undefined ? { registration_location: textoVehiculo(v.registrationLocation) } : {}),
   ...(v.notes !== undefined ? { notes: textoVehiculo(v.notes) } : {}),
+});
+
+export const rowToVehicleRecovery = (r: any): VehicleRecovery => ({
+  id: r.id,
+  branchId: r.branch_id,
+  vehicleId: r.vehicle_id,
+  kind: r.kind,
+  saleId: r.sale_id ?? undefined,
+  loanId: r.loan_id ?? undefined,
+  status: r.status,
+  recoveredOn: r.recovered_on,
+  reason: r.reason ?? undefined,
+  conditionNote: r.condition_note ?? undefined,
+  debtAtRecovery: numOrUndef(r.debt_at_recovery),
+  reentryValue: numOrUndef(r.reentry_value),
+  writtenOff: Number(r.written_off ?? 0),
+  refunded: Number(r.refunded ?? 0),
+  refundMethod: r.refund_method ?? undefined,
+  liquidationMode: r.liquidation_mode ?? undefined,
+  proceeds: numOrUndef(r.proceeds),
+  applied: numOrUndef(r.applied),
+  shortfallAction: r.shortfall_action ?? undefined,
+  paymentId: r.payment_id ?? undefined,
+  note: r.note ?? undefined,
+  createdByName: r.created_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
+  closedAt: r.closed_at ? new Date(r.closed_at) : undefined,
 });
 
 export const rowToVehicleEvent = (r: any): VehicleEvent => ({

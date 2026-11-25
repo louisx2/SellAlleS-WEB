@@ -36,6 +36,10 @@ const EVENTO: Record<VehicleEvent['kind'], string> = {
   baja: 'Dado de baja',
   garantia: 'En garantía de un préstamo',
   liberacion: 'Liberado',
+  incautacion: 'Incautado',
+  devolucion: 'Devuelto al cliente',
+  liquidacion: 'Garantía liquidada',
+  recuperacion: 'Recuperado',
 };
 
 const estado = (s?: string) =>

@@ -11,7 +11,7 @@ import { cn, formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
-import type { LoanPayment, PaymentMethod, Refinancing } from '@/lib/types';
+import type { LoanPayment, LoanPaymentMethod, Refinancing } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,10 +27,11 @@ import { ArrowLeft, DollarSign, Printer, RefreshCw, Undo2 } from 'lucide-react';
 import { ventanaDeCuotas } from '@/lib/plan-largo';
 
 
-const METHOD_LABEL: Record<PaymentMethod, string> = {
+const METHOD_LABEL: Record<LoanPaymentMethod, string> = {
   cash: 'Efectivo',
   card: 'Tarjeta',
   transfer: 'Transferencia',
+  dacion: 'Dación en pago',
 };
 
 const INSTALLMENT_STATUS: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' | 'destructive' }> = {
