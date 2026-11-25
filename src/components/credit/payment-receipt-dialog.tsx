@@ -15,6 +15,7 @@ import { Printer } from 'lucide-react';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
 import type { PaymentMethod, PaymentResult } from '@/lib/types';
+import { etiquetaDelSaldo, muestraDeudaTotal, type CuentaDelRecibo } from '@/lib/recibo-abono';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   cash: 'Efectivo',
@@ -33,6 +34,8 @@ export interface PaymentReceiptData {
   userName?: string;
   notes?: string;
   saleId?: string; // presente cuando el abono fue a una venta específica
+  /** De qué cuenta es el saldo: sin esto, «Deuda restante del cliente» (o de la venta con saleId). */
+  cuenta?: CuentaDelRecibo;
 }
 
 /** El recibo de abono, también lo usa la ruta del cobrador para imprimir y para el PDF. */
@@ -92,7 +95,7 @@ export function ReceiptBody({ data }: { data: PaymentReceiptData }) {
       <Separator className="my-2" />
       <div className="text-xs space-y-1 py-1">
         <div className="flex justify-between font-semibold">
-          <span>{data.saleId ? 'Saldo restante de la venta:' : 'Deuda restante del cliente:'}</span>
+          <span>{etiquetaDelSaldo(data.cuenta, data.saleId)}</span>
           <span>{formatCurrency(result.remainingBalance)}</span>
         </div>
         {isFinancing && (
@@ -101,7 +104,7 @@ export function ReceiptBody({ data }: { data: PaymentReceiptData }) {
             <span>{result.installmentsPaid} de {result.installmentsTotal}</span>
           </div>
         )}
-        {result.customerBalance != null && data.saleId && (
+        {result.customerBalance != null && muestraDeudaTotal(data.cuenta, data.saleId) && (
           <div className="flex justify-between">
             <span>Deuda total del cliente:</span>
             <span>{formatCurrency(result.customerBalance)}</span>

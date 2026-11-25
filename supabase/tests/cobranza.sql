@@ -307,16 +307,20 @@ begin
     ('00000000-0000-0000-0000-0000000000aa', bP, e701, e7c1, 'promesa', hoy - 1, ((hoy - 4) + time '10:00') at time zone tz),
     ('00000000-0000-0000-0000-0000000000aa', bP, e701, e7c1, 'promesa', hoy - 1, ((hoy - 2) + time '10:00') at time zone tz),
     ('00000000-0000-0000-0000-0000000000aa', bP, e701, e7c1, 'promesa', hoy - 5, ((hoy - 6) + time '10:00') at time zone tz),
-    ('00000000-0000-0000-0000-0000000000aa', bP, e701, e7c1, 'promesa', hoy + 1, (hoy + time '10:00') at time zone tz);
+    ('00000000-0000-0000-0000-0000000000aa', bP, e701, e7c1, 'promesa', hoy + 1, (hoy + time '10:00') at time zone tz),
+    -- Pagó una parte a las 15:00 y a las 16:00 prometió el resto: ese abono no la cumple.
+    ('00000000-0000-0000-0000-0000000000aa', bP, e701, e7c1, 'promesa', hoy - 2, ((hoy - 3) + time '16:00') at time zone tz),
+    -- Prometió a las 14:00 pagar ese mismo día y pagó a las 15:00: cumplida.
+    ('00000000-0000-0000-0000-0000000000aa', bP, e701, e7c1, 'promesa', hoy - 3, ((hoy - 3) + time '14:00') at time zone tz);
 
   r := cobranza_reporte(bP, hoy - 7, hoy);
   select x into fila from jsonb_array_elements(r->'cobradores') x where x->>'collector_id' = e7c1::text;
   select amount into cuota from loan_installments where loan_id = '00000000-0000-0000-0000-00000000e711' and installment_number = 1;
   perform pg_temp.igual((fila->>'por_cobrar')::numeric, cuota, 'por cobrar del período');
   perform pg_temp.igual((fila->>'cobrado')::numeric, 350::numeric, 'cobrado (sin el anulado, con el de las 9 p. m.)');
-  perform pg_temp.igual((fila->>'visitas')::int, 7, 'visitas (3 pagos + 4 promesas)');
-  perform pg_temp.igual((fila->>'promesas_cumplidas')::int, 1, 'promesas cumplidas');
-  perform pg_temp.igual((fila->>'promesas_incumplidas')::int, 2, 'promesas incumplidas');
+  perform pg_temp.igual((fila->>'visitas')::int, 9, 'visitas (3 pagos + 6 promesas)');
+  perform pg_temp.igual((fila->>'promesas_cumplidas')::int, 2, 'promesas cumplidas');
+  perform pg_temp.igual((fila->>'promesas_incumplidas')::int, 3, 'promesas incumplidas (el abono de antes de la visita no cuenta)');
   perform pg_temp.igual((fila->>'atrasados')::int, 1, 'atrasados en su cartera');
   perform pg_temp.igual((fila->>'en_mano')::numeric, 300::numeric, 'en mano');
   perform pg_temp.igual(fila->>'en_mano_desde', (hoy - 3)::text, 'en mano desde');
@@ -345,5 +349,34 @@ select pg_temp.igual((select count(*)::int from receipt_links where num_nonnulls
 -- Plantillas: sin fila de ajustes, vacías (el texto base lo pone el front).
 select pg_temp.igual((public.motos_ajuste(gen_random_uuid())).whatsapp_reminder, null::text, 'plantilla de aviso por defecto');
 select pg_temp.igual((public.motos_ajuste(gen_random_uuid())).whatsapp_receipt, null::text, 'plantilla de recibo por defecto');
+
+-- Quien solo tiene Reportes ve las entregas y la cartera (los reportes de
+-- Cuadres y Antigüedad las leen directo).
+insert into roles (id, company_id, name, is_system, description, permissions) values
+  ('00000000-0000-0000-0000-00000000e7a1', '00000000-0000-0000-0000-0000000000aa', 'Prueba solo reportes', false, '', '{"reports":["view"]}');
+delete from profile_branches where profile_id = 'cc56c633-4b6c-4a8e-a7e8-6ee3a1934566' and branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0';
+insert into profile_branches (profile_id, company_id, branch_id, role_id) values
+  ('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566', '00000000-0000-0000-0000-0000000000aa', '169fe6bb-91fa-4633-8e43-5a45e410e2b0', '00000000-0000-0000-0000-00000000e7a1');
+insert into collector_settlements (company_id, branch_id, collector_id, expected, received) values
+  ('00000000-0000-0000-0000-0000000000aa', '169fe6bb-91fa-4633-8e43-5a45e410e2b0', '00000000-0000-0000-0000-00000000e7c1', 10, 10);
+set local role authenticated;
+select pg_temp.como('cc56c633-4b6c-4a8e-a7e8-6ee3a1934566');
+select pg_temp.igual((select count(*)::int from collector_settlements where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0') > 0, true, 'reportes ve las entregas');
+select pg_temp.igual((select count(*)::int from collection_assignments where branch_id = '169fe6bb-91fa-4633-8e43-5a45e410e2b0'), 1, 'reportes ve la cartera');
+reset role;
+select pg_temp.como('92381752-13b2-4f43-8b09-612647754599');
+
+-- Anular un abono borra el enlace de su recibo: el cliente no se queda con un
+-- comprobante de algo que ya no vale.
+do $$
+declare pc uuid;
+begin
+  select id into pc from loan_payments
+   where loan_id = '00000000-0000-0000-0000-00000000e711' and amount = 50 and voided_at is null;
+  insert into receipt_links (code, loan_payment_id, company_id, company_slug, storage_path, download_name, expires_at)
+  values ('PRUEBAe7d', pc, '00000000-0000-0000-0000-0000000000aa', 'demo', 'x/abonos/d.pdf', 'recibo-de-abono.pdf', now() + interval '15 days');
+  perform void_loan_payment(pc, 'prueba');
+  perform pg_temp.igual((select count(*)::int from receipt_links where code = 'PRUEBAe7d'), 0, 'el enlace de un abono anulado se borra');
+end $$;
 
 select 'ok';

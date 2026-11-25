@@ -244,3 +244,17 @@ test('efectividad: cobrado entre por cobrar, sin tope; sin nada por cobrar no ha
   assert.equal(efectividad(1, 3), 33);
   assert.equal(efectividad(100, 0), null);
 });
+
+import { etiquetaDelSaldo, muestraDeudaTotal } from '../../src/lib/recibo-abono.ts';
+
+test('recibo: el saldo dice de qué es', () => {
+  assert.equal(etiquetaDelSaldo('prestamo'), 'Saldo restante del préstamo:');
+  assert.equal(etiquetaDelSaldo('venta'), 'Saldo restante de la venta:');
+  assert.equal(etiquetaDelSaldo(undefined, 'venta-1'), 'Saldo restante de la venta:');
+  assert.equal(etiquetaDelSaldo('cliente'), 'Deuda restante del cliente:');
+  assert.equal(etiquetaDelSaldo(undefined), 'Deuda restante del cliente:');
+  assert.equal(muestraDeudaTotal('venta'), true);
+  assert.equal(muestraDeudaTotal(undefined, 'venta-1'), true);
+  assert.equal(muestraDeudaTotal('prestamo'), false);
+  assert.equal(muestraDeudaTotal('cliente'), false);
+});

@@ -133,6 +133,7 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar, tel
     branchName: sucursal,
     userName: appUser?.name,
     notes: [metodo === 'transfer' && referencia.trim() ? `Ref. ${referencia.trim()}` : '', nota.trim()].filter(Boolean).join(' · ') || undefined,
+    cuenta: opcion?.tipo,
   } : null;
 
   // El recibo por WhatsApp: el PDF sale de la copia de abajo, se sube y el

@@ -3,7 +3,8 @@
 -- Diseño: docs/superpowers/specs/2026-11-23-motoprestamos-design.md (Entrega 3)
 -- Plan:   docs/superpowers/plans/2026-11-24-motoprestamos-entrega-3b-recibos-avisos-reportes.md (Task 1)
 --
--- No cambia ninguna función viva. `receipt_links` deja de exigir venta: un enlace
+-- No cambia ninguna función viva. Amplía la lectura de entregas y cartera a quien ve
+-- los reportes y agrega un trigger en los abonos (al anular, borra el enlace del recibo). `receipt_links` deja de exigir venta: un enlace
 -- es de una venta o de un abono (la función `c` solo lee la ruta del archivo, así
 -- que no cambia). `motos_ajuste` lee los ajustes por nombre: las columnas nuevas no
 -- la rompen.
@@ -29,8 +30,9 @@ alter table public.motos_settings
 -- 3. Reporte de cobranza por cobrador ------------------------------------------------------
 -- Por cobrar: cuotas (pagadas o no) que vencían en el período, de los clientes de la
 -- cartera actual. Cobrado: abonos no anulados del cobrador con fecha local en el período.
--- Promesa cumplida: el cliente abonó (sin anular) en la sucursal entre el día de la visita
--- y el de la promesa; solo cuentan las promesas ya vencidas. Las fechas son locales, en
+-- Promesa cumplida: el cliente abonó (sin anular) en la sucursal desde el momento de la
+-- visita hasta el día de la promesa —un abono anterior a la visita, aunque sea del mismo
+-- día, no la cumple («pagó una parte y prometió el resto»)—; solo cuentan las ya vencidas. Las fechas son locales, en
 -- la zona de la empresa (como company_today).
 
 create or replace function public.cobranza_reporte(p_branch_id uuid, p_desde date, p_hasta date)
@@ -87,11 +89,11 @@ begin
      where a.branch_id = p_branch_id
   ),
   abonos as (
-    select collector_id, customer_id, amount, method, en_calle, settlement_id, voided_at,
+    select collector_id, customer_id, amount, method, en_calle, settlement_id, voided_at, date,
            timezone(v_tz, date)::date as dia
       from public.loan_payments where branch_id = p_branch_id
     union all
-    select collector_id, customer_id, amount, method, en_calle, settlement_id, voided_at,
+    select collector_id, customer_id, amount, method, en_calle, settlement_id, voided_at, date,
            timezone(v_tz, date)::date as dia
       from public.credit_payments where branch_id = p_branch_id
   ),
@@ -99,7 +101,7 @@ begin
     select v.collector_id,
            exists (select 1 from abonos ab
                     where ab.customer_id = v.customer_id and ab.voided_at is null
-                      and ab.dia between timezone(v_tz, v.created_at)::date and v.promise_date) as cumplida
+                      and ab.date >= v.created_at and ab.dia <= v.promise_date) as cumplida
       from public.collection_visits v
      where v.branch_id = p_branch_id and v.outcome = 'promesa'
        and v.promise_date between p_desde and p_hasta and v.promise_date < v_hoy
@@ -152,7 +154,58 @@ begin
 end;
 $$;
 
--- 4. Grants -------------------------------------------------------------------------------
+-- 4. Quien ve los reportes lee las entregas y la cartera de la sucursal -------------------
+-- Cuadres y Antigüedad por cobrador las leen directo; sin esto, un rol con solo
+-- Reportes veía tablas vacías. Escribir sigue pidiendo los permisos de cobranza.
+
+drop policy collector_settlements_select on public.collector_settlements;
+create policy collector_settlements_select on public.collector_settlements
+  for select using (
+    (company_id = public.current_company_id()
+     and (collector_id = public.cobranza_mi_cobrador(branch_id)
+          or public.cobranza_tengo_permiso(branch_id, 'cobranza-cuadre', 'view')
+          or public.cobranza_tengo_permiso(branch_id, 'reports', 'view')))
+    or public.is_super_admin());
+
+drop policy collection_assignments_select on public.collection_assignments;
+create policy collection_assignments_select on public.collection_assignments
+  for select using (
+    (company_id = public.current_company_id()
+     and (collector_id = public.cobranza_mi_cobrador(branch_id)
+          or public.cobranza_tengo_permiso(branch_id, 'cobranza-all', 'view')
+          or public.cobranza_tengo_permiso(branch_id, 'reports', 'view')))
+    or public.is_super_admin());
+
+-- 5. Anular un abono borra el enlace de su recibo ------------------------------------------
+-- La función `c` responde «Enlace no encontrado»: el cliente no se queda con el
+-- comprobante de un abono que ya no vale.
+
+create or replace function public.cobranza_borrar_enlaces_de_anulado()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_table_name = 'loan_payments' then
+    delete from public.receipt_links where loan_payment_id = new.id;
+  else
+    delete from public.receipt_links where credit_payment_id = new.id;
+  end if;
+  return new;
+end;
+$$;
+
+create trigger trg_enlaces_de_abono_anulado after update of voided_at on public.loan_payments
+  for each row when (old.voided_at is null and new.voided_at is not null)
+  execute function public.cobranza_borrar_enlaces_de_anulado();
+create trigger trg_enlaces_de_abono_anulado after update of voided_at on public.credit_payments
+  for each row when (old.voided_at is null and new.voided_at is not null)
+  execute function public.cobranza_borrar_enlaces_de_anulado();
+
+-- 6. Grants -------------------------------------------------------------------------------
 
 revoke execute on function public.cobranza_reporte(uuid, date, date) from public, anon;
 grant execute on function public.cobranza_reporte(uuid, date, date) to authenticated, service_role;
+revoke execute on function public.cobranza_borrar_enlaces_de_anulado() from public, anon, authenticated;
+grant execute on function public.cobranza_borrar_enlaces_de_anulado() to service_role;
