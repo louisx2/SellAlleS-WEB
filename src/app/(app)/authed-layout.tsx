@@ -85,6 +85,7 @@ const reportsNavItems = [
     { href: '/reports/antiguedad', label: 'Antigüedad de Cartera' },
     { href: '/reports/cobranza', label: 'Cobranza por Cobrador' },
     { href: '/reports/cuadres', label: 'Cuadres de Cobradores' },
+    { href: '/reports/recuperaciones', label: 'Recuperaciones de Motos' },
     { href: '/reports/inventory', label: 'Valorización de Inventario' },
     { href: '/reports/taxes', label: 'Impuestos' },
     { href: '/reports/ganancias', label: 'Reporte de Ganancias' },
@@ -327,7 +328,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     if (slug === 'comisiones' && !isModuleEnabled('commissions')) return false;
     // El del taller, solo con el módulo encendido.
     if (slug === 'taller' && !isModuleEnabled('services')) return false;
-    if ((slug === 'vehiculos' || slug === 'cobranza' || slug === 'cuadres') && !isModuleEnabled('motoprestamos')) return false;
+    if ((slug === 'vehiculos' || slug === 'cobranza' || slug === 'cuadres' || slug === 'recuperaciones') && !isModuleEnabled('motoprestamos')) return false;
     return isReportVisible(effectivePermissions, slug);
   });
 

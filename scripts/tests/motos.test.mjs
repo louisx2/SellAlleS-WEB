@@ -288,3 +288,7 @@ test('los reportes de cobranza se pueden dar o quitar en un rol', () => {
   assert.ok(slugs.includes('cobranza'));
   assert.ok(slugs.includes('cuadres'));
 });
+
+test('el reporte de recuperaciones se puede dar o quitar en un rol', () => {
+  assert.ok(REPORT_ITEMS.some((r) => r.slug === 'recuperaciones'));
+});

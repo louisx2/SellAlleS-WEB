@@ -59,6 +59,22 @@ export function repartoDeLiquidacion(deuda: number, monto: number): { aplicado: 
   return { aplicado: aplicado / 100, sobrante: (m - aplicado) / 100, faltante: (d - aplicado) / 100 };
 }
 
+/**
+ * Lo recuperado en una recuperación, para el reporte: en la venta, el valor con
+ * que la moto vuelve al inventario; en la garantía liquidada, lo que pagó el
+ * tercero o la tasación de la dación. Incautada o devuelta: nada todavía.
+ */
+export function recuperadoDe(r: {
+  kind: 'venta' | 'garantia';
+  status: EstadoDeRecuperacion;
+  reentryValue?: number;
+  proceeds?: number;
+}): number {
+  if (r.kind === 'venta') return r.reentryValue ?? 0;
+  if (r.status === 'liquidada') return r.proceeds ?? 0;
+  return 0;
+}
+
 /** Resultado de una recuperación para el reporte: recuperado − dado de baja − devuelto. */
 export function resultadoDeRecuperacion(r: { recuperado: number; dadoDeBaja: number; devuelto: number }): number {
   return (aCentavos(r.recuperado) - aCentavos(r.dadoDeBaja) - aCentavos(r.devuelto)) / 100;

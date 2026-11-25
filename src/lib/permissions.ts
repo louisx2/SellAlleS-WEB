@@ -92,6 +92,7 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'antiguedad', label: 'Antigüedad de Cartera' },
   { slug: 'cobranza', label: 'Cobranza por Cobrador' },
   { slug: 'cuadres', label: 'Cuadres de Cobradores' },
+  { slug: 'recuperaciones', label: 'Recuperaciones de Motos' },
   { slug: 'inventory', label: 'Valorización de Inventario' },
   { slug: 'taxes', label: 'Impuestos' },
   { slug: 'ganancias', label: 'Reporte de Ganancias' },

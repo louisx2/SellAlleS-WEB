@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import {
   accionesDeRecuperacion,
   repartoDeLiquidacion,
+  recuperadoDe,
   resultadoDeRecuperacion,
   TEXTO_ESTADO_RECUPERACION,
 } from '../../src/lib/motos-recuperacion.ts';
@@ -84,6 +85,14 @@ test('resultado: recuperado − dado de baja − devuelto', () => {
   assert.equal(resultadoDeRecuperacion({ recuperado: 50000, dadoDeBaja: 30000, devuelto: 1000 }), 19000);
   assert.equal(resultadoDeRecuperacion({ recuperado: 50000, dadoDeBaja: 75000, devuelto: 1000 }), -26000);
   assert.equal(resultadoDeRecuperacion({ recuperado: 0.3, dadoDeBaja: 0.1, devuelto: 0.2 }), 0);
+});
+
+test('recuperado: valor de reingreso en la venta, lo obtenido al liquidar, nada mientras está incautada o si se devolvió', () => {
+  assert.equal(recuperadoDe({ kind: 'venta', status: 'recuperada', reentryValue: 50000 }), 50000);
+  assert.equal(recuperadoDe({ kind: 'garantia', status: 'liquidada', liquidationMode: 'tercero', proceeds: 12050.5 }), 12050.5);
+  assert.equal(recuperadoDe({ kind: 'garantia', status: 'liquidada', liquidationMode: 'dacion', proceeds: 6000, reentryValue: 6000 }), 6000);
+  assert.equal(recuperadoDe({ kind: 'garantia', status: 'incautada' }), 0);
+  assert.equal(recuperadoDe({ kind: 'garantia', status: 'devuelta' }), 0);
 });
 
 test('texto de cada estado de la recuperación', () => {

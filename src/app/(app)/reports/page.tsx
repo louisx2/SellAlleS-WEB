@@ -65,6 +65,7 @@ export default function ReportsDashboardPage() {
   const showVehiculosReport = isModuleEnabled('motoprestamos') && isReportVisible(effectivePermissions, 'vehiculos');
   const showCobranzaReport = isModuleEnabled('motoprestamos') && isReportVisible(effectivePermissions, 'cobranza');
   const showCuadresReport = isModuleEnabled('motoprestamos') && isReportVisible(effectivePermissions, 'cuadres');
+  const showRecuperacionesReport = isModuleEnabled('motoprestamos') && isReportVisible(effectivePermissions, 'recuperaciones');
   const showAgingReport = isReportVisible(effectivePermissions, 'antiguedad');
 
   // --- Filtrado por Sucursal (las ventas anuladas no cuentan como ingreso) ---
@@ -428,6 +429,20 @@ export default function ReportsDashboardPage() {
                   <div>
                     <CardTitle className="text-sm font-bold">Cuadres de Cobradores</CardTitle>
                     <CardDescription className="text-3xs mt-1">Entregas de los cobradores: esperado, recibido y diferencias</CardDescription>
+                  </div>
+                  <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
+                </CardHeader>
+              </Card>
+            </Link>
+          )}
+
+          {showRecuperacionesReport && (
+            <Link href="/reports/recuperaciones">
+              <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
+                <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle className="text-sm font-bold">Recuperaciones de Motos</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Motos incautadas, liquidadas y ventas recuperadas: lo recuperado contra lo dado de baja</CardDescription>
                   </div>
                   <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
                 </CardHeader>
