@@ -141,6 +141,9 @@ function LoanCard({ loan, lateFeeRate, graceDays }: { loan: PortalLoan; lateFeeR
           {loan.status === 'refinanced' ? (
             // Su saldo pasó a un préstamo nuevo: no está pagado, está cerrado.
             <Badge variant="secondary">Refinanciado</Badge>
+          ) : loan.status === 'cancelled' ? (
+            // Cerrado con el saldo dado de baja al liquidar la garantía.
+            <Badge variant="secondary">Cerrado</Badge>
           ) : status.pendingBalance <= 0 ? (
             <Badge className="bg-green-600">Pagado</Badge>
           ) : status.isOverdue ? (

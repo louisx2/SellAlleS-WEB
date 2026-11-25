@@ -2,7 +2,9 @@
 -- corre contra producción dentro de una transacción que se revierte, después del
 -- SQL de las migraciones:
 --
---   begin; <20261126120000_motos_recuperacion_base.sql> <20261126130000_motos_recuperacion_rpc.sql> <este archivo> rollback;
+--   begin; <20261126120000_motos_recuperacion_base.sql> <20261126130000_motos_recuperacion_rpc.sql> <20261126140000_motos_recuperacion_arreglos.sql> <este archivo> rollback;
+--
+-- (Ya aplicadas en producción: basta `begin; <este archivo> rollback;`.)
 --
 -- Pasa si el último resultado es `ok`. Datos con UUID fijos (…e8XX) en la empresa
 -- demo, sucursal Principal (…0b1). Los préstamos se desembolsan por transferencia.
@@ -269,5 +271,159 @@ end $$;
 
 select pg_temp.igual(has_function_privilege('anon', 'public.motos_liquidar_garantia(uuid, text, numeric, text, uuid, text, text, text)', 'EXECUTE'), false, 'anon y liquidar');
 select pg_temp.igual(has_function_privilege('authenticated', 'public.motos_devolver_dinero(uuid, uuid, numeric, text, text)', 'EXECUTE'), false, 'devolver dinero solo por dentro');
+
+-- ---------------------------------------------------------------------------
+-- 3. Arreglos de la revisión final (Task 7)
+-- ---------------------------------------------------------------------------
+-- Cada caso corre en su propio bloque y anota si pasó: una corrida muestra todos
+-- los que fallan. Al final, si alguno falló, la suite se detiene con la lista.
+
+create temp table s3_resultado (caso text, error text);
+update customers set email = 'recuperacion-prueba@example.com' where id = '00000000-0000-0000-0000-00000000e8a1';
+insert into vehicles (id, company_id, branch_id, origin, product_id, brand, model, chassis, cost) values
+  ('00000000-0000-0000-0000-00000000e807', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e803', 'Yamaha', 'YBR', 'REC-3', 70000),
+  ('00000000-0000-0000-0000-00000000e808', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e803', 'Yamaha', 'YBR', 'REC-4', 70000),
+  ('00000000-0000-0000-0000-00000000e809', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e803', 'Yamaha', 'YBR', 'REC-5', 70000),
+  ('00000000-0000-0000-0000-00000000e80a', '00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-0000000000b1', 'inventario', '00000000-0000-0000-0000-00000000e803', 'Yamaha', 'YBR', 'REC-6', 70000);
+
+-- Préstamo con el saldo dado de baja: no manda avisos de cuota.
+do $$
+declare a constant uuid := '00000000-0000-0000-0000-00000000e8a1'; hoy date := company_today('00000000-0000-0000-0000-0000000000aa'); l uuid; v uuid;
+begin
+  begin
+    l := pg_temp.prestamo(a, jsonb_build_object('vehiculo', jsonb_build_object('chassis', 'REC-F1')));
+    v := pg_temp.vid('REC-F1');
+    perform pg_temp.igual((select count(*) > 0 from pending_due_reminders(60) r join loan_installments li on li.id = r.installment_id where li.loan_id = l), true, 'el préstamo activo avisa');
+    perform motos_incautar(v, hoy, 'No paga', null);
+    perform motos_liquidar_garantia(v, 'tercero', 3000, 'transfer', null, 'baja', 'T-F1', null);
+    perform pg_temp.igual((select count(*)::int from pending_due_reminders(60) r join loan_installments li on li.id = r.installment_id where li.loan_id = l), 0, 'sin avisos del préstamo dado de baja');
+    insert into s3_resultado values ('avisos del préstamo dado de baja', null);
+  exception when others then
+    insert into s3_resultado values ('avisos del préstamo dado de baja', sqlerrm);
+  end;
+end $$;
+
+-- Venta financiada recuperada: no manda avisos de cuota.
+do $$
+declare a constant uuid := '00000000-0000-0000-0000-00000000e8a1'; hoy date := company_today('00000000-0000-0000-0000-0000000000aa'); s uuid;
+begin
+  begin
+    select x.id into s from create_sale_with_items(
+      jsonb_build_object('branch_id', '00000000-0000-0000-0000-0000000000b1', 'customer_id', a,
+        'subtotal', 95000, 'itbis_amount', 0, 'total', 95000, 'payment_method', 'financing', 'payment_status', 'in_financing', 'amount_paid', 0,
+        'financing_details', '{"interestRate":5,"installments":12,"frequency":"monthly","interestMode":"monthly_prorated"}'::jsonb),
+      jsonb_build_array(jsonb_build_object('product_id', '00000000-0000-0000-0000-00000000e803', 'product_name', 'Moto', 'quantity', 1, 'price', 95000,
+        'itbis', false, 'unit', 'und', 'vehicle_id', '00000000-0000-0000-0000-00000000e807'))) x;
+    perform pg_temp.igual((select count(*) > 0 from pending_due_reminders(400) r join financing_installments fi on fi.id = r.installment_id where fi.sale_id = s), true, 'la venta financiada avisa');
+    perform motos_recuperar_venta('00000000-0000-0000-0000-00000000e807', hoy, 'No paga', null, 50000, 0, 'cash', null);
+    perform pg_temp.igual((select count(*)::int from pending_due_reminders(400) r join financing_installments fi on fi.id = r.installment_id where fi.sale_id = s), 0, 'sin avisos de la venta recuperada');
+    insert into s3_resultado values ('avisos de la venta recuperada', null);
+  exception when others then
+    insert into s3_resultado values ('avisos de la venta recuperada', sqlerrm);
+  end;
+end $$;
+
+-- Anular un abono viejo no reabre la venta recuperada.
+do $$
+declare a constant uuid := '00000000-0000-0000-0000-00000000e8a1'; b1 constant uuid := '00000000-0000-0000-0000-0000000000b1';
+  hoy date := company_today('00000000-0000-0000-0000-0000000000aa'); s uuid; pago uuid; saldo numeric;
+begin
+  begin
+    s := pg_temp.vender_a_credito('00000000-0000-0000-0000-00000000e803', '00000000-0000-0000-0000-00000000e808', a);
+    perform register_sale_payment(s, 20000, 'transfer', b1, null, 'T-V3');
+    select id into pago from credit_payments where sale_id = s order by date desc limit 1;
+    perform motos_recuperar_venta('00000000-0000-0000-0000-00000000e808', hoy, 'No paga', null, 50000, 0, 'cash', null);
+    select credit_balance into saldo from customers where id = a;
+    perform pg_temp.debe_fallar(format('select void_credit_payment(%L, %L)', pago, 'Error'), '%se recuperó%');
+    perform pg_temp.igual((select payment_status::text from sales where id = s), 'paid', 'la venta sigue recuperada');
+    perform pg_temp.igual((select credit_balance from customers where id = a), saldo, 'el cliente no vuelve a deber la venta');
+    insert into s3_resultado values ('anular abono de venta recuperada', null);
+  exception when others then
+    insert into s3_resultado values ('anular abono de venta recuperada', sqlerrm);
+  end;
+end $$;
+
+-- Una venta con dos motos no se recupera desde una sola.
+do $$
+declare a constant uuid := '00000000-0000-0000-0000-00000000e8a2'; hoy date := company_today('00000000-0000-0000-0000-0000000000aa'); s uuid;
+begin
+  begin
+    select x.id into s from create_sale_with_items(
+      jsonb_build_object('branch_id', '00000000-0000-0000-0000-0000000000b1', 'customer_id', a,
+        'subtotal', 190000, 'itbis_amount', 0, 'total', 190000, 'payment_method', 'credit', 'payment_status', 'credit', 'amount_paid', 0),
+      jsonb_build_array(
+        jsonb_build_object('product_id', '00000000-0000-0000-0000-00000000e803', 'product_name', 'Moto', 'quantity', 1, 'price', 95000,
+          'itbis', false, 'unit', 'und', 'vehicle_id', '00000000-0000-0000-0000-00000000e809'),
+        jsonb_build_object('product_id', '00000000-0000-0000-0000-00000000e803', 'product_name', 'Moto', 'quantity', 1, 'price', 95000,
+          'itbis', false, 'unit', 'und', 'vehicle_id', '00000000-0000-0000-0000-00000000e80a'))) x;
+    perform pg_temp.debe_fallar(format('select motos_recuperar_venta(%L, %L, %L, null, 50000)', '00000000-0000-0000-0000-00000000e809', hoy, 'No paga'), '%más de una moto%');
+    insert into s3_resultado values ('venta con dos motos', null);
+  exception when others then
+    insert into s3_resultado values ('venta con dos motos', sqlerrm);
+  end;
+end $$;
+
+-- Un préstamo con el saldo dado de baja no recibe abonos.
+do $$
+declare a constant uuid := '00000000-0000-0000-0000-00000000e8a1'; b1 constant uuid := '00000000-0000-0000-0000-0000000000b1';
+  hoy date := company_today('00000000-0000-0000-0000-0000000000aa'); l uuid; v uuid;
+begin
+  begin
+    l := pg_temp.prestamo(a, jsonb_build_object('vehiculo', jsonb_build_object('chassis', 'REC-F5')));
+    v := pg_temp.vid('REC-F5');
+    perform motos_incautar(v, hoy, 'No paga', null);
+    perform motos_liquidar_garantia(v, 'tercero', 3000, 'transfer', null, 'baja', 'T-F5', null);
+    perform pg_temp.debe_fallar(format('select register_loan_payment(%L, 10, %L, %L, null, %L)', l, 'transfer', b1, 'T-X'), '%dado de baja%');
+    perform pg_temp.igual((select status from loans where id = l), 'cancelled', 'sigue dado de baja');
+    insert into s3_resultado values ('abono a préstamo dado de baja', null);
+  exception when others then
+    insert into s3_resultado values ('abono a préstamo dado de baja', sqlerrm);
+  end;
+end $$;
+
+-- El abono de la liquidación a un tercero no se anula.
+do $$
+declare a constant uuid := '00000000-0000-0000-0000-00000000e8a1'; hoy date := company_today('00000000-0000-0000-0000-0000000000aa'); l uuid; v uuid; r jsonb;
+begin
+  begin
+    l := pg_temp.prestamo(a, jsonb_build_object('vehiculo', jsonb_build_object('chassis', 'REC-F6')));
+    v := pg_temp.vid('REC-F6');
+    perform motos_incautar(v, hoy, 'No paga', null);
+    r := motos_liquidar_garantia(v, 'tercero', 3000, 'transfer', null, 'deuda', 'T-F6', null);
+    perform pg_temp.debe_fallar(format('select void_loan_payment(%L, %L)', r->>'payment_id', 'Error'), '%liquidación%');
+    insert into s3_resultado values ('anular abono de liquidación', null);
+  exception when others then
+    insert into s3_resultado values ('anular abono de liquidación', sqlerrm);
+  end;
+end $$;
+
+-- Refinanciar con la moto incautada: la moto y su recuperación pasan al préstamo nuevo.
+do $$
+declare a constant uuid := '00000000-0000-0000-0000-00000000e8a1'; hoy date := company_today('00000000-0000-0000-0000-0000000000aa'); l uuid; v uuid; r jsonb; nuevo uuid;
+begin
+  begin
+    l := pg_temp.prestamo(a, jsonb_build_object('vehiculo', jsonb_build_object('chassis', 'REC-F7')));
+    v := pg_temp.vid('REC-F7');
+    perform motos_incautar(v, hoy, 'No paga', null);
+    r := refinance_loan(l, 'capital', null, 0, 5, 4, 'weekly', null, 'Acuerdo de pago');
+    nuevo := (r->>'new_loan_id')::uuid;
+    perform pg_temp.igual((select loan_id from vehicles where id = v), nuevo, 'la moto pasa al préstamo nuevo');
+    perform pg_temp.igual((select status from vehicles where id = v), 'recuperado', 'sigue incautada');
+    perform pg_temp.igual((select loan_id from vehicle_recoveries where vehicle_id = v and status = 'incautada'), nuevo, 'la recuperación pasa al préstamo nuevo');
+    perform motos_devolver_garantia(v, null);
+    perform pg_temp.igual((select row(status, loan_id)::text from vehicles where id = v), row('en_garantia', nuevo)::text, 'devuelta en garantía del préstamo nuevo');
+    insert into s3_resultado values ('refinanciar con la moto incautada', null);
+  exception when others then
+    insert into s3_resultado values ('refinanciar con la moto incautada', sqlerrm);
+  end;
+end $$;
+
+do $$
+declare f text;
+begin
+  select string_agg(caso || ': ' || error, ' | ' order by caso) into f from s3_resultado where error is not null;
+  if f is not null then raise exception 'FALLAN §3: %', f; end if;
+  if (select count(*) from s3_resultado) <> 7 then raise exception '§3: corrieron % casos de 7', (select count(*) from s3_resultado); end if;
+end $$;
 
 select 'ok';

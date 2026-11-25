@@ -5,6 +5,7 @@ import {
   totalLateFeeDue,
   type LateFeePolicy,
 } from '@/lib/late-fee';
+import { deudaCerrada, estadoSinDeuda } from '@/lib/motos-recuperacion';
 
 // Calculado en el cliente solo para MOSTRAR (badges, próximo vencimiento); los
 // montos reales de mora/capital los calcula register_loan_payment en el servidor.
@@ -74,7 +75,7 @@ export function calculateLoanStatus(
   const next = open[0] ?? null;
   const pendingBalance = round2(loan.totalWithInterest - loan.amountPaid);
 
-  return {
+  const estado: LoanStatus = {
     installmentsPaid: installments.length - open.length,
     totalInstallments: installments.length,
     nextDueDate: next ? new Date(next.dueDate + 'T00:00:00') : null,
@@ -85,4 +86,7 @@ export function calculateLoanStatus(
     installmentAmount: next?.amount ?? 0,
     lateFeePolicy: policy,
   };
+  // Cerrado al liquidar la garantía con el saldo dado de baja: sus cuotas
+  // siguen abiertas en la base, pero ya no se deben ni generan mora.
+  return deudaCerrada(loan) ? estadoSinDeuda(estado) : estado;
 }

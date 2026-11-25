@@ -60,6 +60,20 @@ export function repartoDeLiquidacion(deuda: number, monto: number): { aplicado: 
 }
 
 /**
+ * Deuda cerrada sin cobrarse entera: el préstamo se cerró con el saldo dado de
+ * baja (`cancelled`, al liquidar la garantía) o la venta se recuperó. Sus cuotas
+ * quedan abiertas en la base, pero ya no se deben.
+ */
+export function deudaCerrada(c: { status?: string; recoveredAt?: Date | null }): boolean {
+  return c.status === 'cancelled' || !!c.recoveredAt;
+}
+
+/** El estado de cuenta de una deuda cerrada: nada pendiente ni atrasado, sin mora ni próxima cuota. */
+export function estadoSinDeuda<T extends { pendingBalance: number; isOverdue: boolean; lateFee: number; paymentDue: number; nextDueDate: Date | null }>(st: T): T {
+  return { ...st, pendingBalance: 0, isOverdue: false, lateFee: 0, paymentDue: 0, nextDueDate: null };
+}
+
+/**
  * Lo recuperado en una recuperación, para el reporte: en la venta, el valor con
  * que la moto vuelve al inventario; en la garantía liquidada, lo que pagó el
  * tercero o la tasación de la dación. Incautada o devuelta: nada todavía.
