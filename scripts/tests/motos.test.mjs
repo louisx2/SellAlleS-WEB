@@ -217,6 +217,8 @@ test('deuda de la moto: el préstamo si está en garantía o liberada, la venta 
   const prestamos = new Map([['l1', { pendiente: 8000, atrasado: true }]]);
   assert.deepEqual(deudaDelVehiculo({ status: 'en_garantia', loanId: 'l1' }, ventas, prestamos), { pendiente: 8000, atrasado: true });
   assert.deepEqual(deudaDelVehiculo({ status: 'liberado', loanId: 'l1' }, ventas, prestamos), { pendiente: 8000, atrasado: true });
+  // Incautada (4A): el préstamo sigue corriendo y la ficha muestra su saldo.
+  assert.deepEqual(deudaDelVehiculo({ status: 'recuperado', loanId: 'l1' }, ventas, prestamos), { pendiente: 8000, atrasado: true });
   assert.deepEqual(deudaDelVehiculo({ status: 'vendido', saleId: 's1' }, ventas, prestamos), { pendiente: 30000, atrasado: false });
   assert.equal(deudaDelVehiculo({ status: 'disponible' }, ventas, prestamos), null);
   assert.equal(deudaDelVehiculo({ status: 'vendido', saleId: 'otra' }, ventas, prestamos), null);

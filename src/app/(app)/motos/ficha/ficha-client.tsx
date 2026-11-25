@@ -11,8 +11,16 @@ import { Label } from '@/components/ui/label';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { ArrowLeft, Pencil, Ban } from 'lucide-react';
+import { ArrowLeft, Pencil, Ban, Warehouse, Undo2, HandCoins, RotateCcw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
+import { supabase } from '@/lib/supabase/client';
+import { useRecuperaciones } from '@/hooks/use-recuperaciones';
+import { accionesDeRecuperacion, TEXTO_ESTADO_RECUPERACION } from '@/lib/motos-recuperacion';
+import { IncautarDialog } from '@/components/motos/recuperacion/incautar-dialog';
+import { DevolverDialog } from '@/components/motos/recuperacion/devolver-dialog';
+import { LiquidarDialog } from '@/components/motos/recuperacion/liquidar-dialog';
+import { RecuperarVentaDialog } from '@/components/motos/recuperacion/recuperar-venta-dialog';
 import { usePermission } from '@/hooks/use-permission';
 import { useProducts } from '@/context/product-provider';
 import { fetchVehicle, fetchVehicleEvents, useVehiculos } from '@/hooks/use-vehiculos';
@@ -42,6 +50,32 @@ const EVENTO: Record<VehicleEvent['kind'], string> = {
   recuperacion: 'Recuperado',
 };
 
+// Cuenta de la venta o del préstamo de la moto: si sigue abierta y cuánto se debe.
+// Se lee aparte (no de los proveedores) porque la venta puede ser vieja.
+type Cuenta = { venta?: { abierta: boolean; deuda: number }; prestamo?: { activo: boolean } };
+
+async function leerCuenta(v: Vehicle): Promise<Cuenta> {
+  const cuenta: Cuenta = {};
+  if (v.saleId) {
+    const { data: s } = await supabase.from('sales')
+      .select('total, amount_paid, payment_status, financing_details, cancelled_at')
+      .eq('id', v.saleId).maybeSingle();
+    if (s) {
+      const financiada = s.payment_status === 'in_financing';
+      const total = financiada ? Number(s.financing_details?.totalWithInterest ?? s.total) : Number(s.total);
+      cuenta.venta = {
+        abierta: !s.cancelled_at && (s.payment_status === 'credit' || financiada),
+        deuda: Math.max(0, Math.round((total - Number(s.amount_paid)) * 100) / 100),
+      };
+    }
+  }
+  if (v.loanId) {
+    const { data: l } = await supabase.from('loans').select('status').eq('id', v.loanId).maybeSingle();
+    if (l) cuenta.prestamo = { activo: l.status === 'active' };
+  }
+  return cuenta;
+}
+
 const estado = (s?: string) =>
   (s && (VEHICLE_STATUS as Record<string, { label: string }>)[s]?.label)
   || (s && (REGISTRATION_STATUS_LABEL as Record<string, string>)[s])
@@ -62,6 +96,11 @@ export default function FichaVehiculoClient() {
   const { ventas, prestamos } = useSaldosDeVehiculos();
   const [entregar, setEntregar] = useState(false);
   const [ubicacion, setUbicacion] = useState<string | null>(null);
+  const { appUser } = useAuth();
+  const esAdmin = !!appUser?.isCompanyAdmin || !!appUser?.isSuperAdmin;
+  const [cuenta, setCuenta] = useState<Cuenta>({});
+  const [dialogo, setDialogo] = useState<'incautar' | 'devolver' | 'liquidar' | 'recuperar_venta' | null>(null);
+  const rec = useRecuperaciones(id || undefined, { enabled: !!id });
 
   useEffect(() => {
     if (typeof window !== 'undefined') setId(new URLSearchParams(window.location.search).get('id') ?? '');
@@ -73,12 +112,21 @@ export default function FichaVehiculoClient() {
     const [v, e] = await Promise.all([fetchVehicle(id), fetchVehicleEvents(id).catch(() => [])]);
     setVehicle(v);
     setEventos(e);
+    setCuenta(v ? await leerCuenta(v).catch(() => ({})) : {});
     setCargando(false);
   }, [id]);
 
   useEffect(() => { cargar(); }, [cargar]);
 
   const vehicleProducts = useMemo(() => products.filter((p) => p.isVehicle), [products]);
+  // La dación entra a un artículo-vehículo de la misma sucursal (la base lo exige).
+  const productosDeLaSucursal = useMemo(
+    () => vehicleProducts.filter((p) => !p.branchId || p.branchId === vehicle?.branchId).map((p) => ({ id: p.id, name: p.name })),
+    [vehicleProducts, vehicle?.branchId],
+  );
+
+  // Después de incautar, devolver, liquidar o recuperar: la ficha y su historial.
+  const trasRecuperar = async () => { await Promise.all([cargar(), rec.reload()]); };
 
   const guardarUbicacion = async () => {
     if (!vehicle || ubicacion === null) return;
@@ -115,7 +163,10 @@ export default function FichaVehiculoClient() {
   );
   const extra = Object.entries(vehicle.extra ?? {});
   const deuda = deudaDelVehiculo(vehicle, ventas, prestamos);
-  const porPrestamo = (vehicle.status === 'en_garantia' || vehicle.status === 'liberado') && !!vehicle.loanId;
+  // Toda garantía con préstamo enlaza al préstamo, también incautada o liquidada.
+  const porPrestamo = vehicle.origin === 'garantia' && !!vehicle.loanId;
+  const acciones = accionesDeRecuperacion(vehicle, cuenta.venta, cuenta.prestamo, esAdmin, canEdit);
+  const nombre = vehicleLabel(vehicle);
   const enCustodia = vehicle.registrationStatus === 'en_custodia' || vehicle.registrationStatus === 'lista_para_entregar';
   const tipo = types.find((t) => t.id === vehicle.vehicleTypeId);
 
@@ -136,6 +187,26 @@ export default function FichaVehiculoClient() {
         {canEdit && vehicle.status === 'disponible' && (
           <Button variant="outline" onClick={() => setBaja(true)}>
             <Ban className="mr-2 h-4 w-4" /> Dar de baja
+          </Button>
+        )}
+        {acciones.includes('incautar') && (
+          <Button variant="outline" onClick={() => setDialogo('incautar')}>
+            <Warehouse className="mr-2 h-4 w-4" /> Incautar
+          </Button>
+        )}
+        {acciones.includes('devolver') && (
+          <Button variant="outline" onClick={() => setDialogo('devolver')}>
+            <Undo2 className="mr-2 h-4 w-4" /> Devolver al cliente
+          </Button>
+        )}
+        {acciones.includes('liquidar') && (
+          <Button onClick={() => setDialogo('liquidar')}>
+            <HandCoins className="mr-2 h-4 w-4" /> Liquidar la garantía
+          </Button>
+        )}
+        {acciones.includes('recuperar_venta') && (
+          <Button variant="outline" onClick={() => setDialogo('recuperar_venta')}>
+            <RotateCcw className="mr-2 h-4 w-4" /> Recuperar vehículo
           </Button>
         )}
         </div>
@@ -229,6 +300,33 @@ export default function FichaVehiculoClient() {
           </CardContent>
         </Card>
 
+        {rec.recuperaciones.length > 0 && (
+          <Card className="lg:col-span-3">
+            <CardHeader><CardTitle>Recuperaciones</CardTitle></CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm">
+                {rec.recuperaciones.map((r) => (
+                  <li key={r.id} className="flex flex-col gap-1 border-b pb-2 last:border-0 sm:flex-row sm:justify-between">
+                    <span>
+                      <span className="font-medium">{TEXTO_ESTADO_RECUPERACION[r.status]}</span>
+                      {r.kind === 'venta' ? ' · venta recuperada' : r.liquidationMode === 'dacion' ? ' · se la quedó el negocio' : r.liquidationMode === 'tercero' ? ' · vendida a un tercero' : ''}
+                      {r.reason ? ` · ${r.reason}` : ''}
+                      {r.debtAtRecovery != null ? ` · debía ${formatCurrency(r.debtAtRecovery)}` : ''}
+                      {r.applied != null ? ` · aplicado ${formatCurrency(r.applied)}` : ''}
+                      {r.writtenOff > 0 ? ` · de baja ${formatCurrency(r.writtenOff)}` : ''}
+                      {r.refunded > 0 ? ` · al cliente ${formatCurrency(r.refunded)}` : ''}
+                      {r.note ? ` · ${r.note}` : ''}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(`${r.recoveredOn}T00:00:00`).toLocaleDateString('es-DO')}{r.createdByName ? ` · ${r.createdByName}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+
         <Card className="lg:col-span-3">
           <CardHeader><CardTitle>Historial</CardTitle></CardHeader>
           <CardContent>
@@ -269,6 +367,37 @@ export default function FichaVehiculoClient() {
         open={entregar}
         onOpenChange={setEntregar}
         onEntregar={async (v, recibe, cedula, motivo) => { await entregarMatricula(v, recibe, cedula, motivo); await cargar(); }}
+      />
+
+      <IncautarDialog
+        nombre={nombre}
+        open={dialogo === 'incautar'}
+        onOpenChange={(o) => setDialogo(o ? 'incautar' : null)}
+        onIncautar={async (input) => { await rec.incautar(vehicle.id, input); await trasRecuperar(); }}
+      />
+      <DevolverDialog
+        nombre={nombre}
+        prestamoActivo={!!cuenta.prestamo?.activo}
+        open={dialogo === 'devolver'}
+        onOpenChange={(o) => setDialogo(o ? 'devolver' : null)}
+        onDevolver={async (nota) => { await rec.devolver(vehicle.id, nota); await trasRecuperar(); }}
+      />
+      {vehicle.loanId && (
+        <LiquidarDialog
+          nombre={nombre}
+          productos={productosDeLaSucursal}
+          open={dialogo === 'liquidar'}
+          onOpenChange={(o) => setDialogo(o ? 'liquidar' : null)}
+          cargarDeuda={() => rec.deudaDelPrestamo(vehicle.loanId!)}
+          onLiquidar={async (input) => { const r = await rec.liquidar(vehicle.id, input); await trasRecuperar(); return r; }}
+        />
+      )}
+      <RecuperarVentaDialog
+        nombre={nombre}
+        deuda={cuenta.venta?.deuda ?? 0}
+        open={dialogo === 'recuperar_venta'}
+        onOpenChange={(o) => setDialogo(o ? 'recuperar_venta' : null)}
+        onRecuperar={async (input) => { const r = await rec.recuperarVenta(vehicle.id, input); await trasRecuperar(); return r; }}
       />
 
       <Dialog open={baja} onOpenChange={setBaja}>

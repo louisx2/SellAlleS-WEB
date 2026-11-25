@@ -43,7 +43,11 @@ const STATUS_LABEL: Record<string, string> = {
   paid: 'Pagada',
   credit: 'A crédito',
   in_financing: 'Financiada',
+  // Moto recuperada (4A): en la base es 'paid', pero no se cobró entera.
+  recuperada: 'Recuperada',
 };
+
+const estadoDe = (s: { paymentStatus: string; recoveredAt?: Date }) => (s.recoveredAt ? 'recuperada' : s.paymentStatus);
 
 const SALE_SELECT = '*, sale_items(*), customers(*), branches(name), financing_installments(*)';
 
@@ -234,7 +238,7 @@ export default function SalesSummaryReportPage() {
   const porEstado = React.useMemo(() => {
     const map = new Map<string, { ventas: number; monto: number }>();
     ventas.forEach((s) => {
-      const e = s.paymentStatus ?? '';
+      const e = estadoDe(s) ?? '';
       const acc = map.get(e) ?? { ventas: 0, monto: 0 };
       map.set(e, { ventas: acc.ventas + 1, monto: acc.monto + s.total });
     });
@@ -322,7 +326,7 @@ export default function SalesSummaryReportPage() {
               { header: 'ITBIS', value: (s) => s.itbisAmount },
               { header: 'Total', value: (s) => s.total },
               { header: 'Metodo', value: (s) => METHOD_LABEL[s.paymentMethod] ?? s.paymentMethod },
-              { header: 'Estado', value: (s) => STATUS_LABEL[s.paymentStatus] ?? s.paymentStatus },
+              { header: 'Estado', value: (s) => STATUS_LABEL[estadoDe(s)] ?? s.paymentStatus },
               { header: 'Anulada', value: (s) => (s.cancelledAt ? 'Si' : 'No') },
             ]}
           />

@@ -178,7 +178,7 @@ export function deudaDelVehiculo(
   v: { status: VehicleStatus; saleId?: string | null; loanId?: string | null },
   ventas: Map<string, Saldo>, prestamos: Map<string, Saldo>,
 ): Saldo | null {
-  if ((v.status === 'en_garantia' || v.status === 'liberado') && v.loanId) return prestamos.get(v.loanId) ?? null;
+  if ((v.status === 'en_garantia' || v.status === 'liberado' || v.status === 'recuperado') && v.loanId) return prestamos.get(v.loanId) ?? null;
   if (v.status === 'vendido' && v.saleId) return ventas.get(v.saleId) ?? null;
   return null;
 }

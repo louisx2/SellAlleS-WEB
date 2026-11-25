@@ -63,6 +63,8 @@ export const buildLoanColumns = (loanLateFeeRate: number, graceDays = 0): Column
       const status = calculateLoanStatus(row.original, loanLateFeeRate, graceDays);
       // Saldo 0 porque pasó al préstamo nuevo, no porque se pagó.
       if (row.original.status === 'refinanced') return <Badge variant="secondary">Refinanciado</Badge>;
+      // Cerrado al liquidar la garantía con el saldo dado de baja (4A).
+      if (row.original.status === 'cancelled') return <Badge variant="secondary">Dado de baja</Badge>;
       if (status.pendingBalance <= 0) return <Badge variant="default" className="bg-green-600">Pagado</Badge>;
       if (status.isOverdue) {
         return (

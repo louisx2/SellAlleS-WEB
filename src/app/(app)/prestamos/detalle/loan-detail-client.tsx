@@ -6,12 +6,12 @@ import { useLoans } from '@/context/loan-provider';
 import { useAuth } from '@/context/auth-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { supabase } from '@/lib/supabase/client';
-import { rowToLoanPayment, rowToRefinancing } from '@/lib/supabase/mappers';
+import { rowToLoanPayment, rowToRefinancing, rowToVehicleRecovery } from '@/lib/supabase/mappers';
 import { cn, formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { FREQUENCY_LABEL } from '@/lib/frequency';
 import { lateFeeDue, lateFeeModeHelp, overdueDays } from '@/lib/late-fee';
-import type { LoanPayment, LoanPaymentMethod, Refinancing } from '@/lib/types';
+import type { LoanPayment, LoanPaymentMethod, Refinancing, VehicleRecovery } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -120,6 +120,18 @@ export default function LoanDetailClient() {
 
   useEffect(() => { loadRefinancings(); }, [loadRefinancings, loans]);
 
+  // Motopréstamos 4A: la última recuperación de la moto en garantía.
+  const [garantia, setGarantia] = useState<VehicleRecovery | null>(null);
+  useEffect(() => {
+    setGarantia(null);
+    if (!loanId) return;
+    let cancelado = false;
+    supabase.from('vehicle_recoveries').select('*').eq('loan_id', loanId)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle()
+      .then(({ data }) => { if (!cancelado) setGarantia(data ? rowToVehicleRecovery(data) : null); });
+    return () => { cancelado = true; };
+  }, [loanId, loans]);
+
   // Se busca por el id actual: una respuesta tardía de otro préstamo no encaja.
   const refinancingOut = refinancings.find((r) => r.loanId === loanId);
   const refinancingIn = refinancings.find((r) => r.newLoanId === loanId);
@@ -163,6 +175,8 @@ export default function LoanDetailClient() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const isRefinanced = loan.status === 'refinanced';
+  // Cerrado al liquidar la garantía con el saldo dado de baja: ya no recibe abonos.
+  const isWrittenOff = loan.status === 'cancelled';
   const canRefinance = isAdmin && loan.status === 'active' && status.pendingBalance > 0;
 
   return (
@@ -185,7 +199,7 @@ export default function LoanDetailClient() {
             Refinanciar
           </Button>
         )}
-        {status.pendingBalance > 0 && (
+        {status.pendingBalance > 0 && !isWrittenOff && (
           <RegisterLoanPaymentDialog loan={loan}>
             <DialogTrigger asChild>
               <Button>
@@ -204,6 +218,8 @@ export default function LoanDetailClient() {
             {loan.customer?.name ?? 'Cliente'}
             {isRefinanced ? (
               <Badge variant="secondary">Refinanciado</Badge>
+            ) : isWrittenOff ? (
+              <Badge variant="secondary">Dado de baja</Badge>
             ) : status.pendingBalance <= 0 ? (
               <Badge className="bg-green-600">Pagado</Badge>
             ) : status.isOverdue ? (
@@ -217,6 +233,30 @@ export default function LoanDetailClient() {
           </CardDescription>
         </CardHeader>
         <CardContent>
+          {garantia && (garantia.status === 'incautada' || garantia.status === 'liquidada') && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-orange-300 bg-orange-50 p-3 text-sm text-orange-900 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-100">
+              <span>
+                {garantia.status === 'incautada' ? (
+                  <>Garantía incautada el {new Date(`${garantia.recoveredOn}T00:00:00`).toLocaleDateString('es-DO')}: la moto está en el patio y el préstamo sigue activo.</>
+                ) : (
+                  <>
+                    Garantía liquidada{garantia.closedAt && <> el {garantia.closedAt.toLocaleDateString('es-DO')}</>}:{' '}
+                    {garantia.liquidationMode === 'dacion' ? 'el negocio se quedó la moto' : 'la moto se vendió a un tercero'}
+                    {garantia.proceeds != null && <> por {formatCurrency(garantia.proceeds)}</>}
+                    {garantia.applied != null && <>; se aplicaron {formatCurrency(garantia.applied)} al préstamo</>}.
+                    {garantia.writtenOff > 0 && <> Se dieron de baja {formatCurrency(garantia.writtenOff)}.</>}
+                    {garantia.refunded > 0 && <> Sobraron {formatCurrency(garantia.refunded)} para el cliente.</>}
+                  </>
+                )}
+              </span>
+              <Link href={`/motos/ficha?id=${garantia.vehicleId}`} className="underline underline-offset-2">Ver la moto</Link>
+            </div>
+          )}
+          {isWrittenOff && !(garantia?.status === 'liquidada' && garantia.writtenOff > 0) && loan.writtenOffAmount != null && (
+            <div className="mb-4 rounded-lg border bg-muted/50 p-3 text-sm">
+              Préstamo cerrado: se dieron de baja {formatCurrency(loan.writtenOffAmount)} y ya no recibe abonos.
+            </div>
+          )}
           {isRefinanced && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/50 p-3 text-sm">
               <span>

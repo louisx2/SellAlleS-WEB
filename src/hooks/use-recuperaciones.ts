@@ -4,7 +4,7 @@
 // acciones que las crean. Todo pasa por las RPC; la base valida estados,
 // permisos y caja, y su mensaje de error se lanza tal cual.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/context/auth-provider';
 import { rowToVehicleRecovery } from '@/lib/supabase/mappers';
@@ -48,22 +48,28 @@ export type ResultadoRecuperarVenta = { recoveryId: string; deuda: number; devue
 
 const limpio = (s?: string) => (s?.trim() ? s.trim() : null);
 
-/** Recuperaciones de la moto dada; sin moto, las de la sucursal activa. */
-export function useRecuperaciones(vehicleId?: string) {
+/** Recuperaciones de la moto dada; sin moto, las de la sucursal activa.
+ *  `enabled: false` no lee nada (la ficha, mientras no sabe qué moto es). */
+export function useRecuperaciones(vehicleId?: string, opts?: { enabled?: boolean }) {
   const { appUser } = useAuth();
   const branchId = appUser?.activeBranchId;
+  const enabled = opts?.enabled ?? true;
   const [recuperaciones, setRecuperaciones] = useState<VehicleRecovery[]>([]);
   const [loading, setLoading] = useState(true);
+  // Solo vale la última lectura: si cambia la moto, la respuesta vieja se descarta.
+  const ultima = useRef(0);
 
   const reload = useCallback(async () => {
-    if (!vehicleId && !branchId) { setLoading(false); return; }
+    const turno = ++ultima.current;
+    if (!enabled || (!vehicleId && !branchId)) { setRecuperaciones([]); setLoading(false); return; }
     setLoading(true);
     let q = supabase.from('vehicle_recoveries').select('*').order('created_at', { ascending: false });
     q = vehicleId ? q.eq('vehicle_id', vehicleId) : q.eq('branch_id', branchId!);
     const { data } = await q;
+    if (turno !== ultima.current) return;
     setRecuperaciones((data ?? []).map(rowToVehicleRecovery));
     setLoading(false);
-  }, [vehicleId, branchId]);
+  }, [enabled, vehicleId, branchId]);
 
   useEffect(() => { reload(); }, [reload]);
 
