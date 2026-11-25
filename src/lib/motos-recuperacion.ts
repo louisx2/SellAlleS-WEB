@@ -1,0 +1,65 @@
+// Motopréstamos 4A: reglas de la recuperación de motos. Lógica pura: la usan la
+// ficha, los diálogos y el reporte. La base vuelve a validar todo en sus RPC
+// (motos_incautar, motos_devolver_garantia, motos_liquidar_garantia y
+// motos_recuperar_venta); esto solo decide qué botones mostrar y qué cifras
+// adelantar en pantalla.
+
+import type { VehicleOrigin, VehicleStatus } from '@/lib/motos';
+
+export type AccionDeRecuperacion = 'incautar' | 'devolver' | 'liquidar' | 'recuperar_venta';
+export type EstadoDeRecuperacion = 'incautada' | 'devuelta' | 'liquidada' | 'recuperada';
+
+export const TEXTO_ESTADO_RECUPERACION: Record<EstadoDeRecuperacion, string> = {
+  incautada: 'Incautada',
+  devuelta: 'Devuelta',
+  liquidada: 'Liquidada',
+  recuperada: 'Recuperada',
+};
+
+/**
+ * Acciones de recuperación que se ofrecen para una moto.
+ * - `incautar`: garantía de un préstamo activo; quien puede editar motos.
+ * - `devolver`: garantía incautada; quien puede editar motos.
+ * - `liquidar`: garantía incautada con el préstamo activo; solo el administrador.
+ * - `recuperar_venta`: moto del inventario vendida con la venta abierta; solo el administrador.
+ * El administrador puede editar motos aunque su rol no lo diga (igual que en la base).
+ */
+export function accionesDeRecuperacion(
+  v: { status: VehicleStatus; origin: VehicleOrigin; saleId?: string; loanId?: string },
+  venta?: { abierta: boolean },
+  prestamo?: { activo: boolean },
+  esAdmin = false,
+  puedeEditar = false,
+): AccionDeRecuperacion[] {
+  const edita = puedeEditar || esAdmin;
+  const acciones: AccionDeRecuperacion[] = [];
+  if (v.origin === 'garantia' && v.loanId) {
+    if (v.status === 'en_garantia' && prestamo?.activo && edita) acciones.push('incautar');
+    if (v.status === 'recuperado') {
+      if (edita) acciones.push('devolver');
+      if (esAdmin && prestamo?.activo) acciones.push('liquidar');
+    }
+  }
+  if (v.origin === 'inventario' && v.status === 'vendido' && v.saleId && venta?.abierta && esAdmin) {
+    acciones.push('recuperar_venta');
+  }
+  return acciones;
+}
+
+const aCentavos = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100);
+
+/**
+ * Cómo se reparte lo que paga la liquidación de una garantía: lo aplicado al
+ * préstamo (hasta la deuda con mora), lo que sobra para el cliente y lo que falta.
+ */
+export function repartoDeLiquidacion(deuda: number, monto: number): { aplicado: number; sobrante: number; faltante: number } {
+  const d = Math.max(aCentavos(deuda), 0);
+  const m = Math.max(aCentavos(monto), 0);
+  const aplicado = Math.min(d, m);
+  return { aplicado: aplicado / 100, sobrante: (m - aplicado) / 100, faltante: (d - aplicado) / 100 };
+}
+
+/** Resultado de una recuperación para el reporte: recuperado − dado de baja − devuelto. */
+export function resultadoDeRecuperacion(r: { recuperado: number; dadoDeBaja: number; devuelto: number }): number {
+  return (aCentavos(r.recuperado) - aCentavos(r.dadoDeBaja) - aCentavos(r.devuelto)) / 100;
+}
