@@ -4,10 +4,10 @@
 -- Plan:   docs/superpowers/plans/2026-11-24-motoprestamos-entrega-3b-recibos-avisos-reportes.md (Task 1)
 --
 -- No cambia ninguna función viva. Amplía la lectura de entregas y cartera a quien ve
--- los reportes y agrega un trigger en los abonos (al anular, borra el enlace del recibo). `receipt_links` deja de exigir venta: un enlace
--- es de una venta o de un abono (la función `c` solo lee la ruta del archivo, así
--- que no cambia). `motos_ajuste` lee los ajustes por nombre: las columnas nuevas no
--- la rompen.
+-- los reportes y agrega un trigger en los abonos (al anular, borra el enlace del
+-- recibo). `receipt_links` deja de exigir venta: un enlace es de una venta o de un
+-- abono (la función `c` solo lee la ruta del archivo, así que no cambia).
+-- `motos_ajuste` lee los ajustes por nombre: las columnas nuevas no la rompen.
 -- Pruebas: supabase/tests/cobranza.sql (§4)
 
 -- 1. Enlaces de recibos de abono ----------------------------------------------------------
@@ -32,8 +32,8 @@ alter table public.motos_settings
 -- cartera actual. Cobrado: abonos no anulados del cobrador con fecha local en el período.
 -- Promesa cumplida: el cliente abonó (sin anular) en la sucursal desde el momento de la
 -- visita hasta el día de la promesa —un abono anterior a la visita, aunque sea del mismo
--- día, no la cumple («pagó una parte y prometió el resto»)—; solo cuentan las ya vencidas. Las fechas son locales, en
--- la zona de la empresa (como company_today).
+-- día, no la cumple («pagó una parte y prometió el resto»)—; solo cuentan las ya
+-- vencidas. Las fechas son locales, en la zona de la empresa (como company_today).
 
 create or replace function public.cobranza_reporte(p_branch_id uuid, p_desde date, p_hasta date)
 returns jsonb
