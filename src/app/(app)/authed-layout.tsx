@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2, Route, ListChecks, Calculator } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2, Route, ListChecks, Calculator, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -64,6 +64,7 @@ const featuresNavItems: NavItem[] = [
   { href: '/motos', icon: Bike, label: 'Vehículos', module: 'motoprestamos', permission: 'motos' },
   { href: '/motos/matriculas', icon: FileCheck, label: 'Matrículas', module: 'motoprestamos', permission: 'motos' },
   { href: '/motos/cobranza', icon: Route, label: 'Cobranza', module: 'motoprestamos', permission: 'cobranza' },
+  { href: '/motos/cobranza/avisos', icon: MessageCircle, label: 'Avisos de cobro', module: 'motoprestamos', permission: 'cobranza' },
   { href: '/motos/cobranza/asignar', icon: ListChecks, label: 'Asignar cartera', module: 'motoprestamos', permission: 'cobranza-all' },
   { href: '/motos/cobranza/cuadre', icon: Calculator, label: 'Cuadre de cobradores', module: 'motoprestamos', permission: 'cobranza-cuadre' },
   { href: '/caja', icon: Coins, label: 'Caja', module: 'caja', permission: 'caja' },
@@ -82,6 +83,8 @@ const reportsNavItems = [
     { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
     { href: '/reports/cobros', label: 'Cobros Recibidos' },
     { href: '/reports/antiguedad', label: 'Antigüedad de Cartera' },
+    { href: '/reports/cobranza', label: 'Cobranza por Cobrador' },
+    { href: '/reports/cuadres', label: 'Cuadres de Cobradores' },
     { href: '/reports/inventory', label: 'Valorización de Inventario' },
     { href: '/reports/taxes', label: 'Impuestos' },
     { href: '/reports/ganancias', label: 'Reporte de Ganancias' },
@@ -324,7 +327,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     if (slug === 'comisiones' && !isModuleEnabled('commissions')) return false;
     // El del taller, solo con el módulo encendido.
     if (slug === 'taller' && !isModuleEnabled('services')) return false;
-    if (slug === 'vehiculos' && !isModuleEnabled('motoprestamos')) return false;
+    if ((slug === 'vehiculos' || slug === 'cobranza' || slug === 'cuadres') && !isModuleEnabled('motoprestamos')) return false;
     return isReportVisible(effectivePermissions, slug);
   });
 

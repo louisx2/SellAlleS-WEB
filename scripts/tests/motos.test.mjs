@@ -278,3 +278,11 @@ test('el permiso de una página es el del ítem del menú más específico', () 
   assert.equal(itemDeRuta(items, '/motos')?.permission, 'motos');
   assert.equal(itemDeRuta(items, '/motosierra'), undefined);
 });
+
+import { REPORT_ITEMS } from '../../src/lib/permissions.ts';
+
+test('los reportes de cobranza se pueden dar o quitar en un rol', () => {
+  const slugs = REPORT_ITEMS.map((r) => r.slug);
+  assert.ok(slugs.includes('cobranza'));
+  assert.ok(slugs.includes('cuadres'));
+});

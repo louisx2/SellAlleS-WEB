@@ -123,6 +123,9 @@ export type MotosSettings = {
   /** Vacío = el texto base de src/lib/contrato.ts. */
   contractSale?: string;
   contractLoan?: string;
+  /** Mensajes de WhatsApp de la cobranza. Vacío = el texto base de src/lib/cobranza-mensajes.ts. */
+  whatsappReminder?: string;
+  whatsappReceipt?: string;
 };
 
 /** Foto de una moto o de la cédula de un cliente (bucket privado `motos`). */
@@ -1288,7 +1291,18 @@ export type EntregaDeCobrador = {
 };
 
 /** Lo que devuelve un cobro de la ruta, para mostrarlo al terminar. */
-export type CobroDeRuta = { paymentId: string; aplicado: number; mora: number; saldo: number | null; enCalle: boolean; repetido?: boolean };
+export type CobroDeRuta = {
+  paymentId: string;
+  aplicado: number;
+  mora: number;
+  saldo: number | null;
+  enCalle: boolean;
+  repetido?: boolean;
+  /** Para imprimir o mandar el recibo (no viene en un cobro repetido). */
+  recibo?: PaymentResult;
+  /** Dónde quedó el abono: el general a las ventas también es de `venta`. */
+  tipoAbono: 'prestamo' | 'venta';
+};
 
 /** Lo que devuelve recibir una entrega. */
 export type EntregaRecibida = { settlementId: string; expected: number; received: number; difference: number; payments: number };

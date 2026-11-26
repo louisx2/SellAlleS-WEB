@@ -3,6 +3,7 @@ import { isUuid } from '@/lib/utils';
 import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
 import { normalizarCamposCliente } from '@/lib/datos-cliente';
+import { AVISO_BASE, RECIBO_BASE, plantillaParaGuardar } from '@/lib/cobranza-mensajes';
 
 // ---------- Role ----------
 export const rowToRole = (r: any): Role => ({
@@ -1124,6 +1125,8 @@ export const rowToMotosSettings = (r: any): MotosSettings => (r ? {
   requireGuarantor: r.require_guarantor ?? false,
   contractSale: r.contract_sale ?? undefined,
   contractLoan: r.contract_loan ?? undefined,
+  whatsappReminder: r.whatsapp_reminder ?? undefined,
+  whatsappReceipt: r.whatsapp_receipt ?? undefined,
 } : { ...MOTOS_SETTINGS_DEFAULT });
 
 /** Solo lo que viene; un contrato en '' o null vuelve al texto base. */
@@ -1134,6 +1137,9 @@ export const motosSettingsToRow = (p: Partial<MotosSettings>) => ({
   ...(p.requireGuarantor !== undefined ? { require_guarantor: p.requireGuarantor } : {}),
   ...('contractSale' in p ? { contract_sale: p.contractSale?.trim() || null } : {}),
   ...('contractLoan' in p ? { contract_loan: p.contractLoan?.trim() || null } : {}),
+  // Vacío o igual al texto base no se guarda: si el base mejora, le llega a quien no lo cambió.
+  ...('whatsappReminder' in p ? { whatsapp_reminder: plantillaParaGuardar(p.whatsappReminder, AVISO_BASE) } : {}),
+  ...('whatsappReceipt' in p ? { whatsapp_receipt: plantillaParaGuardar(p.whatsappReceipt, RECIBO_BASE) } : {}),
 });
 
 // ---------- Cobranza en la calle (Motopréstamos 3A) ----------

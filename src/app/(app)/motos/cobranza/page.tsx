@@ -12,6 +12,8 @@ import { useAuth } from '@/context/auth-provider';
 import { usePermission } from '@/hooks/use-permission';
 import { useCobranza, useCuentasDeCobro } from '@/hooks/use-cobranza';
 import { useVehiculos } from '@/hooks/use-vehiculos';
+import { useMotosAjustes } from '@/hooks/use-motos-ajustes';
+import { useCompanyProfile } from '@/context/company-profile-provider';
 import { resumenDelCobrador, rutaDelDia, TEXTO_RESULTADO, type ParadaDeRuta, type Promesa } from '@/lib/cobranza';
 import { fechaLocal, hoyLocal } from '@/lib/subscription-status';
 import { vehicleLabel } from '@/lib/motos';
@@ -29,6 +31,8 @@ export default function CobranzaPage() {
   const { appUser } = useAuth();
   const verTodas = usePermission('cobranza-all', 'view');
   const { vehicles } = useVehiculos();
+  const { ajustes } = useMotosAjustes();
+  const { profile } = useCompanyProfile();
   const cobranza = useCobranza();
   const datos = useCuentasDeCobro();
   const { cuentas, clientes } = datos;
@@ -205,6 +209,10 @@ export default function CobranzaPage() {
         open={!!cobrar}
         onOpenChange={(o) => !o && setCobrar(null)}
         onCobrar={async (a) => { const r = await cobranza.registrarAbono(a); await datos.reload(); return r; }}
+        telefono={cobrar ? cliente(cobrar.customerId)?.phone : undefined}
+        sucursal={(typeof window !== 'undefined' && localStorage.getItem('userBranch')) || 'Sucursal'}
+        empresa={profile.name}
+        plantillaRecibo={ajustes.whatsappReceipt}
       />
       <VisitaDialog
         customerId={visita?.customerId ?? null}

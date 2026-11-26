@@ -90,6 +90,8 @@ export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'date-range', label: 'Ingresos por Fechas' },
   { slug: 'receivables', label: 'Cuentas por Cobrar' },
   { slug: 'antiguedad', label: 'Antigüedad de Cartera' },
+  { slug: 'cobranza', label: 'Cobranza por Cobrador' },
+  { slug: 'cuadres', label: 'Cuadres de Cobradores' },
   { slug: 'inventory', label: 'Valorización de Inventario' },
   { slug: 'taxes', label: 'Impuestos' },
   { slug: 'ganancias', label: 'Reporte de Ganancias' },

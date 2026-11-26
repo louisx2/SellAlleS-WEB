@@ -22,8 +22,16 @@
 // Ademas de la factura comparte el plan de pagos y el estado del
 // financiamiento de la misma venta (`documento`, ver _shared/documentos.ts).
 // Sin `documento` es la factura, exactamente como antes.
+//
+// Con `abono` ({ tipo: 'prestamo' | 'venta', paymentId }) en vez de `saleId`
+// comparte el recibo de un abono (cobranza en la calle, Motopréstamos 3B): mismos
+// dos pasos, su propia carpeta y su enlace en `receipt_links` sin venta. Sin
+// `abono`, el camino de la venta no cambia.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
-import { diasDeValidez, documentoValido, nombreDeDescarga, rutaDelDocumento } from '../_shared/documentos.ts';
+import {
+  abonoValido, DIAS_RECIBO, diasDeValidez, documentoValido, NOMBRE_RECIBO, nombreDeDescarga, rutaDelDocumento,
+  rutaDelRecibo,
+} from '../_shared/documentos.ts';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -73,6 +81,94 @@ function slug(nombre: string | null | undefined) {
   return limpio || 'comprobante';
 }
 
+type Admin = ReturnType<typeof createClient>;
+
+/** El recibo de un abono: comprueba que es de la empresa y que no está anulado,
+ *  y da la subida o el enlace corto, igual que con la venta. */
+async function reciboDeAbono(
+  admin: Admin,
+  userId: string,
+  perfil: { is_super_admin: boolean | null; company_id: string | null },
+  abono: { tipo: 'prestamo' | 'venta'; paymentId: string },
+  paso: 'subida' | 'enlace',
+): Promise<Response> {
+  const tabla = abono.tipo === 'prestamo' ? 'loan_payments' : 'credit_payments';
+  const { data: pago } = await admin
+    .from(tabla)
+    .select('id, company_id, voided_at')
+    .eq('id', abono.paymentId)
+    .maybeSingle();
+  if (!pago) return json(404, { error: 'Abono no encontrado.' });
+  if (perfil.is_super_admin !== true && perfil.company_id !== pago.company_id) {
+    return json(403, { error: 'No tienes permiso para acceder a este abono.' });
+  }
+  if (pago.voided_at) return json(409, { error: 'Este abono fue anulado.' });
+
+  const ruta = rutaDelRecibo(pago.company_id, pago.id);
+
+  if (paso === 'subida') {
+    const { data: subida, error: upErr } = await admin.storage
+      .from('comprobantes')
+      .createSignedUploadUrl(ruta, { upsert: true });
+    if (upErr || !subida) {
+      console.error('Fallo creando la URL de subida del recibo:', upErr?.message);
+      return json(502, { error: `No se pudo preparar la subida: ${upErr?.message ?? 'desconocido'}` });
+    }
+    return json(200, { ok: true, ruta, uploadToken: subida.token });
+  }
+
+  const { data: empresa } = await admin
+    .from('companies')
+    .select('name, link_slug')
+    .eq('id', pago.company_id)
+    .maybeSingle();
+  const empresaSlug = empresa?.link_slug?.trim() || slug(empresa?.name);
+  const vence = new Date(Date.now() + DIAS_RECIBO * 24 * 60 * 60 * 1000);
+
+  // Reenviar el mismo recibo renueva el plazo y conserva la dirección.
+  const { data: existente } = await admin
+    .from('receipt_links')
+    .select('code')
+    .eq('storage_path', ruta)
+    .gt('expires_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  let code = existente?.code as string | undefined;
+  if (code) {
+    const { error: renErr } = await admin.from('receipt_links').update({ expires_at: vence.toISOString() }).eq('code', code);
+    if (renErr) return json(502, { error: `No se pudo renovar el enlace: ${renErr.message}` });
+  }
+  for (let intento = 0; intento < 3 && !code; intento++) {
+    const candidato = codigoNuevo();
+    const { error: insErr } = await admin.from('receipt_links').insert({
+      code: candidato,
+      loan_payment_id: abono.tipo === 'prestamo' ? pago.id : null,
+      credit_payment_id: abono.tipo === 'venta' ? pago.id : null,
+      company_id: pago.company_id,
+      company_slug: empresaSlug,
+      storage_path: ruta,
+      download_name: NOMBRE_RECIBO,
+      expires_at: vence.toISOString(),
+      created_by: userId,
+    });
+    if (!insErr) code = candidato;
+    else if (insErr.code !== '23505') {
+      console.error('Fallo guardando el enlace del recibo:', insErr.message);
+      return json(502, { error: `No se pudo generar el enlace: ${insErr.message}` });
+    }
+  }
+  if (!code) return json(502, { error: 'No se pudo generar el enlace. Intenta de nuevo.' });
+
+  return json(200, {
+    ok: true,
+    ruta,
+    url: `${BASE_ENLACE}/${empresaSlug}/c/${code}`,
+    diasValidez: DIAS_RECIBO,
+    venceEl: vence.toISOString(),
+  });
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json(405, { error: 'Metodo no permitido.' });
@@ -98,6 +194,14 @@ Deno.serve(async (req) => {
     if (!perfil) return json(403, { error: 'Perfil no encontrado.' });
 
     const body = await req.json().catch(() => null);
+
+    // Recibo de un abono: otro camino, la venta no se toca.
+    if (body?.abono !== undefined) {
+      const abono = abonoValido(body.abono);
+      if (!abono) return json(400, { error: 'Abono no válido.' });
+      return await reciboDeAbono(admin, caller.user.id, perfil, abono, body?.paso === 'enlace' ? 'enlace' : 'subida');
+    }
+
     const saleId = body?.saleId;
     if (!saleId) return json(400, { error: 'Se requiere saleId.' });
     const paso = body?.paso === 'enlace' ? 'enlace' : 'subida';

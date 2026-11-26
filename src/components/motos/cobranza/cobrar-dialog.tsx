@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
@@ -8,9 +9,16 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { MessageCircle, Printer } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
+import { ReceiptBody } from '@/components/credit/payment-receipt-dialog';
 import { parseMonto } from '@/lib/motos';
 import { formatCurrency, cn } from '@/lib/utils';
+import { RECIBO_BASE, llenarMensaje } from '@/lib/cobranza-mensajes';
+import {
+  abrirPestanaParaWhatsApp, abrirWhatsAppConTexto, compartirReciboDeAbono, generateReceiptPdf,
+} from '@/lib/receipt-sharing';
 import type { ParadaDeRuta } from '@/lib/cobranza';
 import type { CobroDeRuta } from '@/lib/types';
 import type { AbonoDeRuta } from '@/hooks/use-cobranza';
@@ -23,6 +31,11 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCobrar: (abono: AbonoDeRuta) => Promise<CobroDeRuta>;
+  /** Para el recibo: teléfono del cliente, sucursal, nombre del negocio y la plantilla de la empresa. */
+  telefono?: string;
+  sucursal: string;
+  empresa: string;
+  plantillaRecibo?: string;
 }
 
 const sugeridoDe = (c: ParadaDeRuta['cuentas'][number]) => Math.min(c.pendiente, c.cuota + c.mora);
@@ -30,8 +43,9 @@ const sugeridoDe = (c: ParadaDeRuta['cuentas'][number]) => Math.min(c.pendiente,
 // Cobrar en la calle: cada préstamo y cada venta por separado, o un abono
 // general que reparte entre las ventas del cliente (como en Cuentas por Cobrar).
 // En efectivo el dinero queda a cargo del cobrador hasta el cuadre.
-export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: Props) {
+export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar, telefono, sucursal, empresa, plantillaRecibo }: Props) {
   const { toast } = useToast();
+  const { appUser } = useAuth();
   const opciones = useMemo<Opcion[]>(() => {
     if (!parada) return [];
     const ops: Opcion[] = parada.cuentas.map((c, i) => ({
@@ -63,6 +77,12 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: P
   const [nota, setNota] = useState('');
   const [saving, setSaving] = useState(false);
   const [hecho, setHecho] = useState<CobroDeRuta | null>(null);
+  const [fechaCobro, setFechaCobro] = useState<Date>(new Date());
+  const [enviando, setEnviando] = useState(false);
+  const [mensaje, setMensaje] = useState<string | null>(null);
+  const printRef = useRef<HTMLDivElement>(null);
+  const pdfRef = useRef<HTMLDivElement>(null);
+  const imprimir = useReactToPrint({ content: () => printRef.current });
   // Uno por cobro: si la respuesta se pierde por la señal y se toca otra vez, la
   // base devuelve el abono que ya quedó en vez de crear otro.
   const requestId = useRef('');
@@ -77,6 +97,7 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: P
     setReferencia('');
     setNota('');
     setHecho(null);
+    setMensaje(null);
     requestId.current = crypto.randomUUID();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -95,11 +116,58 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: P
     try {
       const r = await onCobrar({ tipo: opcion.tipo, id: opcion.id, monto: valor, metodo, referencia, nota, requestId: requestId.current });
       setHecho(r);
+      setFechaCobro(new Date());
       toast({ title: 'Abono registrado', description: `${formatCurrency(valor)} de ${nombre}.` });
     } catch (e: any) {
       toast({ title: 'No se pudo cobrar', description: e?.message, variant: 'destructive' });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const datosRecibo = hecho?.recibo ? {
+    result: hecho.recibo,
+    customerName: nombre,
+    method: metodo,
+    date: fechaCobro,
+    branchName: sucursal,
+    userName: appUser?.name,
+    notes: [metodo === 'transfer' && referencia.trim() ? `Ref. ${referencia.trim()}` : '', nota.trim()].filter(Boolean).join(' · ') || undefined,
+    cuenta: opcion?.tipo,
+  } : null;
+
+  // El recibo por WhatsApp: el PDF sale de la copia de abajo, se sube y el
+  // cliente recibe el enlace con la plantilla de la empresa.
+  const enviarRecibo = async () => {
+    if (!hecho?.recibo || !pdfRef.current) return;
+    const ventana = abrirPestanaParaWhatsApp(); // antes de cualquier await (escritorio)
+    setEnviando(true);
+    try {
+      const pdf = await generateReceiptPdf(pdfRef.current, 'recibo-de-abono.pdf');
+      const plantilla = plantillaRecibo?.trim() || RECIBO_BASE;
+      const recibo = hecho.recibo;
+      const r = await compartirReciboDeAbono(
+        { tipo: hecho.tipoAbono, paymentId: hecho.paymentId },
+        pdf,
+        (url, venceEl) => llenarMensaje(plantilla, {
+          cliente: nombre,
+          monto: formatCurrency(recibo.amount),
+          saldo: hecho.saldo != null ? formatCurrency(hecho.saldo) : undefined,
+          fecha: fechaCobro.toLocaleDateString('es-DO'),
+          enlace: url,
+          vence: new Date(venceEl).toLocaleDateString('es-DO'),
+          empresa,
+        }),
+        telefono,
+        ventana,
+      );
+      setMensaje(r.texto);
+      if (!r.abrioWhatsApp) toast({ title: 'Recibo listo', description: 'Toca «Abrir WhatsApp» para mandarlo.' });
+    } catch (e: any) {
+      ventana?.close();
+      toast({ title: 'No se pudo enviar el recibo', description: e?.message, variant: 'destructive' });
+    } finally {
+      setEnviando(false);
     }
   };
 
@@ -130,9 +198,33 @@ export function CobrarDialog({ parada, nombre, open, onOpenChange, onCobrar }: P
                 Este efectivo queda a tu cargo hasta que lo entregues en el cuadre.
               </p>
             )}
+            {datosRecibo && (
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={imprimir}><Printer className="mr-2 h-4 w-4" /> Imprimir recibo</Button>
+                <Button variant="outline" onClick={enviarRecibo} disabled={enviando}>
+                  <MessageCircle className="mr-2 h-4 w-4" /> {enviando ? 'Preparando…' : mensaje ? 'Enviar otra vez' : 'Enviar por WhatsApp'}
+                </Button>
+                {mensaje && (
+                  <Button className="col-span-2" variant="secondary" onClick={() => abrirWhatsAppConTexto(mensaje, telefono)}>
+                    Abrir WhatsApp
+                  </Button>
+                )}
+              </div>
+            )}
             <DialogFooter>
               <Button onClick={() => onOpenChange(false)}>Listo</Button>
             </DialogFooter>
+            {datosRecibo && (
+              <>
+                {/* Copia para imprimir (react-to-print la clona) y otra, fuera de la vista, para el PDF. */}
+                <div className="hidden"><div ref={printRef} className="receipt-container"><ReceiptBody data={datosRecibo} /></div></div>
+                <div style={{ position: 'fixed', left: '-9999px', top: 0 }} aria-hidden>
+                  <div ref={pdfRef} className="receipt-container bg-white p-3 text-black" style={{ width: '80mm' }}>
+                    <ReceiptBody data={datosRecibo} />
+                  </div>
+                </div>
+              </>
+            )}
           </>
         ) : (
           <>

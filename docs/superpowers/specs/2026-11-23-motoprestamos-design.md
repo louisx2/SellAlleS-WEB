@@ -365,6 +365,17 @@ WhatsApp de avisos y recibos (entrega 3).
 > desde la ruta quien está marcado como cobrador en la sucursal (un admin con «ver todas las
 > rutas» las ve, pero cobra desde la oficina). Quedan para 3B: recibo y avisos por WhatsApp e
 > imprimir al cobrar, y los reportes de cobranza.
+>
+> **Estado 3B (2026-11-24):** recibo del abono, avisos por WhatsApp y reportes de cobranza,
+> construida en la rama `claude/motoprestamos-entrega-3b` (sobre 3A). Migración
+> `20261125140000_cobranza_recibos_y_reportes` **aplicada en producción** y `receipt-link` v10
+> desplegada (sin `abono` hace lo mismo que antes). Diferencias con lo de abajo: el recibo es el
+> mismo recibo de abono de la oficina (imprimir, o PDF con enlace corto de 15 días); un cobro
+> repetido por falta de señal no trae recibo; anular un abono borra el enlace de su recibo; las
+> plantillas (aviso y recibo) viven en `motos_settings` y vacías usan el texto base; «enviado
+> hoy» en Avisos se guarda en el teléfono; el reporte de cobranza lo calcula la base
+> (`cobranza_reporte`), con por cobrar según la cartera actual y una promesa cumplida solo por
+> un abono hecho después de la visita; quien tiene Reportes ve entregas y cartera.
 
 ### Cobradores y cartera
 

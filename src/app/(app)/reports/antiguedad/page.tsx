@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -8,6 +8,9 @@ import { ExportButton } from '@/components/reports/export-button';
 import { useSales } from '@/context/sales-provider';
 import { useLoans } from '@/context/loan-provider';
 import { useCompanyProfile } from '@/context/company-profile-provider';
+import { useModules } from '@/context/modules-provider';
+import { useCobranza } from '@/hooks/use-cobranza';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { calculateFinancingStatus, formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { agruparCartera, partidasPendientes, TRAMOS, type CuentaCartera } from '@/lib/antiguedad';
@@ -29,6 +32,11 @@ export default function AntiguedadCarteraPage() {
   const { financingSales } = useSales();
   const { loans } = useLoans();
   const { profile } = useCompanyProfile();
+  // Con Motopréstamos, la cartera se puede ver por cobrador (los de la sucursal activa).
+  const { isModuleEnabled } = useModules();
+  const motosOn = isModuleEnabled('motoprestamos');
+  const { cobradores, asignaciones } = useCobranza(motosOn ? undefined : '');
+  const [cobradorFiltro, setCobradorFiltro] = useState('todos');
 
   const { filas, totales } = useMemo(() => {
     const hoy = new Date();
@@ -76,8 +84,12 @@ export default function AntiguedadCarteraPage() {
       cuentas.push({ ...base, id: l.id, saldo: st.pendingBalance, diasAtraso: diasDesde(st.nextDueDate, st.isOverdue, hoy) });
     }
 
-    return agruparCartera(cuentas);
-  }, [financingSales, loans, profile.lateFeeRate, profile.lateFeeGraceDays, profile.loanLateFeeRate, profile.loanLateFeeGraceDays]);
+    const delCobrador = cobradorFiltro === 'todos' ? null
+      : cobradorFiltro === 'sin'
+        ? (id: string) => !asignaciones.some((a) => a.customerId === id)
+        : (id: string) => asignaciones.some((a) => a.customerId === id && a.collectorId === cobradorFiltro);
+    return agruparCartera(delCobrador ? cuentas.filter((c) => delCobrador(c.clienteId)) : cuentas);
+  }, [financingSales, loans, profile.lateFeeRate, profile.lateFeeGraceDays, profile.loanLateFeeRate, profile.loanLateFeeGraceDays, cobradorFiltro, asignaciones]);
 
   const atrasados = filas.filter((f) => f.diasMax > 0).length;
   const pctVencido = totales.total > 0 ? Math.round((totales.vencido / totales.total) * 1000) / 10 : 0;
@@ -98,6 +110,18 @@ export default function AntiguedadCarteraPage() {
           ]}
         />
       </PageHeader>
+      {motosOn && (
+        <div className="mb-4">
+          <Select value={cobradorFiltro} onValueChange={setCobradorFiltro}>
+            <SelectTrigger className="w-64" aria-label="Cobrador"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los cobradores</SelectItem>
+              <SelectItem value="sin">Sin asignar</SelectItem>
+              {cobradores.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3 mb-6">
         <Card className="min-w-0">

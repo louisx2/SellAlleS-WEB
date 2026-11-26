@@ -106,6 +106,7 @@ export function RegisterLoanPaymentDialog({ loan, children }: RegisterLoanPaymen
           customerBalance: null,
         },
         customerName: loan.customer?.name ?? 'Cliente',
+        cuenta: 'prestamo',
         method,
         date: new Date(),
         branchName: (typeof window !== 'undefined' && localStorage.getItem('userBranch')) || 'Sucursal',
