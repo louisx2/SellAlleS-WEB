@@ -17,7 +17,7 @@ import { hoyLocal, montoProximaCuota, type CobroEmpresa } from '@/lib/subscripti
 const fmt = (s?: string | null) => (s ? new Date(`${s.slice(0, 10)}T00:00:00`).toLocaleDateString('es-DO', { day: 'numeric', month: 'long' }) : '');
 const cuotas = (n: number) => `${n} ${n === 1 ? 'cuota pendiente' : 'cuotas pendientes'}`;
 
-type Tono = 'rojo' | 'ambar' | 'azul';
+export type Tono = 'rojo' | 'ambar' | 'azul';
 
 const ESTILO: Record<Tono, { caja: string; icono: string; boton: string }> = {
   rojo: {
