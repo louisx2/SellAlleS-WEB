@@ -532,6 +532,19 @@ Cobrado hoy RD$9,200 · En mano RD$7,700 (sin entregar)
    emite nota de crédito por lo que no se pagó o solo se da de baja el saldo? Y al liquidar una
    garantía, ¿basta con registrar lo obtenido como abono, sin factura? Bloquea solo la entrega 4.
 
+## Pendientes que anotó Louis (2026-11-26)
+
+1. **Sugerencias al encender el módulo.** Al activar Motopréstamos en una empresa, cargar solas, como
+   sugerencia que se puede borrar, las categorías de vehículos (Motor, Pasola, Carro…) y las del
+   inventario (Motos, Repuestos…). Hoy los tipos de vehículo («Motor») solo se crean al dar de alta
+   la empresa con el rubro Motopréstamos (`admin/empresas`, `preset.vehicleTypes`); encender el
+   módulo después en una empresa que ya existe no carga nada.
+2. **Nada de vehículos con el módulo apagado.** Las opciones de Inventario no deben ofrecer «Es
+   vehículo» si el módulo está apagado. El formulario del artículo ya lo esconde
+   (`product-dialog.tsx`: `showVehicle = isModuleEnabled('motoprestamos') || product.isVehicle`),
+   salvo en un artículo que ya era vehículo. Falta confirmar con Louis en qué pantalla lo vio y
+   revisar el resto de Inventario (filtros, columnas, importación).
+
 ## Decisiones mías para revisar
 
 - Cobro diario como dos frecuencias (lunes a sábado, todos los días); interés diario prorrateado a
