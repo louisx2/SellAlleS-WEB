@@ -218,6 +218,15 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 > `sales` (no se tocaron las funciones de abonos ni de refinanciación); la venta de una moto
 > que después se dio en garantía ya no se puede anular. Pasan a 2C: exigir garante, custodia
 > por defecto, fotos de la cédula, contrato y portal.
+>
+> **Estado 2C (2026-11-24):** construida en la rama `claude/motoprestamos-entrega-2c` (sobre
+> 2B). Migraciones `20261124200000_motos_ajustes_y_fotos` y `20261124210000_motos_reglas_y_portal`
+> **aplicadas en producción**, con `motos_ajustes.sql` pasando contra lo aplicado. Diferencias con
+> lo de abajo: los ajustes son por empresa (`motos_settings`; sin fila = lo de 2A/2B); las
+> plantillas vacías usan el texto base (no se siembran); con «custodia en contado» la matrícula
+> queda «lista para entregar»; exigir garante aplica a todo préstamo nuevo (no a refinanciaciones)
+> y a la venta de una moto a plazo, solo con el módulo encendido; las fotos de la cédula viven en
+> el «Expediente del cliente»; el texto de WhatsApp pasa a la entrega 3.
 
 ### Catálogo, rubro y menú
 

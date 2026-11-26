@@ -20,6 +20,8 @@ import { formatCurrency } from '@/lib/utils';
 import { deudaDelVehiculo, REGISTRATION_STATUS_LABEL, VEHICLE_STATUS, vehicleLabel, type VehicleStatus } from '@/lib/motos';
 import { useSaldosDeVehiculos } from '@/hooks/use-saldos-de-vehiculos';
 import { EntregarMatriculaDialog } from '@/components/motos/entregar-matricula-dialog';
+import { ContratoBoton } from '@/components/motos/contrato-boton';
+import { FotosMotos } from '@/components/motos/fotos';
 import { VehicleStatusBadge } from '@/components/motos/vehicle-status-badge';
 import { VehicleFormDialog } from '@/components/motos/vehicle-form-dialog';
 import type { Vehicle, VehicleEvent } from '@/lib/types';
@@ -125,6 +127,8 @@ export default function FichaVehiculoClient() {
             <Pencil className="mr-2 h-4 w-4" /> Editar
           </Button>
         )}
+        {porPrestamo && <ContratoBoton tipo="prestamo" id={vehicle.loanId!} />}
+        {vehicle.status === 'vendido' && vehicle.saleId && <ContratoBoton tipo="venta" id={vehicle.saleId} />}
         {canEdit && vehicle.status === 'disponible' && (
           <Button variant="outline" onClick={() => setBaja(true)}>
             <Ban className="mr-2 h-4 w-4" /> Dar de baja
@@ -211,6 +215,13 @@ export default function FichaVehiculoClient() {
                 {vehicle.registrationStatus === 'entregada' ? 'Constancia de entrega' : 'Entregar matrícula'}
               </Button>
             )}
+          </CardContent>
+        </Card>
+
+        <Card className="lg:col-span-3">
+          <CardHeader><CardTitle>Fotos</CardTitle></CardHeader>
+          <CardContent>
+            <FotosMotos owner={{ tipo: 'vehiculo', id: vehicle.id }} canEdit={canEdit} />
           </CardContent>
         </Card>
 

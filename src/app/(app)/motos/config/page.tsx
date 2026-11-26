@@ -12,6 +12,9 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ContratosTab } from '@/components/motos/config/contratos-tab';
+import { GeneralTab } from '@/components/motos/config/general-tab';
 import { Pencil, Plus, Trash } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { usePermission } from '@/hooks/use-permission';
@@ -22,8 +25,9 @@ import type { VehicleExtraField, VehicleType } from '@/lib/types';
 
 type Draft = { id?: string; name: string; extraFields: VehicleExtraField[]; isActive: boolean };
 
-// Configuración de Motopréstamos. En 2A: los tipos de vehículo (Motor, Pasola,
-// Carro…) con sus campos extra, como los tipos de equipo del Taller.
+// Configuración de Motopréstamos: tipos de vehículo (Motor, Pasola, Carro… con
+// sus campos extra, como los tipos de equipo del Taller), los textos de los
+// contratos y los ajustes generales (custodia de la matrícula y garante).
 export default function MotosConfigPage() {
   const { toast } = useToast();
   const canEdit = usePermission('motos-config', 'edit');
@@ -56,6 +60,16 @@ export default function MotosConfigPage() {
   return (
     <div>
       <PageHeader title="Configuración de Motopréstamos" />
+      <Tabs defaultValue="tipos">
+        <TabsList className="mb-4">
+          <TabsTrigger value="tipos">Tipos de vehículo</TabsTrigger>
+          <TabsTrigger value="contratos">Contratos</TabsTrigger>
+          <TabsTrigger value="general">General</TabsTrigger>
+        </TabsList>
+        {/* Montada siempre: cambiar de pestaña no pierde lo escrito en un contrato. */}
+        <TabsContent value="contratos" forceMount className="data-[state=inactive]:hidden"><ContratosTab canEdit={canEdit} /></TabsContent>
+        <TabsContent value="general"><GeneralTab canEdit={canEdit} /></TabsContent>
+        <TabsContent value="tipos">
       <Card>
         <CardHeader className="flex flex-row items-start justify-between space-y-0">
           <div>
@@ -79,6 +93,8 @@ export default function MotosConfigPage() {
           ))}
         </CardContent>
       </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={!!draft} onOpenChange={(o) => !o && setDraft(null)}>
         <DialogContent>

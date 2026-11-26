@@ -11,6 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useGarantes } from '@/hooks/use-garantes';
+import { FotosMotos } from '@/components/motos/fotos';
 import type { Customer } from '@/lib/types';
 
 type Campo = { key: string; label: string; placeholder?: string };
@@ -140,8 +141,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
-/** Garantes (fiadores) y referencias del cliente. Van por cliente: el contrato
- *  imprime los garantes del cliente. */
+/** Expediente del cliente para Motopréstamos: fotos de la cédula, garantes
+ *  (fiadores) y referencias. Van por cliente: el contrato imprime sus garantes. */
 export function GarantesDialog({ customer, open, onOpenChange }: Props) {
   const g = useGarantes(open ? customer.id : undefined);
   const [clave, setClave] = useState(0);
@@ -156,10 +157,15 @@ export function GarantesDialog({ customer, open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Garantes y referencias</DialogTitle>
+          <DialogTitle>Expediente del cliente</DialogTitle>
           <DialogDescription>{customer.name}</DialogDescription>
         </DialogHeader>
         <div key={clave} className="space-y-5">
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold">Cédula (fotos)</h3>
+            <FotosMotos owner={{ tipo: 'cliente', id: customer.id }} canEdit />
+          </div>
+          <Separator />
           <Lista
             titulo="Garantes o fiadores"
             vacio="Sin garantes."
