@@ -61,6 +61,8 @@ export function baseQtyInCart(productId: string, items: CartItem[], exceptCartIt
     if (item.product.id !== productId) continue;
     // Pieza de un caso del taller: ya salió del inventario al agregarla al caso.
     if (item.serviceItemId) continue;
+    // Una moto con su chasis: la unidad la controla la base, no el stock de la foto.
+    if (item.vehicleId) continue;
     if (exceptCartItemId !== undefined && item.cartItemId === exceptCartItemId) continue;
     total += lineBaseQty(item);
   }

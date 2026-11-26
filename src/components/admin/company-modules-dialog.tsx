@@ -81,8 +81,26 @@ export function CompanyModulesDialog({ companyId, companyName, open, onOpenChang
       }
     }
 
+    // Motopréstamos vive sobre Préstamos: encenderlo enciende Préstamos, y si la
+    // empresa no usa Caja se le avisa (el dinero prestado no quedaría controlado).
+    if (key === 'motoprestamos' && value) {
+      if (!state.prestamos) {
+        const { error: loanError } = await supabase
+          .from('company_modules')
+          .upsert({ company_id: companyId, module_key: 'prestamos', enabled: true }, { onConflict: 'company_id,module_key' });
+        if (loanError) {
+          setSavingKey(null);
+          toast({ title: 'Motopréstamos encendido, pero no Préstamos', description: loanError.message, variant: 'destructive' });
+          return;
+        }
+      }
+      if (!state.caja) {
+        toast({ title: 'Recomendado: encender Caja', description: 'Así el efectivo de los préstamos y los cobros queda controlado.' });
+      }
+    }
+
     setSavingKey(null);
-    setState((prev) => ({ ...prev, [key]: value }));
+    setState((prev) => ({ ...prev, [key]: value, ...(key === 'motoprestamos' && value ? { prestamos: true } : {}) }));
     // Si la empresa editada es la del propio super admin, refrescar su menú.
     reloadOwnModules();
   };

@@ -234,6 +234,8 @@ export function SalesProvider({ children }: { children: ReactNode }) {
         // Línea de un caso del taller: la base comprueba que sea del caso y no
         // vuelve a descontar la pieza (salió del inventario al agregarla al caso).
         service_item_id: item.serviceItemId ?? null,
+        // Línea de un vehículo: la base vende ESA unidad (motos_vincular_venta).
+        vehicle_id: item.vehicleId ?? null,
       })),
     });
     if (error) throw error;

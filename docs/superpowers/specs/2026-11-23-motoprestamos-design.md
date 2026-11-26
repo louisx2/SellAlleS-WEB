@@ -118,10 +118,9 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 
 ## Entrega 1 — Motor común
 
-> **Estado (2026-11-23):** construida en la rama `claude/motoprestamos`. Migraciones
+> **Estado (2026-11-23):** fusionada (PR #78 y #80) y desplegada. Migraciones
 > `20261124120000`, `20261124130000` y `20261124140000` (correcciones de la revisión: primer
-> pago en domingo y sucursal de otra empresa) **aplicadas en producción**. Front sin
-> fusionar; falta la prueba en pantalla. Cambios respecto a lo de abajo: "Al día" se
+> pago en domingo y sucursal de otra empresa) **aplicadas en producción**. Cambios respecto a lo de abajo: "Al día" se
 > llama "Por vencer" y cada cuota va al tramo de su propio atraso; el ticket y el plan
 > térmico se recortan solo en papel; las tablas arrancan en la próxima cuota a cobrar.
 
@@ -191,6 +190,23 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 
 ## Entrega 2 — Módulo base
 
+> Se construye en tres partes que se fusionan por separado: **2A** vehículos e inventario por
+> chasis (módulo, ficha, venta y anulación por chasis, reportes de vehículos); **2B** garantía
+> en préstamos, matrículas en custodia y datos del cliente; **2C** contrato, configuración
+> general, fotos y portal. El stock de un artículo-vehículo es derivado: lo recalcula la base
+> con las unidades disponibles y bloquea cualquier otro cambio (así quedan fuera compras,
+> transferencias y ajustes manuales sin tocarlos uno por uno).
+>
+> **Estado 2A (2026-11-24):** construida en la rama `claude/motoprestamos-entrega-2`.
+> Migraciones `20261124150000_motos_vehiculos`, `20261124160000_motos_venta_por_chasis` y
+> `20261124170000_motos_ajustes_revision` (arreglos de la revisión final) **aplicadas en producción**, con las suites `motos_vehiculos.sql` y `motos_venta.sql`
+> pasando contra lo aplicado. Probada en pantalla en la demo (módulo, artículo-vehículo,
+> ingreso, chasis repetido, ficha, edición, baja, tipos, selector del POS, avisos de
+> cantidad y de cliente, reporte) sin cobrar: el cobro y la anulación por chasis los cubre
+> la suite. Front sin fusionar. Diferencias con lo de abajo: el cajero ve las unidades con
+> `pos:view` para elegir el chasis; el selector se abre desde el carrito, así que sale por
+> tarjeta, búsqueda o código igual.
+
 ### Catálogo, rubro y menú
 
 - Módulo `motoprestamos`, "Motopréstamos", apagado por defecto. Necesita Préstamos y
@@ -236,8 +252,9 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
   artículos-vehículo (avisan "ingresa las motos desde Vehículos"), para no crear ni mover stock
   sin chasis. Tampoco llevan presentaciones (paquete/caja) **(decisión mía)**.
 - La línea de la factura (y del e-CF) lleva en la descripción los datos de la unidad: "Honda CG
-  150 · 2025 · Roja · Chasis … · Motor …" **(decisión mía)**: así se acostumbra facturar
-  vehículos y la factura identifica cuál se vendió.
+  150 · Chasis … · Motor … · 2025 · Roja" **(decisión mía)**: así se acostumbra facturar
+  vehículos y la factura identifica cuál se vendió. Chasis y motor van antes que año y color
+  porque el e-CF corta el nombre del artículo a 80 caracteres.
 - **En el POS:** al agregar un artículo-vehículo se elige cuál unidad (chasis) de las
   disponibles; la línea va con cantidad 1 fija y toma el precio propio de la unidad si lo tiene.
   Vender un vehículo exige cliente **(decisión mía)**: hace falta saber de quién es.

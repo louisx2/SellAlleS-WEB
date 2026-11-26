@@ -631,6 +631,12 @@ export default function CompaniesManagementPage() {
             })));
           }
         }
+        // Motopréstamos: los tipos de vehículo del rubro.
+        if (preset.vehicleTypes?.length) {
+          await supabase.from('vehicle_types').insert(
+            preset.vehicleTypes.map((name, i) => ({ company_id: companyId, name, position: i })),
+          );
+        }
       }
 
       toast({ title: editingId ? 'Empresa actualizada' : 'Empresa creada con su administrador', description: form.name });

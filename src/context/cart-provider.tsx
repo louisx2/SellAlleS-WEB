@@ -13,6 +13,8 @@ import { ventaExentaDeItbis, totalesDeLaVenta } from '@/lib/totales-venta';
 import { useAuth } from '@/context/auth-provider';
 import { useBranches } from '@/context/branch-provider';
 import { create, useStore } from 'zustand';
+import { vehicleLineName } from '@/lib/motos';
+import type { Vehicle } from '@/lib/types';
 import { persist, createJSONStorage } from 'zustand/middleware';
 
 const MAX_CARTS = 3;
@@ -32,6 +34,8 @@ interface CartState {
   activeCartId: string;
   saleCompletionCount: number;
   toast: string | null;
+  // Artículo-vehículo que se quiso agregar: el POS abre el selector de chasis.
+  vehiclePickFor: Product | null;
 }
 
 interface CartActions {
@@ -42,6 +46,9 @@ interface CartActions {
   // (código escaneado o botón viejo): si no, el cobro fallaría recién al final.
   addItem: (product: Product, quantity?: number, presentation?: ProductPresentation) => void;
   addQuickItem: (input: QuickItemInput) => void;
+  // Una moto con su chasis: línea propia, cantidad 1, precio de la unidad si tiene.
+  addVehicleItem: (product: Product, vehicle: Vehicle) => void;
+  closeVehiclePick: () => void;
   removeItem: (cartItemId: string) => void;
   updateQuantity: (cartItemId: string, quantity: number) => void;
   setCustomPrice: (cartItemId: string, price: number | undefined) => void;
@@ -108,6 +115,7 @@ const cartStore = create<CartStore>()(
       activeCartId: '',
       saleCompletionCount: 0,
       toast: null,
+      vehiclePickFor: null,
 
       // Initializer
       _init: () => {
@@ -120,6 +128,9 @@ const cartStore = create<CartStore>()(
 
       // Actions
       addItem: (product, quantity = 1, presentation) => set(state => {
+        // Un vehículo no entra suelto: cualquier vía (tarjeta, búsqueda, código)
+        // termina en el selector de chasis.
+        if (product.isVehicle) return { vehiclePickFor: product };
         const newCarts = state.carts.map(cart => {
           if (cart.id === state.activeCartId) {
             if (!presentation && !isSoldLoose(product)) {
@@ -185,6 +196,25 @@ const cartStore = create<CartStore>()(
         return { carts: newCarts };
       }),
 
+      addVehicleItem: (product, vehicle) => set(state => ({
+        vehiclePickFor: null,
+        carts: state.carts.map(cart =>
+          cart.id === state.activeCartId
+            ? {
+                ...cart,
+                items: [...cart.items, {
+                  cartItemId: `item-${Date.now()}-${Math.random()}`,
+                  product: { ...product, name: vehicleLineName(vehicle), price: vehicle.price ?? product.price },
+                  quantity: 1,
+                  vehicleId: vehicle.id,
+                }],
+              }
+            : cart
+        ),
+      })),
+
+      closeVehiclePick: () => set({ vehiclePickFor: null }),
+
       // Siempre línea nueva: `addItem` fusiona por `product.id`, y los artículos
       // rápidos comparten el id vacío, así que dos distintos se juntarían.
       addQuickItem: (input) => set(state => ({
@@ -219,6 +249,11 @@ const cartStore = create<CartStore>()(
           if (cart.id === state.activeCartId) {
             const itemToUpdate = cart.items.find(item => item.cartItemId === cartItemId);
             if (!itemToUpdate) return cart;
+            if (itemToUpdate.vehicleId) {
+              set({ toast: 'Cada moto va en su propia línea: agrega otra unidad desde el inventario.' });
+              setTimeout(() => set({ toast: null }), 3000);
+              return cart;
+            }
             if (itemToUpdate.serviceItemId) {
               set({ toast: 'La cantidad viene del caso del taller: cámbiala allí.' });
               setTimeout(() => set({ toast: null }), 3000);
@@ -381,6 +416,8 @@ const cartStore = create<CartStore>()(
     }),
     {
       name: 'sellalles-cart-storage', // name of the item in the storage (must be unique)
+      // El selector de chasis abierto no sobrevive a una recarga.
+      partialize: (s) => ({ ...s, vehiclePickFor: null }),
       storage: createJSONStorage(() => localStorage), // (optional) by default, 'localStorage' is used
       onRehydrateStorage: (state) => {
         // This is called when the storage is rehydrated

@@ -269,6 +269,16 @@ export function CheckoutDialog({ isOpen, onOpenChange, onSaleComplete }: Checkou
     downPaymentReferenceOverride?: string,
   ) => {
     if (!activeCart || !appUser) return;
+    // Motopréstamos: se avisa aquí, antes de la base, con algo que se entienda.
+    const sinChasis = activeCart.items.find((i) => i.product.isVehicle && !i.vehicleId);
+    if (sinChasis) {
+      toast({ title: 'Falta el chasis', description: `Elige el chasis de «${sinChasis.product.name}»: quítalo del carrito y vuelve a agregarlo.`, variant: 'destructive' });
+      return;
+    }
+    if (activeCart.items.some((i) => i.vehicleId) && !isUuid(activeCart.selectedCustomer?.id)) {
+      toast({ title: 'Falta el cliente', description: 'Para vender un vehículo elige el cliente.', variant: 'destructive' });
+      return;
+    }
     // Sin esto, dos toques = dos ventas insertadas y el cliente facturado dos
     // veces. La venta ya salió de aquí; deshacerla es un trabajo manual.
     if (ventaEnCurso.current) return;

@@ -1,6 +1,6 @@
 import type { ModuleKey } from '@/lib/modules';
 
-export type BusinessType = 'tienda' | 'ferreteria' | 'lavanderia' | 'reparaciones' | 'prestamos' | 'otro';
+export type BusinessType = 'tienda' | 'ferreteria' | 'lavanderia' | 'reparaciones' | 'prestamos' | 'motoprestamos' | 'otro';
 
 export interface BusinessTypePreset {
   label: string;
@@ -13,11 +13,13 @@ export interface BusinessTypePreset {
   serviceTypes?: { name: string; basePrice?: number }[];
   /** Rubro del taller (src/lib/taller.ts → RUBROS): siembra tipos de equipo y chequeos. */
   tallerRubro?: string;
+  /** Tipos de vehículo que siembra el módulo Motopréstamos. */
+  vehicleTypes?: string[];
 }
 
 /** Módulos "verticales" que un preset de rubro puede activar/desactivar
  *  explícitamente al crear la empresa. */
-export const OPTIONAL_VERTICALS: ModuleKey[] = ['services', 'lavanderia', 'prestamos'];
+export const OPTIONAL_VERTICALS: ModuleKey[] = ['services', 'lavanderia', 'prestamos', 'motoprestamos', 'caja', 'customer-portal'];
 
 export const BUSINESS_TYPE_PRESETS: Record<BusinessType, BusinessTypePreset> = {
   tienda: {
@@ -52,6 +54,12 @@ export const BUSINESS_TYPE_PRESETS: Record<BusinessType, BusinessTypePreset> = {
     label: 'Préstamos',
     description: 'Préstamos de dinero a clientes, con cuotas e interés.',
     modules: ['prestamos'],
+  },
+  motoprestamos: {
+    label: 'Motopréstamos',
+    description: 'Venta de motos a cuotas y préstamos con la moto en garantía.',
+    modules: ['prestamos', 'motoprestamos', 'caja', 'customer-portal'],
+    vehicleTypes: ['Motor'],
   },
   otro: {
     label: 'Otro / no definido',
