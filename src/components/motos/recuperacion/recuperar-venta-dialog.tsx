@@ -8,11 +8,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { parseMonto } from '@/lib/motos';
 import { hoyLocal } from '@/lib/subscription-status';
 import { cn, formatCurrency } from '@/lib/utils';
-import type { RecuperarVentaInput, ResultadoRecuperarVenta } from '@/hooks/use-recuperaciones';
+import { montoNotaDeRecuperacion } from '@/lib/motos-recuperacion';
+import type { RecuperarVentaInput, ResultadoNotaDeCredito, ResultadoRecuperarVenta } from '@/hooks/use-recuperaciones';
 
 interface Props {
   nombre: string;
@@ -21,6 +23,13 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onRecuperar: (input: RecuperarVentaInput) => Promise<ResultadoRecuperarVenta>;
+  /** La venta lleva NCF: se ofrece la nota de crédito por lo no cobrado (4B). */
+  conComprobante?: boolean;
+  /** Total de la factura y total a pagar (con intereses si es financiada), para la vista previa. */
+  totalFacturado?: number;
+  totalAPagar?: number;
+  /** Emite la nota después de recuperar; si falla, la recuperación queda. */
+  emitirNota?: () => Promise<ResultadoNotaDeCredito>;
 }
 
 function Opcion({ activo, onClick, titulo, detalle }: { activo: boolean; onClick: () => void; titulo: string; detalle?: string }) {
@@ -40,7 +49,9 @@ function Opcion({ activo, onClick, titulo, detalle }: { activo: boolean; onClick
 
 // La moto vendida a crédito vuelve al inventario como usada. Lo que el cliente
 // no pagó se da de baja y la venta queda «Recuperada» (no se cobra ni se anula).
-export function RecuperarVentaDialog({ nombre, deuda, open, onOpenChange, onRecuperar }: Props) {
+export function RecuperarVentaDialog({
+  nombre, deuda, open, onOpenChange, onRecuperar, conComprobante = false, totalFacturado = 0, totalAPagar = 0, emitirNota,
+}: Props) {
   const { toast } = useToast();
   const [fecha, setFecha] = useState('');
   const [motivo, setMotivo] = useState('');
@@ -50,7 +61,9 @@ export function RecuperarVentaDialog({ nombre, deuda, open, onOpenChange, onRecu
   const [devolucion, setDevolucion] = useState('');
   const [metodo, setMetodo] = useState<'cash' | 'transfer'>('cash');
   const [nota, setNota] = useState('');
+  const [conNota, setConNota] = useState(false);
   const [saving, setSaving] = useState(false);
+  const ofreceNota = conComprobante && !!emitirNota;
 
   useEffect(() => {
     if (!open) return;
@@ -62,6 +75,8 @@ export function RecuperarVentaDialog({ nombre, deuda, open, onOpenChange, onRecu
     setDevolucion('');
     setMetodo('cash');
     setNota('');
+    setConNota(ofreceNota);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const reingreso = parseMonto(valor);
@@ -69,6 +84,10 @@ export function RecuperarVentaDialog({ nombre, deuda, open, onOpenChange, onRecu
   const monto = parseMonto(devolucion);
   const devolucionValida = !devolver || (monto !== undefined && !Number.isNaN(monto) && monto > 0);
   const listo = !!fecha && fecha <= hoyLocal() && !!motivo.trim() && reingresoValido && devolucionValida;
+  const montoNota = montoNotaDeRecuperacion({
+    totalFacturado, totalAPagar, dadoDeBaja: deuda,
+    devuelto: devolver && monto !== undefined && !Number.isNaN(monto) ? monto : 0,
+  });
 
   const guardar = async () => {
     if (!listo) return;
@@ -83,6 +102,18 @@ export function RecuperarVentaDialog({ nombre, deuda, open, onOpenChange, onRecu
       const partes = [`Vuelve al inventario. Se dieron de baja ${formatCurrency(r.deuda)}.`];
       if (r.devuelto > 0) partes.push(`Se le devolvieron ${formatCurrency(r.devuelto)} al cliente.`);
       toast({ title: 'Moto recuperada', description: partes.join(' ') });
+      if (conNota && emitirNota) {
+        try {
+          const n = await emitirNota();
+          toast({ title: 'Nota de crédito emitida', description: `${n.ncf ?? 'Nota'} por ${formatCurrency(n.total)}.` });
+        } catch (e: any) {
+          toast({
+            title: 'La moto se recuperó, pero la nota de crédito no se pudo emitir',
+            description: `${e?.message ?? 'Inténtalo de nuevo.'} Emítela desde la venta.`,
+            variant: 'destructive',
+          });
+        }
+      }
       onOpenChange(false);
     } catch (e: any) {
       toast({ title: 'No se pudo recuperar', description: e?.message, variant: 'destructive' });
@@ -146,6 +177,18 @@ export function RecuperarVentaDialog({ nombre, deuda, open, onOpenChange, onRecu
                 <Opcion activo={metodo === 'transfer'} onClick={() => setMetodo('transfer')} titulo="Transferencia" />
               </div>
             </div>
+          )}
+
+          {ofreceNota && (
+            <label className="flex items-start gap-2 rounded-md border p-3 text-sm">
+              <Checkbox checked={conNota} onCheckedChange={(v) => setConNota(v === true)} className="mt-0.5" />
+              <span>
+                Emitir nota de crédito por lo no cobrado ({formatCurrency(montoNota)})
+                <span className="block text-xs text-muted-foreground">
+                  B04 o E34 según el comprobante de la venta. Si no sale ahora, se emite después desde la venta.
+                </span>
+              </span>
+            </label>
           )}
 
           <div className="grid gap-1.5">
