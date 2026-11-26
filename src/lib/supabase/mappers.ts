@@ -620,6 +620,7 @@ export const rowToCreditNote = (r: any): CreditNote => ({
   reason: r.reason ?? undefined,
   userName: r.user_name ?? undefined,
   createdAt: new Date(r.created_at),
+  kind: r.kind === 'recuperacion' ? 'recuperacion' : 'anulacion',
 });
 
 // branchUuid ya resuelto por el provider (nombre → uuid).

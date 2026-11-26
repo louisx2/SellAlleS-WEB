@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 
 import {
   accionesDeRecuperacion,
+  montoNotaDeRecuperacion,
   repartoDeLiquidacion,
   recuperadoDe,
   resultadoDeRecuperacion,
@@ -102,4 +103,18 @@ test('texto de cada estado de la recuperación', () => {
     liquidada: 'Liquidada',
     recuperada: 'Recuperada',
   });
+});
+
+test('nota de crédito de la recuperación: lo no cobrado del valor facturado', () => {
+  // Crédito de 95,000 con 20,000 abonados y 1,000 devueltos al cliente.
+  assert.equal(montoNotaDeRecuperacion({ totalFacturado: 95000, totalAPagar: 95000, dadoDeBaja: 75000, devuelto: 1000 }), 76000);
+  // Financiada sin abonos: el factor se topa en 1 y la nota es el total facturado.
+  assert.equal(montoNotaDeRecuperacion({ totalFacturado: 95000, totalAPagar: 99750, dadoDeBaja: 99750, devuelto: 0 }), 95000);
+  assert.equal(montoNotaDeRecuperacion({ totalFacturado: 95000, totalAPagar: 99750, dadoDeBaja: 99750, devuelto: 5000 }), 95000);
+  // Nada sin cobrar: no hay nota.
+  assert.equal(montoNotaDeRecuperacion({ totalFacturado: 95000, totalAPagar: 95000, dadoDeBaja: 0, devuelto: 0 }), 0);
+  // Centavos exactos.
+  assert.equal(montoNotaDeRecuperacion({ totalFacturado: 0.3, totalAPagar: 0.3, dadoDeBaja: 0.1 + 0.2, devuelto: 0 }), 0.3);
+  // ITBIS aparte: 118,000 con 18,000 abonados → 100,000.
+  assert.equal(montoNotaDeRecuperacion({ totalFacturado: 118000, totalAPagar: 118000, dadoDeBaja: 100000, devuelto: 0 }), 100000);
 });

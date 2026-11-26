@@ -89,6 +89,26 @@ export function recuperadoDe(r: {
   return 0;
 }
 
+/**
+ * Monto de la nota de crédito de una venta recuperada (4B): lo que no se cobró del
+ * valor facturado. La factura no lleva intereses y lo abonado cubrió capital e
+ * interés, así que se prorratea contra el total a pagar; lo devuelto al cliente
+ * también cuenta como no cobrado. Es la vista previa del diálogo: la base calcula
+ * el monto final desde las líneas de la venta (puede diferir en un centavo).
+ */
+export function montoNotaDeRecuperacion(v: {
+  totalFacturado: number;
+  totalAPagar: number;
+  dadoDeBaja: number;
+  devuelto: number;
+}): number {
+  const aPagar = aCentavos(v.totalAPagar);
+  const noCobrado = Math.max(aCentavos(v.dadoDeBaja) + aCentavos(v.devuelto), 0);
+  if (aPagar <= 0 || noCobrado <= 0) return 0;
+  const factor = Math.min(1, noCobrado / aPagar);
+  return Math.round(aCentavos(v.totalFacturado) * factor) / 100;
+}
+
 /** Resultado de una recuperación para el reporte: recuperado − dado de baja − devuelto. */
 export function resultadoDeRecuperacion(r: { recuperado: number; dadoDeBaja: number; devuelto: number }): number {
   return (aCentavos(r.recuperado) - aCentavos(r.dadoDeBaja) - aCentavos(r.devuelto)) / 100;

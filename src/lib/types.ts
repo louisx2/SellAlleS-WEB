@@ -586,6 +586,9 @@ export type CreditNote = {
   reason?: string;
   userName?: string;
   createdAt: Date;
+  // 'recuperacion': la nota parcial de una venta recuperada (Motopréstamos 4B), por lo
+  // no cobrado; no anula la venta. Las de antes son todas 'anulacion'.
+  kind: 'anulacion' | 'recuperacion';
 };
 
 export type QuoteStatus = 'pending' | 'sent' | 'accepted' | 'rejected' | 'converted';
