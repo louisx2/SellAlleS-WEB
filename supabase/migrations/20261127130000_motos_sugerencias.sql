@@ -25,12 +25,12 @@ begin
     return;
   end if;
 
-  -- Sucursales donde la categoría se vería: la propia y, con el pool encendido, las del pool.
+  -- Sucursales donde la categoría se vería: la propia y, si está en el pool de categorías,
+  -- las demás del pool. El pool es solo las filas de branch_sharing (lo que leen la app y
+  -- branch_shares_with_me); company_branch_sharing ya no se usa.
   v_pool := array[p_branch_id];
-  if exists (select 1 from public.company_branch_sharing
-              where company_id = v_company and scope = 'categorias' and enabled)
-     and exists (select 1 from public.branch_sharing
-                  where company_id = v_company and scope = 'categorias' and branch_id = p_branch_id) then
+  if exists (select 1 from public.branch_sharing
+              where company_id = v_company and scope = 'categorias' and branch_id = p_branch_id) then
     v_pool := v_pool || array(select branch_id from public.branch_sharing
                                where company_id = v_company and scope = 'categorias' and branch_id <> p_branch_id);
   end if;

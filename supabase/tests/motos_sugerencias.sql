@@ -95,7 +95,7 @@ end $$;
 do $$
 begin
   begin
-    insert into company_branch_sharing (company_id, scope, enabled) values ('00000000-0000-0000-0000-00000000e6c0', 'categorias', true);
+    -- El pool es solo las filas de branch_sharing (lo que leen la app y las reglas de acceso).
     insert into branch_sharing (company_id, scope, branch_id) values
       ('00000000-0000-0000-0000-00000000e6c0', 'categorias', '00000000-0000-0000-0000-00000000e6c1'),
       ('00000000-0000-0000-0000-00000000e6c0', 'categorias', '00000000-0000-0000-0000-00000000e6c2');
