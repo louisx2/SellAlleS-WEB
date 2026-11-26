@@ -14,7 +14,6 @@ export interface BusinessTypePreset {
   /** Rubro del taller (src/lib/taller.ts → RUBROS): siembra tipos de equipo y chequeos. */
   tallerRubro?: string;
   /** Tipos de vehículo que siembra el módulo Motopréstamos. */
-  vehicleTypes?: string[];
 }
 
 /** Módulos "verticales" que un preset de rubro puede activar/desactivar
@@ -59,7 +58,6 @@ export const BUSINESS_TYPE_PRESETS: Record<BusinessType, BusinessTypePreset> = {
     label: 'Motopréstamos',
     description: 'Venta de motos a cuotas y préstamos con la moto en garantía.',
     modules: ['prestamos', 'motoprestamos', 'caja', 'customer-portal'],
-    vehicleTypes: ['Motor'],
   },
   otro: {
     label: 'Otro / no definido',
