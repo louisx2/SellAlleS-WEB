@@ -6,7 +6,7 @@ import { useReactToPrint } from 'react-to-print';
 import { useSales } from '@/context/sales-provider';
 import { useAuth } from '@/context/auth-provider';
 import { Button } from '@/components/ui/button';
-import { ArrowLeft, Loader2, RefreshCw, FilePlus2, QrCode, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Loader2, RefreshCw, FilePlus2, QrCode, ShieldCheck, RotateCcw } from 'lucide-react';
 import { usePermission } from '@/hooks/use-permission';
 import { useModules } from '@/context/modules-provider';
 import Link from 'next/link';
@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardFooter } from '@/components/ui/card'
 import { ReceiptBarcode, ReceiptContent, ReceiptEcf, ReceiptHeader, ReceiptItems, ReceiptTotals } from '@/components/pos/receipt-content';
 import { useToast } from '@/hooks/use-toast';
 import { SalePaymentsCard } from '@/components/sales/sale-payments-card';
+import { ContratoBoton } from '@/components/motos/contrato-boton';
 import { IncluirDatosCliente } from '@/components/pos/incluir-datos-cliente';
 import { CompartirDocumento } from '@/components/sharing/compartir-documento';
 import {
@@ -27,8 +28,13 @@ import { rowToEcfDocumento } from '@/lib/supabase/mappers';
 import { emitirEcf } from '@/lib/ecf-client';
 import { cuentaComoProblemaEcf, ecfConProblema, esEcf, esperarQrEcf, puedeReemitir, puedeReintentar, resultadoDeEcf } from '@/lib/ecf';
 import type { ResultadoEcf } from '@/lib/ecf';
-import { cn } from '@/lib/utils';
-import type { EcfDocumento, EcfEstado } from '@/lib/types';
+import { cn, formatCurrency } from '@/lib/utils';
+import type { EcfDocumento, EcfEstado, Vehicle } from '@/lib/types';
+import { fetchVehicle } from '@/hooks/use-vehiculos';
+import { useRecuperaciones } from '@/hooks/use-recuperaciones';
+import { accionesDeRecuperacion } from '@/lib/motos-recuperacion';
+import { vehicleLabel } from '@/lib/motos';
+import { RecuperarVentaDialog } from '@/components/motos/recuperacion/recuperar-venta-dialog';
 
 // Todo el documento menos `request_json` (la copia de lo enviado, solo para soporte).
 const ECF_COLUMNAS = 'id, tipo_ecf, encf, estado, security_code, qr_url, signed_at, mensajes_dgii, reemplazado_por, created_at';
@@ -80,6 +86,37 @@ export default function SaleReceiptClient() {
   const [accionEcf, setAccionEcf] = useState<AccionEcf | null>(null);
   const [confirmarReemision, setConfirmarReemision] = useState(false);
   const esVentaEcf = esEcf(baseSale?.ncf);
+
+  // Motopréstamos 4A: la moto de esta venta (si es una sola) para recuperarla,
+  // y, ya recuperada, cuál era (la venta deja de tenerla enlazada).
+  const motosActivo = isModuleEnabled('motoprestamos');
+  const esAdmin = !!appUser?.isCompanyAdmin || !!appUser?.isSuperAdmin;
+  const [motoVendida, setMotoVendida] = useState<Vehicle | null>(null);
+  const [motoRecuperada, setMotoRecuperada] = useState<string | null>(null);
+  const [recuperar, setRecuperar] = useState(false);
+  const { recuperarVenta } = useRecuperaciones(undefined, { enabled: false });
+  const recuperada = !!baseSale?.recoveredAt;
+
+  useEffect(() => {
+    setMotoVendida(null);
+    setMotoRecuperada(null);
+    if (!motosActivo || !saleId) return;
+    let cancelado = false;
+    (async () => {
+      if (recuperada) {
+        const { data } = await supabase.from('vehicle_recoveries').select('vehicle_id')
+          .eq('sale_id', saleId).eq('kind', 'venta').order('created_at', { ascending: false }).limit(1).maybeSingle();
+        if (!cancelado) setMotoRecuperada(data?.vehicle_id ?? null);
+        return;
+      }
+      // Con dos motos en la misma venta no se ofrece: el saldo es de la venta entera.
+      const { data } = await supabase.from('vehicles').select('id').eq('sale_id', saleId).limit(2);
+      if (cancelado || (data ?? []).length !== 1) return;
+      const v = await fetchVehicle(data![0].id);
+      if (!cancelado) setMotoVendida(v);
+    })();
+    return () => { cancelado = true; };
+  }, [motosActivo, saleId, recuperada]);
 
   const cargarEcf = useCallback(async (): Promise<EcfDocumento | undefined> => {
     const { data, error } = await supabase
@@ -194,6 +231,13 @@ export default function SaleReceiptClient() {
   // Una venta anulada con el comprobante rechazado ya no tiene nada que resolver.
   const ecfPorResolver = !!ecf && cuentaComoProblemaEcf(ecf.estado, !!sale.cancelledAt);
 
+  const ventaAbierta = !sale.cancelledAt && (sale.paymentStatus === 'credit' || sale.paymentStatus === 'in_financing');
+  const verRecuperar = !!motoVendida
+    && accionesDeRecuperacion(motoVendida, { abierta: ventaAbierta }, undefined, esAdmin, false).includes('recuperar_venta');
+  // Igual que la base: financiada, el total con interés; a crédito, el total.
+  const totalAPagar = sale.paymentStatus === 'in_financing' ? (sale.financingDetails?.totalWithInterest ?? sale.total) : sale.total;
+  const deudaDeLaVenta = Math.max(0, Math.round((totalAPagar - sale.amountPaid) * 100) / 100);
+
   return (
     <div className="max-w-md mx-auto print:mx-0 print:max-w-full">
         <div className="mb-6 flex flex-wrap gap-2 print:hidden">
@@ -211,7 +255,28 @@ export default function SaleReceiptClient() {
                 </Link>
               </Button>
             )}
+            {/* Motopréstamos: contrato de venta condicional de la moto vendida a plazo. */}
+            {(sale.paymentMethod === 'credit' || sale.paymentMethod === 'financing') && !sale.cancelledAt && (
+              <ContratoBoton tipo="venta" id={sale.id} verificar />
+            )}
+            {verRecuperar && (
+              <Button variant="outline" onClick={() => setRecuperar(true)}>
+                <RotateCcw className="mr-2 h-4 w-4" />
+                Recuperar vehículo
+              </Button>
+            )}
         </div>
+      {sale.recoveredAt && (
+        <div className="mb-4 rounded-md border border-orange-300 bg-orange-50 p-3 text-center text-sm text-orange-900 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-100 print:hidden">
+          <p className="font-semibold">VENTA RECUPERADA el {sale.recoveredAt.toLocaleDateString('es-DO')}</p>
+          <p>
+            La moto volvió al inventario{sale.writtenOffAmount ? ` y se dieron de baja ${formatCurrency(sale.writtenOffAmount)}` : ''}. No se cobra ni se anula.
+            {motoRecuperada && (
+              <> <Link href={`/motos/ficha?id=${motoRecuperada}`} className="underline underline-offset-2">Ver la moto</Link></>
+            )}
+          </p>
+        </div>
+      )}
       {sale.cancelledAt && (
         <div className="mb-4 rounded-md border border-destructive bg-destructive/10 p-3 text-center text-sm font-semibold text-destructive">
           VENTA ANULADA el {sale.cancelledAt.toLocaleDateString('es-DO')} — se emitió nota de crédito.
@@ -338,6 +403,19 @@ export default function SaleReceiptClient() {
           <ReceiptBarcode sale={sale} className="mt-2" />
         </div>
       </div>
+      {motoVendida && (
+        <RecuperarVentaDialog
+          nombre={vehicleLabel(motoVendida)}
+          deuda={deudaDeLaVenta}
+          open={recuperar}
+          onOpenChange={setRecuperar}
+          onRecuperar={async (input) => {
+            const r = await recuperarVenta(motoVendida.id, input);
+            await reload();
+            return r;
+          }}
+        />
+      )}
     </div>
   );
 }

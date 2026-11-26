@@ -1,0 +1,95 @@
+// Motopréstamos 4A: reglas de la recuperación de motos. Lógica pura: la usan la
+// ficha, los diálogos y el reporte. La base vuelve a validar todo en sus RPC
+// (motos_incautar, motos_devolver_garantia, motos_liquidar_garantia y
+// motos_recuperar_venta); esto solo decide qué botones mostrar y qué cifras
+// adelantar en pantalla.
+
+import type { VehicleOrigin, VehicleStatus } from '@/lib/motos';
+
+export type AccionDeRecuperacion = 'incautar' | 'devolver' | 'liquidar' | 'recuperar_venta';
+export type EstadoDeRecuperacion = 'incautada' | 'devuelta' | 'liquidada' | 'recuperada';
+
+export const TEXTO_ESTADO_RECUPERACION: Record<EstadoDeRecuperacion, string> = {
+  incautada: 'Incautada',
+  devuelta: 'Devuelta',
+  liquidada: 'Liquidada',
+  recuperada: 'Recuperada',
+};
+
+/**
+ * Acciones de recuperación que se ofrecen para una moto.
+ * - `incautar`: garantía de un préstamo activo; quien puede editar motos.
+ * - `devolver`: garantía incautada; quien puede editar motos.
+ * - `liquidar`: garantía incautada con el préstamo activo; solo el administrador.
+ * - `recuperar_venta`: moto del inventario vendida con la venta abierta; solo el administrador.
+ * El administrador puede editar motos aunque su rol no lo diga (igual que en la base).
+ */
+export function accionesDeRecuperacion(
+  v: { status: VehicleStatus; origin: VehicleOrigin; saleId?: string; loanId?: string },
+  venta?: { abierta: boolean },
+  prestamo?: { activo: boolean },
+  esAdmin = false,
+  puedeEditar = false,
+): AccionDeRecuperacion[] {
+  const edita = puedeEditar || esAdmin;
+  const acciones: AccionDeRecuperacion[] = [];
+  if (v.origin === 'garantia' && v.loanId) {
+    if (v.status === 'en_garantia' && prestamo?.activo && edita) acciones.push('incautar');
+    if (v.status === 'recuperado') {
+      if (edita) acciones.push('devolver');
+      if (esAdmin && prestamo?.activo) acciones.push('liquidar');
+    }
+  }
+  if (v.origin === 'inventario' && v.status === 'vendido' && v.saleId && venta?.abierta && esAdmin) {
+    acciones.push('recuperar_venta');
+  }
+  return acciones;
+}
+
+const aCentavos = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100);
+
+/**
+ * Cómo se reparte lo que paga la liquidación de una garantía: lo aplicado al
+ * préstamo (hasta la deuda con mora), lo que sobra para el cliente y lo que falta.
+ */
+export function repartoDeLiquidacion(deuda: number, monto: number): { aplicado: number; sobrante: number; faltante: number } {
+  const d = Math.max(aCentavos(deuda), 0);
+  const m = Math.max(aCentavos(monto), 0);
+  const aplicado = Math.min(d, m);
+  return { aplicado: aplicado / 100, sobrante: (m - aplicado) / 100, faltante: (d - aplicado) / 100 };
+}
+
+/**
+ * Deuda cerrada sin cobrarse entera: el préstamo se cerró con el saldo dado de
+ * baja (`cancelled`, al liquidar la garantía) o la venta se recuperó. Sus cuotas
+ * quedan abiertas en la base, pero ya no se deben.
+ */
+export function deudaCerrada(c: { status?: string; recoveredAt?: Date | null }): boolean {
+  return c.status === 'cancelled' || !!c.recoveredAt;
+}
+
+/** El estado de cuenta de una deuda cerrada: nada pendiente ni atrasado, sin mora ni próxima cuota. */
+export function estadoSinDeuda<T extends { pendingBalance: number; isOverdue: boolean; lateFee: number; paymentDue: number; nextDueDate: Date | null }>(st: T): T {
+  return { ...st, pendingBalance: 0, isOverdue: false, lateFee: 0, paymentDue: 0, nextDueDate: null };
+}
+
+/**
+ * Lo recuperado en una recuperación, para el reporte: en la venta, el valor con
+ * que la moto vuelve al inventario; en la garantía liquidada, lo que pagó el
+ * tercero o la tasación de la dación. Incautada o devuelta: nada todavía.
+ */
+export function recuperadoDe(r: {
+  kind: 'venta' | 'garantia';
+  status: EstadoDeRecuperacion;
+  reentryValue?: number;
+  proceeds?: number;
+}): number {
+  if (r.kind === 'venta') return r.reentryValue ?? 0;
+  if (r.status === 'liquidada') return r.proceeds ?? 0;
+  return 0;
+}
+
+/** Resultado de una recuperación para el reporte: recuperado − dado de baja − devuelto. */
+export function resultadoDeRecuperacion(r: { recuperado: number; dadoDeBaja: number; devuelto: number }): number {
+  return (aCentavos(r.recuperado) - aCentavos(r.dadoDeBaja) - aCentavos(r.devuelto)) / 100;
+}

@@ -301,7 +301,7 @@ export default function CustomerHistoryClient() {
                     <TableCell className="text-right">{formatCurrency(sale.total)}</TableCell>
                     <TableCell>
                       <Badge variant={sale.paymentStatus === 'paid' ? 'outline' : 'destructive'}>
-                        {PAYMENT_STATUS_LABEL[sale.paymentStatus] ?? sale.paymentStatus}
+                        {sale.recoveredAt ? 'Recuperada' : PAYMENT_STATUS_LABEL[sale.paymentStatus] ?? sale.paymentStatus}
                       </Badge>
                     </TableCell>
                   </TableRow>

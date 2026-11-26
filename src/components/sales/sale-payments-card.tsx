@@ -114,7 +114,10 @@ export function SalePaymentsCard({ sale }: { sale: Sale }) {
         <div>
           <CardTitle className="flex flex-wrap items-center gap-2 text-base">
             Abonos de esta venta
-            {saldado
+            {sale.recoveredAt
+              // Moto recuperada (4A): no se cobró entera, el resto se dio de baja.
+              ? <Badge variant="outline" className="text-orange-700 border-orange-700">Recuperada</Badge>
+              : saldado
               ? <Badge className="bg-green-600">Saldada</Badge>
               : <Badge variant="destructive">Debe {formatCurrency(status.pendingBalance)}</Badge>}
           </CardTitle>

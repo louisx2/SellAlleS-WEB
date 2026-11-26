@@ -64,6 +64,10 @@ export const salesColumns: ColumnDef<Sale>[] = [
       if (row.original.cancelledAt) {
         return <Badge variant="destructive">Anulada</Badge>;
       }
+      // Moto recuperada (4A): queda en 'paid' pero no se cobró entera.
+      if (row.original.recoveredAt) {
+        return <Badge variant="outline" className="text-orange-700 border-orange-700">Recuperada</Badge>;
+      }
       const status: Sale['paymentStatus'] = row.getValue('paymentStatus');
       const isCredit = status === 'credit' || status === 'in_financing';
       return (

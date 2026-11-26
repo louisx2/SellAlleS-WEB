@@ -1,8 +1,9 @@
-import type { Vehicle, VehicleEvent, VehicleType, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
+import type { VehicleRecovery, Cobrador, AsignacionDeCartera, VisitaDeCobro, AbonoDeCobrador, EntregaDeCobrador, Vehicle, VehicleEvent, VehicleType, CustomerGuarantor, CustomerReference, MotosSettings, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
 import { normalizarCamposCliente } from '@/lib/datos-cliente';
+import { AVISO_BASE, RECIBO_BASE, plantillaParaGuardar } from '@/lib/cobranza-mensajes';
 
 // ---------- Role ----------
 export const rowToRole = (r: any): Role => ({
@@ -128,6 +129,11 @@ export const rowToCustomer = (r: any): Customer => ({
   createdBy: r.created_by,
   createdByName: r.profiles?.name || undefined,
   branchId: r.branch_id ?? undefined,
+  nickname: r.nickname ?? undefined,
+  workplace: r.workplace ?? undefined,
+  zone: r.zone ?? undefined,
+  collectionAddress: r.collection_address ?? undefined,
+  collectionReference: r.collection_reference ?? undefined,
 });
 // branch_id tampoco se manda: lo pone addCustomer al crear y no debe cambiar al
 // editar — moverlo de sucursal es otra cosa, no un renombrado.
@@ -140,6 +146,30 @@ export const customerToRow = (c: Partial<Customer>) => ({
   ncf_type: c.ncfType ?? 'consumer',
   notes: c.notes ?? null, credit_limit: c.creditLimit ?? null,
   discount_percentage: c.discountPercentage ?? 0,
+  // Datos de cobranza: solo si vienen, para que una edición desde otra pantalla
+  // (o sin el módulo Motopréstamos) no los borre.
+  ...(c.nickname !== undefined ? { nickname: c.nickname.trim() || null } : {}),
+  ...(c.workplace !== undefined ? { workplace: c.workplace.trim() || null } : {}),
+  ...(c.zone !== undefined ? { zone: c.zone.trim() || null } : {}),
+  ...(c.collectionAddress !== undefined ? { collection_address: c.collectionAddress.trim() || null } : {}),
+  ...(c.collectionReference !== undefined ? { collection_reference: c.collectionReference.trim() || null } : {}),
+});
+
+export const rowToGuarantor = (r: any): CustomerGuarantor => ({
+  id: r.id, customerId: r.customer_id, name: r.name, idDoc: r.id_doc ?? undefined,
+  phone: r.phone ?? undefined, address: r.address ?? undefined, relationship: r.relationship ?? undefined,
+});
+export const guarantorToRow = (g: Omit<CustomerGuarantor, 'id'>) => ({
+  customer_id: g.customerId, name: g.name.trim(), id_doc: g.idDoc?.trim() || null,
+  phone: g.phone?.trim() || null, address: g.address?.trim() || null, relationship: g.relationship?.trim() || null,
+});
+export const rowToReference = (r: any): CustomerReference => ({
+  id: r.id, customerId: r.customer_id, name: r.name,
+  phone: r.phone ?? undefined, relationship: r.relationship ?? undefined,
+});
+export const referenceToRow = (x: Omit<CustomerReference, 'id'>) => ({
+  customer_id: x.customerId, name: x.name.trim(),
+  phone: x.phone?.trim() || null, relationship: x.relationship?.trim() || null,
 });
 
 // ---------- Branch ----------
@@ -556,6 +586,8 @@ export const rowToSale = (r: any): Sale => ({
   quoteId: r.quote_id ?? undefined,
   couponId: r.coupon_id ?? undefined,
   cancelledAt: r.cancelled_at ? new Date(r.cancelled_at) : undefined,
+  recoveredAt: r.recovered_at ? new Date(r.recovered_at) : undefined,
+  writtenOffAmount: r.written_off_amount != null ? Number(r.written_off_amount) : undefined,
   // El embed trae todos los documentos de la venta (el rechazado y el que lo
   // reemplazó): solo cuenta el vigente.
   ecf: documentoVigente((r.ecf_documentos ?? []).map(rowToEcfDocumento)),
@@ -881,6 +913,7 @@ export const rowToLoan = (r: any): Loan => ({
   firstDueDate: r.first_due_date ?? undefined,
   disbursementMethod: r.disbursement_method ?? undefined,
   disbursementReference: r.disbursement_reference ?? undefined,
+  writtenOffAmount: r.written_off_amount != null ? Number(r.written_off_amount) : undefined,
   notes: r.notes ?? undefined,
   userName: r.user_name ?? undefined,
   createdAt: new Date(r.created_at),
@@ -1038,6 +1071,11 @@ export const rowToVehicle = (r: any): Vehicle => ({
   registrationStatus: r.registration_status ?? 'no_aplica',
   registrationLocation: r.registration_location ?? undefined,
   registrationSince: r.registration_since ? new Date(r.registration_since) : undefined,
+  loanId: r.loan_id ?? undefined,
+  registrationDeliveredTo: r.registration_delivered_to ?? undefined,
+  registrationDeliveredDoc: r.registration_delivered_doc ?? undefined,
+  registrationDeliveredAt: r.registration_delivered_at ? new Date(r.registration_delivered_at) : undefined,
+  registrationDeliveredByName: r.registration_delivered_by_name ?? undefined,
   notes: r.notes ?? undefined,
   createdByName: r.created_by_name ?? undefined,
   createdAt: new Date(r.created_at),
@@ -1066,6 +1104,33 @@ export const vehicleToRow = (v: Partial<Vehicle>) => ({
   ...(v.notes !== undefined ? { notes: textoVehiculo(v.notes) } : {}),
 });
 
+export const rowToVehicleRecovery = (r: any): VehicleRecovery => ({
+  id: r.id,
+  branchId: r.branch_id,
+  vehicleId: r.vehicle_id,
+  kind: r.kind,
+  saleId: r.sale_id ?? undefined,
+  loanId: r.loan_id ?? undefined,
+  status: r.status,
+  recoveredOn: r.recovered_on,
+  reason: r.reason ?? undefined,
+  conditionNote: r.condition_note ?? undefined,
+  debtAtRecovery: numOrUndef(r.debt_at_recovery),
+  reentryValue: numOrUndef(r.reentry_value),
+  writtenOff: Number(r.written_off ?? 0),
+  refunded: Number(r.refunded ?? 0),
+  refundMethod: r.refund_method ?? undefined,
+  liquidationMode: r.liquidation_mode ?? undefined,
+  proceeds: numOrUndef(r.proceeds),
+  applied: numOrUndef(r.applied),
+  shortfallAction: r.shortfall_action ?? undefined,
+  paymentId: r.payment_id ?? undefined,
+  note: r.note ?? undefined,
+  createdByName: r.created_by_name ?? undefined,
+  createdAt: new Date(r.created_at),
+  closedAt: r.closed_at ? new Date(r.closed_at) : undefined,
+});
+
 export const rowToVehicleEvent = (r: any): VehicleEvent => ({
   id: r.id,
   kind: r.kind,
@@ -1073,6 +1138,70 @@ export const rowToVehicleEvent = (r: any): VehicleEvent => ({
   toStatus: r.to_status ?? undefined,
   note: r.note ?? undefined,
   saleId: r.sale_id ?? undefined,
+  loanId: r.loan_id ?? undefined,
   createdByName: r.created_by_name ?? undefined,
   createdAt: new Date(r.created_at),
+});
+
+// ---------- Motopréstamos: ajustes ----------
+export const MOTOS_SETTINGS_DEFAULT: MotosSettings = {
+  custodyFinancedSale: true, custodyCashSale: false, custodyLoan: true, requireGuarantor: false,
+};
+
+export const rowToMotosSettings = (r: any): MotosSettings => (r ? {
+  custodyFinancedSale: r.custody_financed_sale ?? true,
+  custodyCashSale: r.custody_cash_sale ?? false,
+  custodyLoan: r.custody_loan ?? true,
+  requireGuarantor: r.require_guarantor ?? false,
+  contractSale: r.contract_sale ?? undefined,
+  contractLoan: r.contract_loan ?? undefined,
+  whatsappReminder: r.whatsapp_reminder ?? undefined,
+  whatsappReceipt: r.whatsapp_receipt ?? undefined,
+} : { ...MOTOS_SETTINGS_DEFAULT });
+
+/** Solo lo que viene; un contrato en '' o null vuelve al texto base. */
+export const motosSettingsToRow = (p: Partial<MotosSettings>) => ({
+  ...(p.custodyFinancedSale !== undefined ? { custody_financed_sale: p.custodyFinancedSale } : {}),
+  ...(p.custodyCashSale !== undefined ? { custody_cash_sale: p.custodyCashSale } : {}),
+  ...(p.custodyLoan !== undefined ? { custody_loan: p.custodyLoan } : {}),
+  ...(p.requireGuarantor !== undefined ? { require_guarantor: p.requireGuarantor } : {}),
+  ...('contractSale' in p ? { contract_sale: p.contractSale?.trim() || null } : {}),
+  ...('contractLoan' in p ? { contract_loan: p.contractLoan?.trim() || null } : {}),
+  // Vacío o igual al texto base no se guarda: si el base mejora, le llega a quien no lo cambió.
+  ...('whatsappReminder' in p ? { whatsapp_reminder: plantillaParaGuardar(p.whatsappReminder, AVISO_BASE) } : {}),
+  ...('whatsappReceipt' in p ? { whatsapp_receipt: plantillaParaGuardar(p.whatsappReceipt, RECIBO_BASE) } : {}),
+});
+
+// ---------- Cobranza en la calle (Motopréstamos 3A) ----------
+const num = (v: any) => Number(v ?? 0);
+const opcional = (v: any) => (v == null ? undefined : v);
+
+export const rowToCobrador = (r: any): Cobrador => ({
+  id: r.id, branchId: r.branch_id, profileId: r.profile_id,
+  name: r.profiles?.name ?? 'Sin nombre', isActive: r.is_active !== false,
+});
+
+export const rowToAsignacion = (r: any): AsignacionDeCartera => ({
+  id: r.id, branchId: r.branch_id, customerId: r.customer_id, collectorId: r.collector_id, orden: r.visit_order ?? 0,
+});
+
+export const rowToVisita = (r: any): VisitaDeCobro => ({
+  id: r.id, branchId: r.branch_id, customerId: r.customer_id, collectorId: opcional(r.collector_id),
+  outcome: r.outcome, promiseDate: opcional(r.promise_date),
+  promiseAmount: r.promise_amount == null ? undefined : num(r.promise_amount),
+  note: opcional(r.note), paymentId: opcional(r.payment_id), createdByName: opcional(r.created_by_name),
+  createdAt: r.created_at,
+});
+
+export const rowToAbonoDeCobrador = (tipo: 'prestamo' | 'venta', r: any): AbonoDeCobrador => ({
+  id: r.id, tipo, collectorId: r.collector_id, customerId: r.customer_id,
+  cuentaId: opcional(tipo === 'prestamo' ? r.loan_id : r.sale_id),
+  amount: num(r.amount), method: r.method, date: r.date, enCalle: !!r.en_calle,
+  settlementId: opcional(r.settlement_id), voided: r.voided_at != null,
+});
+
+export const rowToEntrega = (r: any): EntregaDeCobrador => ({
+  id: r.id, collectorId: r.collector_id, expected: num(r.expected), received: num(r.received),
+  difference: num(r.difference), note: opcional(r.note), receivedByName: opcional(r.received_by_name),
+  cajaMovementId: opcional(r.caja_movement_id), createdAt: r.created_at,
 });

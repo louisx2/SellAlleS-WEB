@@ -154,6 +154,8 @@ export default function GananciasReportPage() {
     let margen = 0;
     let ventas = 0;
     branchSales.forEach((sale) => {
+      // Venta recuperada: lo que faltaba se dio de baja, ya no entra.
+      if (sale.recoveredAt) return;
       const pendiente = 1 - fraccionCobrada(sale);
       if (pendiente < 0.0001) return;
       ventas += 1;

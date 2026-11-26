@@ -10,6 +10,7 @@ import {
   totalLateFeeDue,
   type LateFeePolicy,
 } from './late-fee';
+import { deudaCerrada, estadoSinDeuda } from './motos-recuperacion';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -68,6 +69,17 @@ export function calculateFinancingStatus(
     sale: Sale,
     fallbackLateFeeRate: number = DEFAULT_LATE_FEE_RATE,
     fallbackGraceDays: number = 0,
+): FinancingStatus {
+    const estado = estadoDelPlan(sale, fallbackLateFeeRate, fallbackGraceDays);
+    // Venta recuperada (Motopréstamos 4A): sus cuotas siguen abiertas en la
+    // base, pero el saldo se dio de baja: no se debe ni genera mora.
+    return deudaCerrada({ recoveredAt: sale.recoveredAt }) ? estadoSinDeuda(estado) : estado;
+}
+
+function estadoDelPlan(
+    sale: Sale,
+    fallbackLateFeeRate: number,
+    fallbackGraceDays: number,
 ): FinancingStatus {
     const installments = sale.installments ?? [];
     const frequency = sale.financingDetails?.frequency ?? 'monthly';

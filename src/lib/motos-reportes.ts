@@ -1,10 +1,12 @@
 // Reportes de vehículos (Motopréstamos): la cartera de unidades y las ventas del
 // período. Lógica pura sobre lo que ya cargan la página y los providers.
-import type { VehicleStatus } from './motos';
+// Solo tipos: los tests importan este archivo sin resolver rutas sin extensión.
+import type { Saldo, VehicleStatus } from './motos';
 
 type VehiculoReporte = {
   status: VehicleStatus;
   saleId?: string;
+  loanId?: string;
   cost?: number;
   brand?: string;
   model?: string;
@@ -15,7 +17,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export function carteraDeVehiculos(
   vehicles: VehiculoReporte[],
-  saldoPorVenta: Map<string, { pendiente: number; atrasado: boolean }>,
+  saldoPorVenta: Map<string, Saldo>,
+  saldoPorPrestamo: Map<string, Saldo> = new Map(),
 ) {
   const porEstado = Object.fromEntries(ESTADOS.map((e) => [e, 0])) as Record<VehicleStatus, number>;
   let inventarioACosto = 0;
@@ -31,7 +34,17 @@ export function carteraDeVehiculos(
       if (saldo.atrasado) vendidosACuotas.atrasados += 1;
     }
   }
-  return { porEstado, inventarioACosto: round2(inventarioACosto), vendidosACuotas };
+  // Préstamos con la moto en garantía: cada préstamo una vez, aunque tenga dos motos.
+  const prestamosConGarantia = { cantidad: 0, pendiente: 0, atrasados: 0 };
+  const prestamos = new Set(vehicles.filter((v) => v.status === 'en_garantia' && v.loanId).map((v) => v.loanId as string));
+  for (const id of prestamos) {
+    const saldo = saldoPorPrestamo.get(id);
+    if (!saldo || saldo.pendiente <= 0) continue;
+    prestamosConGarantia.cantidad += 1;
+    prestamosConGarantia.pendiente = round2(prestamosConGarantia.pendiente + saldo.pendiente);
+    if (saldo.atrasado) prestamosConGarantia.atrasados += 1;
+  }
+  return { porEstado, inventarioACosto: round2(inventarioACosto), vendidosACuotas, prestamosConGarantia };
 }
 
 type VentaReporte = {

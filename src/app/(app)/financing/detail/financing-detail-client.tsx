@@ -212,6 +212,8 @@ export default function FinancingDetailClient() {
             {sale.customer?.name ?? 'Consumidor Final'}
             {sale.cancelledAt ? (
               <Badge variant="destructive">Anulada</Badge>
+            ) : sale.recoveredAt ? (
+              <Badge variant="outline" className="text-orange-700 border-orange-700">Recuperada</Badge>
             ) : status.pendingBalance <= 0 ? (
               <Badge className="bg-green-600">Pagado</Badge>
             ) : status.isOverdue ? (

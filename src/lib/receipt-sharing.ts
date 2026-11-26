@@ -156,6 +156,58 @@ export async function shareSalePdfLinkViaWhatsApp(
   return { url, validez, abrioWhatsApp };
 }
 
+/**
+ * El recibo de un abono por WhatsApp (cobranza en la calle): mismo camino que la
+ * factura —permiso de subida, el PDF directo a Storage, enlace corto— pero con
+ * `abono` en vez de `saleId`. `mensaje` arma el texto con el enlace y su fecha de
+ * vencimiento. Sin teléfono, WhatsApp abre para elegir el chat.
+ */
+export async function compartirReciboDeAbono(
+  abono: { tipo: 'prestamo' | 'venta'; paymentId: string },
+  pdfBase64: string,
+  mensaje: (url: string, venceEl: string) => string,
+  telefono?: string,
+  ventana?: Window | null,
+): Promise<{ url: string; venceEl: string; texto: string; abrioWhatsApp: boolean }> {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) throw new Error('Tu sesión expiró. Vuelve a entrar y repite el envío.');
+
+  const subida = await llamarReceiptLinkConCuerpo({ abono });
+  const { ruta, uploadToken } = subida as { ruta: string; uploadToken: string };
+  if (!ruta?.includes('/abonos/')) {
+    throw new Error('El servidor todavía no sabe compartir recibos de abono. Avísale al administrador del sistema.');
+  }
+  const { error: upErr } = await supabase.storage
+    .from('comprobantes')
+    .uploadToSignedUrl(ruta, uploadToken, base64APdf(pdfBase64), { contentType: 'application/pdf', upsert: true });
+  if (upErr) throw new Error(`No se pudo guardar el PDF: ${upErr.message}`);
+
+  const enlace = await llamarReceiptLinkConCuerpo({ abono, paso: 'enlace' });
+  const { url, venceEl } = enlace as { url: string; venceEl: string };
+  const texto = mensaje(url, venceEl);
+  const abrioWhatsApp = abrirWhatsApp(texto, telefonoNormalizado(telefono), ventana);
+  return { url, venceEl, texto, abrioWhatsApp };
+}
+
+/** Abre WhatsApp con un texto ya armado (el reintento del recibo de abono). */
+export function abrirWhatsAppConTexto(texto: string, telefono?: string) {
+  abrirWhatsApp(texto, telefonoNormalizado(telefono));
+}
+
+function telefonoNormalizado(telefono?: string): string {
+  let phone = (telefono ?? '').replace(/\D/g, '');
+  if (phone.length === 10 && /^(809|829|849)/.test(phone)) phone = '1' + phone;
+  return phone;
+}
+
+async function llamarReceiptLinkConCuerpo(body: Record<string, unknown>) {
+  const { data, error } = await supabase.functions.invoke('receipt-link', { body });
+  const msg = (data as { error?: string } | null)?.error ?? error?.message;
+  if (msg) throw new Error(msg);
+  if (!data) throw new Error('La función no devolvió respuesta.');
+  return data as Record<string, unknown>;
+}
+
 /** Reintento manual: el enlace ya está generado y solo falta abrir el chat.
  *  Sirve cuando el navegador bloqueó la pestaña la primera vez. */
 export function abrirWhatsAppConEnlace(

@@ -13,6 +13,35 @@ import { formatCurrency } from '@/lib/utils';
 import { calculateLoanStatus } from '@/lib/loan-utils';
 import { calculateFinancingStatus } from '@/lib/utils';
 import type { Loan, Sale } from '@/lib/types';
+
+// Motopréstamos: la moto de un préstamo o una venta (sin chasis) y su matrícula.
+// Opcional: un negocio sin el módulo, o una versión vieja de la base, no lo manda.
+type PortalVehicle = { brand?: string | null; model?: string | null; plate?: string | null; registrationStatus?: string };
+type PortalLoan = Loan & { vehicles?: PortalVehicle[] };
+type PortalSale = Sale & { vehicles?: PortalVehicle[] };
+
+const MATRICULA: Record<string, string> = {
+  en_custodia: 'en custodia del negocio',
+  lista_para_entregar: 'lista para retirar',
+  entregada: 'entregada',
+};
+
+const nombreMoto = (v: PortalVehicle) =>
+  [[v.brand, v.model].filter(Boolean).join(' ') || 'Moto', v.plate ? `placa ${v.plate}` : ''].filter(Boolean).join(' · ');
+
+function MotosDeLaCuenta({ vehicles }: { vehicles?: PortalVehicle[] }) {
+  if (!vehicles?.length) return null;
+  return (
+    <div className="space-y-1 rounded-md bg-muted/50 p-3 text-sm">
+      {vehicles.map((v, i) => (
+        <p key={i}>
+          <span className="font-medium">Moto:</span> {nombreMoto(v)}
+          {v.registrationStatus && MATRICULA[v.registrationStatus] ? ` · Matrícula ${MATRICULA[v.registrationStatus]}` : ''}
+        </p>
+      ))}
+    </div>
+  );
+}
 import { PasswordInput } from '@/components/ui/password-input';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
@@ -43,8 +72,9 @@ interface PortalBusiness {
   lateFeeGraceDays?: number;
   loanLateFeeRate: number;
   loanLateFeeGraceDays?: number;
-  loans: Loan[];
-  creditSales: Sale[];
+  loans: PortalLoan[];
+  creditSales: PortalSale[];
+  registrationsReady?: PortalVehicle[];
 }
 
 type Step = 'cedula' | 'login' | 'setup' | 'dashboard' | 'forgot' | 'reset-via-token';
@@ -101,7 +131,7 @@ function InstallmentsTable({ installments }: { installments: DisplayInstallment[
   );
 }
 
-function LoanCard({ loan, lateFeeRate, graceDays }: { loan: Loan; lateFeeRate: number; graceDays: number }) {
+function LoanCard({ loan, lateFeeRate, graceDays }: { loan: PortalLoan; lateFeeRate: number; graceDays: number }) {
   const status = calculateLoanStatus(loan, lateFeeRate, graceDays);
   return (
     <Card>
@@ -111,6 +141,9 @@ function LoanCard({ loan, lateFeeRate, graceDays }: { loan: Loan; lateFeeRate: n
           {loan.status === 'refinanced' ? (
             // Su saldo pasó a un préstamo nuevo: no está pagado, está cerrado.
             <Badge variant="secondary">Refinanciado</Badge>
+          ) : loan.status === 'cancelled' ? (
+            // Cerrado con el saldo dado de baja al liquidar la garantía.
+            <Badge variant="secondary">Cerrado</Badge>
           ) : status.pendingBalance <= 0 ? (
             <Badge className="bg-green-600">Pagado</Badge>
           ) : status.isOverdue ? (
@@ -152,13 +185,14 @@ function LoanCard({ loan, lateFeeRate, graceDays }: { loan: Loan; lateFeeRate: n
             <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
           </div>
         </div>
+        <MotosDeLaCuenta vehicles={loan.vehicles} />
         <InstallmentsTable installments={loan.installments} />
       </CardContent>
     </Card>
   );
 }
 
-function CreditSaleCard({ sale, lateFeeRate, graceDays }: { sale: Sale; lateFeeRate: number; graceDays: number }) {
+function CreditSaleCard({ sale, lateFeeRate, graceDays }: { sale: PortalSale; lateFeeRate: number; graceDays: number }) {
   const status = calculateFinancingStatus(sale, lateFeeRate, graceDays);
   const isFinancing = sale.paymentStatus === 'in_financing';
   return (
@@ -203,6 +237,7 @@ function CreditSaleCard({ sale, lateFeeRate, graceDays }: { sale: Sale; lateFeeR
             <p className="font-semibold">{status.nextDueDate ? status.nextDueDate.toLocaleDateString('es-DO') : '—'}</p>
           </div>
         </div>
+        <MotosDeLaCuenta vehicles={sale.vehicles} />
         {/* Refinanciado: solo las cuotas del plan vigente. Las anteriores ya
             están cerradas con lo pagado y mezclarlas confunde al cliente. */}
         <InstallmentsTable
@@ -221,6 +256,11 @@ function BusinessDashboard({ business }: { business: PortalBusiness }) {
         <Store className="h-5 w-5 text-muted-foreground" />
         <h2 className="text-lg font-bold">{business.companyName}</h2>
       </div>
+      {(business.registrationsReady ?? []).map((v, i) => (
+        <div key={i} className="rounded-md border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100">
+          Tu matrícula de {nombreMoto(v)} está lista para retirar.
+        </div>
+      ))}
       {!hasDebt ? (
         <p className="text-sm text-muted-foreground py-6 text-center">
           No tienes préstamos ni compras a crédito registradas con este negocio.

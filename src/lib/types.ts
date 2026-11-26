@@ -1,4 +1,6 @@
 import type { RegistrationStatus, VehicleCondition, VehicleOrigin, VehicleStatus } from '@/lib/motos';
+import type { ResultadoVisita } from '@/lib/cobranza';
+import type { EstadoDeRecuperacion } from '@/lib/motos-recuperacion';
 import type { UnitCode } from './units';
 import type { InterestMode, PaymentFrequency } from './frequency';
 import type { LateFeeMode } from './late-fee';
@@ -94,6 +96,49 @@ export type Customer = {
   createdByName?: string;
   /** UUID de la sucursal dueña. Vacío = de la empresa, visible desde todas. */
   branchId?: string;
+  // Datos de cobranza (módulo Motopréstamos).
+  nickname?: string;
+  workplace?: string;
+  zone?: string;
+  collectionAddress?: string;
+  collectionReference?: string;
+};
+
+/** Garante o fiador del cliente (Motopréstamos). */
+export type CustomerGuarantor = {
+  id: string;
+  customerId: string;
+  name: string;
+  idDoc?: string;
+  phone?: string;
+  address?: string;
+  relationship?: string;
+};
+
+/** Ajustes del módulo Motopréstamos (una fila por empresa; sin fila = por defecto). */
+export type MotosSettings = {
+  custodyFinancedSale: boolean;
+  custodyCashSale: boolean;
+  custodyLoan: boolean;
+  requireGuarantor: boolean;
+  /** Vacío = el texto base de src/lib/contrato.ts. */
+  contractSale?: string;
+  contractLoan?: string;
+  /** Mensajes de WhatsApp de la cobranza. Vacío = el texto base de src/lib/cobranza-mensajes.ts. */
+  whatsappReminder?: string;
+  whatsappReceipt?: string;
+};
+
+/** Foto de una moto o de la cédula de un cliente (bucket privado `motos`). */
+export type MotosPhoto = { id: string; path: string; createdAt: Date; url?: string };
+
+/** Referencia personal o comercial del cliente (Motopréstamos). */
+export type CustomerReference = {
+  id: string;
+  customerId: string;
+  name: string;
+  phone?: string;
+  relationship?: string;
 };
 
 export type CouponStatus = 'active' | 'redeemed' | 'expired';
@@ -251,7 +296,8 @@ export type PermissionResource =
   | 'dashboard' | 'pos' | 'sales' | 'quotes' | 'services' | 'credit' | 'financing'
   | 'prestamos' | 'caja' | 'expenses' | 'payables' | 'reports' | 'products' | 'customers'
   | 'suppliers' | 'company-profile' | 'users' | 'branches' | 'roles' | 'suscripcion'
-  | 'service-types' | 'quick-sales' | 'services-all' | 'motos' | 'motos-config';
+  | 'service-types' | 'quick-sales' | 'services-all' | 'motos' | 'motos-config'
+  | 'cobranza' | 'cobranza-all' | 'cobranza-cuadre';
 
 // reports_visible: slugs de src/lib/permissions.ts#REPORT_ITEMS que este rol
 // puede ver dentro de "Reportes"; ausente = todos visibles.
@@ -501,6 +547,10 @@ export type Sale = {
   // Venta anulada con nota de crédito (RPC annul_sale). La venta no se borra:
   // los reportes de ingresos la filtran y el 607 la reporta junto a su NC.
   cancelledAt?: Date;
+  // Venta de una moto recuperada (Motopréstamos 4A): queda en 'paid' y el
+  // saldo que no se cobró se dio de baja. La pantalla la muestra «Recuperada».
+  recoveredAt?: Date;
+  writtenOffAmount?: number;
   // El e-CF vigente de la venta (el más reciente que nadie ha reemplazado).
   // undefined = la venta no lleva comprobante electrónico.
   ecf?: EcfDocumento;
@@ -678,13 +728,17 @@ export type LoanInstallment = {
   paidAt?: string;
 };
 
+// 'dacion': el negocio se quedó la moto en garantía como pago (Motopréstamos 4A).
+// No entra dinero: no cuenta en la caja ni en los cobros.
+export type LoanPaymentMethod = PaymentMethod | 'dacion';
+
 export type LoanPayment = {
   id: string;
   loanId: string;
   customerId: string;
   amount: number;
   lateFeePaid: number;
-  method: PaymentMethod;
+  method: LoanPaymentMethod;
   reference?: string;   // identificador de transferencia/tarjeta
   notes?: string;
   userName?: string;
@@ -728,6 +782,8 @@ export type Loan = {
   // Ausente en los préstamos anteriores a 2026-11-24 (sin registro).
   disbursementMethod?: DisbursementMethod;
   disbursementReference?: string;
+  // Saldo dado de baja al liquidar la garantía (el préstamo queda 'cancelled').
+  writtenOffAmount?: number;
   notes?: string;
   userName?: string;
   createdAt: Date;
@@ -1170,6 +1226,12 @@ export type Vehicle = {
   registrationStatus: RegistrationStatus;
   registrationLocation?: string;
   registrationSince?: Date;
+  /** Préstamo que la tiene en garantía (o el último, si ya se liberó). */
+  loanId?: string;
+  registrationDeliveredTo?: string;
+  registrationDeliveredDoc?: string;
+  registrationDeliveredAt?: Date;
+  registrationDeliveredByName?: string;
   notes?: string;
   createdByName?: string;
   createdAt: Date;
@@ -1178,11 +1240,114 @@ export type Vehicle = {
 
 export type VehicleEvent = {
   id: string;
-  kind: 'ingreso' | 'venta' | 'venta_anulada' | 'cambio_estado' | 'matricula' | 'edicion' | 'baja';
+  kind: 'ingreso' | 'venta' | 'venta_anulada' | 'cambio_estado' | 'matricula' | 'edicion' | 'baja' | 'garantia' | 'liberacion'
+    | 'incautacion' | 'devolucion' | 'liquidacion' | 'recuperacion';
   fromStatus?: string;
   toStatus?: string;
   note?: string;
   saleId?: string;
+  loanId?: string;
   createdByName?: string;
   createdAt: Date;
 };
+
+/** Una recuperación de moto (Motopréstamos 4A): venta recuperada o garantía
+ *  incautada → devuelta o liquidada. Se escribe solo por las RPC. */
+export type VehicleRecovery = {
+  id: string;
+  branchId: string;
+  vehicleId: string;
+  kind: 'venta' | 'garantia';
+  saleId?: string;
+  loanId?: string;
+  status: EstadoDeRecuperacion;
+  /** yyyy-mm-dd */
+  recoveredOn: string;
+  reason?: string;
+  conditionNote?: string;
+  debtAtRecovery?: number;
+  /** Valor con que la moto vuelve al inventario (venta recuperada o dación). */
+  reentryValue?: number;
+  writtenOff: number;
+  refunded: number;
+  refundMethod?: 'cash' | 'transfer';
+  liquidationMode?: 'tercero' | 'dacion';
+  /** Lo que pagó el tercero o el valor de la dación. */
+  proceeds?: number;
+  /** La parte que se aplicó al préstamo. */
+  applied?: number;
+  shortfallAction?: 'deuda' | 'baja';
+  paymentId?: string;
+  note?: string;
+  createdByName?: string;
+  createdAt: Date;
+  closedAt?: Date;
+};
+
+// ---------- Cobranza en la calle (Motopréstamos 3A) ----------
+
+/** Un usuario marcado como cobrador en una sucursal. */
+export type Cobrador = { id: string; branchId: string; profileId: string; name: string; isActive: boolean };
+
+/** Cliente de la cartera de un cobrador, con su orden de visita. */
+export type AsignacionDeCartera = { id: string; branchId: string; customerId: string; collectorId: string; orden: number };
+
+export type VisitaDeCobro = {
+  id: string;
+  branchId: string;
+  customerId: string;
+  collectorId?: string;
+  outcome: ResultadoVisita;
+  promiseDate?: string;
+  promiseAmount?: number;
+  note?: string;
+  paymentId?: string;
+  createdByName?: string;
+  createdAt: string;
+};
+
+/** Abono cobrado por un cobrador (préstamo o venta). `enCalle`: efectivo que
+ *  sigue en su bolsillo hasta la entrega (`settlementId`). */
+export type AbonoDeCobrador = {
+  id: string;
+  tipo: 'prestamo' | 'venta';
+  collectorId: string;
+  customerId: string;
+  cuentaId?: string;
+  amount: number;
+  method: string;
+  date: string;
+  enCalle: boolean;
+  settlementId?: string;
+  voided: boolean;
+};
+
+/** Entrega del cobrador: lo esperado (sus abonos en efectivo) contra lo recibido. */
+export type EntregaDeCobrador = {
+  id: string;
+  collectorId: string;
+  expected: number;
+  received: number;
+  difference: number;
+  note?: string;
+  receivedByName?: string;
+  cajaMovementId?: string;
+  createdAt: string;
+};
+
+/** Lo que devuelve un cobro de la ruta, para mostrarlo al terminar. */
+export type CobroDeRuta = {
+  paymentId: string;
+  aplicado: number;
+  mora: number;
+  saldo: number | null;
+  enCalle: boolean;
+  repetido?: boolean;
+  /** Para imprimir o mandar el recibo (no viene en un cobro repetido). */
+  recibo?: PaymentResult;
+  /** Dónde quedó el abono: el general a las ventas también es de `venta`. */
+  tipoAbono: 'prestamo' | 'venta';
+};
+
+/** Lo que devuelve recibir una entrega. */
+export type EntregaRecibida = { settlementId: string; expected: number; received: number; difference: number; payments: number };

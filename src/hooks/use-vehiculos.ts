@@ -70,7 +70,35 @@ export function useVehiculos(opts?: { branchId?: string }) {
     await reload();
   };
 
-  return { branchId, vehicles, types, loading, reload, addVehicle, updateVehicle, darDeBaja };
+  /** Entrega la matrícula a quien la retira. Con deuda pendiente solo un
+   *  administrador, y con motivo (lo valida la base). */
+  const entregarMatricula = async (vehicle: Vehicle, recibe: string, cedula: string, motivoForzado?: string): Promise<void> => {
+    const { error } = await supabase.rpc('motos_entregar_matricula', {
+      p_vehicle_id: vehicle.id,
+      p_recibe: recibe,
+      p_cedula: cedula.trim() || null,
+      p_motivo_forzado: motivoForzado?.trim() || null,
+    });
+    if (error) throw error;
+    await reload();
+  };
+
+  return { branchId, vehicles, types, loading, reload, addVehicle, updateVehicle, darDeBaja, entregarMatricula };
+}
+
+/** Motos registradas a nombre de un cliente (para elegir la garantía de un préstamo). */
+export async function fetchVehiculosDelCliente(customerId: string): Promise<Vehicle[]> {
+  const { data, error } = await supabase
+    .from('vehicles').select(SELECT).eq('customer_id', customerId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(rowToVehicle);
+}
+
+/** Motos en garantía de un préstamo (la tarjeta Garantía del detalle). */
+export async function fetchVehiculosDelPrestamo(loanId: string): Promise<Vehicle[]> {
+  const { data, error } = await supabase.from('vehicles').select(SELECT).eq('loan_id', loanId);
+  if (error) throw error;
+  return (data ?? []).map(rowToVehicle);
 }
 
 /** Un vehículo por id, sin importar la sucursal activa (la ficha se abre por enlace). */

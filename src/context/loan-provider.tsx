@@ -1,13 +1,13 @@
 'use client';
 
 import React, { createContext, useContext, ReactNode, useState, useEffect, useCallback } from 'react';
-import type { DisbursementMethod, Loan, LoanFrequency, LoanPaymentResult, PaymentMethod, RefinanceBaseMode, RefinanceLateFeeAction, VoidLoanPaymentResult } from '@/lib/types';
+import type { DisbursementMethod, Loan, Vehicle, LoanFrequency, LoanPaymentResult, PaymentMethod, RefinanceBaseMode, RefinanceLateFeeAction, VoidLoanPaymentResult } from '@/lib/types';
 import { supabase } from '@/lib/supabase/client';
-import { rowToLoan, loanToRow, rowToLoanPaymentResult } from '@/lib/supabase/mappers';
+import { rowToLoan, loanToRow, rowToLoanPaymentResult, vehicleToRow } from '@/lib/supabase/mappers';
 import { useAuth } from '@/context/auth-provider';
 import { useSharing } from '@/context/sharing-provider';
 
-interface NewLoanInput {
+export interface NewLoanInput {
   branchId: string;
   customerId: string;
   principal: number;
@@ -19,9 +19,20 @@ interface NewLoanInput {
   disbursementReference?: string;
 }
 
+/** La moto del cliente que respalda el préstamo: una ya registrada (vehicleId)
+ *  o una nueva (vehiculo, con chasis). */
+export type GarantiaInput = {
+  vehicleId?: string;
+  vehiculo?: Partial<Vehicle>;
+  matriculaEnCustodia: boolean;
+  ubicacion?: string;
+};
+
 interface LoanContextType {
   loans: Loan[];
   addLoan: (loan: NewLoanInput) => Promise<Loan>;
+  /** Préstamo y garantía en una sola transacción (motos_crear_prestamo). */
+  addLoanConGarantia: (loan: NewLoanInput, garantia: GarantiaInput) => Promise<Loan>;
   payLoan: (loanId: string, amount: number, method: PaymentMethod, branchId?: string, notes?: string, reference?: string) => Promise<LoanPaymentResult>;
   voidLoanPayment: (paymentId: string, reason: string) => Promise<VoidLoanPaymentResult>;
   /**
@@ -114,6 +125,27 @@ export function LoanProvider({ children }: { children: ReactNode }) {
     return rowToLoan(data);
   };
 
+  // Con garantía, el préstamo y la moto los crea la base juntos: si la moto falla
+  // (chasis repetido, moto ajena), no queda préstamo ni dinero desembolsado.
+  const addLoanConGarantia = async (loanData: NewLoanInput, garantia: GarantiaInput): Promise<Loan> => {
+    const userName = (typeof window !== 'undefined' && localStorage.getItem('userName')) || undefined;
+    const { data: id, error } = await supabase.rpc('motos_crear_prestamo', {
+      p_prestamo: loanToRow({ ...loanData, userName }),
+      p_garantia: {
+        vehicle_id: garantia.vehicleId ?? null,
+        vehiculo: garantia.vehiculo ? vehicleToRow(garantia.vehiculo) : null,
+        matricula_en_custodia: garantia.matriculaEnCustodia,
+        ubicacion: garantia.ubicacion?.trim() || null,
+      },
+    });
+    if (error) throw error;
+    const { data, error: e2 } = await supabase
+      .from('loans').select('*, customers(*), loan_installments(*)').eq('id', id).single();
+    if (e2) throw e2;
+    await load();
+    return rowToLoan(data);
+  };
+
   // Abono a un préstamo: RPC atómica register_loan_payment (mora primero, luego
   // capital a la cuota más antigua), independiente de register_sale_payment.
   const payLoan = async (
@@ -188,7 +220,7 @@ export function LoanProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <LoanContext.Provider value={{ loans, addLoan, payLoan, voidLoanPayment, refinanceLoan, reload: load, loading }}>
+    <LoanContext.Provider value={{ loans, addLoan, addLoanConGarantia, payLoan, voidLoanPayment, refinanceLoan, reload: load, loading }}>
       {children}
     </LoanContext.Provider>
   );

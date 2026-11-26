@@ -38,7 +38,8 @@ export function SalesActions({ sale }: SalesActionsProps) {
   // Cualquier venta vigente se puede anular (la base exige administrador). Una
   // a crédito o financiada con abonos posteriores la rechaza la base hasta que
   // se anulen esos abonos.
-  const canAnnul = canDelete && !appUser?.bloqueo && !sale.cancelledAt;
+  // Una venta recuperada no se anula (la base lo rechaza).
+  const canAnnul = canDelete && !appUser?.bloqueo && !sale.cancelledAt && !sale.recoveredAt;
 
   const esFinanciamiento = sale.paymentMethod === 'financing' || !!sale.financingDetails;
   // A una venta anulada no se le manda nada: el estado le diría al cliente que

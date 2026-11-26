@@ -176,7 +176,8 @@ export default function DashboardPage() {
   // Se suma `total`, no `amountPaid`: en efectivo amountPaid es lo que ENTREGO
   // el cliente (el POS lo usa para calcular la devuelta), asi que una venta de
   // 850 pagada con un billete de 2000 inflaba este KPI en los 1150 de vuelto.
-  const totalRevenueToday = filteredSales.filter((s) => s.paymentStatus === 'paid').reduce((a, s) => a + s.total, 0);
+  // La venta recuperada (4A) queda en 'paid' sin haberse cobrado: no es ingreso.
+  const totalRevenueToday = filteredSales.filter((s) => s.paymentStatus === 'paid' && !s.recoveredAt).reduce((a, s) => a + s.total, 0);
   const totalCreditToday = filteredSales.filter((s) => s.paymentStatus === 'credit').reduce((a, s) => a + s.total, 0);
   const creditTxToday = filteredSales.filter((s) => s.paymentStatus === 'credit').length;
   const totalSalesToday = filteredSales.length;

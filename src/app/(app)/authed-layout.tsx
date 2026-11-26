@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2 } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2, Route, ListChecks, Calculator, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -17,6 +17,7 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { moduleForRoute, type ModuleKey } from '@/lib/modules';
+import { itemDeRuta } from '@/lib/rutas';
 import { hasPermission, isReportVisible, unionPermissions } from '@/lib/permissions';
 import type { PermissionResource } from '@/lib/types';
 import { useCompanyProfile } from '@/context/company-profile-provider';
@@ -61,6 +62,11 @@ const featuresNavItems: NavItem[] = [
   { href: '/financing', icon: Landmark, label: 'Financiamientos', module: 'financing', permission: 'financing' },
   { href: '/prestamos', icon: HandCoins, label: 'Préstamos', module: 'prestamos', permission: 'prestamos' },
   { href: '/motos', icon: Bike, label: 'Vehículos', module: 'motoprestamos', permission: 'motos' },
+  { href: '/motos/matriculas', icon: FileCheck, label: 'Matrículas', module: 'motoprestamos', permission: 'motos' },
+  { href: '/motos/cobranza', icon: Route, label: 'Cobranza', module: 'motoprestamos', permission: 'cobranza' },
+  { href: '/motos/cobranza/avisos', icon: MessageCircle, label: 'Avisos de cobro', module: 'motoprestamos', permission: 'cobranza' },
+  { href: '/motos/cobranza/asignar', icon: ListChecks, label: 'Asignar cartera', module: 'motoprestamos', permission: 'cobranza-all' },
+  { href: '/motos/cobranza/cuadre', icon: Calculator, label: 'Cuadre de cobradores', module: 'motoprestamos', permission: 'cobranza-cuadre' },
   { href: '/caja', icon: Coins, label: 'Caja', module: 'caja', permission: 'caja' },
   { href: '/expenses', icon: Wallet, label: 'Gastos', module: 'expenses', permission: 'expenses' },
 ];
@@ -77,6 +83,9 @@ const reportsNavItems = [
     { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
     { href: '/reports/cobros', label: 'Cobros Recibidos' },
     { href: '/reports/antiguedad', label: 'Antigüedad de Cartera' },
+    { href: '/reports/cobranza', label: 'Cobranza por Cobrador' },
+    { href: '/reports/cuadres', label: 'Cuadres de Cobradores' },
+    { href: '/reports/recuperaciones', label: 'Recuperaciones de Motos' },
     { href: '/reports/inventory', label: 'Valorización de Inventario' },
     { href: '/reports/taxes', label: 'Impuestos' },
     { href: '/reports/ganancias', label: 'Reporte de Ganancias' },
@@ -319,7 +328,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     if (slug === 'comisiones' && !isModuleEnabled('commissions')) return false;
     // El del taller, solo con el módulo encendido.
     if (slug === 'taller' && !isModuleEnabled('services')) return false;
-    if (slug === 'vehiculos' && !isModuleEnabled('motoprestamos')) return false;
+    if ((slug === 'vehiculos' || slug === 'cobranza' || slug === 'cuadres' || slug === 'recuperaciones') && !isModuleEnabled('motoprestamos')) return false;
     return isReportVisible(effectivePermissions, slug);
   });
 
@@ -335,7 +344,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   // también al contenido de la página (si alguien escribe la URL a mano sin
   // tener el permiso, no ve el contenido igual que no ve el enlace).
   const allNavItems = [...coreNavItems, ...featuresNavItems, ...adminNavItems];
-  const matchedNavItem = allNavItems.find(item => pathname === item.href || pathname.startsWith(item.href + '/'));
+  const matchedNavItem = itemDeRuta(allNavItems, pathname);
   const permissionBlocked = !isSuperAdmin && !!matchedNavItem && !!userRole && !hasExtra(matchedNavItem.permission);
 
   // Guard de bloqueo: fuera del Carrito, Movimientos, la Caja y Mi Suscripción
@@ -748,7 +757,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                     {visibleFeaturesNavItems.map(item => (
                       <SidebarMenuItem key={item.href}>
                         <Link href={item.href} passHref>
-                          <SidebarMenuButton size="sm" className="h-8" isActive={pathname.startsWith(item.href)} tooltip={item.label}>
+                          <SidebarMenuButton size="sm" className="h-8" isActive={matchedNavItem?.href === item.href} tooltip={item.label}>
                             {item.icon && <item.icon />}
                             <span>{item.label}</span>
                           </SidebarMenuButton>
@@ -803,7 +812,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                     {visibleAdminNavItems.map(item => (
                       <SidebarMenuItem key={item.href}>
                         <Link href={item.href} passHref>
-                          <SidebarMenuButton size="sm" className="h-8" isActive={pathname.startsWith(item.href)}>
+                          <SidebarMenuButton size="sm" className="h-8" isActive={matchedNavItem?.href === item.href}>
                             {item.icon && <item.icon />}
                             <span>{item.label}</span>
                           </SidebarMenuButton>

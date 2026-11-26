@@ -1,0 +1,245 @@
+// Motopréstamos 3A: la ruta del día del cobrador y su resumen de efectivo.
+// Lógica pura (sin Supabase): el hook arma las cuentas y esto decide a quién
+// visitar, en qué orden y cuánto sugerir. Pruebas: scripts/tests/cobranza.test.mjs
+//
+// Las fechas son yyyy-mm-dd en la hora local (el hook las pasa por `fechaLocal`).
+
+export type ResultadoVisita = 'pago' | 'no_estaba' | 'no_tenia' | 'promesa' | 'se_nego' | 'moto_no_aparece';
+
+export const TEXTO_RESULTADO: Record<ResultadoVisita, string> = {
+  pago: 'Pagó',
+  no_estaba: 'No estaba',
+  no_tenia: 'No tenía',
+  promesa: 'Prometió pagar',
+  se_nego: 'Se negó',
+  moto_no_aparece: 'La moto no aparece',
+};
+
+/** Un préstamo o una venta a plazos con algo pendiente. `cuota` es lo que toca
+ *  cobrar ahora (lo vencido más la de hoy); `mora`, la mora pendiente. */
+export type CuentaDeCobro = {
+  tipo: 'prestamo' | 'venta';
+  id: string;
+  customerId: string;
+  branchId: string;
+  pendiente: number;
+  cuota: number;
+  mora: number;
+  diasAtraso: number;
+  venceHoy: boolean;
+  proximaFecha?: string;
+};
+
+export type Promesa = { customerId: string; fecha: string; monto?: number };
+
+export type MotivoDeVisita = 'atrasado' | 'vence_hoy' | 'promesa';
+
+export type ParadaDeRuta = {
+  customerId: string;
+  nombre?: string;
+  cuentas: CuentaDeCobro[];
+  sugerido: number;
+  diasAtraso: number;
+  motivo: MotivoDeVisita;
+  promesa?: Promesa;
+  orden: number;
+};
+
+const centavos = (n: number) => Math.round(n * 100) / 100;
+
+const diasEntre = (desde: string, hasta: string) =>
+  Math.round((new Date(`${hasta}T00:00:00`).getTime() - new Date(`${desde}T00:00:00`).getTime()) / 86_400_000);
+
+export type CuotaDeCobro = { dueDate: string; amount: number; paidAmount: number; status: 'pending' | 'partial' | 'paid' };
+
+/**
+ * Arma la cuenta de la ruta desde las cuotas del plan. `pendiente` y `mora` los
+ * da el cálculo de siempre (calculateLoanStatus / calculateFinancingStatus).
+ * La cuota es lo que falta de las vencidas más la de hoy; si no hay nada
+ * vencido, lo que falta de la próxima. Sin plan (crédito simple), todo lo
+ * pendiente y sin atraso: solo entra a la ruta por una promesa.
+ */
+export function cuentaDesdeCuotas(
+  c: Omit<CuentaDeCobro, 'cuota' | 'diasAtraso' | 'venceHoy' | 'proximaFecha'> & { cuotas: CuotaDeCobro[] },
+  hoy: string,
+): CuentaDeCobro {
+  const { cuotas, ...cuenta } = c;
+  const abiertas = cuotas
+    .filter((q) => q.status !== 'paid' && q.amount - q.paidAmount > 0.005)
+    .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+  const falta = (q: CuotaDeCobro) => q.amount - q.paidAmount;
+  const tocan = abiertas.filter((q) => q.dueDate <= hoy);
+  const vencida = abiertas.find((q) => q.dueDate < hoy);
+  const cuota = cuotas.length === 0
+    ? cuenta.pendiente
+    : tocan.length > 0 ? tocan.reduce((s, q) => s + falta(q), 0) : abiertas[0] ? falta(abiertas[0]) : 0;
+  return {
+    ...cuenta,
+    cuota: centavos(cuota),
+    diasAtraso: vencida ? diasEntre(vencida.dueDate, hoy) : 0,
+    venceHoy: abiertas.some((q) => q.dueDate === hoy),
+    proximaFecha: abiertas.find((q) => q.dueDate > hoy)?.dueDate,
+  };
+}
+
+/** Lo que se le sugiere cobrar a una cuenta: la cuota más la mora, sin pasarse de lo pendiente. */
+const sugeridoDe = (c: CuentaDeCobro) => Math.min(c.pendiente, c.cuota + c.mora);
+
+const toca = (c: CuentaDeCobro) => c.diasAtraso > 0 || c.venceHoy;
+
+/**
+ * Las paradas del día: los clientes de la cartera con algo atrasado, algo que
+ * vence hoy o una promesa para hoy (y algo pendiente). Por `orden` sigue el
+ * orden de la cartera y, a igual orden, el nombre; por `atraso`, el que más
+ * días lleva primero.
+ */
+export function rutaDelDia(
+  cuentas: CuentaDeCobro[],
+  asignados: { customerId: string; orden: number; nombre?: string }[],
+  promesas: Promesa[],
+  hoy: string,
+  ordenarPor: 'orden' | 'atraso',
+): ParadaDeRuta[] {
+  const paradas: ParadaDeRuta[] = [];
+  for (const a of asignados) {
+    const suyas = cuentas.filter((c) => c.customerId === a.customerId && c.pendiente > 0.005);
+    if (suyas.length === 0) continue;
+    const promesa = promesas.find((p) => p.customerId === a.customerId && p.fecha === hoy);
+    const tocan = suyas.filter(toca);
+    if (tocan.length === 0 && !promesa) continue;
+
+    const diasAtraso = Math.max(0, ...suyas.map((c) => c.diasAtraso));
+    const motivo: MotivoDeVisita = diasAtraso > 0 ? 'atrasado' : tocan.length > 0 ? 'vence_hoy' : 'promesa';
+    const sugerido = tocan.length > 0
+      ? tocan.reduce((s, c) => s + sugeridoDe(c), 0)
+      : promesa?.monto ?? suyas.reduce((s, c) => s + sugeridoDe(c), 0);
+
+    paradas.push({
+      customerId: a.customerId,
+      nombre: a.nombre,
+      cuentas: suyas,
+      sugerido: centavos(sugerido),
+      diasAtraso,
+      motivo,
+      promesa,
+      orden: a.orden,
+    });
+  }
+
+  const porNombre = (x: ParadaDeRuta, y: ParadaDeRuta) =>
+    (x.nombre ?? '').localeCompare(y.nombre ?? '', 'es') || x.customerId.localeCompare(y.customerId);
+  return paradas.sort((x, y) =>
+    ordenarPor === 'atraso'
+      ? y.diasAtraso - x.diasAtraso || x.orden - y.orden || porNombre(x, y)
+      : x.orden - y.orden || porNombre(x, y));
+}
+
+/** Un día más o menos sobre una fecha yyyy-mm-dd local. */
+function sumarDias(fecha: string, n: number): string {
+  const d = new Date(`${fecha}T00:00:00`);
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export type MotivoDeAviso = 'manana' | 'hoy' | 'atrasado';
+
+export type Aviso = { customerId: string; motivo: MotivoDeAviso; diasAtraso: number; monto: number; fecha: string };
+
+const ORDEN_AVISO: Record<MotivoDeAviso, number> = { atrasado: 0, hoy: 1, manana: 2 };
+
+/**
+ * Los avisos de cuota del día, uno por cliente: algo atrasado, una cuota de hoy
+ * o una de mañana. El monto es lo que se le cobraría (cuota y mora, sin pasar de
+ * lo pendiente) de lo que ya toca; si solo es mañana, lo que falta de esa cuota.
+ * Con `clientes`, solo esos (la cartera del cobrador).
+ */
+export function avisosDelDia(cuentas: CuentaDeCobro[], hoy: string, clientes?: Set<string>): Aviso[] {
+  const manana = sumarDias(hoy, 1);
+  const porCliente = new Map<string, CuentaDeCobro[]>();
+  for (const c of cuentas) {
+    if (c.pendiente <= 0.005 || (clientes && !clientes.has(c.customerId))) continue;
+    porCliente.set(c.customerId, [...(porCliente.get(c.customerId) ?? []), c]);
+  }
+  const avisos: Aviso[] = [];
+  for (const [customerId, suyas] of porCliente) {
+    const tocan = suyas.filter(toca);
+    if (tocan.length > 0) {
+      const diasAtraso = Math.max(0, ...tocan.map((c) => c.diasAtraso));
+      avisos.push({
+        customerId,
+        motivo: diasAtraso > 0 ? 'atrasado' : 'hoy',
+        diasAtraso,
+        monto: centavos(tocan.reduce((s, c) => s + sugeridoDe(c), 0)),
+        fecha: diasAtraso > 0 ? sumarDias(hoy, -diasAtraso) : hoy,
+      });
+      continue;
+    }
+    const deManana = suyas.filter((c) => c.proximaFecha === manana);
+    if (deManana.length > 0) {
+      avisos.push({
+        customerId, motivo: 'manana', diasAtraso: 0, fecha: manana,
+        monto: centavos(deManana.reduce((s, c) => s + Math.min(c.pendiente, c.cuota), 0)),
+      });
+    }
+  }
+  return avisos.sort((x, y) =>
+    ORDEN_AVISO[x.motivo] - ORDEN_AVISO[y.motivo] || y.diasAtraso - x.diasAtraso || x.customerId.localeCompare(y.customerId));
+}
+
+export type Periodo = 'hoy' | 'semana' | 'mes' | 'mes_pasado' | '30';
+
+/** El rango de un período de los reportes, en fechas locales. La semana empieza
+ *  el lunes. */
+export function rangoDelPeriodo(periodo: Periodo, hoy: string): { desde: string; hasta: string } {
+  const d = new Date(`${hoy}T00:00:00`);
+  const ymd = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  if (periodo === 'hoy') return { desde: hoy, hasta: hoy };
+  if (periodo === 'semana') return { desde: sumarDias(hoy, -((d.getDay() + 6) % 7)), hasta: hoy };
+  if (periodo === 'mes') return { desde: ymd(new Date(d.getFullYear(), d.getMonth(), 1)), hasta: hoy };
+  if (periodo === 'mes_pasado') {
+    return { desde: ymd(new Date(d.getFullYear(), d.getMonth() - 1, 1)), hasta: ymd(new Date(d.getFullYear(), d.getMonth(), 0)) };
+  }
+  return { desde: sumarDias(hoy, -29), hasta: hoy };
+}
+
+/** Cobrado entre por cobrar, en %, sin tope (cobrar atrasos lo sube de 100).
+ *  Sin nada por cobrar no hay efectividad. */
+export function efectividad(cobrado: number, porCobrar: number): number | null {
+  return porCobrar > 0 ? Math.round((cobrado / porCobrar) * 100) : null;
+}
+
+/** Las entregas sumadas por cobrador, en centavos exactos (0.1 + 0.2 = 0.3). */
+export function resumenDeEntregas(entregas: { collectorId: string; expected: number; received: number; difference: number }[]) {
+  const m = new Map<string, { collectorId: string; entregas: number; esperado: number; recibido: number; diferencia: number }>();
+  const c = (n: number) => Math.round(n * 100);
+  for (const e of entregas) {
+    const f = m.get(e.collectorId) ?? { collectorId: e.collectorId, entregas: 0, esperado: 0, recibido: 0, diferencia: 0 };
+    f.entregas += 1;
+    f.esperado += c(e.expected);
+    f.recibido += c(e.received);
+    f.diferencia += c(e.difference);
+    m.set(e.collectorId, f);
+  }
+  return [...m.values()].map((f) => ({ ...f, esperado: f.esperado / 100, recibido: f.recibido / 100, diferencia: f.diferencia / 100 }));
+}
+
+export type AbonoDelCobrador = {
+  monto: number;
+  metodo: 'cash' | 'transfer';
+  enCalle: boolean;
+  entregado: boolean;
+  anulado: boolean;
+  fecha: string;
+};
+
+/** Lo cobrado hoy (todo método, sin anulados) y el efectivo en mano: cobrado en
+ *  la calle, sin entregar y sin anular, con la fecha del más viejo. */
+export function resumenDelCobrador(abonos: AbonoDelCobrador[], hoy: string) {
+  const vivos = abonos.filter((a) => !a.anulado);
+  const enMano = vivos.filter((a) => a.metodo === 'cash' && a.enCalle && !a.entregado);
+  return {
+    cobradoHoy: centavos(vivos.filter((a) => a.fecha === hoy).reduce((s, a) => s + a.monto, 0)),
+    enMano: centavos(enMano.reduce((s, a) => s + a.monto, 0)),
+    enManoDesde: enMano.length ? enMano.map((a) => a.fecha).sort()[0] : undefined,
+  };
+}

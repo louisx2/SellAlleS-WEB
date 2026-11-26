@@ -65,3 +65,24 @@ export function adjuntoDelCorreo(doc: DocumentoVenta): string {
   if (doc === 'estado') return 'el estado de su financiamiento en formato PDF';
   return 'su factura en formato PDF';
 }
+
+// ---------- Recibo de un abono (Motopréstamos 3B) ----------
+// El cobrador manda por WhatsApp el recibo de un abono de préstamo o de venta. Va
+// en su propia carpeta: no pisa ningún documento de la venta.
+
+export const NOMBRE_RECIBO = 'recibo-de-abono.pdf';
+export const DIAS_RECIBO = 15;
+
+export function rutaDelRecibo(companyId: string, paymentId: string): string {
+  return `${companyId}/abonos/${paymentId}.pdf`;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** El abono que pide el navegador, o null si no es uno bien formado. */
+export function abonoValido(x: unknown): { tipo: 'prestamo' | 'venta'; paymentId: string } | null {
+  if (!x || typeof x !== 'object') return null;
+  const { tipo, paymentId } = x as { tipo?: unknown; paymentId?: unknown };
+  if ((tipo !== 'prestamo' && tipo !== 'venta') || typeof paymentId !== 'string' || !UUID.test(paymentId)) return null;
+  return { tipo, paymentId };
+}

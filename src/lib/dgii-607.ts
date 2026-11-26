@@ -67,7 +67,9 @@ const idFields = (rnc: string): [string, string] => {
 // inicial va a su método de cobro y el balance a "Venta a Crédito".
 const paymentBreakdown = (sale: Sale): { cash: number; transfer: number; card: number; credit: number } => {
   const out = { cash: 0, transfer: 0, card: 0, credit: 0 };
-  const isCredit = sale.paymentStatus === 'credit' || sale.paymentStatus === 'in_financing';
+  // Una venta recuperada (Motopréstamos 4A) queda en 'paid' sin haberse cobrado
+  // entera: lo que no se cobró sigue siendo venta a crédito.
+  const isCredit = sale.paymentStatus === 'credit' || sale.paymentStatus === 'in_financing' || !!sale.recoveredAt;
   if (!isCredit) {
     if (sale.paymentMethod === 'transfer') out.transfer = sale.total;
     else if (sale.paymentMethod === 'card') out.card = sale.total;

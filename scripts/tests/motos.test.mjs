@@ -159,3 +159,136 @@ test('ventas del período por modelo, contado frente a financiado', () => {
     { modelo: 'Suzuki GN 125', contado: 0, financiado: 1 },
   ]);
 });
+
+// --- 2B: garantía en préstamos y matrículas (src/lib/motos.ts, motos-reportes.ts) ---
+import {
+  deudaDelVehiculo, diasDesde, entregaDeMatricula, matriculasPorPestana, reporteDeMatriculas, vehiculosParaGarantia,
+} from '../../src/lib/motos.ts';
+
+test('garantía: solo las motos del cliente en esa sucursal, liberadas o vendidas', () => {
+  const lista = [
+    { id: 'lib', customerId: 'c1', branchId: 'b1', status: 'liberado' },
+    { id: 'ven', customerId: 'c1', branchId: 'b1', status: 'vendido' },
+    { id: 'gar', customerId: 'c1', branchId: 'b1', status: 'en_garantia' },
+    { id: 'otro', customerId: 'c2', branchId: 'b1', status: 'liberado' },
+    { id: 'suc', customerId: 'c1', branchId: 'b2', status: 'liberado' },
+    { id: 'baja', customerId: 'c1', branchId: 'b1', status: 'baja' },
+  ];
+  assert.deepEqual(vehiculosParaGarantia(lista, 'c1', 'b1').map((v) => v.id), ['lib', 'ven']);
+});
+
+test('entrega de la matrícula: lista sí, con deuda solo el admin y forzada', () => {
+  assert.deepEqual(entregaDeMatricula({ registrationStatus: 'lista_para_entregar' }, false),
+    { puede: true, forzada: false, aviso: null });
+  const admin = entregaDeMatricula({ registrationStatus: 'en_custodia' }, true);
+  assert.equal(admin.puede, true);
+  assert.equal(admin.forzada, true);
+  assert.match(admin.aviso, /motivo/);
+  const cajero = entregaDeMatricula({ registrationStatus: 'en_custodia' }, false);
+  assert.equal(cajero.puede, false);
+  assert.equal(cajero.aviso, 'La deuda de esta moto no está saldada. Solo un administrador puede entregar la matrícula, y con motivo.');
+  assert.equal(entregaDeMatricula({ registrationStatus: 'entregada' }, true).puede, false);
+  assert.equal(entregaDeMatricula({ registrationStatus: 'no_aplica' }, true).puede, false);
+});
+
+test('días desde una fecha, de calendario y cruzando de mes', () => {
+  assert.equal(diasDesde(new Date(2026, 9, 30, 18, 0), new Date(2026, 10, 2, 8, 0)), 3);
+  assert.equal(diasDesde(new Date(2026, 10, 2, 8, 0), new Date(2026, 10, 2, 23, 0)), 0);
+});
+
+test('matrículas por pestaña: listas la más vieja primero, entregadas la más reciente primero', () => {
+  const d = (dia) => new Date(2026, 10, dia);
+  const lista = [
+    { id: 'c', registrationStatus: 'en_custodia', registrationSince: d(1) },
+    { id: 'l2', registrationStatus: 'lista_para_entregar', registrationSince: d(10) },
+    { id: 'l1', registrationStatus: 'lista_para_entregar', registrationSince: d(3) },
+    { id: 'e1', registrationStatus: 'entregada', registrationDeliveredAt: d(4) },
+    { id: 'e2', registrationStatus: 'entregada', registrationDeliveredAt: d(9) },
+    { id: 'n', registrationStatus: 'no_aplica' },
+  ];
+  const p = matriculasPorPestana(lista);
+  assert.deepEqual(p.enCustodia.map((v) => v.id), ['c']);
+  assert.deepEqual(p.listas.map((v) => v.id), ['l1', 'l2']);
+  assert.deepEqual(p.entregadas.map((v) => v.id), ['e2', 'e1']);
+});
+
+test('deuda de la moto: el préstamo si está en garantía o liberada, la venta si está vendida', () => {
+  const ventas = new Map([['s1', { pendiente: 30000, atrasado: false }]]);
+  const prestamos = new Map([['l1', { pendiente: 8000, atrasado: true }]]);
+  assert.deepEqual(deudaDelVehiculo({ status: 'en_garantia', loanId: 'l1' }, ventas, prestamos), { pendiente: 8000, atrasado: true });
+  assert.deepEqual(deudaDelVehiculo({ status: 'liberado', loanId: 'l1' }, ventas, prestamos), { pendiente: 8000, atrasado: true });
+  // Incautada (4A): el préstamo sigue corriendo y la ficha muestra su saldo.
+  assert.deepEqual(deudaDelVehiculo({ status: 'recuperado', loanId: 'l1' }, ventas, prestamos), { pendiente: 8000, atrasado: true });
+  assert.deepEqual(deudaDelVehiculo({ status: 'vendido', saleId: 's1' }, ventas, prestamos), { pendiente: 30000, atrasado: false });
+  assert.equal(deudaDelVehiculo({ status: 'disponible' }, ventas, prestamos), null);
+  assert.equal(deudaDelVehiculo({ status: 'vendido', saleId: 'otra' }, ventas, prestamos), null);
+});
+
+test('cartera: cada préstamo con garantía cuenta una vez aunque tenga dos motos', () => {
+  const vehicles = [
+    veh({ id: 'g1', status: 'en_garantia', loanId: 'L', cost: undefined }),
+    veh({ id: 'g2', status: 'en_garantia', loanId: 'L', cost: undefined }),
+    veh({ id: 'g3', status: 'en_garantia', loanId: 'M', cost: undefined }),
+    veh({ id: 'a', cost: 50000 }),
+  ];
+  const prestamos = new Map([['L', { pendiente: 40000, atrasado: true }], ['M', { pendiente: 0, atrasado: false }]]);
+  const c = carteraDeVehiculos(vehicles, new Map(), prestamos);
+  assert.deepEqual(c.prestamosConGarantia, { cantidad: 1, pendiente: 40000, atrasados: 1 });
+  assert.equal(c.inventarioACosto, 50000);
+  assert.deepEqual(carteraDeVehiculos(vehicles, new Map()).prestamosConGarantia, { cantidad: 0, pendiente: 0, atrasados: 0 });
+});
+
+test('reporte de matrículas: listas hace más de 30 días y entregadas en el período', () => {
+  const d = (mes, dia) => new Date(2026, mes, dia);
+  const hoy = d(10, 24);
+  const lista = [
+    { registrationStatus: 'en_custodia', registrationSince: d(10, 1) },
+    { registrationStatus: 'lista_para_entregar', registrationSince: d(9, 10) },  // 45 días
+    { registrationStatus: 'lista_para_entregar', registrationSince: d(10, 20) },
+    { registrationStatus: 'entregada', registrationDeliveredAt: d(10, 5) },
+    { registrationStatus: 'entregada', registrationDeliveredAt: d(8, 5) },     // fuera del período
+  ];
+  assert.deepEqual(reporteDeMatriculas(lista, d(10, 1), d(10, 30), hoy),
+    { enCustodia: 1, listas: 2, listasMasDe30: 1, entregadasEnPeriodo: 1 });
+});
+
+import { PERMISSION_RESOURCES, RESOURCE_MODULE, actionsFor } from '../../src/lib/permissions.ts';
+
+test('cobranza: tres permisos del módulo, con las acciones que usa la base', () => {
+  for (const key of ['cobranza', 'cobranza-all', 'cobranza-cuadre']) {
+    assert.ok(PERMISSION_RESOURCES.some((r) => r.key === key), key);
+    assert.equal(RESOURCE_MODULE[key], 'motoprestamos', key);
+  }
+  assert.deepEqual(actionsFor('cobranza'), ['view', 'create']);
+  assert.deepEqual(actionsFor('cobranza-all'), ['view']);
+  assert.deepEqual(actionsFor('cobranza-cuadre'), ['view', 'create']);
+});
+
+import { itemDeRuta } from '../../src/lib/rutas.ts';
+
+test('el permiso de una página es el del ítem del menú más específico', () => {
+  const items = [
+    { href: '/motos', permission: 'motos' },
+    { href: '/motos/cobranza', permission: 'cobranza' },
+    { href: '/motos/cobranza/asignar', permission: 'cobranza-all' },
+    { href: '/motos/config', permission: 'motos-config' },
+  ];
+  assert.equal(itemDeRuta(items, '/motos/cobranza')?.permission, 'cobranza');
+  assert.equal(itemDeRuta(items, '/motos/cobranza/asignar')?.permission, 'cobranza-all');
+  assert.equal(itemDeRuta(items, '/motos/config')?.permission, 'motos-config');
+  assert.equal(itemDeRuta(items, '/motos/ficha')?.permission, 'motos');
+  assert.equal(itemDeRuta(items, '/motos')?.permission, 'motos');
+  assert.equal(itemDeRuta(items, '/motosierra'), undefined);
+});
+
+import { REPORT_ITEMS } from '../../src/lib/permissions.ts';
+
+test('los reportes de cobranza se pueden dar o quitar en un rol', () => {
+  const slugs = REPORT_ITEMS.map((r) => r.slug);
+  assert.ok(slugs.includes('cobranza'));
+  assert.ok(slugs.includes('cuadres'));
+});
+
+test('el reporte de recuperaciones se puede dar o quitar en un rol', () => {
+  assert.ok(REPORT_ITEMS.some((r) => r.slug === 'recuperaciones'));
+});

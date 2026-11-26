@@ -206,6 +206,27 @@ que se ve en la demo; la recuperación hace falta cuando el negocio ya lleva mes
 > la suite. Front sin fusionar. Diferencias con lo de abajo: el cajero ve las unidades con
 > `pos:view` para elegir el chasis; el selector se abre desde el carrito, así que sale por
 > tarjeta, búsqueda o código igual.
+>
+> **Estado 2B (2026-11-24):** construida en la rama `claude/motoprestamos-entrega-2b` (sobre
+> 2A). Migraciones `20261124180000_motos_datos_del_cliente` y
+> `20261124190000_motos_garantia_y_matriculas` **aplicadas en producción**, con las suites
+> `motos_clientes.sql` y `motos_garantia.sql` pasando contra lo aplicado. Diferencias con lo de
+> abajo: el enlace préstamo ↔ moto es `vehicles.loan_id` (como `sale_id`), no la tabla
+> `loan_collaterals` (el historial queda en `vehicle_events.loan_id`); el préstamo sin
+> garantía sigue por el insert de siempre y la RPC `motos_crear_prestamo` solo se usa con
+> garantía; saldar, anular el abono y refinanciar los resuelven triggers sobre `loans` y
+> `sales` (no se tocaron las funciones de abonos ni de refinanciación); la venta de una moto
+> que después se dio en garantía ya no se puede anular. Pasan a 2C: exigir garante, custodia
+> por defecto, fotos de la cédula, contrato y portal.
+>
+> **Estado 2C (2026-11-24):** construida en la rama `claude/motoprestamos-entrega-2c` (sobre
+> 2B). Migraciones `20261124200000_motos_ajustes_y_fotos` y `20261124210000_motos_reglas_y_portal`
+> **aplicadas en producción**, con `motos_ajustes.sql` pasando contra lo aplicado. Diferencias con
+> lo de abajo: los ajustes son por empresa (`motos_settings`; sin fila = lo de 2A/2B); las
+> plantillas vacías usan el texto base (no se siembran); con «custodia en contado» la matrícula
+> queda «lista para entregar»; exigir garante aplica a todo préstamo nuevo (no a refinanciaciones)
+> y a la venta de una moto a plazo, solo con el módulo encendido; las fotos de la cédula viven en
+> el «Expediente del cliente»; el texto de WhatsApp pasa a la entrega 3.
 
 ### Catálogo, rubro y menú
 
@@ -333,6 +354,29 @@ WhatsApp de avisos y recibos (entrega 3).
 
 ## Entrega 3 — Cobranza en la calle
 
+> **Estado 3A (2026-11-24):** cobradores, cartera, ruta, cobro en la calle, visitas y cuadre,
+> construida en la rama `claude/motoprestamos-entrega-3a` (sobre 2C). Migraciones
+> `20261125120000_cobranza_base` y `20261125130000_cobranza_cobro_y_cuadre` **aplicadas en
+> producción**, con `cobranza.sql` pasando contra lo aplicado. Diferencias con lo de abajo:
+> la columna es `collector_id` (no `collected_by`); el cobro lleva un identificador para que
+> repetirlo sin señal no cobre dos veces; la entrega rechaza si lo esperado cambió mientras el
+> cajero contaba; un cobrador con abonos o entregas no se puede borrar (se desmarca); el rol
+> Cobrador ve las motos de su sucursal (solo lectura, para la placa en la ruta); solo cobra
+> desde la ruta quien está marcado como cobrador en la sucursal (un admin con «ver todas las
+> rutas» las ve, pero cobra desde la oficina). Quedan para 3B: recibo y avisos por WhatsApp e
+> imprimir al cobrar, y los reportes de cobranza.
+>
+> **Estado 3B (2026-11-24):** recibo del abono, avisos por WhatsApp y reportes de cobranza,
+> construida en la rama `claude/motoprestamos-entrega-3b` (sobre 3A). Migración
+> `20261125140000_cobranza_recibos_y_reportes` **aplicada en producción** y `receipt-link` v10
+> desplegada (sin `abono` hace lo mismo que antes). Diferencias con lo de abajo: el recibo es el
+> mismo recibo de abono de la oficina (imprimir, o PDF con enlace corto de 15 días); un cobro
+> repetido por falta de señal no trae recibo; anular un abono borra el enlace de su recibo; las
+> plantillas (aviso y recibo) viven en `motos_settings` y vacías usan el texto base; «enviado
+> hoy» en Avisos se guarda en el teléfono; el reporte de cobranza lo calcula la base
+> (`cobranza_reporte`), con por cobrar según la cartera actual y una promesa cumplida solo por
+> un abono hecho después de la visita; quien tiene Reportes ve entregas y cartera.
+
 ### Cobradores y cartera
 
 - **Cobradores** = usuarios marcados como cobradores por sucursal (como los técnicos del Taller,
@@ -417,6 +461,22 @@ Cobrado hoy RD$9,200 · En mano RD$7,700 (sin entregar)
 ---
 
 ## Entrega 4 — Recuperación
+
+> **Estado 4A (2026-11-26):** recuperación de motos, construida en la rama
+> `claude/motoprestamos-entrega-4a` (sobre 3B). Migraciones `20261126120000_motos_recuperacion_base`,
+> `20261126130000_motos_recuperacion_rpc` y `20261126140000_motos_recuperacion_arreglos`
+> **aplicadas en producción**. Louis pidió «ambas» formas: la venta recuperada se cierra **dando
+> de baja el saldo** (4A; la nota de crédito parcial B04/E34 queda para 4B) y la garantía se
+> liquida **vendiéndola a un tercero** (abono sin factura; la moto sale de baja) **o quedándosela
+> el negocio** (dación en pago: método `dacion`, la moto entra al inventario por la tasación).
+> Diferencias con lo de abajo: la venta recuperada queda en `paid` con `recovered_at` y
+> `written_off_amount` (no hay estado nuevo; las pantallas dicen «Recuperada», no se cobra, no se
+> anula ni se reabre, no manda avisos ni cuenta en el 607 como cobrada); el préstamo con el saldo
+> de baja queda `cancelled` con `written_off_amount` (no recibe abonos ni avisos); el sobrante de
+> una venta a un tercero no pasa por la caja (solo el de la dación y la devolución de una venta
+> recuperada); el abono de una liquidación no se anula; una venta con dos motos no se recupera
+> desde una; refinanciar con la moto incautada la pasa al préstamo nuevo. Registro en
+> `vehicle_recoveries`; reporte «Recuperaciones de Motos».
 
 ### Moto vendida a cuotas
 

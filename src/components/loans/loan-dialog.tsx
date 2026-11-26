@@ -19,6 +19,10 @@ import { formatCurrency } from '@/lib/utils';
 import { CustomerSearchDialog } from '@/components/pos/customer-search-dialog';
 import { DisbursementFields } from '@/components/loans/disbursement-fields';
 import { useCaja } from '@/context/caja-provider';
+import { useModules } from '@/context/modules-provider';
+import { useMotosAjustes } from '@/hooks/use-motos-ajustes';
+import { supabase } from '@/lib/supabase/client';
+import { GarantiaFields, faltaEnGarantia, garantiaParaGuardar, garantiaVacia, type GarantiaForm } from '@/components/motos/garantia-fields';
 // El calendario, las etiquetas y el tope viven en lib/frequency.ts, compartidos
 // con Financiamiento: el prorrateo de la tasa mensual es el mismo cálculo.
 import { FREQUENCY_LABEL, FREQUENCY_OPTIONS, installmentLabel, maxInstallments, monthsFor } from '@/lib/frequency';
@@ -35,7 +39,15 @@ interface LoanDialogProps {
 // sale hacia el cliente, no al revés. El servidor recalcula todo al guardar.
 export function LoanDialog({ children }: LoanDialogProps) {
   const { toast } = useToast();
-  const { addLoan } = useLoans();
+  const { addLoan, addLoanConGarantia } = useLoans();
+  const { isModuleEnabled } = useModules();
+  // Con el módulo Motopréstamos el préstamo puede llevar la moto en garantía.
+  const conGarantia = isModuleEnabled('motoprestamos');
+  const [garantia, setGarantia] = useState<GarantiaForm>(garantiaVacia);
+  const { ajustes } = useMotosAjustes();
+  // Con «exigir garante» encendido, la base rechaza el préstamo de un cliente sin
+  // garantes: aquí se avisa antes.
+  const [sinGarante, setSinGarante] = useState(false);
   const { branches } = useBranches();
   const { appUser } = useAuth();
   const { profile } = useCompanyProfile();
@@ -71,7 +83,9 @@ export function LoanDialog({ children }: LoanDialogProps) {
       setNotes('');
       setDisbursementMethod('cash');
       setDisbursementReference('');
+      setGarantia({ ...garantiaVacia(), custodia: ajustes.custodyLoan });
     }
+    // Solo al abrir: si los ajustes llegan tarde, los pone el efecto de abajo sin borrar lo escrito.
   }, [open, appUser?.activeBranchId, profile.defaultLoanInterestRate]);
 
   // Sin caja abierta no se ofrece el efectivo.
@@ -95,13 +109,30 @@ export function LoanDialog({ children }: LoanDialogProps) {
   const nInstallments = Number(installments) || 0;
   const isPrincipalInvalid = !principal || Number(principal) <= 0;
   const isInstallmentsInvalid = nInstallments < 1 || nInstallments > maxInstallments(frequency);
-  const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isInstallmentsInvalid && preview.installmentAmount > 0;
+  // Si los ajustes cargan con el diálogo ya abierto, solo se ajusta el valor
+  // inicial de la custodia mientras la garantía no se haya tocado.
+  useEffect(() => {
+    if (!open) return;
+    setGarantia((g) => (g.activa ? g : { ...g, custodia: ajustes.custodyLoan }));
+  }, [open, ajustes.custodyLoan]);
+
+  useEffect(() => {
+    if (!open || !conGarantia || !ajustes.requireGuarantor || !customer) { setSinGarante(false); return; }
+    let vigente = true;
+    supabase.from('customer_guarantors').select('id', { count: 'exact', head: true }).eq('customer_id', customer.id)
+      .then(({ count }) => { if (vigente) setSinGarante((count ?? 0) === 0); });
+    return () => { vigente = false; };
+  }, [open, conGarantia, ajustes.requireGuarantor, customer]);
+
+  const faltaGarantia = conGarantia ? faltaEnGarantia(garantia) : null;
+  const canSubmit = !!customer && !!branchId && !isPrincipalInvalid && !isInstallmentsInvalid && preview.installmentAmount > 0
+    && !faltaGarantia && !sinGarante;
 
   const handleSubmit = async () => {
     if (!canSubmit || !customer) return;
     setSaving(true);
     try {
-      const loan = await addLoan({
+      const datos = {
         branchId,
         customerId: customer.id,
         principal: Number(principal),
@@ -111,7 +142,11 @@ export function LoanDialog({ children }: LoanDialogProps) {
         notes: notes.trim() || undefined,
         disbursementMethod,
         disbursementReference: disbursementMethod === 'transfer' ? disbursementReference.trim() || undefined : undefined,
-      });
+      };
+      // Con garantía, la base crea el préstamo y la moto juntos.
+      const loan = conGarantia && garantia.activa
+        ? await addLoanConGarantia(datos, garantiaParaGuardar(garantia))
+        : await addLoan(datos);
       toast({ title: 'Préstamo creado', description: `${formatCurrency(Number(principal))} a ${customer.name}.` });
       setOpen(false);
       router.push(`/prestamos/detalle?id=${loan.id}&nuevo=1`);
@@ -202,6 +237,16 @@ export function LoanDialog({ children }: LoanDialogProps) {
               cashDisabled={cashDisabled}
             />
 
+            {sinGarante && (
+              <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+                Este cliente no tiene garante y el negocio lo exige para financiar o prestar. Agrégalo en el expediente del cliente.
+              </p>
+            )}
+
+            {conGarantia && (
+              <GarantiaFields value={garantia} onChange={setGarantia} customerId={customer?.id} branchId={branchId} />
+            )}
+
             <div className="grid gap-2">
               <Label htmlFor="notes">Notas (opcional)</Label>
               <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Ej: garantía, referencia, acuerdo…" />
@@ -237,7 +282,12 @@ export function LoanDialog({ children }: LoanDialogProps) {
       <CustomerSearchDialog
         isOpen={customerSearchOpen}
         onOpenChange={setCustomerSearchOpen}
-        onCustomerSelected={(c) => { setCustomer(c); setCustomerSearchOpen(false); }}
+        onCustomerSelected={(c) => {
+          setCustomer(c);
+          // La moto elegida era del cliente anterior.
+          setGarantia((g) => ({ ...g, vehicleId: '' }));
+          setCustomerSearchOpen(false);
+        }}
       />
     </>
   );
