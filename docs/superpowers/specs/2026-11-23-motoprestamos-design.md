@@ -462,6 +462,22 @@ Cobrado hoy RD$9,200 · En mano RD$7,700 (sin entregar)
 
 ## Entrega 4 — Recuperación
 
+> **Estado 4A (2026-11-26):** recuperación de motos, construida en la rama
+> `claude/motoprestamos-entrega-4a` (sobre 3B). Migraciones `20261126120000_motos_recuperacion_base`,
+> `20261126130000_motos_recuperacion_rpc` y `20261126140000_motos_recuperacion_arreglos`
+> **aplicadas en producción**. Louis pidió «ambas» formas: la venta recuperada se cierra **dando
+> de baja el saldo** (4A; la nota de crédito parcial B04/E34 queda para 4B) y la garantía se
+> liquida **vendiéndola a un tercero** (abono sin factura; la moto sale de baja) **o quedándosela
+> el negocio** (dación en pago: método `dacion`, la moto entra al inventario por la tasación).
+> Diferencias con lo de abajo: la venta recuperada queda en `paid` con `recovered_at` y
+> `written_off_amount` (no hay estado nuevo; las pantallas dicen «Recuperada», no se cobra, no se
+> anula ni se reabre, no manda avisos ni cuenta en el 607 como cobrada); el préstamo con el saldo
+> de baja queda `cancelled` con `written_off_amount` (no recibe abonos ni avisos); el sobrante de
+> una venta a un tercero no pasa por la caja (solo el de la dación y la devolución de una venta
+> recuperada); el abono de una liquidación no se anula; una venta con dos motos no se recupera
+> desde una; refinanciar con la moto incautada la pasa al préstamo nuevo. Registro en
+> `vehicle_recoveries`; reporte «Recuperaciones de Motos».
+
 ### Moto vendida a cuotas
 
 - Acción **Recuperar vehículo** en la venta financiada y en la ficha: fecha, motivo, estado de la
