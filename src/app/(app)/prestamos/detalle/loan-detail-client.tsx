@@ -466,6 +466,11 @@ export default function LoanDetailClient() {
                           <span className="text-xs text-muted-foreground" title="El préstamo se refinanció: sus abonos ya no se pueden anular.">
                             Cerrado
                           </span>
+                        ) : p.method === 'dacion' || garantia?.paymentId === p.id ? (
+                          // La liquidación de la garantía (dación o venta a un tercero) no se anula: la base lo rechaza.
+                          <span className="text-xs text-muted-foreground" title="Es la liquidación de la garantía: la moto ya salió y no se anula.">
+                            Liquidación
+                          </span>
                         ) : (
                           <Button variant="ghost" size="sm" onClick={() => setVoiding(p)}>
                             <Undo2 className="mr-1 h-3.5 w-3.5" />
