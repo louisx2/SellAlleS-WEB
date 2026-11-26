@@ -478,6 +478,14 @@ Cobrado hoy RD$9,200 · En mano RD$7,700 (sin entregar)
 > desde una; refinanciar con la moto incautada la pasa al préstamo nuevo. Registro en
 > `vehicle_recoveries`; reporte «Recuperaciones de Motos».
 
+> **Estado 4B (2026-11-26):** nota de crédito por lo no cobrado de la venta recuperada, en la rama
+> `claude/motoprestamos-entrega-4b` (diseño corto `2026-11-26-motoprestamos-4b-nota-credito-design.md`).
+> Migración `20261127120000_motos_nota_credito_recuperacion` **aplicada** y `ecf-emitir` **desplegada**
+> (las anulaciones arman igual que antes). Probada en pantalla en la demo: la E34 con
+> `CodigoModificacion` 3 la **aceptó la DGII en TesteCF**. La 607 la pone en «Venta a crédito»; en
+> Impuestos, la de más de 30 días no rebaja el ITBIS; Anulados la lista como «Recuperación» fuera de
+> sus totales.
+
 ### Moto vendida a cuotas
 
 - Acción **Recuperar vehículo** en la venta financiada y en la ficha: fecha, motivo, estado de la
