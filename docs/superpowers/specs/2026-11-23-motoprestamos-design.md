@@ -354,6 +354,18 @@ WhatsApp de avisos y recibos (entrega 3).
 
 ## Entrega 3 — Cobranza en la calle
 
+> **Estado 3A (2026-11-24):** cobradores, cartera, ruta, cobro en la calle, visitas y cuadre,
+> construida en la rama `claude/motoprestamos-entrega-3a` (sobre 2C). Migraciones
+> `20261125120000_cobranza_base` y `20261125130000_cobranza_cobro_y_cuadre` **aplicadas en
+> producción**, con `cobranza.sql` pasando contra lo aplicado. Diferencias con lo de abajo:
+> la columna es `collector_id` (no `collected_by`); el cobro lleva un identificador para que
+> repetirlo sin señal no cobre dos veces; la entrega rechaza si lo esperado cambió mientras el
+> cajero contaba; un cobrador con abonos o entregas no se puede borrar (se desmarca); el rol
+> Cobrador ve las motos de su sucursal (solo lectura, para la placa en la ruta); solo cobra
+> desde la ruta quien está marcado como cobrador en la sucursal (un admin con «ver todas las
+> rutas» las ve, pero cobra desde la oficina). Quedan para 3B: recibo y avisos por WhatsApp e
+> imprimir al cobrar, y los reportes de cobranza.
+
 ### Cobradores y cartera
 
 - **Cobradores** = usuarios marcados como cobradores por sucursal (como los técnicos del Taller,

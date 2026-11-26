@@ -1,4 +1,4 @@
-import type { Vehicle, VehicleEvent, VehicleType, CustomerGuarantor, CustomerReference, MotosSettings, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
+import type { Cobrador, AsignacionDeCartera, VisitaDeCobro, AbonoDeCobrador, EntregaDeCobrador, Vehicle, VehicleEvent, VehicleType, CustomerGuarantor, CustomerReference, MotosSettings, Product, ProductPresentation, LinePresentation, Customer, Branch, Supplier, Expense, Sale, CartItem, CompanyProfile, CreditNote, CreditPayment, FinancingInstallment, FinancingAmendment, PaymentResult, Quote, ProductCategory, ProductLocation, Loan, LoanInstallment, LoanPayment, LoanPaymentResult, Coupon, CajaSession, CajaMovement, CajaCloseResult, SubscriptionPayment, Role, SupplierInvoice, SupplierInvoiceItem, SupplierPayment, SupplierPaymentResult, VoidedNcf, RefinanceQuote, Refinancing, EcfDocumento } from '@/lib/types';
 import { isUuid } from '@/lib/utils';
 import { documentoVigente } from '@/lib/ecf';
 import { normalizeUnitCode, DEFAULT_UNIT_CODE } from '@/lib/units';
@@ -1134,4 +1134,38 @@ export const motosSettingsToRow = (p: Partial<MotosSettings>) => ({
   ...(p.requireGuarantor !== undefined ? { require_guarantor: p.requireGuarantor } : {}),
   ...('contractSale' in p ? { contract_sale: p.contractSale?.trim() || null } : {}),
   ...('contractLoan' in p ? { contract_loan: p.contractLoan?.trim() || null } : {}),
+});
+
+// ---------- Cobranza en la calle (Motopréstamos 3A) ----------
+const num = (v: any) => Number(v ?? 0);
+const opcional = (v: any) => (v == null ? undefined : v);
+
+export const rowToCobrador = (r: any): Cobrador => ({
+  id: r.id, branchId: r.branch_id, profileId: r.profile_id,
+  name: r.profiles?.name ?? 'Sin nombre', isActive: r.is_active !== false,
+});
+
+export const rowToAsignacion = (r: any): AsignacionDeCartera => ({
+  id: r.id, branchId: r.branch_id, customerId: r.customer_id, collectorId: r.collector_id, orden: r.visit_order ?? 0,
+});
+
+export const rowToVisita = (r: any): VisitaDeCobro => ({
+  id: r.id, branchId: r.branch_id, customerId: r.customer_id, collectorId: opcional(r.collector_id),
+  outcome: r.outcome, promiseDate: opcional(r.promise_date),
+  promiseAmount: r.promise_amount == null ? undefined : num(r.promise_amount),
+  note: opcional(r.note), paymentId: opcional(r.payment_id), createdByName: opcional(r.created_by_name),
+  createdAt: r.created_at,
+});
+
+export const rowToAbonoDeCobrador = (tipo: 'prestamo' | 'venta', r: any): AbonoDeCobrador => ({
+  id: r.id, tipo, collectorId: r.collector_id, customerId: r.customer_id,
+  cuentaId: opcional(tipo === 'prestamo' ? r.loan_id : r.sale_id),
+  amount: num(r.amount), method: r.method, date: r.date, enCalle: !!r.en_calle,
+  settlementId: opcional(r.settlement_id), voided: r.voided_at != null,
+});
+
+export const rowToEntrega = (r: any): EntregaDeCobrador => ({
+  id: r.id, collectorId: r.collector_id, expected: num(r.expected), received: num(r.received),
+  difference: num(r.difference), note: opcional(r.note), receivedByName: opcional(r.received_by_name),
+  cajaMovementId: opcional(r.caja_movement_id), createdAt: r.created_at,
 });

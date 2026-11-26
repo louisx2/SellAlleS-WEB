@@ -249,3 +249,32 @@ test('reporte de matrículas: listas hace más de 30 días y entregadas en el pe
   assert.deepEqual(reporteDeMatriculas(lista, d(10, 1), d(10, 30), hoy),
     { enCustodia: 1, listas: 2, listasMasDe30: 1, entregadasEnPeriodo: 1 });
 });
+
+import { PERMISSION_RESOURCES, RESOURCE_MODULE, actionsFor } from '../../src/lib/permissions.ts';
+
+test('cobranza: tres permisos del módulo, con las acciones que usa la base', () => {
+  for (const key of ['cobranza', 'cobranza-all', 'cobranza-cuadre']) {
+    assert.ok(PERMISSION_RESOURCES.some((r) => r.key === key), key);
+    assert.equal(RESOURCE_MODULE[key], 'motoprestamos', key);
+  }
+  assert.deepEqual(actionsFor('cobranza'), ['view', 'create']);
+  assert.deepEqual(actionsFor('cobranza-all'), ['view']);
+  assert.deepEqual(actionsFor('cobranza-cuadre'), ['view', 'create']);
+});
+
+import { itemDeRuta } from '../../src/lib/rutas.ts';
+
+test('el permiso de una página es el del ítem del menú más específico', () => {
+  const items = [
+    { href: '/motos', permission: 'motos' },
+    { href: '/motos/cobranza', permission: 'cobranza' },
+    { href: '/motos/cobranza/asignar', permission: 'cobranza-all' },
+    { href: '/motos/config', permission: 'motos-config' },
+  ];
+  assert.equal(itemDeRuta(items, '/motos/cobranza')?.permission, 'cobranza');
+  assert.equal(itemDeRuta(items, '/motos/cobranza/asignar')?.permission, 'cobranza-all');
+  assert.equal(itemDeRuta(items, '/motos/config')?.permission, 'motos-config');
+  assert.equal(itemDeRuta(items, '/motos/ficha')?.permission, 'motos');
+  assert.equal(itemDeRuta(items, '/motos')?.permission, 'motos');
+  assert.equal(itemDeRuta(items, '/motosierra'), undefined);
+});
