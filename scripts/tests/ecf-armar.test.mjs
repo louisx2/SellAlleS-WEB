@@ -354,6 +354,14 @@ test('E34 anula con referencia', () => {
   assert.equal(vieja.Encabezado.IdDoc.IndicadorNotaCredito, 1);
 });
 
+test('E34 que corrige montos (recuperación) lleva CodigoModificacion 3; sin código sigue siendo 1', () => {
+  const referencia = { encf: 'E320000000007', fechaEmision: '2026-10-01', masDe30Dias: true };
+  const corrige = armar({ tipo: 34, encf: 'E340000000002', referencia: { ...referencia, codigoModificacion: 3 } });
+  assert.equal(corrige.InformacionReferencia.CodigoModificacion, 3);
+  const anula = armar({ tipo: 34, encf: 'E340000000003', referencia });
+  assert.equal(anula.InformacionReferencia.CodigoModificacion, 1);
+});
+
 test('E34 sin comprador (venta a consumidor final) usa Consumidor Final', () => {
   const ecf = armar({
     tipo: 34,

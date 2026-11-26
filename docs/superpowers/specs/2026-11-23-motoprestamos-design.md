@@ -478,6 +478,14 @@ Cobrado hoy RD$9,200 · En mano RD$7,700 (sin entregar)
 > desde una; refinanciar con la moto incautada la pasa al préstamo nuevo. Registro en
 > `vehicle_recoveries`; reporte «Recuperaciones de Motos».
 
+> **Estado 4B (2026-11-26):** nota de crédito por lo no cobrado de la venta recuperada, en la rama
+> `claude/motoprestamos-entrega-4b` (diseño corto `2026-11-26-motoprestamos-4b-nota-credito-design.md`).
+> Migración `20261127120000_motos_nota_credito_recuperacion` **aplicada** y `ecf-emitir` **desplegada**
+> (las anulaciones arman igual que antes). Probada en pantalla en la demo: la E34 con
+> `CodigoModificacion` 3 la **aceptó la DGII en TesteCF**. La 607 la pone en «Venta a crédito»; en
+> Impuestos, la de más de 30 días no rebaja el ITBIS; Anulados la lista como «Recuperación» fuera de
+> sus totales.
+
 ### Moto vendida a cuotas
 
 - Acción **Recuperar vehículo** en la venta financiada y en la ficha: fecha, motivo, estado de la
@@ -531,6 +539,19 @@ Cobrado hoy RD$9,200 · En mano RD$7,700 (sin entregar)
 3. **Recuperación ante la DGII** (para tu contador): al recuperar una moto vendida a cuotas, ¿se
    emite nota de crédito por lo que no se pagó o solo se da de baja el saldo? Y al liquidar una
    garantía, ¿basta con registrar lo obtenido como abono, sin factura? Bloquea solo la entrega 4.
+
+## Pendientes que anotó Louis (2026-11-26)
+
+1. **Sugerencias al encender el módulo.** Al activar Motopréstamos en una empresa, cargar solas, como
+   sugerencia que se puede borrar, las categorías de vehículos (Motor, Pasola, Carro…) y las del
+   inventario (Motos, Repuestos…). Hoy los tipos de vehículo («Motor») solo se crean al dar de alta
+   la empresa con el rubro Motopréstamos (`admin/empresas`, `preset.vehicleTypes`); encender el
+   módulo después en una empresa que ya existe no carga nada.
+2. **Nada de vehículos con el módulo apagado.** Las opciones de Inventario no deben ofrecer «Es
+   vehículo» si el módulo está apagado. El formulario del artículo ya lo esconde
+   (`product-dialog.tsx`: `showVehicle = isModuleEnabled('motoprestamos') || product.isVehicle`),
+   salvo en un artículo que ya era vehículo. Falta confirmar con Louis en qué pantalla lo vio y
+   revisar el resto de Inventario (filtros, columnas, importación).
 
 ## Decisiones mías para revisar
 

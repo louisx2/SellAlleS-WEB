@@ -8,6 +8,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase/client';
 import { useAuth } from '@/context/auth-provider';
 import { rowToVehicleRecovery } from '@/lib/supabase/mappers';
+import { emitirEcf } from '@/lib/ecf-client';
+import { tipoDeEncf } from '@/lib/ecf';
 import type { VehicleRecovery } from '@/lib/types';
 
 export type IncautarInput = { fecha: string; motivo: string; nota?: string };
@@ -45,6 +47,8 @@ export type RecuperarVentaInput = {
 };
 
 export type ResultadoRecuperarVenta = { recoveryId: string; deuda: number; devuelto: number };
+
+export type ResultadoNotaDeCredito = { creditNoteId: string; ncf: string | null; total: number };
 
 const limpio = (s?: string) => (s?.trim() ? s.trim() : null);
 
@@ -139,5 +143,19 @@ export function useRecuperaciones(vehicleId?: string, opts?: { enabled?: boolean
     return { recoveryId: r.recovery_id, deuda: Number(r.deuda), devuelto: Number(r.devuelto) };
   };
 
-  return { recuperaciones, loading, reload, deudaDelPrestamo, incautar, devolver, liquidar, recuperarVenta };
+  /** Nota de crédito por lo no cobrado de una venta recuperada (4B). Si es una E34,
+   *  se manda a firmar enseguida, como la de la anulación; si no alcanza, el
+   *  servidor la reintenta. */
+  const emitirNotaDeCredito = async (saleId: string, motivo?: string): Promise<ResultadoNotaDeCredito> => {
+    const { data, error } = await supabase.rpc('motos_nota_credito_recuperacion', {
+      p_sale_id: saleId,
+      p_motivo: limpio(motivo),
+    });
+    if (error) throw error;
+    const r = data as any;
+    if (tipoDeEncf(r.ncf) === 34) await emitirEcf({ creditNoteId: r.credit_note_id }).catch(() => undefined);
+    return { creditNoteId: r.credit_note_id, ncf: r.ncf ?? null, total: Number(r.total) };
+  };
+
+  return { recuperaciones, loading, reload, deudaDelPrestamo, incautar, devolver, liquidar, recuperarVenta, emitirNotaDeCredito };
 }

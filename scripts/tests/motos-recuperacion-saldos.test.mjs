@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { deudaCerrada, estadoSinDeuda } from '../../src/lib/motos-recuperacion.ts';
+import { deudaCerrada, estadoSinDeuda, itbisQueRebajaLaNota } from '../../src/lib/motos-recuperacion.ts';
 import { classify607, DGII_607_HEADERS } from '../../src/lib/dgii-607.ts';
 
 test('deuda cerrada: préstamo con el saldo dado de baja o venta recuperada', () => {
@@ -41,4 +41,38 @@ test('607: la venta a crédito recuperada reporta lo cobrado por su método y el
   const campo = (nombre) => Number(rows[0].fields[DGII_607_HEADERS.indexOf(nombre)] || 0);
   assert.equal(campo('Venta a Crédito'), 75000);
   assert.equal(campo('Efectivo'), 0);
+});
+
+const notaDeRecuperacion = (extra = {}) => ({
+  id: 'n1', saleId: 's2', customerName: 'Cliente', ncf: 'B0400000001', ncfModified: 'B0200000001',
+  subtotal: 84745.76, itbisAmount: 15254.24, total: 100000, createdAt: new Date('2026-05-01T15:00:00Z'),
+  kind: 'recuperacion', ...extra,
+});
+
+test('607: la nota de una recuperación reversa venta a crédito, no efectivo', () => {
+  const { rows } = classify607([], [notaDeRecuperacion()]);
+  assert.equal(rows.length, 1);
+  const campo = (nombre) => Number(rows[0].fields[DGII_607_HEADERS.indexOf(nombre)] || 0);
+  assert.equal(campo('Venta a Crédito'), 100000);
+  assert.equal(campo('Efectivo'), 0);
+  assert.equal(campo('Cheque/Transferencia'), 0);
+});
+
+test('607: la nota de una anulación sigue en el método con que se devolvió', () => {
+  const { rows } = classify607([], [notaDeRecuperacion({ kind: 'anulacion', refundMethod: 'transfer', total: 118 })]);
+  const campo = (nombre) => Number(rows[0].fields[DGII_607_HEADERS.indexOf(nombre)] || 0);
+  assert.equal(campo('Cheque/Transferencia'), 118);
+  assert.equal(campo('Venta a Crédito'), 0);
+});
+
+test('ITBIS que rebaja la nota: la de recuperación con más de 30 días no rebaja', () => {
+  const nota = (creada) => ({ kind: 'recuperacion', itbisAmount: 15254.24, createdAt: new Date(creada) });
+  const venta = new Date('2026-04-01T15:00:00Z');
+  // 1 de abril → 1 de mayo son 30 días: todavía rebaja; → 2 de mayo son 31: ya no.
+  assert.equal(itbisQueRebajaLaNota(nota('2026-05-01T15:00:00Z'), venta), 15254.24);
+  assert.equal(itbisQueRebajaLaNota(nota('2026-05-02T15:00:00Z'), venta), 0);
+  // Sin la fecha de la venta no se puede saber: rebaja, como hasta hoy.
+  assert.equal(itbisQueRebajaLaNota(nota('2026-07-01T15:00:00Z'), undefined), 15254.24);
+  // Las anulaciones siguen como hasta hoy.
+  assert.equal(itbisQueRebajaLaNota({ kind: 'anulacion', itbisAmount: 18, createdAt: new Date('2026-07-01T15:00:00Z') }, venta), 18);
 });

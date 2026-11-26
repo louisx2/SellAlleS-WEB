@@ -48,6 +48,9 @@ type FilaNota = {
   reason: string | null;
   user_name: string | null;
   created_at: string;
+  // 'recuperacion': nota parcial de una venta recuperada (Motopréstamos 4B). Se lista
+  // marcada, pero no es una anulación: no cuenta en los totales.
+  kind: string | null;
   customers: { name: string | null } | null;
   sales: { created_at: string; user_name: string | null } | null;
 };
@@ -97,7 +100,7 @@ export default function AnuladosPage() {
       // porque casi siempre es otra.
       let q = supabase
         .from('credit_notes')
-        .select('id,sale_id,branch_id,ncf,ncf_modified,total,refund_method,reason,user_name,created_at,customers(name),sales(created_at,user_name)')
+        .select('id,sale_id,branch_id,ncf,ncf_modified,total,refund_method,reason,user_name,created_at,kind,customers(name),sales(created_at,user_name)')
         .gte('created_at', desdeIso)
         .lte('created_at', hastaIso)
         .order('created_at', { ascending: false });
@@ -123,6 +126,7 @@ export default function AnuladosPage() {
     let devuelto = 0;
     let sinDevolucion = 0;
     notas.forEach((n) => {
+      if (n.kind === 'recuperacion') return;
       const t = Number(n.total ?? 0);
       anuladas += 1;
       monto += t;
@@ -144,7 +148,8 @@ export default function AnuladosPage() {
       { header: 'Motivo', value: (n: FilaNota) => n.reason ?? '' },
       { header: 'Facturó', value: (n: FilaNota) => n.sales?.user_name ?? '' },
       { header: 'Anuló', value: (n: FilaNota) => n.user_name ?? '' },
-      { header: 'NC (B04)', value: (n: FilaNota) => n.ncf ?? '' },
+      { header: 'Tipo', value: (n: FilaNota) => (n.kind === 'recuperacion' ? 'Recuperación' : 'Anulación') },
+      { header: 'NC', value: (n: FilaNota) => n.ncf ?? '' },
       { header: 'NCF anulado', value: (n: FilaNota) => n.ncf_modified ?? '' },
     ],
     [sucursales],
@@ -288,6 +293,9 @@ export default function AnuladosPage() {
                           </div>
                         )}
                         {n.ncf && <div className="font-mono text-muted-foreground">NC {n.ncf}</div>}
+                        {n.kind === 'recuperacion' && (
+                          <div className="mt-0.5 inline-block rounded border border-orange-700 px-1 text-orange-700">Recuperación</div>
+                        )}
                       </TableCell>
                       {esAdmin && selectedBranch === 'all' && (
                         <TableCell className="text-xs">

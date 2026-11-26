@@ -118,10 +118,14 @@ const buildSaleFields = (sale: Sale): string[] => {
 
 const buildCreditNoteFields = (note: CreditNote): string[] => {
   const [rnc, tipoId] = idFields(digitsOnly(note.customerRnc));
-  // La devolución del dinero va en la casilla del método con que se devolvió.
-  const cash = note.refundMethod === 'cash' || !note.refundMethod ? note.total : 0;
-  const transfer = note.refundMethod === 'transfer' ? note.total : 0;
-  const card = note.refundMethod === 'card' ? note.total : 0;
+  // La devolución del dinero va en la casilla del método con que se devolvió. La nota
+  // de una venta recuperada (Motopréstamos 4B) no devuelve dinero: reversa lo que
+  // quedó a crédito, así que va entera en la casilla 20.
+  const recuperacion = note.kind === 'recuperacion';
+  const cash = !recuperacion && (note.refundMethod === 'cash' || !note.refundMethod) ? note.total : 0;
+  const transfer = !recuperacion && note.refundMethod === 'transfer' ? note.total : 0;
+  const card = !recuperacion && note.refundMethod === 'card' ? note.total : 0;
+  const credit = recuperacion ? note.total : 0;
   return [
     rnc,                                            // 1  RNC o Cédula del cliente
     tipoId,                                         // 2  1=RNC, 2=Cédula
@@ -136,7 +140,7 @@ const buildCreditNoteFields = (note: CreditNote): string[] => {
     fmtAmount(cash),                                // 17 Efectivo
     fmtAmount(transfer),                            // 18 Cheque / Transferencia / Depósito
     fmtAmount(card),                                // 19 Tarjeta débito/crédito
-    '0.00',                                         // 20 Venta a crédito
+    fmtAmount(credit),                              // 20 Venta a crédito
     '0.00', '0.00', '0.00',                         // 21-23
   ];
 };

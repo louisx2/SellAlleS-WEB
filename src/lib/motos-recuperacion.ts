@@ -89,6 +89,49 @@ export function recuperadoDe(r: {
   return 0;
 }
 
+/**
+ * Monto de la nota de crédito de una venta recuperada (4B): lo que no se cobró del
+ * valor facturado. La factura no lleva intereses y lo abonado cubrió capital e
+ * interés, así que se prorratea contra el total a pagar; lo devuelto al cliente
+ * también cuenta como no cobrado. Es la vista previa del diálogo: la base calcula
+ * el monto final desde las líneas de la venta (puede diferir en un centavo).
+ */
+export function montoNotaDeRecuperacion(v: {
+  totalFacturado: number;
+  totalAPagar: number;
+  dadoDeBaja: number;
+  devuelto: number;
+}): number {
+  const aPagar = aCentavos(v.totalAPagar);
+  const noCobrado = Math.max(aCentavos(v.dadoDeBaja) + aCentavos(v.devuelto), 0);
+  if (aPagar <= 0 || noCobrado <= 0) return 0;
+  const factor = Math.min(1, noCobrado / aPagar);
+  return Math.round(aCentavos(v.totalFacturado) * factor) / 100;
+}
+
+/** Días que puede pasar una nota de crédito después de su factura y seguir rebajando el ITBIS. */
+export const DIAS_NOTA_REBAJA_ITBIS = 30;
+
+const diasCalendario = (desde: Date, hasta: Date) =>
+  Math.round(
+    (Date.UTC(hasta.getFullYear(), hasta.getMonth(), hasta.getDate())
+      - Date.UTC(desde.getFullYear(), desde.getMonth(), desde.getDate())) / 86_400_000,
+  );
+
+/**
+ * ITBIS que rebaja una nota de crédito en el reporte de impuestos. La nota de una
+ * venta recuperada emitida más de 30 días después de la factura no lo rebaja (por
+ * eso su E34 sale con IndicadorNotaCredito 1). Las anulaciones siguen como hasta hoy,
+ * y sin la fecha de la venta no hay cómo saberlo: rebaja.
+ */
+export function itbisQueRebajaLaNota(
+  nota: { kind?: string; itbisAmount: number; createdAt: Date },
+  fechaVenta?: Date,
+): number {
+  if (nota.kind !== 'recuperacion' || !fechaVenta) return nota.itbisAmount;
+  return diasCalendario(fechaVenta, nota.createdAt) > DIAS_NOTA_REBAJA_ITBIS ? 0 : nota.itbisAmount;
+}
+
 /** Resultado de una recuperación para el reporte: recuperado − dado de baja − devuelto. */
 export function resultadoDeRecuperacion(r: { recuperado: number; dadoDeBaja: number; devuelto: number }): number {
   return (aCentavos(r.recuperado) - aCentavos(r.dadoDeBaja) - aCentavos(r.devuelto)) / 100;

@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { formatCurrency } from '@/lib/utils';
+import { itbisQueRebajaLaNota } from '@/lib/motos-recuperacion';
 import { Receipt, DollarSign, Hash, ArrowUpCircle, ArrowDownCircle, Scale } from 'lucide-react';
 import { ExportButton } from '@/components/reports/export-button';
 
@@ -46,7 +47,7 @@ export default function TaxesReportPage() {
     (async () => {
       const { data } = await supabase
         .from('credit_notes')
-        .select('*, customers(name, rnc)')
+        .select('*, customers(name, rnc), sales(created_at)')
         .or(`branch_id.eq.${activeBranchId},branch_id.is.null`)
         .order('created_at', { ascending: false });
       if (!cancelled) setCreditNotes((data ?? []).map(rowToCreditNote));
@@ -69,12 +70,16 @@ export default function TaxesReportPage() {
     const salesItbis = periodSales.reduce((a, s) => a + s.itbisAmount, 0);
     const salesRevenue = periodSales.reduce((a, s) => a + s.total, 0);
     const taxable = periodSales.filter((s) => s.itbisAmount > 0).length;
-    const notesItbis = periodNotes.reduce((a, n) => a + n.itbisAmount, 0);
+    // La nota de una venta recuperada con más de 30 días no rebaja el ITBIS.
+    const notesItbis = periodNotes.reduce((a, n) => a + itbisQueRebajaLaNota(n, n.saleCreatedAt), 0);
+    const sinRebaja = periodNotes.filter((n) => n.itbisAmount > 0 && itbisQueRebajaLaNota(n, n.saleCreatedAt) === 0);
     return {
       salesRevenue,
       taxable,
       // ITBIS cobrado neto (operaciones − devoluciones): la parte "output" de la IT-1.
       outputItbis: salesItbis - notesItbis,
+      notasSinRebaja: sinRebaja.length,
+      itbisSinRebaja: sinRebaja.reduce((a, n) => a + n.itbisAmount, 0),
     };
   }, [periodSales, periodNotes]);
 
@@ -136,6 +141,12 @@ export default function TaxesReportPage() {
             <CardContent>
               <div className="text-2xl font-bold text-emerald-600">{formatCurrency(stats.outputItbis)}</div>
               <p className="text-xs text-muted-foreground">Operaciones menos notas de crédito del mes</p>
+              {stats.notasSinRebaja > 0 && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {stats.notasSinRebaja} {stats.notasSinRebaja === 1 ? 'nota de recuperación' : 'notas de recuperación'} con más de 30 días
+                  no {stats.notasSinRebaja === 1 ? 'rebaja' : 'rebajan'} ITBIS ({formatCurrency(stats.itbisSinRebaja)}).
+                </p>
+              )}
             </CardContent>
           </Card>
           <Card className="border-blue-500/30 bg-blue-500/5">

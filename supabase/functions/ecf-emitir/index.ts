@@ -23,7 +23,7 @@ import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 import { lineasDesdeItems } from '../_shared/ecf/armar.ts';
 import type { DatosEcf, TipoEcf } from '../_shared/ecf/armar.ts';
 import { datosEcf, vencimientoDeSecuencia } from '../_shared/ecf/datos.ts';
-import type { FilaSecuencia } from '../_shared/ecf/datos.ts';
+import type { EntradaDatos, FilaSecuencia } from '../_shared/ecf/datos.ts';
 import { completarDocumento, emitirDocumento, emitirLote, emitirUno, ErrorDatosEcf } from '../_shared/ecf/emitir.ts';
 import type { CambioDocumento, DepsEmision, DepsLote, DocLote, DocReservado } from '../_shared/ecf/emitir.ts';
 import type { Ambiente } from '../_shared/ecf/mseller.ts';
@@ -126,7 +126,7 @@ async function cargarDatos(admin: Cliente, doc: DocReservado): Promise<DatosEcf>
   // En una nota de crédito, las líneas, el cliente y la fecha de referencia son
   // los de la venta original; el e-NCF que modifica es el de su documento.
   let ventaId = origen.sale_id;
-  let nota: { created_at: string; total: number; itbis_amount: number; encfOriginal: string } | undefined;
+  let nota: EntradaDatos['nota'];
   if (tipo === 34) {
     if (!origen.credit_note_id) throw new ErrorDatosEcf('El documento E34 no está enlazado a una nota de crédito.');
     const n = await una<{
@@ -135,10 +135,12 @@ async function cargarDatos(admin: Cliente, doc: DocReservado): Promise<DatosEcf>
       total: number | string;
       itbis_amount: number | string;
       created_at: string;
+      kind: string | null;
+      items: Array<{ nombre: string; cantidad: number | string; precio: number | string; itbis: boolean; servicio: boolean }> | null;
     }>(
       admin
         .from('credit_notes')
-        .select('sale_id, ncf_modified, total, itbis_amount, created_at')
+        .select('sale_id, ncf_modified, total, itbis_amount, created_at, kind, items')
         .eq('id', origen.credit_note_id)
         .limit(1),
       'la nota de crédito',
@@ -163,6 +165,17 @@ async function cargarDatos(admin: Cliente, doc: DocReservado): Promise<DatosEcf>
       itbis_amount: numero(n.itbis_amount),
       encfOriginal,
     };
+    // La nota de una venta recuperada (4B) corrige montos con sus propias líneas.
+    if (n.kind === 'recuperacion' && Array.isArray(n.items) && n.items.length > 0) {
+      nota.codigoModificacion = 3;
+      nota.lineas = n.items.map((it) => ({
+        nombre: it.nombre,
+        cantidad: numero(it.cantidad),
+        precio: numero(it.precio),
+        itbis: it.itbis === true,
+        servicio: it.servicio === true,
+      }));
+    }
   }
   if (!ventaId) throw new ErrorDatosEcf('El documento no está enlazado a una venta.');
 

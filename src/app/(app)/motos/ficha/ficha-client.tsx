@@ -52,13 +52,16 @@ const EVENTO: Record<VehicleEvent['kind'], string> = {
 
 // Cuenta de la venta o del préstamo de la moto: si sigue abierta y cuánto se debe.
 // Se lee aparte (no de los proveedores) porque la venta puede ser vieja.
-type Cuenta = { venta?: { abierta: boolean; deuda: number }; prestamo?: { activo: boolean } };
+type Cuenta = {
+  venta?: { abierta: boolean; deuda: number; conComprobante: boolean; total: number; totalAPagar: number };
+  prestamo?: { activo: boolean };
+};
 
 async function leerCuenta(v: Vehicle): Promise<Cuenta> {
   const cuenta: Cuenta = {};
   if (v.saleId) {
     const { data: s } = await supabase.from('sales')
-      .select('total, amount_paid, payment_status, financing_details, cancelled_at')
+      .select('total, amount_paid, payment_status, financing_details, cancelled_at, ncf')
       .eq('id', v.saleId).maybeSingle();
     if (s) {
       const financiada = s.payment_status === 'in_financing';
@@ -66,6 +69,9 @@ async function leerCuenta(v: Vehicle): Promise<Cuenta> {
       cuenta.venta = {
         abierta: !s.cancelled_at && (s.payment_status === 'credit' || financiada),
         deuda: Math.max(0, Math.round((total - Number(s.amount_paid)) * 100) / 100),
+        conComprobante: !!s.ncf,
+        total: Number(s.total),
+        totalAPagar: total,
       };
     }
   }
@@ -395,6 +401,10 @@ export default function FichaVehiculoClient() {
       <RecuperarVentaDialog
         nombre={nombre}
         deuda={cuenta.venta?.deuda ?? 0}
+        conComprobante={!!cuenta.venta?.conComprobante}
+        totalFacturado={cuenta.venta?.total ?? 0}
+        totalAPagar={cuenta.venta?.totalAPagar ?? 0}
+        emitirNota={vehicle.saleId ? (() => { const saleId = vehicle.saleId!; return () => rec.emitirNotaDeCredito(saleId); })() : undefined}
         open={dialogo === 'recuperar_venta'}
         onOpenChange={(o) => setDialogo(o ? 'recuperar_venta' : null)}
         onRecuperar={async (input) => { const r = await rec.recuperarVenta(vehicle.id, input); await trasRecuperar(); return r; }}

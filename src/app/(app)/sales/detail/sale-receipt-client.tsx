@@ -94,7 +94,7 @@ export default function SaleReceiptClient() {
   const [motoVendida, setMotoVendida] = useState<Vehicle | null>(null);
   const [motoRecuperada, setMotoRecuperada] = useState<string | null>(null);
   const [recuperar, setRecuperar] = useState(false);
-  const { recuperarVenta } = useRecuperaciones(undefined, { enabled: false });
+  const { recuperarVenta, emitirNotaDeCredito } = useRecuperaciones(undefined, { enabled: false });
   const recuperada = !!baseSale?.recoveredAt;
 
   useEffect(() => {
@@ -117,6 +117,25 @@ export default function SaleReceiptClient() {
     })();
     return () => { cancelado = true; };
   }, [motosActivo, saleId, recuperada]);
+
+  // Motopréstamos 4B: la nota de crédito por lo no cobrado de la venta recuperada.
+  const [notaRec, setNotaRec] = useState<{ id: string; ncf: string | null; total: number; estado?: EcfEstado } | null>(null);
+  const [notaVersion, setNotaVersion] = useState(0);
+  const [emitiendoNota, setEmitiendoNota] = useState(false);
+  useEffect(() => {
+    setNotaRec(null);
+    if (!recuperada || !saleId) return;
+    let cancelado = false;
+    (async () => {
+      const { data: n } = await supabase.from('credit_notes').select('id, ncf, total')
+        .eq('sale_id', saleId).eq('kind', 'recuperacion').maybeSingle();
+      if (cancelado || !n) return;
+      const { data: d } = await supabase.from('ecf_documentos').select('estado')
+        .eq('credit_note_id', n.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+      if (!cancelado) setNotaRec({ id: n.id, ncf: n.ncf, total: Number(n.total), estado: (d?.estado as EcfEstado | undefined) ?? undefined });
+    })();
+    return () => { cancelado = true; };
+  }, [recuperada, saleId, notaVersion]);
 
   const cargarEcf = useCallback(async (): Promise<EcfDocumento | undefined> => {
     const { data, error } = await supabase
@@ -237,6 +256,25 @@ export default function SaleReceiptClient() {
   // Igual que la base: financiada, el total con interés; a crédito, el total.
   const totalAPagar = sale.paymentStatus === 'in_financing' ? (sale.financingDetails?.totalWithInterest ?? sale.total) : sale.total;
   const deudaDeLaVenta = Math.max(0, Math.round((totalAPagar - sale.amountPaid) * 100) / 100);
+  const verEmitirNota = !!sale.recoveredAt && !notaRec && !!sale.ncf && esAdmin;
+
+  const emitirNota = async () => {
+    const n = await emitirNotaDeCredito(sale.id);
+    setNotaVersion((v) => v + 1);
+    return n;
+  };
+
+  const emitirNotaDesdeLaVenta = async () => {
+    setEmitiendoNota(true);
+    try {
+      const n = await emitirNota();
+      toast({ title: 'Nota de crédito emitida', description: `${n.ncf ?? 'Nota'} por ${formatCurrency(n.total)}.` });
+    } catch (e: any) {
+      toast({ title: 'No se pudo emitir la nota de crédito', description: e?.message, variant: 'destructive' });
+    } finally {
+      setEmitiendoNota(false);
+    }
+  };
 
   return (
     <div className="max-w-md mx-auto print:mx-0 print:max-w-full">
@@ -275,6 +313,17 @@ export default function SaleReceiptClient() {
               <> <Link href={`/motos/ficha?id=${motoRecuperada}`} className="underline underline-offset-2">Ver la moto</Link></>
             )}
           </p>
+          {notaRec && (
+            <p className="mt-1 flex flex-wrap items-center justify-center gap-2">
+              <span>Nota de crédito <span className="font-mono">{notaRec.ncf ?? ''}</span> por {formatCurrency(notaRec.total)}</span>
+              {notaRec.estado && <EcfEstadoBadge estado={notaRec.estado} />}
+            </p>
+          )}
+          {verEmitirNota && (
+            <Button size="sm" variant="outline" className="mt-2" disabled={emitiendoNota} onClick={emitirNotaDesdeLaVenta}>
+              {emitiendoNota ? 'Emitiendo…' : 'Emitir nota de crédito'}
+            </Button>
+          )}
         </div>
       )}
       {sale.cancelledAt && (
@@ -407,6 +456,10 @@ export default function SaleReceiptClient() {
         <RecuperarVentaDialog
           nombre={vehicleLabel(motoVendida)}
           deuda={deudaDeLaVenta}
+          conComprobante={!!sale.ncf}
+          totalFacturado={sale.total}
+          totalAPagar={totalAPagar}
+          emitirNota={emitirNota}
           open={recuperar}
           onOpenChange={setRecuperar}
           onRecuperar={async (input) => {

@@ -73,8 +73,16 @@ export interface EntradaDatos {
   /** 'YYYY-MM-DD' de la última cuota si la venta es a plazos. */
   ultimaCuota?: string | null;
   vencimientoSecuencia?: string;
-  /** Solo en una nota de crédito (E34). */
-  nota?: { created_at: string; total: number; itbis_amount: number; encfOriginal: string };
+  /** Solo en una nota de crédito (E34). `lineas` y `codigoModificacion` solo en la de una
+   *  venta recuperada: sus líneas ya prorrateadas y el código 3 (corrige montos). */
+  nota?: {
+    created_at: string;
+    total: number;
+    itbis_amount: number;
+    encfOriginal: string;
+    lineas?: LineaEcf[];
+    codigoModificacion?: 1 | 3;
+  };
 }
 
 /** Lo que se le pasa a `armarEcf`. Lanza si falta la nota de un E34. */
@@ -118,6 +126,9 @@ export function datosEcf(e: EntradaDatos): DatosEcf {
       fechaEmision: fechaVenta,
       masDe30Dias: diasEntre(fechaVenta, fechaNota) > DIAS_NOTA_SIN_INDICADOR,
     };
+    if (e.nota.codigoModificacion) d.referencia.codigoModificacion = e.nota.codigoModificacion;
+    // La nota de una venta recuperada no acredita la venta entera: va con sus líneas.
+    if (e.nota.lineas && e.nota.lineas.length > 0) d.lineas = e.nota.lineas;
   }
 
   return d;
