@@ -20,11 +20,13 @@ test('el módulo viene apagado y se enciende por empresa', () => {
   assert.equal(resolveEnabledModules([{ module_key: 'motoprestamos', enabled: true }]).has('motoprestamos'), true);
 });
 
-test('el rubro Motopréstamos enciende sus módulos y siembra el tipo Motor', () => {
+test('el rubro Motopréstamos enciende sus módulos; los tipos de vehículo los siembra la base', () => {
   const preset = BUSINESS_TYPE_PRESETS.motoprestamos;
   assert.ok(preset);
   assert.deepEqual([...preset.modules].sort(), ['caja', 'customer-portal', 'motoprestamos', 'prestamos']);
-  assert.deepEqual(preset.vehicleTypes, ['Motor']);
+  // Al encender el módulo, la base carga los tipos y categorías sugeridos
+  // (20261127130000_motos_sugerencias.sql): el alta ya no los inserta.
+  assert.equal('vehicleTypes' in preset, false);
   assert.ok(OPTIONAL_VERTICALS.includes('motoprestamos'));
 });
 
