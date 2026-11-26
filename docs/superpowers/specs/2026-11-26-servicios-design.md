@@ -77,6 +77,7 @@ revise.
 - **Cobro en la calle** del servicio a domicilio (el personal cobrando con el teléfono). Se cobra
   por el POS, de contado o a crédito.
 - **Horarios del personal**, días libres y turnos.
+- **Liquidar comisiones** (marcar lo pagado a cada persona). Hay reporte, como en Comisiones.
 - **Historia clínica** (consultorios, veterinaria). Datos sensibles que piden otro cuidado.
 
 ## Lo que haría que fracase aunque funcione
@@ -86,7 +87,8 @@ revise.
 - Que el taller de celulares pierda algo de lo que hace hoy.
 - Que cambie algo en ventas, caja, comisiones o e-CF para las empresas que no encienden el
   módulo.
-- Que una comisión se pague dos veces, o que una venta anulada siga comisionando.
+- Que una misma línea sume comisión dos veces en el cálculo, o que una venta anulada siga
+  comisionando.
 - Que para registrar a sus manicuristas un negocio tenga que gastar cupos de usuario.
 
 ## Restricciones del proyecto
@@ -149,6 +151,8 @@ Cada tipo de ficha dice **qué campos lleva y cómo se llaman** (decisión mía)
 - Si pide clave o patrón (solo tiene sentido en equipos).
 - Campos propios (texto o número), como hoy: «Tamaño», «Peso», «Kilometraje», «Color».
 - Sus chequeos de llegada, como hoy («Pulgas», «Heridas», «Nudos» para una mascota).
+- **Se deja en el negocio** sí o no: si lo normal es que el cliente lo deje y vuelva a buscarlo
+  (mascota, moto, equipo). Decide el camino de estados (ver Estados).
 - **De reparación** sí o no. Activa los estados de reparación, la «Garantía al taller» desde una
   venta y el texto «Lo estamos reparando» para el cliente. Las plantillas de celulares,
   computadoras, electrónica y mecánica vienen marcadas.
@@ -182,12 +186,16 @@ recibo. El servicio de catálogo puede venir marcado «a domicilio» por defecto
 
 ### Estados (decisión mía)
 
-Hay dos caminos según la orden:
+Hay dos caminos, y los decide si **la orden se queda en el negocio**, no si tiene ficha:
 
-- **Con ficha** (lo que el cliente deja y vuelve a buscar: mascota, moto, equipo):
+- **Se queda** (el cliente lo deja y vuelve a buscarlo):
   Agendada → Recibido → En proceso → Listo para retirar → Entregado.
-- **Sin ficha** (persona o lugar):
+- **No se queda** (servicio a la persona, a domicilio, o el cliente espera):
   Agendada → Llegó → En proceso → Terminado.
+
+La orden toma el valor del tipo de ficha («Se deja en el negocio»); sin ficha o **a domicilio**
+es «no se queda». Se puede cambiar en la orden con **El cliente espera** (el cambio de aceite
+mientras espera, el baño a domicilio de Max).
 
 Para todas: **Cancelada** y **No vino** (solo desde Agendada). Si la ficha es de reparación, se
 suman los cuatro de hoy: En diagnóstico, Esperando aprobación, Esperando pieza y No se pudo
@@ -197,8 +205,9 @@ reparar; y «En proceso» se lee «En reparación».
   confirmar por WhatsApp o a mano.
 - Una orden sin cita (el que llega sin cita) empieza en Recibido / Llegó, o en En proceso con
   «Atender ahora».
-- Sin ficha, «Terminado» equivale a lo que hoy es «Entregado»: cierra la orden. Se llega a él
-  cobrando o con el botón **Terminar** (orden en RD$0 o cobrada antes).
+- «Terminado» equivale a lo que hoy es «Entregado»: cierra la orden, y la fidelidad (que hoy
+  cuenta al entregar) cuenta igual. Se llega a él con el botón **Terminar**, que hace lo de
+  `taller_entregar` sin pedir quién retira.
 - Las claves internas (reusar `in_repair` como «En proceso» o renombrarla) las decide quien
   construya: no hay filas que convertir.
 
@@ -216,6 +225,8 @@ cita es el jueves 26 a las 10:00 a. m.».
   `assigned_to` con `auth.uid()`; pasa a comparar el usuario del personal.
 - La orden tiene un **responsable** (el de hoy: a quién se le pasa el caso). Cada línea de
   servicio tiene **quién la hace**, que por defecto es el responsable.
+- Una línea puede llevar **varias personas** (la cuadrilla de una limpieza). La comisión de la
+  línea se reparte en partes iguales, la agenda ocupa a todas y cada una la ve como suya.
 - Pasar la orden a otra persona sigue igual que «transferir» hoy, con su historial.
 
 ### Catálogo de servicios
@@ -232,6 +243,11 @@ el POS) suma (decisión mía):
 - **Usar un artículo que ya existe** en vez de crear uno nuevo, convirtiéndolo en servicio sin
   existencias. Es lo que necesita POPI: sus 13 servicios del catálogo no tienen artículo, y
   cuatro de ellos ya existen en el inventario como bien con existencias.
+  - Solo se puede si el artículo no maneja existencias o tiene 0 o menos. Si tiene existencias,
+    la pantalla lo dice y ofrece crear un artículo de servicio nuevo; el bien se puede agregar
+    a la orden como material (una vacuna que se aplica, por ejemplo).
+  - La marca «es servicio» del e-CF se muestra con su valor y la decide el negocio.
+  - Sin migración para POPI: lo hace POPI (o Louis con ellos) en la pantalla nueva.
 
 ### Nueva orden y «Atender ahora»
 
@@ -285,9 +301,16 @@ Lo nuevo (decisión mía):
 - En el POS, si el módulo está encendido, una línea de un **servicio del catálogo vendido
   suelto** (sin orden) deja elegir **¿quién lo hizo?**. Así un salón que no usa la agenda igual
   paga comisiones.
-- La base de la comisión es lo cobrado de esa línea **sin ITBIS**, después de su descuento y de
-  la parte que le toca del descuento general. Una venta anulada no comisiona. Igual que
-  Comisiones, el interés de una venta financiada no comisiona.
+- **Solo comisionan las líneas de servicio del catálogo.** Las piezas, los materiales y los
+  artículos vendidos en la misma cuenta no dan comisión de servicio (si hay vendedor, eso lo
+  cubre el módulo Comisiones).
+- La base de la comisión es lo facturado de esa línea **sin ITBIS**, después de su descuento y
+  de la parte que le toca del descuento general. El monto fijo es **por unidad**. Una línea en
+  RD$0 no comisiona, ni siquiera con monto fijo.
+- Cuenta **en el momento de la venta**, también a crédito o financiada, igual que Comisiones.
+  Una venta anulada no comisiona. El interés de una venta financiada no comisiona.
+- **Solo reporte**, como Comisiones: no se registran pagos de comisión ni «pagado hasta». Marcar
+  comisiones como pagadas queda para después.
 - **Comisiones por servicio y Comisiones por vendedor son independientes**: cada módulo calcula
   lo suyo y no se descuentan entre sí. Si una empresa enciende los dos, el vendedor cobra su %
   de la factura y quien hizo el servicio cobra el suyo. No se toca el módulo Comisiones.
@@ -358,9 +381,10 @@ La lógica va en `src/lib/` con pruebas, como `taller-reportes.ts`.
 
 Cada una se puede fusionar y desplegar sola.
 
-1. **Servicios para todos.** Nombre y textos, tipos de ficha configurables (campos, de
-   reparación), órdenes sin ficha, fichas guardadas del cliente, estados por camino, personal
-   sin usuario, a domicilio, catálogo con duración, comisión, «volver cada» y «usar un artículo
+1. **Servicios para todos.** Nombre y textos, tipos de ficha configurables (campos, se deja en
+   el negocio, de reparación), órdenes sin ficha, fichas guardadas del cliente, estados por
+   camino («se queda» o no, «El cliente espera»), personal sin usuario con varias personas por
+   línea, a domicilio, catálogo con duración, comisión, «volver cada» y «usar un artículo
    que ya existe», «Atender ahora», plantillas y rubros nuevos, `defaultEnabled` en false.
    El taller de celulares queda funcionando igual.
 2. **Agenda.** Citas con hora por línea y persona, vistas de día y semana, avisos de choque,
