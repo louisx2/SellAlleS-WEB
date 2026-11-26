@@ -10,31 +10,38 @@ import { ExportButton } from '@/components/reports/export-button';
 import { Bike, HandCoins, ShieldCheck } from 'lucide-react';
 import { useVehiculos } from '@/hooks/use-vehiculos';
 import { useSales } from '@/context/sales-provider';
-import { useCompanyProfile } from '@/context/company-profile-provider';
-import { calculateFinancingStatus, formatCurrency } from '@/lib/utils';
-import { VEHICLE_STATUS, type VehicleStatus } from '@/lib/motos';
+import { useSaldosDeVehiculos } from '@/hooks/use-saldos-de-vehiculos';
+import { formatCurrency } from '@/lib/utils';
+import { diasDesde, matriculasPorPestana, reporteDeMatriculas, VEHICLE_STATUS, vehicleLabel, type VehicleStatus } from '@/lib/motos';
 import { carteraDeVehiculos, ventasDeVehiculos } from '@/lib/motos-reportes';
 
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 // Vehículos de la sucursal activa: cuántos hay en cada estado, cuánto vale el
-// inventario, lo que falta por cobrar de los vendidos a cuotas, y las ventas del
-// período por modelo.
+// inventario, lo que falta por cobrar de los vendidos a cuotas y de los préstamos
+// con la moto en garantía, las ventas del período por modelo y las matrículas.
 export default function ReporteVehiculosPage() {
   const { vehicles, loading } = useVehiculos();
-  const { sales, financingSales } = useSales();
-  const { profile } = useCompanyProfile();
+  const { sales } = useSales();
+  const saldos = useSaldosDeVehiculos();
   const hoy = new Date();
   const [desde, setDesde] = useState(ymd(new Date(hoy.getFullYear(), hoy.getMonth(), 1)));
   const [hasta, setHasta] = useState(ymd(hoy));
 
-  const cartera = useMemo(() => {
-    const saldos = new Map(financingSales.filter((s) => !s.cancelledAt).map((s) => {
-      const st = calculateFinancingStatus(s, profile.lateFeeRate, profile.lateFeeGraceDays);
-      return [s.id, { pendiente: st.pendingBalance, atrasado: st.isOverdue }];
-    }));
-    return carteraDeVehiculos(vehicles, saldos);
-  }, [vehicles, financingSales, profile.lateFeeRate, profile.lateFeeGraceDays]);
+  const cartera = useMemo(
+    () => carteraDeVehiculos(vehicles, saldos.ventas, saldos.prestamos),
+    [vehicles, saldos.ventas, saldos.prestamos],
+  );
+
+  const matriculas = useMemo(() => {
+    const ahora = new Date();
+    return {
+      resumen: reporteDeMatriculas(vehicles, new Date(`${desde}T00:00:00`), new Date(`${hasta}T23:59:59`), ahora),
+      listas: matriculasPorPestana(vehicles).listas.map((v) => ({
+        v, dias: v.registrationSince ? diasDesde(v.registrationSince, ahora) : 0,
+      })),
+    };
+  }, [vehicles, desde, hasta]);
 
   const ventas = useMemo(() => {
     const lista = sales.filter((s) => !s.cancelledAt).map((s) => ({
@@ -80,8 +87,9 @@ export default function ReporteVehiculosPage() {
         {tarjeta('Vendidas a cuotas', <HandCoins className="h-4 w-4 text-muted-foreground" />,
           formatCurrency(cartera.vendidosACuotas.pendiente),
           `${cartera.vendidosACuotas.cantidad} con saldo · ${cartera.vendidosACuotas.atrasados} atrasadas`)}
-        {tarjeta('En garantía', <ShieldCheck className="h-4 w-4 text-muted-foreground" />,
-          String(cartera.porEstado.en_garantia), 'motos de clientes en préstamos')}
+        {tarjeta('Préstamos con garantía', <ShieldCheck className="h-4 w-4 text-muted-foreground" />,
+          formatCurrency(cartera.prestamosConGarantia.pendiente),
+          `${cartera.prestamosConGarantia.cantidad} con saldo · ${cartera.prestamosConGarantia.atrasados} atrasados · ${cartera.porEstado.en_garantia} motos`)}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -143,6 +151,57 @@ export default function ReporteVehiculosPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card className="mt-4">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
+          <CardTitle>Matrículas</CardTitle>
+          <ExportButton
+            filename="matriculas_listas_para_entregar"
+            rows={matriculas.listas}
+            columns={[
+              { header: 'Moto', value: (r) => vehicleLabel(r.v) },
+              { header: 'Chasis', value: (r) => r.v.chassis ?? '' },
+              { header: 'Cliente', value: (r) => r.v.customerName ?? '' },
+              { header: 'Guardada en', value: (r) => r.v.registrationLocation ?? '' },
+              { header: 'Días esperando', value: (r) => r.dias },
+            ]}
+          />
+        </CardHeader>
+        <CardContent>
+          <div className="mb-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+            <div><p className="text-xs text-muted-foreground">En custodia</p><p className="text-lg font-semibold">{matriculas.resumen.enCustodia}</p></div>
+            <div><p className="text-xs text-muted-foreground">Listas para entregar</p><p className="text-lg font-semibold">{matriculas.resumen.listas}</p></div>
+            <div><p className="text-xs text-muted-foreground">Listas hace más de 30 días</p><p className="text-lg font-semibold">{matriculas.resumen.listasMasDe30}</p></div>
+            <div><p className="text-xs text-muted-foreground">Entregadas en el período</p><p className="text-lg font-semibold">{matriculas.resumen.entregadasEnPeriodo}</p></div>
+          </div>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Lista para entregar</TableHead>
+                <TableHead>Chasis</TableHead>
+                <TableHead>Cliente</TableHead>
+                <TableHead>Guardada en</TableHead>
+                <TableHead className="text-right">Días esperando</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {matriculas.listas.length > 0 ? matriculas.listas.map(({ v, dias }) => (
+                <TableRow key={v.id}>
+                  <TableCell className="font-medium">{vehicleLabel(v)}</TableCell>
+                  <TableCell className="font-mono text-xs">{v.chassis ?? '—'}</TableCell>
+                  <TableCell>{v.customerName ?? '—'}</TableCell>
+                  <TableCell>{v.registrationLocation ?? '—'}</TableCell>
+                  <TableCell className="text-right">{dias}</TableCell>
+                </TableRow>
+              )) : (
+                <TableRow>
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">No hay matrículas esperando a su dueño.</TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
     </div>
   );
 }

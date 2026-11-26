@@ -61,6 +61,7 @@ const featuresNavItems: NavItem[] = [
   { href: '/financing', icon: Landmark, label: 'Financiamientos', module: 'financing', permission: 'financing' },
   { href: '/prestamos', icon: HandCoins, label: 'Préstamos', module: 'prestamos', permission: 'prestamos' },
   { href: '/motos', icon: Bike, label: 'Vehículos', module: 'motoprestamos', permission: 'motos' },
+  { href: '/motos/matriculas', icon: FileCheck, label: 'Matrículas', module: 'motoprestamos', permission: 'motos' },
   { href: '/caja', icon: Coins, label: 'Caja', module: 'caja', permission: 'caja' },
   { href: '/expenses', icon: Wallet, label: 'Gastos', module: 'expenses', permission: 'expenses' },
 ];

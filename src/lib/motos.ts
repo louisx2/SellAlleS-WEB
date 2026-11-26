@@ -114,3 +114,90 @@ export function unidadesParaElegir<
   if (libres.length === 0) return { opciones, aviso: `Las unidades disponibles de ${product.name} ya están en un carrito.` };
   return { opciones, aviso: `Ninguna unidad coincide con «${q.trim()}».` };
 }
+
+// --- 2B: garantía en préstamos y matrículas en custodia ---
+
+/** Lo que se debe de una cuenta (venta o préstamo) y si va atrasada. */
+export type Saldo = { pendiente: number; atrasado: boolean };
+
+/** Motos del cliente que pueden respaldar un préstamo nuevo en esa sucursal:
+ *  liberadas o vendidas. Que la venta esté saldada lo valida la base. */
+export function vehiculosParaGarantia<V extends { customerId?: string | null; branchId: string; status: VehicleStatus }>(
+  vehicles: V[], customerId: string, branchId: string,
+): V[] {
+  return vehicles.filter((v) => v.customerId === customerId && v.branchId === branchId
+    && (v.status === 'liberado' || v.status === 'vendido'));
+}
+
+export const AVISO_DEUDA_MATRICULA =
+  'La deuda de esta moto no está saldada. Solo un administrador puede entregar la matrícula, y con motivo.';
+
+/** Si se puede entregar la matrícula y cómo. Espejo de motos_entregar_matricula. */
+export function entregaDeMatricula(
+  v: { registrationStatus: RegistrationStatus }, esAdmin: boolean,
+): { puede: boolean; forzada: boolean; aviso: string | null } {
+  if (v.registrationStatus === 'lista_para_entregar') return { puede: true, forzada: false, aviso: null };
+  if (v.registrationStatus === 'en_custodia') {
+    return esAdmin
+      ? { puede: true, forzada: true, aviso: 'Tiene deuda pendiente: se entregará como forzada y hay que escribir el motivo.' }
+      : { puede: false, forzada: false, aviso: AVISO_DEUDA_MATRICULA };
+  }
+  return { puede: false, forzada: false, aviso: 'Esa matrícula no está en custodia.' };
+}
+
+/** Días de calendario entre dos fechas (en la hora local). */
+export function diasDesde(fecha: Date, hoy: Date): number {
+  const dia = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((dia(hoy) - dia(fecha)) / 86_400_000);
+}
+
+type ConMatricula = {
+  registrationStatus: RegistrationStatus;
+  registrationSince?: Date | null;
+  registrationDeliveredAt?: Date | null;
+};
+
+const tiempo = (d?: Date | null) => (d ? d.getTime() : 0);
+
+/** Las tres pestañas de Matrículas. Listas: la que más lleva esperando primero.
+ *  Entregadas: la más reciente primero. */
+export function matriculasPorPestana<V extends ConMatricula>(vehicles: V[]): { enCustodia: V[]; listas: V[]; entregadas: V[] } {
+  return {
+    enCustodia: vehicles.filter((v) => v.registrationStatus === 'en_custodia')
+      .sort((a, b) => tiempo(a.registrationSince) - tiempo(b.registrationSince)),
+    listas: vehicles.filter((v) => v.registrationStatus === 'lista_para_entregar')
+      .sort((a, b) => tiempo(a.registrationSince) - tiempo(b.registrationSince)),
+    entregadas: vehicles.filter((v) => v.registrationStatus === 'entregada')
+      .sort((a, b) => tiempo(b.registrationDeliveredAt) - tiempo(a.registrationDeliveredAt)),
+  };
+}
+
+/** La cuenta de la moto: el préstamo si está en garantía o liberada, la venta si
+ *  está vendida. Sin cuenta conocida, null. */
+export function deudaDelVehiculo(
+  v: { status: VehicleStatus; saleId?: string | null; loanId?: string | null },
+  ventas: Map<string, Saldo>, prestamos: Map<string, Saldo>,
+): Saldo | null {
+  if ((v.status === 'en_garantia' || v.status === 'liberado') && v.loanId) return prestamos.get(v.loanId) ?? null;
+  if (v.status === 'vendido' && v.saleId) return ventas.get(v.saleId) ?? null;
+  return null;
+}
+
+/** Matrículas: en custodia y listas hoy, listas que llevan más de 30 días
+ *  esperando, y entregadas dentro del período. */
+export function reporteDeMatriculas(vehicles: ConMatricula[], desde: Date, hasta: Date, hoy: Date) {
+  let enCustodia = 0;
+  let listas = 0;
+  let listasMasDe30 = 0;
+  let entregadasEnPeriodo = 0;
+  for (const v of vehicles) {
+    if (v.registrationStatus === 'en_custodia') enCustodia += 1;
+    if (v.registrationStatus === 'lista_para_entregar') {
+      listas += 1;
+      if (v.registrationSince && diasDesde(v.registrationSince, hoy) > 30) listasMasDe30 += 1;
+    }
+    const entregada = v.registrationDeliveredAt;
+    if (v.registrationStatus === 'entregada' && entregada && entregada >= desde && entregada <= hasta) entregadasEnPeriodo += 1;
+  }
+  return { enCustodia, listas, listasMasDe30, entregadasEnPeriodo };
+}

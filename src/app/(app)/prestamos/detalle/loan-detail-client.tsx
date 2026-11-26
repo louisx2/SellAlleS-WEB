@@ -21,6 +21,7 @@ import { RegisterLoanPaymentDialog } from '@/components/loans/register-loan-paym
 import { LoanTicketDialog } from '@/components/loans/loan-ticket-dialog';
 import { VoidLoanPaymentDialog } from '@/components/loans/void-loan-payment-dialog';
 import { RefinanceLoanDialog } from '@/components/loans/refinance-loan-dialog';
+import { GarantiaCard } from '@/components/motos/garantia-card';
 import { ArrowLeft, DollarSign, Printer, RefreshCw, Undo2 } from 'lucide-react';
 // Un plan largo (cobro diario, semanal de 2 años) se muestra desde la próxima cuota a cobrar.
 import { ventanaDeCuotas } from '@/lib/plan-largo';
@@ -301,6 +302,8 @@ export default function LoanDetailClient() {
           )}
         </CardContent>
       </Card>
+
+      <GarantiaCard loanId={loan.id} />
 
       {loan.installments && loan.installments.length > 0 && (
         <Card>
