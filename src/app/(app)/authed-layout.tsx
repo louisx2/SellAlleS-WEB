@@ -31,7 +31,7 @@ import { supabase } from '@/lib/supabase/client';
 import { ProfileModal } from '@/components/profile/profile-modal';
 import { SupportDialog } from '@/components/support/support-dialog';
 import { useActualizacionDisponible, aplicarActualizacion, VERSION } from '@/lib/pwa-update';
-import { AvisoDeCuota } from '@/components/subscription/aviso-de-cuota';
+import { AvisoDeCuota, avisoDeCuota, type Tono } from '@/components/subscription/aviso-de-cuota';
 import { EcfProblemasBanner } from '@/components/ecf/ecf-problemas-banner';
 import { EcfCupoBanner } from '@/components/ecf/ecf-cupo-banner';
 import { useMiCuenta } from '@/hooks/use-mi-cuenta';
@@ -107,9 +107,19 @@ const adminNavItems: NavItem[] = [
     { href: '/roles', icon: Shield, label: 'Roles', permission: 'roles' },
     { href: '/service-types', icon: PenTool, label: 'Configuración del Taller', module: 'services', permission: 'service-types' },
     { href: '/motos/config', icon: Settings2, label: 'Configuración de Motopréstamos', module: 'motoprestamos', permission: 'motos-config' },
-    { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', permission: 'suscripcion' },
     { href: '/settings', icon: Settings, label: 'Ajustes', permission: 'company-profile' },
 ];
+
+// Fuera de Administrar, a la vista: es donde se paga, y lleva un punto en el
+// ícono cuando la cuenta tiene algo pendiente (ver puntoSuscripcion).
+const suscripcionNavItem: NavItem = { href: '/suscripcion', icon: Receipt, label: 'Mi Suscripción', permission: 'suscripcion' };
+
+/** Color del punto de Mi Suscripción: el mismo tono del aviso de cuota. */
+const PUNTO_SUSCRIPCION: Record<Tono, string> = {
+  rojo: 'bg-red-500',
+  ambar: 'bg-amber-500',
+  azul: 'bg-sky-500',
+};
 
 // Modo solo facturación (lib/bloqueo.ts). Solo pesa dentro de una empresa: el
 // lobby de Mis Empresas y la plataforma del super admin siguen igual.
@@ -153,7 +163,13 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const multiEmpresaEnLobby = !!(appUser && !appUser.isSuperAdmin && (appUser.companies?.length ?? 0) > 1 && !appUser.impersonatedCompanyId);
   const verAvisoDeCuota = !!(appUser?.isCompanyOwner || (appUser?.isSuperAdmin && appUser.impersonatedCompanyId))
     && !appUser?.companyDemoExpiresAt && !multiEmpresaEnLobby;
-  const { cuenta: miCuenta } = useMiCuenta(verAvisoDeCuota, appUser?.impersonatedCompanyId || appUser?.companyId);
+  // El punto de Mi Suscripción en el menú es más discreto que el aviso: lo ve
+  // cualquier administrador de la empresa (la base solo le da la cuenta a
+  // ellos), no solo el dueño.
+  const verPuntoSuscripcion = !!appUser?.isCompanyAdmin && !appUser.companyDemoExpiresAt
+    && (!appUser.isSuperAdmin || !!appUser.impersonatedCompanyId) && !multiEmpresaEnLobby;
+  const { cuenta: miCuenta } = useMiCuenta(verAvisoDeCuota || verPuntoSuscripcion, appUser?.impersonatedCompanyId || appUser?.companyId);
+  const avisoSuscripcion = verPuntoSuscripcion ? avisoDeCuota(miCuenta) : null;
   const comprobantesPendientes = useComprobantesPendientes(!!appUser?.isSuperAdmin && !appUser.impersonatedCompanyId);
   
   const { theme, setTheme } = useTheme();
@@ -308,9 +324,35 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   const visibleFeaturesNavItems = featuresNavItems.filter(item => menuNormal && userRole && moduleOk(item) && hasExtra(item.permission));
   const visibleAdminNavItems = adminNavItems.filter(item => menuNormal && moduleOk(item) && hasExtra(item.permission));
   const canViewAdmin = menuNormal && visibleAdminNavItems.length > 0;
+  const visibleSuscripcion = menuNormal && moduleOk(suscripcionNavItem) && hasExtra(suscripcionNavItem.permission);
+  // Punto sobre el ícono (se ve con el menú abierto y colapsado), con el tono
+  // del aviso de cuota: rojo si debe o está en solo facturación, ámbar si la
+  // próxima cuota vence pronto, azul si hay un comprobante en revisión.
+  // Son <div> y no <span> porque SidebarMenuButton esconde todo <span> hijo
+  // cuando el menú está colapsado.
+  const puntoSuscripcion = avisoSuscripcion && (
+    <>
+      <div
+        aria-hidden
+        className={cn(
+          'pointer-events-none absolute left-6 top-1 h-2.5 w-2.5 rounded-full ring-2 ring-card',
+          PUNTO_SUSCRIPCION[avisoSuscripcion.tono],
+        )}
+      />
+      <div className="sr-only">{avisoSuscripcion.titulo}</div>
+    </>
+  );
+  const tooltipSuscripcion = avisoSuscripcion
+    ? `${suscripcionNavItem.label}: ${avisoSuscripcion.titulo}`
+    : suscripcionNavItem.label;
   const canViewReports = menuNormal && isModuleEnabled('reports') && hasExtra('reports');
+  // Dentro de una empresa la base trata al super admin como uno más
+  // (is_super_admin() da falso), así que las pantallas de plataforma no le
+  // sirven: se ocultan, y se vuelve con "Volver a Plataforma" del banner.
+  const verMenuPlataforma = isSuperAdmin && !isImpersonating;
+  const verMenuMultiEmpresa = !isSuperAdmin && hasMultipleCompanies;
   const navEnBloqueo = bloqueo
-    ? [...coreNavItems, ...featuresNavItems, ...adminNavItems]
+    ? [...coreNavItems, ...featuresNavItems, ...adminNavItems, suscripcionNavItem]
         .filter(item => rutaPermitidaEnBloqueo(item.href) && moduleOk(item) && hasExtra(item.permission)
           && (!!userRole || item.href === '/suscripcion'))
         .sort((a, b) => ordenEnBloqueo(a.href) - ordenEnBloqueo(b.href))
@@ -343,7 +385,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
   // Guard de permisos: mismo criterio que gatea el ítem en el menú, aplicado
   // también al contenido de la página (si alguien escribe la URL a mano sin
   // tener el permiso, no ve el contenido igual que no ve el enlace).
-  const allNavItems = [...coreNavItems, ...featuresNavItems, ...adminNavItems];
+  const allNavItems = [...coreNavItems, ...featuresNavItems, ...adminNavItems, suscripcionNavItem];
   const matchedNavItem = itemDeRuta(allNavItems, pathname);
   const permissionBlocked = !isSuperAdmin && !!matchedNavItem && !!userRole && !hasExtra(matchedNavItem.permission);
 
@@ -598,7 +640,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
       >
         <SidebarContent>
           <SidebarMenu>
-            {isSuperAdmin && (
+            {verMenuPlataforma && (
               <SidebarMenuItem>
                 <Link href="/admin/companies" passHref>
                   <SidebarMenuButton isActive={pathname === '/admin/companies'} tooltip="Plataforma">
@@ -608,7 +650,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-             {(isSuperAdmin || hasMultipleCompanies) && (
+            {(verMenuPlataforma || verMenuMultiEmpresa) && (
               <SidebarMenuItem>
                 <Link href="/admin/empresas" passHref>
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/empresas')} tooltip={isSuperAdmin ? "Empresas" : "Mis Empresas"}>
@@ -620,7 +662,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-            {isSuperAdmin && (
+            {verMenuPlataforma && (
               <SidebarMenuItem>
                 <Link href="/admin/cobros" passHref>
                   <SidebarMenuButton
@@ -647,7 +689,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-            {hasMultipleCompanies && !isSuperAdmin && (
+            {verMenuMultiEmpresa && (
               <SidebarMenuItem>
                 <Link href="/admin/consolidado" passHref>
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/consolidado')} tooltip="Panel Consolidado">
@@ -657,8 +699,8 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-            {(isSuperAdmin || hasMultipleCompanies) && <SidebarSeparator />}
-            {isSuperAdmin && (
+            {(verMenuPlataforma || verMenuMultiEmpresa) && <SidebarSeparator />}
+            {verMenuPlataforma && (
               <SidebarMenuItem>
                 <Link href="/admin/users" passHref>
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/users')} tooltip="Usuarios de la Plataforma">
@@ -668,7 +710,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-            {isSuperAdmin && (
+            {verMenuPlataforma && (
               <SidebarMenuItem>
                 <Link href="/admin/soporte" passHref>
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/soporte')} tooltip="Bandeja de Soporte">
@@ -678,7 +720,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-            {isSuperAdmin && (
+            {verMenuPlataforma && (
               <SidebarMenuItem>
                 <Link href="/admin/correos" passHref>
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/correos')} tooltip="Correos enviados por la plataforma">
@@ -688,7 +730,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-            {isSuperAdmin && (
+            {verMenuPlataforma && (
               <SidebarMenuItem>
                 <Link href="/admin/facturacion-electronica" passHref>
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/facturacion-electronica')} tooltip="Facturación electrónica de las empresas">
@@ -698,7 +740,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                 </Link>
               </SidebarMenuItem>
             )}
-            {isSuperAdmin && (
+            {verMenuPlataforma && (
               <SidebarMenuItem>
                 <Link href="/admin/plataforma" passHref>
                   <SidebarMenuButton isActive={pathname.startsWith('/admin/plataforma')} tooltip="Configuración de la Plataforma">
@@ -711,7 +753,12 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
             {navEnBloqueo.map((item) => (
               <SidebarMenuItem key={item.href}>
                 <Link href={item.href} passHref>
-                  <SidebarMenuButton isActive={pathname === item.href || pathname.startsWith(`${item.href}/`)} tooltip={item.label}>
+                  <SidebarMenuButton
+                    isActive={pathname === item.href || pathname.startsWith(`${item.href}/`)}
+                    tooltip={item.href === suscripcionNavItem.href ? tooltipSuscripcion : item.label}
+                    className="relative"
+                  >
+                    {item.href === suscripcionNavItem.href && puntoSuscripcion}
                     {item.icon && <item.icon />}
                     <span className="group-data-[collapsible=icon]:hidden">{item.label}</span>
                   </SidebarMenuButton>
@@ -822,6 +869,22 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
                   </SidebarMenu>
                 </CollapsibleContent>
               </Collapsible>
+            )}
+
+            {visibleSuscripcion && (
+              <SidebarMenuItem>
+                <Link href={suscripcionNavItem.href} passHref>
+                  <SidebarMenuButton
+                    isActive={matchedNavItem?.href === suscripcionNavItem.href}
+                    tooltip={tooltipSuscripcion}
+                    className="relative"
+                  >
+                    {puntoSuscripcion}
+                    <Receipt />
+                    <span className="group-data-[collapsible=icon]:hidden">{suscripcionNavItem.label}</span>
+                  </SidebarMenuButton>
+                </Link>
+              </SidebarMenuItem>
             )}
           </SidebarMenu>
           <div className={cn(
