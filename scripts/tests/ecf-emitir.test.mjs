@@ -1128,6 +1128,48 @@ test('datosEcf: un E34 sin nota no se arma', () => {
   assert.throws(() => datosEcf(entrada({ tipo: 34 })), /nota de crédito/);
 });
 
+test('datosEcf: la nota de una recuperación usa sus propias líneas y el código 3', () => {
+  // Venta de 100,000 gravada (118,000 con ITBIS) con 18,000 abonados: la nota acredita 100,000.
+  const lineasNota = [{ nombre: 'Moto de prueba', cantidad: 1, precio: 84745.76, itbis: true, servicio: false }];
+  const d = datosEcf(
+    entrada({
+      tipo: 34,
+      encf: 'E340000000002',
+      venta: { ...entrada().venta, total: 118000, itbis_amount: 18000, payment_status: 'paid' },
+      lineas: [{ nombre: 'Moto de prueba', cantidad: 1, precio: 100000, itbis: true, servicio: false }],
+      nota: {
+        created_at: '2026-11-05T16:00:00Z', total: 100000, itbis_amount: 15254.24, encfOriginal: ENCF,
+        lineas: lineasNota, codigoModificacion: 3,
+      },
+    }),
+  );
+  assert.deepEqual(d.lineas, lineasNota, 'las líneas de la nota, no las de la venta');
+  assert.equal(d.referencia.codigoModificacion, 3);
+  assert.equal(d.totalGuardado, 100000);
+  assert.equal(d.itbisGuardado, 15254.24);
+
+  const armado = armarEcf(d);
+  assert.equal(armado.ok, true, armado.ok ? '' : armado.error);
+  assert.equal(armado.json.ECF.Encabezado.Totales.MontoTotal, 100000);
+  assert.equal(armado.json.ECF.Encabezado.Totales.TotalITBIS, 15254.24);
+  assert.equal(armado.json.ECF.InformacionReferencia.CodigoModificacion, 3);
+});
+
+test('datosEcf: la nota de una anulación sigue con las líneas de la venta y sin código', () => {
+  const d = datosEcf(
+    entrada({
+      tipo: 34,
+      encf: 'E340000000001',
+      nota: { created_at: '2026-11-05T16:00:00Z', total: 118, itbis_amount: 18, encfOriginal: ENCF },
+    }),
+  );
+  assert.deepEqual(d.lineas, LINEAS);
+  assert.equal(d.referencia.codigoModificacion, undefined);
+  const armado = armarEcf(d);
+  assert.equal(armado.ok, true, armado.ok ? '' : armado.error);
+  assert.equal(armado.json.ECF.InformacionReferencia.CodigoModificacion, 1);
+});
+
 test('datosEcf: pasa el vencimiento de la secuencia cuando lo hay', () => {
   assert.equal(datosEcf(entrada({ tipo: 31, vencimientoSecuencia: '2028-12-31' })).vencimientoSecuencia, '2028-12-31');
 });

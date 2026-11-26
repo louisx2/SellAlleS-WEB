@@ -29,7 +29,9 @@ export interface DatosEcf {
   lineas: LineaEcf[];
   totalGuardado: number; // sales.total o credit_notes.total
   itbisGuardado: number; // sales.itbis_amount o credit_notes.itbis_amount
-  referencia?: { encf: string; fechaEmision: string; masDe30Dias: boolean };
+  // codigoModificacion: 1 anula el comprobante (por defecto); 3 corrige montos (la nota
+  // de una venta recuperada, con sus propias líneas).
+  referencia?: { encf: string; fechaEmision: string; masDe30Dias: boolean; codigoModificacion?: 1 | 3 };
 }
 
 export type ResultadoArmado = { ok: true; json: Record<string, unknown> } | { ok: false; error: string };
@@ -260,7 +262,7 @@ export function armarEcf(d: DatosEcf): ResultadoArmado {
     ecf.InformacionReferencia = {
       NCFModificado: referencia.encf,
       FechaNCFModificado: aFechaDgii(referencia.fechaEmision),
-      CodigoModificacion: 1, // anulación total
+      CodigoModificacion: referencia.codigoModificacion ?? 1, // 1 anula; 3 corrige montos
     };
   }
   ecf.FechaHoraFirma = ''; // la pone MSeller al firmar
