@@ -1187,7 +1187,8 @@ export type Service = {
     serviceType?: ServiceType;
     assignedTo?: string;
     assignedUser?: User;
-    staff?: Staff;
+    /** Solo lo que trae el embed; el registro completo sale de useTallerConfig().staff. */
+    staff?: Pick<Staff, 'id' | 'name' | 'profileId'>;
     /** Falla reportada por el cliente. */
     description: string;
     status: ServiceStatus;

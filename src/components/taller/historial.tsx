@@ -13,7 +13,7 @@ const cuando = (d: Date) => d.toLocaleString('es-DO', { dateStyle: 'medium', tim
 function texto(e: ServiceEvent, nombre: (id?: string) => string, persona: (id?: string) => string): string {
   switch (e.kind) {
     case 'created':
-      return `Ingresó el caso${e.toStatus ? ` (${SERVICE_STATUS[e.toStatus]?.label ?? e.toStatus})` : ''}${e.toUser ? `, asignado a ${nombre(e.toUser)}` : ''}`;
+      return `Ingresó el caso${e.toStatus ? ` (${SERVICE_STATUS[e.toStatus]?.label ?? e.toStatus})` : ''}${e.toStaff ? `, asignado a ${persona(e.toStaff)}` : e.toUser ? `, asignado a ${nombre(e.toUser)}` : ''}`;
     case 'status':
       return `Cambió a «${e.toStatus ? SERVICE_STATUS[e.toStatus]?.label ?? e.toStatus : '?'}»`;
     case 'assigned':

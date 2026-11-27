@@ -854,12 +854,8 @@ export const rowToService = (r: any): import('@/lib/types').Service => ({
   assignedUser: undefined,
   staff: r.service_staff ? {
     id: r.service_staff.id,
-    branchId: r.branch_id,
     name: r.service_staff.name,
     profileId: r.service_staff.profile_id ?? undefined,
-    commissionRate: 0,
-    isActive: true,
-    position: 0,
   } : undefined,
   description: r.description ?? '',
   status: r.status,

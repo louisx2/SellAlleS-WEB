@@ -132,6 +132,10 @@ export default function CasoClient() {
   const isTech = config.technicians.some((t) => t.profileId === appUser?.id);
   const catalog = config.catalog.filter((s) => s.isActive && s.productId
     && (!s.equipmentTypeId || !service?.equipmentTypeId || s.equipmentTypeId === service.equipmentTypeId));
+  const staffNames = useMemo(
+    () => Object.fromEntries(config.staff.map((p) => [p.id, p.name])) as Record<string, string>,
+    [config.staff],
+  );
   const suggestedCategory = useMemo(() => {
     const ids = new Set(labor.map((l) => l.serviceTypeId));
     return config.catalog.find((s) => ids.has(s.id) && s.partCategoryId)?.partCategoryId;
@@ -484,7 +488,7 @@ export default function CasoClient() {
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-base">Historial</CardTitle></CardHeader>
             <CardContent>
-              <Historial events={events} names={names} staffNames={Object.fromEntries(config.staff.map((p) => [p.id, p.name]))} canNote={canEdit} onNote={addNote} />
+              <Historial events={events} names={names} staffNames={staffNames} canNote={canEdit} onNote={addNote} />
             </CardContent>
           </Card>
         </div>
