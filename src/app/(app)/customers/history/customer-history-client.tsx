@@ -9,7 +9,7 @@ import { useModules } from '@/context/modules-provider';
 import { useSharing } from '@/context/sharing-provider';
 import { supabase } from '@/lib/supabase/client';
 import { rowToService, rowToCoupon, SERVICE_SELECT } from '@/lib/supabase/mappers';
-import { caseNumber, equipmentLabel } from '@/lib/taller';
+import { caseNumber, equipmentLabel, statusCtx } from '@/lib/taller';
 import { StatusBadge } from '@/components/taller/status-badge';
 import { formatCurrency } from '@/lib/utils';
 import type { Service, Coupon } from '@/lib/types';
@@ -327,7 +327,7 @@ export default function CustomerHistoryClient() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Fecha</TableHead>
-                    <TableHead>Descripción</TableHead>
+                    <TableHead>Orden</TableHead>
                     <TableHead className="text-right">Total</TableHead>
                     <TableHead>Estado</TableHead>
                   </TableRow>
@@ -342,7 +342,7 @@ export default function CustomerHistoryClient() {
                       </TableCell>
                       <TableCell className="text-right">{formatCurrency(service.total)}</TableCell>
                       <TableCell>
-                        <StatusBadge status={service.status} />
+                        <StatusBadge status={service.status} ctx={statusCtx(service)} />
                       </TableCell>
                     </TableRow>
                   ))}

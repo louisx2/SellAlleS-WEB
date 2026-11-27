@@ -139,6 +139,20 @@ export function fichaFields(
   return out;
 }
 
+/** Campos de la ficha de una orden: los de su tipo o, si el tipo ya no está,
+ *  los tres de siempre (para no esconder lo que se anotó). */
+export function camposDeFicha(
+  t?: Pick<EquipmentType, 'brandLabel' | 'modelLabel' | 'serialLabel'>,
+): { key: 'brand' | 'model' | 'serial'; label: string }[] {
+  return t ? fichaFields(t) : [{ key: 'brand', label: 'Marca' }, { key: 'model', label: 'Modelo' }, { key: 'serial', label: 'Serie' }];
+}
+
+/** Valor de un campo de la ficha en la copia que guarda la orden. */
+export function valorDeFicha(s: Pick<Service, 'equipmentBrand' | 'equipmentModel' | 'equipmentSerial'>,
+  key: 'brand' | 'model' | 'serial'): string | undefined {
+  return key === 'brand' ? s.equipmentBrand : key === 'model' ? s.equipmentModel : s.equipmentSerial;
+}
+
 /** "#0142": con ceros a la izquierda hasta 4 cifras, para que se lea igual en
  *  la lista, el recibo y el POS. */
 export function caseNumber(n: number): string {
@@ -207,13 +221,16 @@ export function trackingUrl(code: string, empresaSlug: string): string {
   return `${ENLACE_BASE}/${empresaSlug || 'taller'}/c/${encodeURIComponent(code)}`;
 }
 
-/** Mensaje para avisarle al cliente cómo va su orden. */
-export function mensajeDeEstado(s: Pick<Service, 'number' | 'status' | 'equipmentBrand' | 'equipmentModel' | 'total' | 'paymentStatus' | 'staysInShop' | 'isRepair'>,
+/** Mensaje para avisarle al cliente cómo va su orden. A domicilio lleva la
+ *  dirección del servicio. */
+export function mensajeDeEstado(s: Pick<Service, 'number' | 'status' | 'equipmentBrand' | 'equipmentModel' | 'total' | 'paymentStatus' | 'staysInShop' | 'isRepair' | 'atCustomer' | 'serviceAddress'>,
   cliente: string | undefined, negocio: string, enlace?: string): string {
   const ficha = equipmentLabel(s);
   const sobre = ficha ? `${ficha} (orden ${caseNumber(s.number)})` : `tu orden ${caseNumber(s.number)}`;
   const saludo = cliente ? `Hola ${cliente.split(' ')[0]}` : 'Hola';
   let texto = `${saludo}, te escribimos de ${negocio} sobre ${sobre}: ${customerText(s.status, statusCtx(s))}.`;
+  const direccion = s.atCustomer ? s.serviceAddress?.trim() : '';
+  if (direccion) texto += ` Dirección del servicio: ${direccion}.`;
   if (isReadyToDeliver(s.status) && s.total > 0 && s.paymentStatus !== 'paid') {
     texto += ` El total es RD$${s.total.toLocaleString('es-DO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}.`;
   }

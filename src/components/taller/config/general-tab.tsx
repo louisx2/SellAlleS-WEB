@@ -66,7 +66,7 @@ export function GeneralTab({ config, canEdit }: { config: TallerConfig; canEdit:
           <CardTitle className="text-base">Inventario de piezas</CardTitle>
           <CardDescription>
             Las piezas que se ofrecen en una orden salen de esta ubicación de la sucursal. Crea la
-            ubicación en <span className="font-medium">Ubicaciones</span> (por ejemplo «Taller») y
+            ubicación en <span className="font-medium">Ubicaciones</span> (por ejemplo «Repuestos») y
             asígnasela a las piezas.
           </CardDescription>
         </CardHeader>

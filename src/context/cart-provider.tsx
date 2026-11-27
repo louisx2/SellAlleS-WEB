@@ -231,7 +231,7 @@ const cartStore = create<CartStore>()(
         // alguna. Para no cobrar una, se le pone precio 0 o se quita en el caso.
         if (active?.items.find(i => i.cartItemId === cartItemId)?.serviceItemId) {
           setTimeout(() => set({ toast: null }), 3000);
-          return { toast: 'Esta línea viene del caso del taller: quítala allí o vacía el carrito.' };
+          return { toast: 'Esta línea viene de una orden de servicio: quítala allí o vacía el carrito.' };
         }
         return {
           carts: state.carts.map(cart =>
@@ -255,7 +255,7 @@ const cartStore = create<CartStore>()(
               return cart;
             }
             if (itemToUpdate.serviceItemId) {
-              set({ toast: 'La cantidad viene del caso del taller: cámbiala allí.' });
+              set({ toast: 'La cantidad viene de la orden de servicio: cámbiala allí.' });
               setTimeout(() => set({ toast: null }), 3000);
               return cart;
             }

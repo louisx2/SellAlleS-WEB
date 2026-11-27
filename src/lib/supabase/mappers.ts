@@ -850,8 +850,6 @@ export const rowToService = (r: any): import('@/lib/types').Service => ({
   customer: r.customers ? rowToCustomer(r.customers) : undefined,
   serviceTypeId: r.service_type_id ?? undefined,
   serviceType: r.service_types ? rowToServiceType(r.service_types) : undefined,
-  assignedTo: r.assigned_to ?? undefined,
-  assignedUser: undefined,
   staff: r.service_staff ? {
     id: r.service_staff.id,
     name: r.service_staff.name,

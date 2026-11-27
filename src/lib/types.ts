@@ -1141,8 +1141,6 @@ export type CustomerSubject = {
     isActive: boolean;
 };
 
-export type Technician = { id: string; profileId: string; name: string };
-
 export type ServiceItemKind = 'labor' | 'part';
 
 export type ServiceItem = {
@@ -1185,8 +1183,6 @@ export type Service = {
     customer?: Customer;
     serviceTypeId?: string;
     serviceType?: ServiceType;
-    assignedTo?: string;
-    assignedUser?: User;
     /** Solo lo que trae el embed; el registro completo sale de useTallerConfig().staff. */
     staff?: Pick<Staff, 'id' | 'name' | 'profileId'>;
     /** Falla reportada por el cliente. */

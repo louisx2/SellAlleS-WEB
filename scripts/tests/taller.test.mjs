@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   caseNumber, checklistFor, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
   mensajeDeEstado, missingRequired, statusLabel, customerText, manualStatuses, canClose, closeLabel,
-  fichaFields, defaultStaysInShop, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS, tiposQueFaltan,
+  fichaFields, camposDeFicha, valorDeFicha, defaultStaysInShop, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS, tiposQueFaltan,
   ordenNueva,
 } from '../../src/lib/taller.ts';
 import {
@@ -171,12 +171,27 @@ test('campos de la ficha', () => {
   assert.equal(defaultStaysInShop({ staysInShop: true }, true), false);
   assert.equal(defaultStaysInShop({ staysInShop: true }, false), true);
   assert.equal(defaultStaysInShop(undefined, false), false);
+  // En la orden: los del tipo, o los tres de siempre si el tipo ya no está.
+  assert.deepEqual(camposDeFicha({ brandLabel: 'Nombre', modelLabel: null, serialLabel: 'Placa' }).map((c) => c.label), ['Nombre', 'Placa']);
+  assert.deepEqual(camposDeFicha(undefined).map((c) => c.key), ['brand', 'model', 'serial']);
+  const orden = { equipmentBrand: 'Max', equipmentModel: 'Poodle', equipmentSerial: undefined };
+  assert.equal(valorDeFicha(orden, 'brand'), 'Max');
+  assert.equal(valorDeFicha(orden, 'model'), 'Poodle');
+  assert.equal(valorDeFicha(orden, 'serial'), undefined);
 });
 
 test('mensaje sin ficha', () => {
   const m = mensajeDeEstado({ number: 142, status: 'delivered', total: 0, paymentStatus: 'paid', ...NO }, 'Ana Gómez', 'Salón X');
   assert.match(m, /sobre tu orden #0142/);
   assert.match(m, /¡Gracias por visitarnos!/);
+});
+
+test('mensaje a domicilio con la dirección', () => {
+  const s = { number: 7, status: 'received', total: 0, paymentStatus: 'pending', ...NO, atCustomer: true, serviceAddress: '  Calle 5 #12, Naco ' };
+  const m = mensajeDeEstado(s, 'Ana', 'Limpia RD', 'https://x/c/1');
+  assert.match(m, /: Ya te anotamos\. Dirección del servicio: Calle 5 #12, Naco\.\n\n/);
+  assert.doesNotMatch(mensajeDeEstado({ ...s, atCustomer: false }, 'Ana', 'Limpia RD'), /Dirección/);
+  assert.doesNotMatch(mensajeDeEstado({ ...s, serviceAddress: ' ' }, 'Ana', 'Limpia RD'), /Dirección/);
 });
 
 test('orden nueva', () => {
