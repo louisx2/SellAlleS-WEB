@@ -289,7 +289,7 @@ export default function SaleReceiptClient() {
               <Button asChild variant="outline">
                 <Link href={`/services/nuevo?garantia_venta=${sale.id}`}>
                   <ShieldCheck className="mr-2 h-4 w-4" />
-                  Garantía al taller
+                  Ingresar por garantía
                 </Link>
               </Button>
             )}

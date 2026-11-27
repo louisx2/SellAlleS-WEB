@@ -45,7 +45,7 @@ export const APP_MODULES: AppModule[] = [
   { key: 'payables',   label: 'Cuentas por Pagar',  description: 'Facturas de suplidores, abonos y antigüedad de saldos. Con datos fiscales DGII (Formato 606) para empresas formalizadas.', defaultEnabled: false },
   { key: 'purchases',  label: 'Compras a Inventario', description: 'Las facturas de suplidores pueden llevar líneas de productos que suman al stock. Requiere Cuentas por Pagar.', defaultEnabled: false },
   { key: 'reports',    label: 'Reportes',           description: 'Resúmenes de ventas, productos e impuestos.',         defaultEnabled: true },
-  { key: 'services',   label: 'Taller', description: 'Casos de reparación o servicio: ingreso con chequeos, técnicos, estados, piezas del inventario y cobro por el POS.',  defaultEnabled: true },
+  { key: 'services',   label: 'Servicios', description: 'Órdenes de servicio para cualquier negocio: personal, fichas de lo que se atiende, chequeos, materiales del inventario y cobro por el POS.', defaultEnabled: false },
   { key: 'lavanderia', label: 'Lavandería',         description: 'Órdenes de servicio de lavandería.',                  defaultEnabled: false, comingSoon: true },
   { key: 'prestamos',  label: 'Préstamos',          description: 'Préstamos de dinero a clientes, con cuotas e interés, independientes de las ventas.', defaultEnabled: false },
   { key: 'loyalty',    label: 'Programa de Fidelidad', description: 'Cupones automáticos al alcanzar cierta cantidad de compras/servicios.', defaultEnabled: false },
@@ -70,6 +70,7 @@ const ROUTE_MODULE: Array<{ prefix: string; module: ModuleKey }> = [
   { prefix: '/payables',  module: 'payables' },
   // Antes que '/reports': gana la primera que coincide.
   { prefix: '/reports/comisiones', module: 'commissions' },
+  { prefix: '/reports/servicios', module: 'services' },
   { prefix: '/reports/taller', module: 'services' },
   { prefix: '/reports/vehiculos', module: 'motoprestamos' },
   { prefix: '/reports',   module: 'reports' },

@@ -1,6 +1,6 @@
 import type { ModuleKey } from '@/lib/modules';
 
-export type BusinessType = 'tienda' | 'ferreteria' | 'lavanderia' | 'reparaciones' | 'prestamos' | 'motoprestamos' | 'otro';
+export type BusinessType = 'tienda' | 'ferreteria' | 'lavanderia' | 'reparaciones' | 'salon' | 'mascotas' | 'limpieza' | 'lubricentro' | 'prestamos' | 'motoprestamos' | 'otro';
 
 export interface BusinessTypePreset {
   label: string;
@@ -44,10 +44,34 @@ export const BUSINESS_TYPE_PRESETS: Record<BusinessType, BusinessTypePreset> = {
   },
   reparaciones: {
     label: 'Reparación de teléfonos',
-    description: 'Taller: casos con chequeos de llegada, técnicos, piezas y seguimiento para el cliente.',
+    description: 'Órdenes con chequeos de llegada, personal, piezas y seguimiento para el cliente.',
     modules: ['services'],
     // El catálogo (con precio) lo arma cada taller: cada servicio crea su artículo.
     tallerRubro: 'celulares',
+  },
+  salon: {
+    label: 'Salón de belleza y uñas',
+    description: 'Órdenes de servicio con el personal que atiende y los materiales del inventario.',
+    modules: ['services'],
+    tallerRubro: 'salon',
+  },
+  mascotas: {
+    label: 'Veterinaria y peluquería de mascotas',
+    description: 'Una ficha por mascota, con chequeos de llegada y seguimiento para el dueño.',
+    modules: ['services'],
+    tallerRubro: 'mascotas',
+  },
+  limpieza: {
+    label: 'Limpieza',
+    description: 'Órdenes de servicio a domicilio, con el personal asignado y cobro por el POS.',
+    modules: ['services'],
+    tallerRubro: 'limpieza',
+  },
+  lubricentro: {
+    label: 'Lubricentro y cambio de aceite',
+    description: 'Una ficha por vehículo, con kilometraje, chequeos y materiales del inventario.',
+    modules: ['services'],
+    tallerRubro: 'lubricentro',
   },
   prestamos: {
     label: 'Préstamos',

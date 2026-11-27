@@ -14,6 +14,8 @@ import {
   duracion, fechaDeCobro, porTecnico, resumen, tiempoPorEstado, topEquipos, topLineas,
 } from '../../src/lib/taller-reportes.ts';
 import { baseQtyInCart } from '../../src/lib/presentations.ts';
+import { moduleForRoute, resolveEnabledModules } from '../../src/lib/modules.ts';
+import { BUSINESS_TYPE_PRESETS } from '../../src/lib/business-types.ts';
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -314,4 +316,22 @@ test('plantilla: nombres que faltan', () => {
   assert.deepEqual(tiposQueFaltan('mascotas', [' perro ']).map((e) => e.name), ['Gato']);
   assert.equal(tiposQueFaltan('mascotas', ['PERRO', 'gato']).length, 0);
   assert.equal(tiposQueFaltan('nada', []).length, 0);
+});
+
+test('Servicios apagado por defecto', () => {
+  assert.equal(resolveEnabledModules([]).has('services'), false);
+  assert.equal(resolveEnabledModules([{ module_key: 'services', enabled: true }]).has('services'), true);
+});
+
+test('rubros de servicios', () => {
+  for (const tipo of ['salon', 'mascotas', 'limpieza', 'lubricentro', 'reparaciones']) {
+    const preset = BUSINESS_TYPE_PRESETS[tipo];
+    assert.ok(preset, tipo);
+    assert.ok(preset.modules.includes('services'), tipo);
+    assert.ok(RUBROS.some((r) => r.key === preset.tallerRubro), `${tipo}: rubro ${preset.tallerRubro}`);
+  }
+});
+
+test('la ruta del reporte nuevo', () => {
+  assert.equal(moduleForRoute('/reports/servicios'), 'services');
 });
