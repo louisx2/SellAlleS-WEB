@@ -16,6 +16,7 @@ import {
 import { baseQtyInCart } from '../../src/lib/presentations.ts';
 import { moduleForRoute, resolveEnabledModules } from '../../src/lib/modules.ts';
 import { BUSINESS_TYPE_PRESETS } from '../../src/lib/business-types.ts';
+import { reportSlugForRoute, REPORT_ITEMS } from '../../src/lib/permissions.ts';
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -334,4 +335,10 @@ test('rubros de servicios', () => {
 
 test('la ruta del reporte nuevo', () => {
   assert.equal(moduleForRoute('/reports/servicios'), 'services');
+});
+
+test('el reporte de servicios conserva el slug de permiso taller', () => {
+  assert.equal(reportSlugForRoute('/reports/servicios'), 'taller');
+  assert.equal(reportSlugForRoute('/reports/inventory'), 'inventory');
+  assert.ok(REPORT_ITEMS.some((r) => r.slug === 'taller'));
 });

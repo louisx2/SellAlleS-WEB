@@ -18,7 +18,7 @@ import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { moduleForRoute, type ModuleKey } from '@/lib/modules';
 import { itemDeRuta } from '@/lib/rutas';
-import { hasPermission, isReportVisible, unionPermissions } from '@/lib/permissions';
+import { hasPermission, isReportVisible, reportSlugForRoute, unionPermissions } from '@/lib/permissions';
 import type { PermissionResource } from '@/lib/types';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { usePlatformSettings } from '@/context/platform-settings-provider';
@@ -358,7 +358,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
         .sort((a, b) => ordenEnBloqueo(a.href) - ordenEnBloqueo(b.href))
     : [];
   const visibleReportsNavItems = reportsNavItems.filter((item) => {
-    const slug = item.href.split('/').pop()!;
+    const slug = reportSlugForRoute(item.href);
     // El 606 es un reporte fiscal DGII: aplica solo a empresas formalizadas y
     // depende de las facturas del módulo de Cuentas por Pagar.
     if (slug === 'compras-606' && (!profile.isFormalized || !isModuleEnabled('payables'))) return false;

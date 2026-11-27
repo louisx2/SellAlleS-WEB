@@ -79,6 +79,16 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
 
 // Los reportes individuales (src/app/(app)/reports/*), controlables por
 // separado dentro de un rol vía permissions.reports_visible.
+/** Reportes cuya ruta ya no coincide con su slug de permiso (el slug se queda
+ *  para no tocar los roles guardados). */
+const REPORT_SLUG_POR_RUTA: Record<string, string> = { servicios: 'taller' };
+
+/** Slug de permiso de un reporte a partir de su ruta (/reports/<ruta>). */
+export function reportSlugForRoute(href: string): string {
+  const ruta = href.split('/').pop() ?? '';
+  return REPORT_SLUG_POR_RUTA[ruta] ?? ruta;
+}
+
 export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'sales-summary', label: 'Resumen de Ventas' },
   { slug: 'user-sales', label: 'Ventas por Usuario' },
