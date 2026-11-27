@@ -234,10 +234,10 @@ begin
        for update of s;
     if found then
       if v_srv.sale_id is not null then
-        raise exception 'El caso #% ya fue cobrado: no se pueden cambiar sus líneas.', v_srv.number;
+        raise exception 'La orden #% ya fue cobrada: no se pueden cambiar sus líneas.', v_srv.number;
       end if;
       if v_srv.status in ('delivered', 'cancelled') then
-        raise exception 'El caso #% está cerrado.', v_srv.number;
+        raise exception 'La orden #% está cerrada.', v_srv.number;
       end if;
     end if;
     if tg_op = 'DELETE' then
@@ -252,10 +252,10 @@ begin
   select * into v_srv from public.services where id = v_item.service_id for update;
 
   if v_srv.sale_id is not null then
-    raise exception 'El caso #% ya fue cobrado: no se pueden cambiar sus líneas.', v_srv.number;
+    raise exception 'La orden #% ya fue cobrada: no se pueden cambiar sus líneas.', v_srv.number;
   end if;
   if v_srv.status in ('delivered', 'cancelled') then
-    raise exception 'El caso #% está cerrado.', v_srv.number;
+    raise exception 'La orden #% está cerrada.', v_srv.number;
   end if;
 
   if v_item.kind <> 'labor' then
@@ -282,7 +282,9 @@ create trigger trg_servicios_item_staff_guard
 alter table public.service_item_staff enable row level security;
 
 -- Ver = ver la línea (la subconsulta hereda la RLS de service_items → services).
--- Escribir = ver la orden y poder editar Servicios en su sucursal.
+-- Escribir = ver la orden y poder crear o editar Servicios en su sucursal, igual
+-- que service_items_write: quien puede agregar una línea dice quién la hace (al
+-- crear la orden, las líneas y sus personas se guardan juntas).
 create policy service_item_staff_select on public.service_item_staff
   for select using (exists (select 1 from public.service_items si where si.id = service_item_staff.service_item_id));
 create policy service_item_staff_write on public.service_item_staff
@@ -291,14 +293,16 @@ create policy service_item_staff_write on public.service_item_staff
       from public.service_items si
       join public.services s on s.id = si.service_id
      where si.id = service_item_staff.service_item_id
-       and public.taller_tiene_permiso(s.branch_id, 'services', 'edit')
+       and (public.taller_tiene_permiso(s.branch_id, 'services', 'edit')
+            or public.taller_tiene_permiso(s.branch_id, 'services', 'create'))
   ))
   with check (exists (
     select 1
       from public.service_items si
       join public.services s on s.id = si.service_id
      where si.id = service_item_staff.service_item_id
-       and public.taller_tiene_permiso(s.branch_id, 'services', 'edit')
+       and (public.taller_tiene_permiso(s.branch_id, 'services', 'edit')
+            or public.taller_tiene_permiso(s.branch_id, 'services', 'create'))
   ));
 
 revoke all on table public.service_item_staff from public, anon, authenticated;
@@ -482,7 +486,7 @@ AS $function$
 begin
   if new.number is distinct from old.number or new.company_id is distinct from old.company_id
      or new.branch_id is distinct from old.branch_id then
-    raise exception 'No se puede cambiar el número, la empresa ni la sucursal de un caso.';
+    raise exception 'No se puede cambiar el número, la empresa ni la sucursal de una orden.';
   end if;
 
   -- Si es de reparación sale del tipo de ficha al crear la orden.
@@ -502,22 +506,22 @@ begin
       or new.payment_status is distinct from old.payment_status
       or new.amount_paid is distinct from old.amount_paid)
      and coalesce(current_setting('taller.cobro', true), '') <> 'si' then
-    raise exception 'El cobro de un caso se hace desde el POS.';
+    raise exception 'El cobro de una orden se hace desde el POS.';
   end if;
 
   -- Los importes los calcula el trigger de las líneas (que corre anidado).
   if (new.labor_price is distinct from old.labor_price or new.parts_total is distinct from old.parts_total)
      and pg_trigger_depth() < 2 then
-    raise exception 'Los importes del caso salen de sus líneas.';
+    raise exception 'Los importes de la orden salen de sus líneas.';
   end if;
 
   if new.status is distinct from old.status then
     if old.status in ('delivered', 'cancelled') then
-      raise exception 'El caso #% ya está %.', old.number,
-        case old.status when 'delivered' then 'entregado' else 'cancelado' end;
+      raise exception 'La orden #% ya está %.', old.number,
+        case old.status when 'delivered' then 'cerrada' else 'cancelada' end;
     end if;
     if new.status = 'delivered' and coalesce(current_setting('taller.entregar', true), '') <> 'si' then
-      raise exception 'Para entregar un caso usa el botón Entregar.';
+      raise exception 'Para cerrar una orden usa el botón Entregar o Terminar.';
     end if;
     -- Una orden que no se queda no pasa por «Listo para retirar»: se termina.
     if new.status = 'ready' and not new.stays_in_shop then
@@ -525,10 +529,10 @@ begin
     end if;
     if new.status = 'cancelled' then
       if new.sale_id is not null then
-        raise exception 'El caso #% ya fue cobrado: anula la venta antes de cancelarlo.', old.number;
+        raise exception 'La orden #% ya fue cobrada: anula la venta antes de cancelarla.', old.number;
       end if;
       if exists (select 1 from public.service_items where service_id = new.id and kind = 'part') then
-        raise exception 'Quita las piezas del caso #% antes de cancelarlo (vuelven al inventario).', old.number;
+        raise exception 'Quita las piezas y materiales de la orden #% antes de cancelarla (vuelven al inventario).', old.number;
       end if;
     end if;
     new.status_changed_at := now();
@@ -608,12 +612,12 @@ declare
   v_srv public.services%rowtype;
 begin
   if p_status = 'delivered' then
-    raise exception 'Para entregar un caso usa el botón Entregar.';
+    raise exception 'Para cerrar una orden usa el botón Entregar o Terminar.';
   end if;
 
   select * into v_srv from public.services where id = p_service_id;
   if not found then
-    raise exception 'Caso no encontrado.';
+    raise exception 'Orden no encontrada.';
   end if;
 
   if p_status = 'ready' and not v_srv.stays_in_shop then
@@ -622,7 +626,7 @@ begin
 
   if p_status = 'cancelled' then
     if not public.taller_tiene_permiso(v_srv.branch_id, 'services', 'delete') then
-      raise exception 'Tu rol no permite cancelar casos del taller.';
+      raise exception 'Tu rol no permite cancelar órdenes de servicio.';
     end if;
     -- Las piezas vuelven al inventario (el trigger de las líneas las repone).
     delete from public.service_items where service_id = p_service_id and kind = 'part';
@@ -633,7 +637,7 @@ begin
 
   update public.services set status = p_status where id = p_service_id;
   if not found then
-    raise exception 'No tienes permiso para cambiar este caso.';
+    raise exception 'No tienes permiso para cambiar esta orden.';
   end if;
   select * into v_srv from public.services where id = p_service_id;
   return v_srv;
@@ -656,18 +660,18 @@ declare
 begin
   select * into v_srv from public.services where id = p_service_id;
   if not found then
-    raise exception 'Caso no encontrado.';
+    raise exception 'Orden no encontrada.';
   end if;
   if v_srv.stays_in_shop then
     if v_srv.status not in ('ready', 'not_repaired') then
-      raise exception 'El caso #% no está listo para entregar.', v_srv.number;
+      raise exception 'La orden #% no está lista para entregar.', v_srv.number;
     end if;
   elsif v_srv.status in ('delivered', 'cancelled') then
-    raise exception 'El caso #% ya está %.', v_srv.number,
-      case v_srv.status when 'delivered' then 'entregado' else 'cancelado' end;
+    raise exception 'La orden #% ya está %.', v_srv.number,
+      case v_srv.status when 'delivered' then 'cerrada' else 'cancelada' end;
   end if;
   if v_srv.sale_id is null and coalesce(v_srv.total, 0) > 0 then
-    raise exception 'El caso #% tiene RD$% por cobrar: cóbralo en el POS antes de entregarlo.',
+    raise exception 'La orden #% tiene RD$% por cobrar: cóbrala en el POS antes de cerrarla.',
       v_srv.number, to_char(v_srv.total, 'FM999,999,990.00');
   end if;
 
@@ -699,7 +703,7 @@ begin
                                then public.company_today(v_srv.company_id) + v_dias end
    where id = p_service_id;
   if not found then
-    raise exception 'No tienes permiso para entregar este caso.';
+    raise exception 'No tienes permiso para cerrar esta orden.';
   end if;
 
   perform set_config('taller.entregar', '', true);
@@ -744,7 +748,7 @@ begin
     raise exception 'La comisión es un porcentaje o un monto fijo, no los dos.';
   end if;
   if not public.taller_puede_configurar() then
-    raise exception 'Tu rol no permite configurar el taller.';
+    raise exception 'Tu rol no permite configurar los servicios.';
   end if;
 
   if nullif(p->>'id', '') is not null then

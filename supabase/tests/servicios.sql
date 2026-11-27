@@ -10,6 +10,7 @@
 --   …e7f2 María Pérez: personal con usuario en la sucursal …e7b1, con un rol que
 --         tiene Servicios ver/crear/editar y no «ver todas».
 --   …e7f3 Carlos Caja: cajero de …e7b1 con un rol sin Servicios; no es personal.
+--   …e7f4 Celia Crea: en …e7b1 con un rol que tiene Servicios ver/crear, sin editar.
 -- La orden «cobrada» del caso C apunta a una venta que ya existe en la demo (la FK lo
 -- exige); esa venta no se toca.
 --
@@ -62,21 +63,26 @@ insert into auth.users (id, instance_id, aud, role, email, raw_user_meta_data, r
   ('00000000-0000-0000-0000-00000000e7f2', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
    'servicios-personal@prueba.invalid', '{"name":"María Pérez"}', '{}', now(), now()),
   ('00000000-0000-0000-0000-00000000e7f3', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
-   'servicios-cajero@prueba.invalid', '{"name":"Carlos Caja"}', '{}', now(), now());
+   'servicios-cajero@prueba.invalid', '{"name":"Carlos Caja"}', '{}', now(), now()),
+  ('00000000-0000-0000-0000-00000000e7f4', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+   'servicios-crea@prueba.invalid', '{"name":"Celia Crea"}', '{}', now(), now());
 update profiles set company_id = '00000000-0000-0000-0000-00000000e7a0', role = 'admin'
  where id = '00000000-0000-0000-0000-00000000e7f1';
 update profiles set company_id = '00000000-0000-0000-0000-00000000e7a0', role = 'cashier'
- where id in ('00000000-0000-0000-0000-00000000e7f2', '00000000-0000-0000-0000-00000000e7f3');
+ where id in ('00000000-0000-0000-0000-00000000e7f2', '00000000-0000-0000-0000-00000000e7f3', '00000000-0000-0000-0000-00000000e7f4');
 
 -- Los permisos salen del rol de la persona EN la sucursal (lo que lee taller_tiene_permiso).
 insert into roles (id, company_id, name, is_system, permissions) values
   ('00000000-0000-0000-0000-00000000e7d1', '00000000-0000-0000-0000-00000000e7a0', 'Personal de prueba', false,
    '{"services":["view","create","edit"],"customers":["view","create"]}'),
   ('00000000-0000-0000-0000-00000000e7d2', '00000000-0000-0000-0000-00000000e7a0', 'Caja de prueba', false,
-   '{"pos":["view","create"],"customers":["view","create"]}');
+   '{"pos":["view","create"],"customers":["view","create"]}'),
+  ('00000000-0000-0000-0000-00000000e7d3', '00000000-0000-0000-0000-00000000e7a0', 'Solo crea de prueba', false,
+   '{"services":["view","create"]}');
 insert into profile_branches (profile_id, branch_id, role_id) values
   ('00000000-0000-0000-0000-00000000e7f2', '00000000-0000-0000-0000-00000000e7b1', '00000000-0000-0000-0000-00000000e7d1'),
-  ('00000000-0000-0000-0000-00000000e7f3', '00000000-0000-0000-0000-00000000e7b1', '00000000-0000-0000-0000-00000000e7d2');
+  ('00000000-0000-0000-0000-00000000e7f3', '00000000-0000-0000-0000-00000000e7b1', '00000000-0000-0000-0000-00000000e7d2'),
+  ('00000000-0000-0000-0000-00000000e7f4', '00000000-0000-0000-0000-00000000e7b1', '00000000-0000-0000-0000-00000000e7d3');
 
 insert into customers (id, company_id, name) values
   ('00000000-0000-0000-0000-00000000e7e1', '00000000-0000-0000-0000-00000000e7a0', 'Cliente de prueba'),
@@ -170,8 +176,9 @@ begin
   end;
 end $$;
 
--- C. Una línea de servicio con dos personas. Una pieza no lleva persona. Cobrada la
---    orden, ya no se cambian las personas.
+-- C. Una línea de servicio con dos personas. Una pieza no lleva persona. Quien solo
+--    puede crear órdenes dice quién hace la línea que agrega. Cobrada la orden, ya no
+--    se cambian las personas.
 do $$
 declare
   v_venta uuid := (select id from sales where company_id = '00000000-0000-0000-0000-0000000000aa' order by created_at limit 1);
@@ -199,6 +206,18 @@ begin
     perform pg_temp.debe_fallar($q$insert into service_item_staff (service_item_id, staff_id)
       values ('00000000-0000-0000-0000-00000000e771', '00000000-0000-0000-0000-00000000e7c4')$q$, '%Esa persona no está en el personal de esta sucursal.%');
 
+    -- Quien solo crea (sin editar): su orden nueva, su línea y quién la hace.
+    perform pg_temp.como('00000000-0000-0000-0000-00000000e7f4');
+    insert into services (id, branch_id, description) values
+      ('00000000-0000-0000-0000-00000000e783', '00000000-0000-0000-0000-00000000e7b1', 'Orden de quien solo crea');
+    insert into service_items (id, service_id, product_id, quantity, price, kind) values
+      ('00000000-0000-0000-0000-00000000e774', '00000000-0000-0000-0000-00000000e783', '00000000-0000-0000-0000-00000000e701', 1, 500, 'labor');
+    insert into service_item_staff (service_item_id, staff_id) values
+      ('00000000-0000-0000-0000-00000000e774', '00000000-0000-0000-0000-00000000e7c2');
+    perform pg_temp.igual((select count(*)::int from service_item_staff where service_item_id = '00000000-0000-0000-0000-00000000e774'), 1,
+                          'quien solo crea dice quién hace la línea');
+    perform pg_temp.como('00000000-0000-0000-0000-00000000e7f1');
+
     -- Cobrada: el sale_id solo se pone con taller.cobro (lo hace create_sale_with_items).
     reset role;
     perform pg_temp.igual(v_venta is not null, true, 'hay una venta de la demo para la FK');
@@ -208,9 +227,9 @@ begin
 
     set local role authenticated;
     perform pg_temp.debe_fallar($q$insert into service_item_staff (service_item_id, staff_id)
-      values ('00000000-0000-0000-0000-00000000e771', '00000000-0000-0000-0000-00000000e7c5')$q$, '%ya fue cobrado%');
+      values ('00000000-0000-0000-0000-00000000e771', '00000000-0000-0000-0000-00000000e7c5')$q$, '%ya fue cobrada%');
     perform pg_temp.debe_fallar($q$delete from service_item_staff
-      where service_item_id = '00000000-0000-0000-0000-00000000e771' and staff_id = '00000000-0000-0000-0000-00000000e7c2'$q$, '%ya fue cobrado%');
+      where service_item_id = '00000000-0000-0000-0000-00000000e771' and staff_id = '00000000-0000-0000-0000-00000000e7c2'$q$, '%ya fue cobrada%');
     perform pg_temp.igual((select count(*)::int from service_item_staff where service_item_id = '00000000-0000-0000-0000-00000000e771'), 2, 'siguen las dos personas');
     reset role;
     insert into srv_resultado values ('C personas por línea', null);
