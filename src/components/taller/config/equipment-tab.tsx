@@ -36,7 +36,7 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
 
   const open = (t?: EquipmentType) =>
     setDraft(t
-      ? { id: t.id, name: t.name, serialLabel: t.serialLabel, asksPassword: t.asksPassword, extraFields: t.extraFields, isActive: t.isActive }
+      ? { id: t.id, name: t.name, serialLabel: t.serialLabel ?? 'Serie', asksPassword: t.asksPassword, extraFields: t.extraFields, isActive: t.isActive }
       : { ...EMPTY });
 
   const save = async () => {

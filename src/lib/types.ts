@@ -1068,8 +1068,12 @@ export type EquipmentExtraField = { key: string; label: string; type: 'text' | '
 export type EquipmentType = {
     id: string;
     name: string;
-    serialLabel: string;
+    brandLabel: string | null;
+    modelLabel: string | null;
+    serialLabel: string | null;
     asksPassword: boolean;
+    staysInShop: boolean;
+    isRepair: boolean;
     extraFields: EquipmentExtraField[];
     position: number;
     isActive: boolean;
@@ -1172,6 +1176,15 @@ export type Service = {
     estimate?: number;
     promisedAt?: Date;
     isQuick: boolean;
+    /** Se queda en el local (si no, se atiende y se termina). */
+    staysInShop: boolean;
+    /** La ficha es de reparación: habilita diagnóstico, piezas y «no se pudo reparar». */
+    isRepair: boolean;
+    /** Se atiende en casa del cliente. */
+    atCustomer: boolean;
+    serviceAddress?: string;
+    staffId?: string;
+    subjectId?: string;
     statusChangedAt: Date;
     readyAt?: Date;
     deliveredAt?: Date;

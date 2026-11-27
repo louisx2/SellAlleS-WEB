@@ -29,7 +29,7 @@ import { formatQuantity } from '@/lib/units';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import {
   ANSWER_LABEL, caseNumber, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
-  fmtDate, MANUAL_STATUSES, mensajeDeEstado, SERVICE_STATUS, warrantyActive, whatsappPhone,
+  fmtDate, manualStatuses, mensajeDeEstado, SERVICE_STATUS, statusCtx, statusLabel, warrantyActive, whatsappPhone,
 } from '@/lib/taller';
 import type { Product, Service, ServiceEvent, ServiceItem, ServiceStatus } from '@/lib/types';
 import { StatusBadge } from '@/components/taller/status-badge';
@@ -344,7 +344,7 @@ export default function CasoClient() {
               <Select value={service.status} onValueChange={(v) => { if (v !== service.status) setStatusDialog(v as ServiceStatus); }}>
                 <SelectTrigger id="st" className="w-56"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {MANUAL_STATUSES.map((s) => <SelectItem key={s} value={s}>{SERVICE_STATUS[s].label}</SelectItem>)}
+                  {manualStatuses(statusCtx(service)).map((s) => <SelectItem key={s} value={s}>{statusLabel(s, statusCtx(service))}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -681,7 +681,7 @@ export default function CasoClient() {
       {editOpen && (
         <EditarFicha
           service={service}
-          serialLabel={equipmentType?.serialLabel}
+          serialLabel={equipmentType?.serialLabel ?? undefined}
           asksPassword={!!equipmentType?.asksPassword}
           extraFields={equipmentType?.extraFields ?? []}
           onClose={() => setEditOpen(false)}
