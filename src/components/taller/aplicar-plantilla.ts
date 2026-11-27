@@ -47,6 +47,7 @@ export async function aplicarPlantilla(
     if (sucs && sucs.length > 0) {
       const { error: e4 } = await supabase.from('taller_settings').upsert(
         sucs.map((b: { id: string }) => ({
+          ...(opts.companyId ? { company_id: opts.companyId } : {}),
           branch_id: b.id, default_at_customer: true, updated_at: new Date().toISOString(),
         })),
         { onConflict: 'branch_id' },

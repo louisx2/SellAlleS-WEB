@@ -61,6 +61,8 @@ export function CatalogTab({ config, canEdit }: { config: TallerConfig; canEdit:
   const [usarExistente, setUsarExistente] = useState(false);
   const [busqueda, setBusqueda] = useState('');
   const [resultados, setResultados] = useState<Articulo[]>([]);
+  // Mientras se lee es_servicio del artículo no se puede guardar (si no, se pisaría con true).
+  const [esCargando, setEsCargando] = useState(false);
 
   const open = (s?: ServiceType) => {
     setUsarExistente(false);
@@ -90,10 +92,20 @@ export function CatalogTab({ config, canEdit }: { config: TallerConfig; canEdit:
 
   // «Factura como servicio» se lee del artículo del servicio al editar.
   useEffect(() => {
-    if (!editingProductId) return;
-    supabase.from('products').select('es_servicio').eq('id', editingProductId).maybeSingle().then(({ data }) => {
-      if (data) setDraft((d) => (d?.id ? { ...d, esServicio: data.es_servicio !== false } : d));
+    if (!editingProductId) { setEsCargando(false); return; }
+    let vivo = true;
+    setEsCargando(true);
+    supabase.from('products').select('es_servicio').eq('id', editingProductId).maybeSingle().then(({ data, error }) => {
+      if (!vivo) return;
+      if (error || !data) {
+        toast({ title: 'No se pudo leer si factura como servicio', description: error?.message, variant: 'destructive' });
+        return; // sigue bloqueado el guardado: no se pisa el valor
+      }
+      setDraft((d) => (d?.id ? { ...d, esServicio: data.es_servicio !== false } : d));
+      setEsCargando(false);
     });
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingProductId]);
 
   // Buscador de artículos de la sucursal para «Usar un artículo que ya existe».
@@ -340,7 +352,7 @@ export function CatalogTab({ config, canEdit }: { config: TallerConfig; canEdit:
           )}
           <DialogFooter>
             <Button variant="secondary" onClick={close}>Cancelar</Button>
-            <Button onClick={save} disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</Button>
+            <Button onClick={save} disabled={saving || esCargando}>{saving ? 'Guardando…' : 'Guardar'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
