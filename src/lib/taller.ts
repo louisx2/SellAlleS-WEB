@@ -1,6 +1,6 @@
 // Lógica pura del Taller: estados, textos y cálculos que comparten la lista, el
 // caso, el ingreso y el recibo. Sin React ni Supabase, y solo `import type`.
-import type { ChecklistAnswer, ChecklistItem, EquipmentType, Service, ServiceStatus } from './types';
+import type { ChecklistAnswer, ChecklistItem, Customer, EquipmentType, Service, ServiceStatus } from './types';
 
 export type StatusMeta = {
   /** Lo que ve el personal. */
@@ -85,6 +85,47 @@ export const closeLabel = (ctx: StatusCtx): 'Entregar' | 'Terminar' => (ctx.stay
 /** Si la orden se queda en el local: nunca cuando se atiende donde el cliente. */
 export function defaultStaysInShop(type: Pick<EquipmentType, 'staysInShop'> | undefined, atCustomer: boolean): boolean {
   return !atCustomer && !!type?.staysInShop;
+}
+
+export type OrdenNuevaInput = {
+  /** «Atender ahora»: entra directo en proceso. */
+  ahora: boolean;
+  /** Tipo de la ficha elegida; sin ficha, undefined. */
+  tipo?: Pick<EquipmentType, 'staysInShop' | 'isRepair'>;
+  /** «El cliente espera»: no se queda aunque el tipo lo diga. */
+  clienteEspera: boolean;
+  atCustomer: boolean;
+  /** Dirección escrita en la pantalla (vacía = la del cliente). */
+  direccion?: string;
+  cliente?: Pick<Customer, 'address' | 'collectionAddress'>;
+  lineas: { staffIds: string[] }[];
+  /** Persona elegida en «Lo atiende». */
+  responsable?: string;
+};
+
+export type OrdenNueva = {
+  status: 'received' | 'in_repair';
+  stays_in_shop: boolean;
+  is_repair: boolean;
+  at_customer: boolean;
+  service_address: string | null;
+  staff_id: string | null;
+};
+
+/** Camino, responsable y dirección de una orden nueva (las columnas de `services`
+ *  que salen de lo elegido). Nunca entra «Lista». */
+export function ordenNueva(i: OrdenNuevaInput): OrdenNueva {
+  const limpio = (s?: string) => s?.trim() || null;
+  return {
+    status: i.ahora ? 'in_repair' : 'received',
+    stays_in_shop: !i.clienteEspera && defaultStaysInShop(i.tipo, i.atCustomer),
+    is_repair: !!i.tipo?.isRepair,
+    at_customer: i.atCustomer,
+    service_address: i.atCustomer
+      ? limpio(i.direccion) ?? limpio(i.cliente?.collectionAddress) ?? limpio(i.cliente?.address)
+      : null,
+    staff_id: i.responsable || i.lineas[0]?.staffIds[0] || null,
+  };
 }
 
 /** Campos de marca / modelo / serie de la ficha, en ese orden, sin los que no se piden. */

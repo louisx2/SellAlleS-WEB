@@ -8,6 +8,7 @@ import {
   caseNumber, checklistFor, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
   mensajeDeEstado, missingRequired, statusLabel, customerText, manualStatuses, canClose, closeLabel,
   fichaFields, defaultStaysInShop, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS, tiposQueFaltan,
+  ordenNueva,
 } from '../../src/lib/taller.ts';
 import {
   duracion, fechaDeCobro, porTecnico, resumen, tiempoPorEstado, topEquipos, topLineas,
@@ -176,6 +177,46 @@ test('mensaje sin ficha', () => {
   const m = mensajeDeEstado({ number: 142, status: 'delivered', total: 0, paymentStatus: 'paid', ...NO }, 'Ana Gómez', 'Salón X');
   assert.match(m, /sobre tu orden #0142/);
   assert.match(m, /¡Gracias por visitarnos!/);
+});
+
+test('orden nueva', () => {
+  const base = { ahora: false, clienteEspera: false, atCustomer: false, lineas: [] };
+
+  // Sin ficha, «Atender ahora»: entra en proceso, no se queda y no es reparación.
+  const sinFicha = ordenNueva({ ...base, ahora: true, lineas: [{ staffIds: ['p1', 'p2'] }] });
+  assert.equal(sinFicha.status, 'in_repair');
+  assert.equal(sinFicha.stays_in_shop, false);
+  assert.equal(sinFicha.is_repair, false);
+  assert.equal(sinFicha.at_customer, false);
+  assert.equal(sinFicha.staff_id, 'p1');
+  assert.equal(sinFicha.service_address, null);
+
+  // «Lo atiende» gana sobre la primera persona de la primera línea.
+  assert.equal(ordenNueva({ ...base, lineas: [{ staffIds: ['p1'] }], responsable: 'p9' }).staff_id, 'p9');
+
+  // Tipo que se queda y de reparación, sin «ahora».
+  const rep = { staysInShop: true, isRepair: true };
+  const recibido = ordenNueva({ ...base, tipo: rep });
+  assert.equal(recibido.status, 'received');
+  assert.equal(recibido.stays_in_shop, true);
+  assert.equal(recibido.is_repair, true);
+  assert.equal(ordenNueva({ ...base, tipo: rep, clienteEspera: true }).stays_in_shop, false, 'el cliente espera');
+  assert.equal(ordenNueva({ ...base, tipo: { staysInShop: false, isRepair: false } }).stays_in_shop, false);
+
+  // A domicilio: nunca se queda; la dirección por defecto es la de cobro, después la del cliente.
+  const cliente = { address: 'Calle 1', collectionAddress: 'Calle 2' };
+  const domicilio = ordenNueva({ ...base, tipo: { staysInShop: true, isRepair: false }, atCustomer: true, cliente });
+  assert.equal(domicilio.at_customer, true);
+  assert.equal(domicilio.stays_in_shop, false);
+  assert.equal(domicilio.service_address, 'Calle 2');
+  assert.equal(ordenNueva({ ...base, atCustomer: true, cliente, direccion: ' Calle 3 ' }).service_address, 'Calle 3');
+  assert.equal(ordenNueva({ ...base, atCustomer: true, cliente: { address: 'Calle 1' }, direccion: '  ' }).service_address, 'Calle 1');
+  assert.equal(ordenNueva({ ...base, atCustomer: true }).service_address, null, 'sin cliente ni dirección');
+  assert.equal(ordenNueva({ ...base, cliente, direccion: 'Calle 3' }).service_address, null, 'solo a domicilio lleva dirección');
+
+  // Sin personas: sin responsable.
+  assert.equal(ordenNueva({ ...base, lineas: [{ staffIds: [] }] }).staff_id, null);
+  assert.equal(ordenNueva(base).staff_id, null);
 });
 
 test('POS: las piezas de un caso no cuentan contra el stock', () => {
