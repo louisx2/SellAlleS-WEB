@@ -95,7 +95,7 @@ export default function CasoClient() {
     if (!id) { setNotFound(true); setLoading(false); return; }
     const [srv, its, evs] = await Promise.all([
       supabase.from('services').select(SERVICE_SELECT).eq('id', id).maybeSingle(),
-      supabase.from('service_items').select('*, products(*)').eq('service_id', id).order('created_at'),
+      supabase.from('service_items').select('*, products(*), service_item_staff(staff_id)').eq('service_id', id).order('created_at'),
       supabase.from('service_events').select('*').eq('service_id', id).order('created_at'),
     ]);
     setLoading(false);
@@ -484,7 +484,7 @@ export default function CasoClient() {
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-base">Historial</CardTitle></CardHeader>
             <CardContent>
-              <Historial events={events} names={names} canNote={canEdit} onNote={addNote} />
+              <Historial events={events} names={names} staffNames={Object.fromEntries(config.staff.map((p) => [p.id, p.name]))} canNote={canEdit} onNote={addNote} />
             </CardContent>
           </Card>
         </div>

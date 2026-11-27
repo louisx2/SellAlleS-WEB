@@ -1051,6 +1051,13 @@ export type ServiceType = {
     equipmentTypeId?: string;
     partCategoryId?: string;
     warrantyDays?: number;
+    durationMin?: number;
+    /** Porcentaje de comisión propio del servicio (pisa el de la persona). */
+    commissionRate?: number;
+    /** Monto fijo de comisión (pisa el porcentaje). */
+    commissionAmount?: number;
+    repeatEveryDays?: number;
+    atCustomerDefault: boolean;
     isActive: boolean;
     position: number;
     /** Precio e ITBIS vigentes, del artículo de servicio. */
@@ -1105,6 +1112,33 @@ export type TallerSettings = {
     hidePartsInPos: boolean;
     terms?: string;
     defaultWarrantyDays?: number;
+    defaultAtCustomer: boolean;
+};
+
+/** Persona que atiende (barbero, técnico, estilista...) de una sucursal. */
+export type Staff = {
+    id: string;
+    branchId: string;
+    name: string;
+    phone?: string;
+    color?: string;
+    commissionRate: number;
+    profileId?: string;
+    isActive: boolean;
+    position: number;
+};
+
+/** Ficha de lo que se atiende de un cliente (equipo, mascota, vehículo...). */
+export type CustomerSubject = {
+    id: string;
+    customerId: string;
+    equipmentTypeId?: string;
+    brand?: string;
+    model?: string;
+    serial?: string;
+    details: Record<string, string>;
+    notes?: string;
+    isActive: boolean;
 };
 
 export type Technician = { id: string; profileId: string; name: string };
@@ -1120,6 +1154,8 @@ export type ServiceItem = {
     quantity: number;
     price: number;
     cost: number;
+    /** Personas que hicieron esta línea (service_item_staff). */
+    staffIds: string[];
 };
 
 export type ServiceEventKind = 'created' | 'status' | 'assigned' | 'note' | 'charged' | 'charge_voided';
@@ -1130,6 +1166,8 @@ export type ServiceEvent = {
     toStatus?: ServiceStatus;
     fromUser?: string;
     toUser?: string;
+    fromStaff?: string;
+    toStaff?: string;
     note?: string;
     visibleToCustomer: boolean;
     createdBy?: string;
@@ -1149,6 +1187,7 @@ export type Service = {
     serviceType?: ServiceType;
     assignedTo?: string;
     assignedUser?: User;
+    staff?: Staff;
     /** Falla reportada por el cliente. */
     description: string;
     status: ServiceStatus;
