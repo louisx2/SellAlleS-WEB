@@ -9,9 +9,9 @@ import { GeneralTab } from '@/components/taller/config/general-tab';
 import { EquipmentTab } from '@/components/taller/config/equipment-tab';
 import { ChecklistTab } from '@/components/taller/config/checklist-tab';
 import { CatalogTab } from '@/components/taller/config/catalog-tab';
-import { TechniciansTab } from '@/components/taller/config/technicians-tab';
+import { StaffTab } from '@/components/taller/config/staff-tab';
 
-// Configuración del Taller. La ruta conserva el nombre viejo (/service-types)
+// Configuración de Servicios. La ruta conserva el nombre viejo (/service-types)
 // para no romper los permisos ni los enlaces guardados.
 export default function TallerConfigPage() {
   const config = useTallerConfig();
@@ -19,28 +19,28 @@ export default function TallerConfigPage() {
 
   return (
     <div>
-      <PageHeader title="Configuración del Taller" />
+      <PageHeader title="Configuración de Servicios" />
       {config.loading ? (
         <div className="space-y-3">
           <Skeleton className="h-10 w-full max-w-xl" />
           <Skeleton className="h-64 w-full" />
         </div>
       ) : (
-        <Tabs defaultValue={config.equipmentTypes.length === 0 ? 'equipos' : 'general'}>
+        <Tabs defaultValue="equipos">
           <div className="overflow-x-auto pb-1">
             <TabsList>
-              <TabsTrigger value="general">General</TabsTrigger>
-              <TabsTrigger value="equipos">Tipos de equipo</TabsTrigger>
+              <TabsTrigger value="equipos">Tipos de ficha</TabsTrigger>
               <TabsTrigger value="chequeos">Chequeos</TabsTrigger>
               <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
-              <TabsTrigger value="tecnicos">Técnicos</TabsTrigger>
+              <TabsTrigger value="personal">Personal</TabsTrigger>
+              <TabsTrigger value="general">General</TabsTrigger>
             </TabsList>
           </div>
-          <TabsContent value="general"><GeneralTab config={config} canEdit={canEdit} /></TabsContent>
           <TabsContent value="equipos"><EquipmentTab config={config} canEdit={canEdit} /></TabsContent>
           <TabsContent value="chequeos"><ChecklistTab config={config} canEdit={canEdit} /></TabsContent>
           <TabsContent value="catalogo"><CatalogTab config={config} canEdit={canEdit} /></TabsContent>
-          <TabsContent value="tecnicos"><TechniciansTab config={config} canEdit={canEdit} /></TabsContent>
+          <TabsContent value="personal"><StaffTab config={config} canEdit={canEdit} /></TabsContent>
+          <TabsContent value="general"><GeneralTab config={config} canEdit={canEdit} /></TabsContent>
         </Tabs>
       )}
     </div>

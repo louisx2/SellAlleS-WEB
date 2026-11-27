@@ -292,3 +292,11 @@ export const RUBROS: { key: string; label: string; equipos: EquipmentTemplate[];
   { key: 'salon', label: 'Salón de belleza y uñas', equipos: [] },
   { key: 'limpieza', label: 'Limpieza', equipos: [], aDomicilio: true },
 ];
+
+/** Tipos de ficha de un rubro que todavía no existen (compara sin mayúsculas ni espacios). */
+export function tiposQueFaltan(key: string, existentes: string[]): EquipmentTemplate[] {
+  const rubro = RUBROS.find((r) => r.key === key);
+  if (!rubro) return [];
+  const tengo = new Set(existentes.map((n) => n.trim().toLowerCase()));
+  return rubro.equipos.filter((e) => !tengo.has(e.name.trim().toLowerCase()));
+}

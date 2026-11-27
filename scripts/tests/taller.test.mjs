@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   caseNumber, checklistFor, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
   mensajeDeEstado, missingRequired, statusLabel, customerText, manualStatuses, canClose, closeLabel,
-  fichaFields, defaultStaysInShop, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS,
+  fichaFields, defaultStaysInShop, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS, tiposQueFaltan,
 } from '../../src/lib/taller.ts';
 import {
   duracion, fechaDeCobro, porTecnico, resumen, tiempoPorEstado, topEquipos, topLineas,
@@ -252,4 +252,10 @@ test('duración legible', () => {
   assert.equal(duracion(5 * H), '5 h');
   assert.equal(duracion(36 * H), '1.5 días');
   assert.equal(duracion(15 * D), '15 días');
+});
+
+test('plantilla: nombres que faltan', () => {
+  assert.deepEqual(tiposQueFaltan('mascotas', [' perro ']).map((e) => e.name), ['Gato']);
+  assert.equal(tiposQueFaltan('mascotas', ['PERRO', 'gato']).length, 0);
+  assert.equal(tiposQueFaltan('nada', []).length, 0);
 });

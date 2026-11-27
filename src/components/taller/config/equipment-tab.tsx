@@ -10,24 +10,44 @@ import { Badge } from '@/components/ui/badge';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Pencil, Plus, Trash, LayoutTemplate } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
-import { RUBROS, fieldKey } from '@/lib/taller';
+import { RUBROS, fieldKey, tiposQueFaltan } from '@/lib/taller';
 import type { EquipmentExtraField, EquipmentType } from '@/lib/types';
 import type { TallerConfig } from '../use-taller-config';
+import { aplicarPlantilla } from '../aplicar-plantilla';
 
 type Draft = {
   id?: string;
   name: string;
+  brandLabel: string;
+  modelLabel: string;
   serialLabel: string;
+  /** Sin «Lleva», la etiqueta se guarda como null (no se pide ese dato). */
+  lleva: { brand: boolean; model: boolean; serial: boolean };
   asksPassword: boolean;
+  staysInShop: boolean;
+  isRepair: boolean;
   extraFields: EquipmentExtraField[];
   isActive: boolean;
 };
 
-const EMPTY: Draft = { name: '', serialLabel: 'Serie', asksPassword: false, extraFields: [], isActive: true };
+const EMPTY: Draft = {
+  name: '', brandLabel: 'Marca', modelLabel: 'Modelo', serialLabel: 'Serie',
+  lleva: { brand: true, model: true, serial: true },
+  asksPassword: false, staysInShop: true, isRepair: false, extraFields: [], isActive: true,
+};
+
+// Los diálogos de esta pantalla no usan el Select de Radix (se congela): <select> nativo.
+const SELECT_CLASS =
+  'flex h-10 w-32 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+
+const DATOS = [
+  ['brand', 'brandLabel', 'Marca, Nombre…'],
+  ['model', 'modelLabel', 'Modelo, Raza…'],
+  ['serial', 'serialLabel', 'IMEI, Serie, Placa…'],
+] as const;
 
 export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdit: boolean }) {
   const { toast } = useToast();
@@ -36,12 +56,18 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
 
   const open = (t?: EquipmentType) =>
     setDraft(t
-      ? { id: t.id, name: t.name, serialLabel: t.serialLabel ?? 'Serie', asksPassword: t.asksPassword, extraFields: t.extraFields, isActive: t.isActive }
-      : { ...EMPTY });
+      ? {
+          id: t.id, name: t.name,
+          brandLabel: t.brandLabel ?? 'Marca', modelLabel: t.modelLabel ?? 'Modelo', serialLabel: t.serialLabel ?? 'Serie',
+          lleva: { brand: t.brandLabel !== null, model: t.modelLabel !== null, serial: t.serialLabel !== null },
+          asksPassword: t.asksPassword, staysInShop: t.staysInShop, isRepair: t.isRepair,
+          extraFields: t.extraFields, isActive: t.isActive,
+        }
+      : { ...EMPTY, lleva: { ...EMPTY.lleva } });
 
   const save = async () => {
     if (!draft) return;
-    if (!draft.name.trim()) { toast({ title: 'Escribe el nombre del tipo de equipo', variant: 'destructive' }); return; }
+    if (!draft.name.trim()) { toast({ title: 'Escribe el nombre del tipo de ficha', variant: 'destructive' }); return; }
     const fields = draft.extraFields
       .filter((f) => f.label.trim())
       .map((f) => ({ ...f, label: f.label.trim(), key: f.key || fieldKey(f.label) }));
@@ -50,10 +76,15 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
       if (keys.has(f.key)) { toast({ title: `Hay dos campos llamados «${f.label}»`, variant: 'destructive' }); return; }
       keys.add(f.key);
     }
+    const label = (lleva: boolean, v: string, def: string) => (lleva ? v.trim() || def : null);
     const row = {
       name: draft.name.trim(),
-      serial_label: draft.serialLabel.trim() || 'Serie',
+      brand_label: label(draft.lleva.brand, draft.brandLabel, 'Marca'),
+      model_label: label(draft.lleva.model, draft.modelLabel, 'Modelo'),
+      serial_label: label(draft.lleva.serial, draft.serialLabel, 'Serie'),
       asks_password: draft.asksPassword,
+      stays_in_shop: draft.staysInShop,
+      is_repair: draft.isRepair,
       extra_fields: fields,
       is_active: draft.isActive,
     };
@@ -63,46 +94,35 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
       : await supabase.from('service_equipment_types').insert({ ...row, position: config.equipmentTypes.length });
     setSaving(false);
     if (error) { toast({ title: 'No se pudo guardar', description: error.message, variant: 'destructive' }); return; }
-    toast({ title: draft.id ? 'Tipo de equipo actualizado' : 'Tipo de equipo creado' });
+    toast({ title: draft.id ? 'Tipo de ficha actualizado' : 'Tipo de ficha creado' });
     setDraft(null);
     config.reload();
   };
 
   const remove = async (t: EquipmentType) => {
-    if (!confirm(`¿Borrar «${t.name}»? Sus chequeos se borran también. Los casos que ya lo usan no cambian.`)) return;
+    if (!confirm(`¿Borrar «${t.name}»? Sus chequeos se borran también. Las órdenes que ya lo usan no cambian.`)) return;
     const { error } = await supabase.from('service_equipment_types').delete().eq('id', t.id);
     if (error) { toast({ title: 'No se pudo borrar', description: error.message, variant: 'destructive' }); return; }
     config.reload();
   };
 
-  // Plantilla por rubro: crea los tipos de equipo que falten (por nombre) con sus
-  // chequeos. Los dos primeros chequeos quedan obligatorios, también en rápida.
+  // Plantilla por rubro: crea los tipos de ficha que falten (por nombre) con sus chequeos.
   const loadTemplate = async (key: string) => {
-    const rubro = RUBROS.find((r) => r.key === key);
-    if (!rubro) return;
-    const existentes = new Set(config.equipmentTypes.map((t) => t.name.trim().toLowerCase()));
-    const nuevos = rubro.equipos.filter((e) => !existentes.has(e.name.toLowerCase()));
-    if (nuevos.length === 0) { toast({ title: 'Ya tienes esos tipos de equipo' }); return; }
-    setSaving(true);
-    let pos = config.equipmentTypes.length;
-    for (const eq of nuevos) {
-      const { data, error } = await supabase.from('service_equipment_types').insert({
-        name: eq.name, serial_label: eq.serialLabel, asks_password: eq.asksPassword,
-        extra_fields: eq.extraFields ?? [], position: pos++,
-      }).select('id').single();
-      if (error || !data) {
-        setSaving(false);
-        toast({ title: 'No se pudo cargar la plantilla', description: error?.message, variant: 'destructive' });
-        return;
-      }
-      await supabase.from('service_checklist_items').insert(
-        eq.checklist.map((label, i) => ({
-          equipment_type_id: data.id, label, position: i, required: i < 2, required_quick: i < 2,
-        })),
-      );
+    if (!key) return;
+    const existentes = config.equipmentTypes.map((t) => t.name);
+    const aDomicilio = RUBROS.find((r) => r.key === key)?.aDomicilio;
+    if (tiposQueFaltan(key, existentes).length === 0 && !aDomicilio) {
+      toast({ title: RUBROS.find((r) => r.key === key)?.equipos.length ? 'Ya tienes esos tipos de ficha' : 'Este rubro no necesita tipos de ficha' });
+      return;
     }
+    setSaving(true);
+    const r = await aplicarPlantilla(key, { existentes });
     setSaving(false);
-    toast({ title: `Listo: ${nuevos.map((e) => e.name).join(', ')}`, description: 'Ajusta los chequeos en la pestaña Chequeos.' });
+    if (r.error) toast({ title: 'No se pudo cargar la plantilla', description: r.error, variant: 'destructive' });
+    else toast({
+      title: r.creados.length ? `Listo: ${r.creados.join(', ')}` : 'Listo',
+      description: aDomicilio ? 'Las órdenes nuevas quedan a domicilio.' : 'Ajusta los chequeos en la pestaña Chequeos.',
+    });
     config.reload();
   };
 
@@ -110,30 +130,32 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
         <div>
-          <CardTitle className="text-base">Tipos de equipo</CardTitle>
+          <CardTitle className="text-base">Tipos de ficha</CardTitle>
           <CardDescription>
-            Qué reparas: teléfonos, laptops, vehículos… Cada tipo dice cómo se llama su número de
-            serie, si se anota la clave y qué datos extra lleva.
+            Qué se atiende: un perro, un vehículo, un teléfono… Cada tipo dice qué datos se piden
+            (marca, modelo, serie), si se anota la clave y qué campos propios lleva.
           </CardDescription>
         </div>
         {canEdit && (
           <div className="flex flex-wrap gap-2">
             {config.equipmentTypes.length > 0 && (
-              <Select value="" onValueChange={loadTemplate} disabled={saving}>
-                <SelectTrigger className="h-9 w-48" aria-label="Cargar plantilla por rubro"><SelectValue placeholder="Cargar plantilla…" /></SelectTrigger>
-                <SelectContent>
-                  {RUBROS.map((r) => <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <select
+                value="" onChange={(e) => loadTemplate(e.target.value)} disabled={saving}
+                aria-label="Cargar plantilla por rubro"
+                className="flex h-9 w-48 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="">Cargar plantilla…</option>
+                {RUBROS.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+              </select>
             )}
-            <Button size="sm" onClick={() => open()}><Plus className="mr-1 h-4 w-4" />Nuevo tipo</Button>
+            <Button size="sm" onClick={() => open()}><Plus className="mr-1 h-4 w-4" />Nuevo tipo de ficha</Button>
           </div>
         )}
       </CardHeader>
       <CardContent className="space-y-2">
         {config.equipmentTypes.length === 0 && (
           <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground space-y-3">
-            <p>Todavía no hay tipos de equipo. Empieza con la plantilla de tu rubro (todo se puede editar después):</p>
+            <p>Todavía no hay tipos de ficha. Empieza con la plantilla de tu rubro (todo se puede editar después):</p>
             {canEdit && (
               <div className="flex flex-wrap justify-center gap-2">
                 {RUBROS.map((r) => (
@@ -153,8 +175,10 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
                 {!t.isActive && <Badge variant="outline">Inactivo</Badge>}
               </div>
               <p className="text-sm text-muted-foreground">
-                {t.serialLabel}
-                {t.asksPassword ? ' · pide clave/patrón' : ''}
+                {[t.brandLabel, t.modelLabel, t.serialLabel].filter(Boolean).join(', ') || 'Sin datos fijos'}
+                {t.staysInShop ? ' · se deja en el negocio' : ''}
+                {t.isRepair ? ' · de reparación' : ''}
+                {t.asksPassword ? ' · pide clave o patrón' : ''}
                 {t.extraFields.length > 0 ? ` · ${t.extraFields.map((f) => f.label).join(', ')}` : ''}
               </p>
             </div>
@@ -171,55 +195,73 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
       <Dialog open={!!draft} onOpenChange={(o) => !o && setDraft(null)}>
         <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{draft?.id ? 'Editar tipo de equipo' : 'Nuevo tipo de equipo'}</DialogTitle>
-            <DialogDescription>Los datos que se piden al ingresar un equipo de este tipo.</DialogDescription>
+            <DialogTitle>{draft?.id ? 'Editar tipo de ficha' : 'Nuevo tipo de ficha'}</DialogTitle>
+            <DialogDescription>Los datos que se piden al atender algo de este tipo.</DialogDescription>
           </DialogHeader>
           {draft && (
             <div className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="eq-name">Nombre</Label>
-                  <Input id="eq-name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Teléfono, Laptop, Vehículo…" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="eq-serial">Número de serie se llama</Label>
-                  <Input id="eq-serial" value={draft.serialLabel} onChange={(e) => setDraft({ ...draft, serialLabel: e.target.value })} placeholder="IMEI, Serie, Placa…" />
-                </div>
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="eq-pass">Anotar clave o patrón de desbloqueo</Label>
-                <Switch id="eq-pass" checked={draft.asksPassword} onCheckedChange={(v) => setDraft({ ...draft, asksPassword: v })} />
+              <div className="space-y-1.5">
+                <Label htmlFor="eq-name">Nombre</Label>
+                <Input id="eq-name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Perro, Vehículo, Teléfono…" />
               </div>
               <div className="space-y-2">
-                <Label>Datos extra</Label>
+                <Label>Datos que se piden</Label>
+                {DATOS.map(([k, f, ph]) => (
+                  <div key={k} className="flex items-center gap-3">
+                    <Input
+                      aria-label={`Etiqueta de ${k === 'brand' ? 'marca' : k === 'model' ? 'modelo' : 'serie'}`}
+                      value={draft[f]} disabled={!draft.lleva[k]} placeholder={ph}
+                      onChange={(e) => setDraft({ ...draft, [f]: e.target.value })}
+                    />
+                    <label className="flex shrink-0 items-center gap-2 text-sm">
+                      <input
+                        type="checkbox" checked={draft.lleva[k]}
+                        onChange={(e) => setDraft({ ...draft, lleva: { ...draft.lleva, [k]: e.target.checked } })}
+                      />
+                      Lleva
+                    </label>
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label htmlFor="eq-pass">Pide clave o patrón</Label>
+                <Switch id="eq-pass" checked={draft.asksPassword} onCheckedChange={(v) => setDraft({ ...draft, asksPassword: v })} />
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label htmlFor="eq-stays">Se deja en el negocio</Label>
+                <Switch id="eq-stays" checked={draft.staysInShop} onCheckedChange={(v) => setDraft({ ...draft, staysInShop: v })} />
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <Label htmlFor="eq-repair">De reparación</Label>
+                <Switch id="eq-repair" checked={draft.isRepair} onCheckedChange={(v) => setDraft({ ...draft, isRepair: v })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Campos propios</Label>
                 {draft.extraFields.map((f, i) => (
                   <div key={i} className="flex gap-2">
                     <Input
-                      aria-label={`Nombre del dato ${i + 1}`}
+                      aria-label={`Nombre del campo ${i + 1}`}
                       value={f.label}
                       onChange={(e) => {
                         const extraFields = [...draft.extraFields];
                         extraFields[i] = { ...f, label: e.target.value, key: f.key && draft.id ? f.key : fieldKey(e.target.value) };
                         setDraft({ ...draft, extraFields });
                       }}
-                      placeholder="Ej.: Kilometraje, Color"
+                      placeholder="Ej.: Kilometraje, Tamaño"
                     />
-                    <Select
-                      value={f.type}
-                      onValueChange={(v) => {
+                    <select
+                      value={f.type} aria-label="Tipo de dato" className={SELECT_CLASS}
+                      onChange={(e) => {
                         const extraFields = [...draft.extraFields];
-                        extraFields[i] = { ...f, type: v as EquipmentExtraField['type'] };
+                        extraFields[i] = { ...f, type: e.target.value as EquipmentExtraField['type'] };
                         setDraft({ ...draft, extraFields });
                       }}
                     >
-                      <SelectTrigger className="w-32" aria-label="Tipo de dato"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="text">Texto</SelectItem>
-                        <SelectItem value="number">Número</SelectItem>
-                      </SelectContent>
-                    </Select>
+                      <option value="text">Texto</option>
+                      <option value="number">Número</option>
+                    </select>
                     <Button
-                      variant="ghost" size="icon" aria-label="Quitar dato" className="text-destructive"
+                      variant="ghost" size="icon" aria-label="Quitar campo" className="text-destructive"
                       onClick={() => setDraft({ ...draft, extraFields: draft.extraFields.filter((_, j) => j !== i) })}
                     >
                       <Trash className="h-4 w-4" />
@@ -230,11 +272,11 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
                   variant="outline" size="sm"
                   onClick={() => setDraft({ ...draft, extraFields: [...draft.extraFields, { key: '', label: '', type: 'text' }] })}
                 >
-                  <Plus className="mr-1 h-4 w-4" />Agregar dato
+                  <Plus className="mr-1 h-4 w-4" />Agregar campo
                 </Button>
               </div>
               <div className="flex items-center justify-between rounded-md border p-3">
-                <Label htmlFor="eq-active">Activo (se ofrece al ingresar)</Label>
+                <Label htmlFor="eq-active">Activo (se ofrece al atender)</Label>
                 <Switch id="eq-active" checked={draft.isActive} onCheckedChange={(v) => setDraft({ ...draft, isActive: v })} />
               </div>
             </div>
