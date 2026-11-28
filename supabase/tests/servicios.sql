@@ -265,7 +265,7 @@ begin
     perform pg_temp.debe_fallar($q$update services set stays_in_shop = false where id = '00000000-0000-0000-0000-00000000e794'$q$,
                                 '%Pasa la orden a otro estado antes de cambiar si el cliente espera.%');
     perform pg_temp.debe_fallar($q$update services set is_repair = false where id = '00000000-0000-0000-0000-00000000e794'$q$,
-                                '%reparación%');
+                                '%Esto se decide al crear la orden.%');
     perform pg_temp.igual((select is_repair from services where id = '00000000-0000-0000-0000-00000000e794'), true, 'sigue de reparación');
     -- En otro estado sí se puede cambiar.
     perform taller_cambiar_estado('00000000-0000-0000-0000-00000000e794', 'in_repair');
@@ -495,13 +495,134 @@ begin
   end;
 end $$;
 
+-- K. Al actualizar un servicio del catálogo, lo que no viene se queda (el front
+--    viejo no manda las claves nuevas). Una de las dos comisiones escribe las dos;
+--    un null explícito borra.
+do $$
+declare
+  v_st service_types;
+begin
+  begin
+    set local role authenticated;
+    perform pg_temp.como('00000000-0000-0000-0000-00000000e7f1');
+    v_st := taller_guardar_servicio(jsonb_build_object(
+      'branch_id', '00000000-0000-0000-0000-00000000e7b1', 'name', 'Baño completo', 'price', 900, 'itbis', false,
+      'duration_min', 60, 'commission_amount', 150, 'repeat_every_days', 30, 'at_customer_default', true,
+      'es_servicio', false));
+    perform pg_temp.igual((select es_servicio from products where id = v_st.product_id), false, 'creado sin facturar como servicio');
+
+    -- Lo que manda el front viejo.
+    v_st := taller_guardar_servicio(jsonb_build_object(
+      'id', v_st.id, 'branch_id', '00000000-0000-0000-0000-00000000e7b1', 'name', 'Baño completo', 'price', 950,
+      'itbis', false, 'description', null, 'equipment_type_id', null, 'part_category_id', null,
+      'warranty_days', null, 'is_active', true));
+    perform pg_temp.igual(v_st.duration_min, 60, 'conserva la duración');
+    perform pg_temp.igual(v_st.commission_amount, 150::numeric, 'conserva el monto fijo');
+    perform pg_temp.igual(v_st.commission_rate, null::numeric, 'sigue sin porcentaje');
+    perform pg_temp.igual(v_st.repeat_every_days, 30, 'conserva volver cada');
+    perform pg_temp.igual(v_st.at_customer_default, true, 'conserva a domicilio');
+    perform pg_temp.igual((select es_servicio from products where id = v_st.product_id), false, 'conserva que no factura como servicio');
+    perform pg_temp.igual((select price from products where id = v_st.product_id), 950::numeric, 'el precio sí cambia');
+
+    v_st := taller_guardar_servicio(jsonb_build_object(
+      'id', v_st.id, 'branch_id', '00000000-0000-0000-0000-00000000e7b1', 'name', 'Baño completo', 'price', 950,
+      'commission_rate', 10, 'duration_min', null, 'es_servicio', true));
+    perform pg_temp.igual(v_st.commission_rate, 10::numeric, 'pasa a porcentaje');
+    perform pg_temp.igual(v_st.commission_amount, null::numeric, 'sin el monto fijo');
+    perform pg_temp.igual(v_st.duration_min, null::integer, 'null borra la duración');
+    perform pg_temp.igual(v_st.repeat_every_days, 30, 'volver cada sigue');
+    perform pg_temp.igual((select es_servicio from products where id = v_st.product_id), true, 'ahora factura como servicio');
+    reset role;
+    insert into srv_resultado values ('K catálogo sin claves nuevas', null);
+  exception when others then
+    insert into srv_resultado values ('K catálogo sin claves nuevas', sqlerrm);
+  end;
+end $$;
+
+-- L. Borrar una orden ENTREGADA (sin cobrar) con personas en sus líneas: el borrado
+--    en cascada pasa por service_item_staff sin que el guard lo rechace. Quitar a la
+--    persona a mano sigue sin poderse. (Borrar la empresa entera no se prueba aquí:
+--    hoy falla antes, por service_items.product_id → products, que es anterior a
+--    esta migración.)
+do $$
+begin
+  begin
+    perform set_config('request.jwt.claims', '', true);
+    insert into services (id, company_id, branch_id, description) values
+      ('00000000-0000-0000-0000-00000000e79e', '00000000-0000-0000-0000-00000000e7a0', '00000000-0000-0000-0000-00000000e7b1', 'Entregada para borrar');
+    insert into service_items (id, service_id, product_id, quantity, price, kind) values
+      ('00000000-0000-0000-0000-00000000e777', '00000000-0000-0000-0000-00000000e79e', '00000000-0000-0000-0000-00000000e701', 1, 0, 'labor');
+    insert into service_item_staff (service_item_id, staff_id) values
+      ('00000000-0000-0000-0000-00000000e777', '00000000-0000-0000-0000-00000000e7c5'),
+      ('00000000-0000-0000-0000-00000000e777', '00000000-0000-0000-0000-00000000e7c1');
+    perform taller_cambiar_estado('00000000-0000-0000-0000-00000000e79e', 'ready');
+    perform taller_entregar('00000000-0000-0000-0000-00000000e79e');
+    perform pg_temp.igual((select status from services where id = '00000000-0000-0000-0000-00000000e79e'), 'delivered', 'entregada');
+
+    perform pg_temp.debe_fallar($q$delete from service_item_staff where service_item_id = '00000000-0000-0000-0000-00000000e777'$q$,
+                                '%está cerrada%');
+    perform pg_temp.igual((select count(*)::int from service_item_staff where service_item_id = '00000000-0000-0000-0000-00000000e777'), 2,
+                          'siguen las dos personas');
+
+    delete from services where id = '00000000-0000-0000-0000-00000000e79e';
+    perform pg_temp.igual((select count(*)::int from services where id = '00000000-0000-0000-0000-00000000e79e'), 0, 'se borró la orden');
+    perform pg_temp.igual((select count(*)::int from service_items where id = '00000000-0000-0000-0000-00000000e777'), 0, 'y su línea');
+    perform pg_temp.igual((select count(*)::int from service_item_staff where service_item_id = '00000000-0000-0000-0000-00000000e777'), 0,
+                          'y las personas de su línea');
+    insert into srv_resultado values ('L borrado en cascada', null);
+  exception when others then
+    insert into srv_resultado values ('L borrado en cascada', sqlerrm);
+  end;
+end $$;
+
+-- M. La garantía es solo de las órdenes de reparación. Una persona no se mueve a
+--    otra línea con un UPDATE (se saltaría las reglas de la línea nueva).
+do $$
+begin
+  begin
+    perform pg_temp.como('00000000-0000-0000-0000-00000000e7f1');
+    insert into taller_settings (company_id, branch_id, default_warranty_days) values
+      ('00000000-0000-0000-0000-00000000e7a0', '00000000-0000-0000-0000-00000000e7b1', 30)
+      on conflict (branch_id) do update set default_warranty_days = 30;
+    insert into services (id, company_id, branch_id, description, stays_in_shop, is_repair) values
+      ('00000000-0000-0000-0000-00000000e79b', '00000000-0000-0000-0000-00000000e7a0', '00000000-0000-0000-0000-00000000e7b1', 'Reparación con garantía', true, true),
+      ('00000000-0000-0000-0000-00000000e79c', '00000000-0000-0000-0000-00000000e7a0', '00000000-0000-0000-0000-00000000e7b1', 'Baño que se queda', true, false),
+      ('00000000-0000-0000-0000-00000000e79d', '00000000-0000-0000-0000-00000000e7a0', '00000000-0000-0000-0000-00000000e7b1', 'Baño que no se queda', false, false);
+    perform taller_cambiar_estado('00000000-0000-0000-0000-00000000e79b', 'ready');
+    perform taller_entregar('00000000-0000-0000-0000-00000000e79b');
+    perform taller_cambiar_estado('00000000-0000-0000-0000-00000000e79c', 'ready');
+    perform taller_entregar('00000000-0000-0000-0000-00000000e79c');
+    perform taller_entregar('00000000-0000-0000-0000-00000000e79d');
+    perform pg_temp.igual((select warranty_until is not null from services where id = '00000000-0000-0000-0000-00000000e79b'), true, 'garantía de la reparación');
+    perform pg_temp.igual((select warranty_until is null from services where id = '00000000-0000-0000-0000-00000000e79c'), true, 'sin garantía: se queda y no es de reparación');
+    perform pg_temp.igual((select warranty_until is null from services where id = '00000000-0000-0000-0000-00000000e79d'), true, 'sin garantía: no se queda');
+
+    set local role authenticated;
+    insert into services (id, branch_id, description) values
+      ('00000000-0000-0000-0000-00000000e79f', '00000000-0000-0000-0000-00000000e7b1', 'Dos líneas');
+    insert into service_items (id, service_id, product_id, quantity, price, kind) values
+      ('00000000-0000-0000-0000-00000000e775', '00000000-0000-0000-0000-00000000e79f', '00000000-0000-0000-0000-00000000e701', 1, 500, 'labor'),
+      ('00000000-0000-0000-0000-00000000e776', '00000000-0000-0000-0000-00000000e79f', '00000000-0000-0000-0000-00000000e701', 1, 500, 'labor');
+    insert into service_item_staff (id, service_item_id, staff_id) values
+      ('00000000-0000-0000-0000-00000000e7a7', '00000000-0000-0000-0000-00000000e775', '00000000-0000-0000-0000-00000000e7c5');
+    perform pg_temp.debe_fallar($q$update service_item_staff set service_item_id = '00000000-0000-0000-0000-00000000e776'
+      where id = '00000000-0000-0000-0000-00000000e7a7'$q$, '%Para cambiar la línea, quita a la persona y agrégala en la otra.%');
+    perform pg_temp.igual((select service_item_id from service_item_staff where id = '00000000-0000-0000-0000-00000000e7a7'),
+                          '00000000-0000-0000-0000-00000000e775'::uuid, 'sigue en su línea');
+    reset role;
+    insert into srv_resultado values ('M garantía y mover de línea', null);
+  exception when others then
+    insert into srv_resultado values ('M garantía y mover de línea', sqlerrm);
+  end;
+end $$;
+
 do $$
 declare f text;
 begin
   select string_agg(caso || ': ' || error, ' | ' order by caso) into f from srv_resultado where error is not null;
   if f is not null then raise exception 'FALLAN: %', f; end if;
-  if (select count(*) from srv_resultado) <> 11 then
-    raise exception 'corrieron % casos de 11', (select count(*) from srv_resultado);
+  if (select count(*) from srv_resultado) <> 14 then
+    raise exception 'corrieron % casos de 14', (select count(*) from srv_resultado);
   end if;
 end $$;
 

@@ -90,6 +90,8 @@ create table public.service_staff (
 create unique index service_staff_branch_profile_uq on public.service_staff(branch_id, profile_id) where profile_id is not null;
 create index service_staff_branch_idx on public.service_staff(branch_id, position);
 create index service_staff_profile_idx on public.service_staff(profile_id) where profile_id is not null;
+-- Las FK sin índice propio (el advisor de Supabase las marca).
+create index service_staff_company_idx on public.service_staff(company_id);
 
 alter table public.service_staff enable row level security;
 
@@ -161,6 +163,8 @@ create table public.customer_subjects (
   updated_at        timestamptz not null default now()
 );
 create index customer_subjects_customer_idx on public.customer_subjects(customer_id);
+create index customer_subjects_company_idx on public.customer_subjects(company_id);
+create index customer_subjects_equipment_type_idx on public.customer_subjects(equipment_type_id) where equipment_type_id is not null;
 
 create or replace function public.servicios_ficha_updated_at()
 returns trigger
@@ -194,6 +198,8 @@ create index services_subject_idx on public.services(subject_id) where subject_i
 alter table public.service_events
   add column from_staff uuid references public.service_staff(id) on delete set null,
   add column to_staff   uuid references public.service_staff(id) on delete set null;
+create index service_events_from_staff_idx on public.service_events(from_staff) where from_staff is not null;
+create index service_events_to_staff_idx on public.service_events(to_staff) where to_staff is not null;
 
 -- -----------------------------------------------------------------------------
 -- 3. Quién hace cada línea de servicio (varias personas por línea)
@@ -209,10 +215,11 @@ create table public.service_item_staff (
 -- Índice único y NO restricción: ver service_staff arriba (tabla puente → 300).
 create unique index service_item_staff_item_staff_uq on public.service_item_staff(service_item_id, staff_id);
 create index service_item_staff_staff_idx on public.service_item_staff(staff_id);
+create index service_item_staff_company_idx on public.service_item_staff(company_id);
 
 -- Antes de poner, cambiar o quitar a alguien de una línea: la orden sigue abierta
 -- y sin cobrar, la línea es de servicio y la persona está activa en la sucursal
--- de la orden. La empresa sale de la orden.
+-- de la orden. La empresa sale de la orden. Una fila no se mueve a otra línea.
 create or replace function public.servicios_item_staff_guard()
 returns trigger
 language plpgsql
@@ -224,13 +231,15 @@ declare
   v_srv   public.services%rowtype;
   v_staff public.service_staff%rowtype;
 begin
-  -- Quitar (o mover) a alguien: la orden de la línea vieja tiene que seguir
-  -- abierta. Si la línea ya no existe, se está borrando la línea o la orden.
-  if tg_op <> 'INSERT' then
+  -- Quitar a alguien: la orden tiene que seguir abierta. Si la línea, la orden o
+  -- la empresa ya no existen, es un borrado en cascada (de la línea, de la orden o
+  -- de la empresa entera) y pasa, sin importar en qué orden corran las FK.
+  if tg_op = 'DELETE' then
     select s.* into v_srv
       from public.service_items si
       join public.services s on s.id = si.service_id
      where si.id = old.service_item_id
+       and exists (select 1 from public.companies c where c.id = s.company_id)
        for update of s;
     if found then
       if v_srv.sale_id is not null then
@@ -240,9 +249,12 @@ begin
         raise exception 'La orden #% está cerrada.', v_srv.number;
       end if;
     end if;
-    if tg_op = 'DELETE' then
-      return old;
-    end if;
+    return old;
+  end if;
+
+  -- Cambiar la línea de una fila se saltaría las reglas de la línea nueva.
+  if tg_op = 'UPDATE' and new.service_item_id is distinct from old.service_item_id then
+    raise exception 'Para cambiar la línea, quita a la persona y agrégala en la otra.';
   end if;
 
   select * into v_item from public.service_items where id = new.service_item_id;
@@ -491,7 +503,7 @@ begin
 
   -- Si es de reparación sale del tipo de ficha al crear la orden.
   if new.is_repair is distinct from old.is_repair then
-    raise exception 'Si la orden es de reparación se decide al crearla.';
+    raise exception 'Esto se decide al crear la orden.';
   end if;
 
   -- «El cliente espera» decide el camino: no se cambia con la orden Lista para
@@ -646,8 +658,8 @@ $function$;
 
 -- Entregar / Terminar. La que se queda se entrega desde Lista o No se pudo
 -- reparar, como hoy. La que no se queda se termina desde cualquier estado
--- abierto y sin quién retira. La garantía cuenta si no terminó en «no se pudo
--- reparar» (para la que se queda es lo mismo que «desde Lista»).
+-- abierto y sin quién retira. La garantía es solo de las órdenes de reparación,
+-- y cuenta si no terminó en «no se pudo reparar» (como hoy: «desde Lista»).
 CREATE OR REPLACE FUNCTION public.taller_entregar(p_service_id uuid, p_picked_up_by text DEFAULT NULL::text, p_note text DEFAULT NULL::text)
  RETURNS services
  LANGUAGE plpgsql
@@ -677,7 +689,8 @@ begin
 
   select name into v_nombre from public.profiles where id = auth.uid();
 
-  if v_srv.status <> 'not_repaired' and v_srv.warranty_of_service_id is null and v_srv.warranty_sale_id is null then
+  if v_srv.is_repair and v_srv.status <> 'not_repaired'
+     and v_srv.warranty_of_service_id is null and v_srv.warranty_sale_id is null then
     select coalesce(
              (select max(st.warranty_days)
                 from public.service_items si
@@ -720,6 +733,10 @@ $function$;
 -- link_product_id usa un artículo que ya existe en vez de crear uno, solo si el
 -- servicio todavía no tiene artículo: tiene que ser de la sucursal, no ser ya otro
 -- servicio y no tener existencias. Pasa a no manejar existencias.
+-- Al actualizar, una clave nueva que no viene (duration_min, commission_*,
+-- repeat_every_days, at_customer_default, es_servicio) deja el valor que ya tenía:
+-- el front viejo no las manda y no tiene que borrarlas. Al crear valen los
+-- defaults (es_servicio true).
 CREATE OR REPLACE FUNCTION public.taller_guardar_servicio(p jsonb)
  RETURNS service_types
  LANGUAGE plpgsql
@@ -735,6 +752,8 @@ declare
   v_link     uuid := nullif(p->>'link_product_id', '')::uuid;
   v_com_rate numeric := nullif(p->>'commission_rate', '')::numeric;
   v_com_amt  numeric := nullif(p->>'commission_amount', '')::numeric;
+  -- La comisión es una pareja: si viene una de las dos, se escriben las dos.
+  v_com_toca boolean := p ? 'commission_rate' or p ? 'commission_amount';
   v_prod     uuid;
   v_art      public.products%rowtype;
 begin
@@ -793,7 +812,8 @@ begin
      where id = v_prod;
   elsif v_prod is not null then
     update public.products
-       set name = v_name, price = v_price, itbis = v_itbis, es_servicio = v_es_serv,
+       set name = v_name, price = v_price, itbis = v_itbis,
+           es_servicio = coalesce((p->>'es_servicio')::boolean, es_servicio),
            is_active = coalesce((p->>'is_active')::boolean, true)
      where id = v_prod;
   else
@@ -829,11 +849,15 @@ begin
            warranty_days = nullif(p->>'warranty_days', '')::integer,
            is_active = coalesce((p->>'is_active')::boolean, true),
            position = coalesce((p->>'position')::integer, position),
-           duration_min = nullif(p->>'duration_min', '')::integer,
-           commission_rate = v_com_rate,
-           commission_amount = v_com_amt,
-           repeat_every_days = nullif(p->>'repeat_every_days', '')::integer,
-           at_customer_default = coalesce((p->>'at_customer_default')::boolean, false)
+           duration_min = case when p ? 'duration_min'
+                               then nullif(p->>'duration_min', '')::integer else duration_min end,
+           commission_rate = case when v_com_toca then v_com_rate else commission_rate end,
+           commission_amount = case when v_com_toca then v_com_amt else commission_amount end,
+           repeat_every_days = case when p ? 'repeat_every_days'
+                                    then nullif(p->>'repeat_every_days', '')::integer else repeat_every_days end,
+           at_customer_default = case when p ? 'at_customer_default'
+                                      then coalesce((p->>'at_customer_default')::boolean, false)
+                                      else at_customer_default end
      where id = v_st.id
     returning * into v_st;
   end if;
