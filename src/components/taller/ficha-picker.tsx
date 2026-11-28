@@ -78,7 +78,8 @@ function Opcion({ name, checked, onSelect, title, notas }: {
   return (
     <label className={cn(
       'inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
-      'focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-1',
+      // Anillo solo con el teclado (no tras un clic), sobre el color del fondo.
+      'ring-offset-background has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2',
       checked ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted',
     )}>
       <input type="radio" name={name} checked={checked} onChange={onSelect} className="sr-only" />

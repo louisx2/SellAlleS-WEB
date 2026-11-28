@@ -43,7 +43,9 @@ export function ChecklistForm({ items, answers, onChange, requiredOf }: {
   };
 
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
+    // Dos por fila solo si cada uno tiene al menos 16rem: con el menú lateral
+    // abierto la columna se angosta y los botones Sí / No / No probado no cabrían.
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(min(16rem,100%),1fr))] gap-2">
       {items.map((item) => {
         const a = answers[item.id];
         const conNota = notaVisible(a, abiertas.has(item.id));

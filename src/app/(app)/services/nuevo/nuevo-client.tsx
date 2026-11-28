@@ -167,6 +167,15 @@ export default function NuevoIngresoClient() {
   // Otro tipo de ficha: otros chequeos, y fuera los servicios de otro tipo.
   const tipoKey = tipo?.id ?? '';
   useEffect(() => { setAnswers({}); setShowAllChecks(false); }, [tipoKey]);
+
+  // En el teléfono la barra de abajo (total y botones) tapa unos 7rem: al pasar
+  // de campo con Tab, que el navegador no deje el campo enfocado debajo de ella.
+  useEffect(() => {
+    const html = document.documentElement;
+    const antes = html.style.scrollPaddingBottom;
+    html.style.scrollPaddingBottom = '8rem';
+    return () => { html.style.scrollPaddingBottom = antes; };
+  }, []);
   useEffect(() => {
     setLineas((ls) => {
       const quedan = ls.filter((l) => {
@@ -409,8 +418,9 @@ export default function NuevoIngresoClient() {
           <p className="text-xs text-muted-foreground">El ITBIS, si aplica, se calcula al cobrar en el POS.</p>
         </div>
       )}
-      {/* Lo principal a la izquierda; Cancelar en rojo a la derecha. */}
-      <div className="flex gap-2">
+      {/* Lo principal a la izquierda; Cancelar en rojo a la derecha. En un
+          teléfono muy angosto Cancelar baja a otra línea, siempre a la derecha. */}
+      <div className="flex flex-wrap gap-2">
         {ofreceCobro ? (
           <>
             <Button type="button" className="flex-1 px-3" disabled={saving} onClick={() => save(true)}>
@@ -425,7 +435,7 @@ export default function NuevoIngresoClient() {
         )}
         <Button
           type="button" variant="outline" asChild
-          className="border-destructive px-3 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+          className="ml-auto border-destructive px-3 text-destructive hover:bg-destructive hover:text-destructive-foreground"
         >
           <Link href="/services">Cancelar</Link>
         </Button>
@@ -682,6 +692,8 @@ export default function NuevoIngresoClient() {
                 </CardHeader>
                 <CardContent className={`space-y-2 ${CC}`}>
                   <ChecklistForm
+                    // Otro tipo de ficha = otros chequeos: sin notas abiertas de antes.
+                    key={tipoKey}
                     items={shownChecks}
                     answers={answers}
                     onChange={setAnswers}
