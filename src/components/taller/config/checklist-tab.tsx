@@ -21,7 +21,7 @@ export function ChecklistTab({ config, canEdit }: { config: TallerConfig; canEdi
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Los chequeos de este tipo de equipo (o los que aplican a todos).
+  // Los chequeos de este tipo de ficha (o los que aplican a todos).
   const items = useMemo(
     () => config.checklist
       .filter((i) => (scope === TODOS ? !i.equipmentTypeId : i.equipmentTypeId === scope))
@@ -68,7 +68,7 @@ export function ChecklistTab({ config, canEdit }: { config: TallerConfig; canEdi
   };
 
   const remove = async (item: ChecklistItem) => {
-    if (!confirm(`¿Quitar «${item.label}»? Los casos que ya lo anotaron lo conservan.`)) return;
+    if (!confirm(`¿Quitar «${item.label}»? Las órdenes que ya lo anotaron lo conservan.`)) return;
     const { error } = await supabase.from('service_checklist_items').delete().eq('id', item.id);
     if (error) return fail(error);
     config.reload();
@@ -79,8 +79,8 @@ export function ChecklistTab({ config, canEdit }: { config: TallerConfig; canEdi
       <CardHeader>
         <CardTitle className="text-base">Chequeos de llegada</CardTitle>
         <CardDescription>
-          Lo que se revisa antes de ingresar un equipo. Se contesta Sí, No o No se pudo probar, con
-          una nota. Cada caso guarda lo que se anotó: quitar un chequeo no cambia los casos viejos.
+          Lo que se revisa antes de atender. Se contesta Sí, No o No se pudo probar, con
+          una nota. Cada orden guarda lo que se anotó: quitar un chequeo no cambia las órdenes viejas.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -92,7 +92,7 @@ export function ChecklistTab({ config, canEdit }: { config: TallerConfig; canEdi
               {config.equipmentTypes.map((t) => (
                 <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
               ))}
-              <SelectItem value={TODOS}>Todos los equipos</SelectItem>
+              <SelectItem value={TODOS}>Todos los tipos de ficha</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -100,13 +100,13 @@ export function ChecklistTab({ config, canEdit }: { config: TallerConfig; canEdi
         <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 text-xs font-medium text-muted-foreground">
           <span>Chequeo</span>
           <span className="w-24 text-center">Obligatorio</span>
-          <span className="w-24 text-center">En rápida</span>
+          <span className="w-24 text-center">Atender ahora</span>
           <span className="w-28" />
         </div>
         <div className="space-y-2">
           {items.length === 0 && (
             <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
-              Sin chequeos {scope === TODOS ? 'para todos los equipos' : 'para este tipo'} todavía.
+              Sin chequeos {scope === TODOS ? 'para todos los tipos de ficha' : 'para este tipo'} todavía.
             </p>
           )}
           {items.map((item, i) => (
@@ -126,8 +126,8 @@ export function ChecklistTab({ config, canEdit }: { config: TallerConfig; canEdi
                 <Switch checked={item.required} disabled={!canEdit} onCheckedChange={(v) => patch(item, { required: v })} aria-label="Obligatorio al ingresar" />
               </label>
               <label className="flex w-24 items-center justify-between gap-2 text-sm sm:justify-center">
-                <span className="sm:hidden">En rápida</span>
-                <Switch checked={item.requiredQuick} disabled={!canEdit} onCheckedChange={(v) => patch(item, { required_quick: v })} aria-label="Obligatorio en reparación rápida" />
+                <span className="sm:hidden">Obligatorio en Atender ahora</span>
+                <Switch checked={item.requiredQuick} disabled={!canEdit} onCheckedChange={(v) => patch(item, { required_quick: v })} aria-label="Obligatorio en Atender ahora" />
               </label>
               <div className="flex w-28 justify-end gap-1">
                 {canEdit && (

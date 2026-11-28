@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar, SidebarTrigger, SidebarContent, SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarHeader, useSidebar, SidebarFooter, SidebarSeparator } from '@/components/ui/sidebar';
-import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, Wrench, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2, Route, ListChecks, Calculator, MessageCircle } from 'lucide-react';
+import { ArrowRightLeft, BadgeDollarSign, Building, Building2, ChevronDown, CircleUserRound, CreditCard, History, Landmark, LayoutGrid, LineChart, LogOut, Package, PanelLeft, Settings, Shield, ShoppingCart, Store, Truck, Users, UsersRound, UserCog, Wallet, FileText, FolderOpen, MapPin, ConciergeBell, PenTool, Briefcase, Sun, Moon, HandCoins, Coins, Receipt, ReceiptText, LifeBuoy, Mail, RefreshCw, FileCheck, Lock, Bike, Settings2, Route, ListChecks, Calculator, MessageCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -18,7 +18,7 @@ import { useModules } from '@/context/modules-provider';
 import { useCaja } from '@/context/caja-provider';
 import { moduleForRoute, type ModuleKey } from '@/lib/modules';
 import { itemDeRuta } from '@/lib/rutas';
-import { hasPermission, isReportVisible, unionPermissions } from '@/lib/permissions';
+import { hasPermission, isReportVisible, reportSlugForRoute, unionPermissions } from '@/lib/permissions';
 import type { PermissionResource } from '@/lib/types';
 import { useCompanyProfile } from '@/context/company-profile-provider';
 import { usePlatformSettings } from '@/context/platform-settings-provider';
@@ -56,7 +56,7 @@ const coreNavItems: NavItem[] = [
 const featuresNavItems: NavItem[] = [
   { href: '/pos', icon: ShoppingCart, label: 'Carrito', module: 'pos', permission: 'pos' },
   { href: '/quotes', icon: FileText, label: 'Cotizaciones', module: 'quotes', permission: 'quotes' },
-  { href: '/services', icon: Wrench, label: 'Taller', module: 'services', permission: 'services' },
+  { href: '/services', icon: ConciergeBell, label: 'Servicios', module: 'services', permission: 'services' },
   { href: '/credit', icon: CreditCard, label: 'Cuentas por Cobrar', module: 'credit', permission: 'credit' },
   { href: '/payables', icon: ReceiptText, label: 'Cuentas por Pagar', module: 'payables', permission: 'payables' },
   { href: '/financing', icon: Landmark, label: 'Financiamientos', module: 'financing', permission: 'financing' },
@@ -77,7 +77,7 @@ const reportsNavItems = [
     { href: '/reports/top-products', label: 'Productos Estrella' },
     { href: '/reports/top-customers', label: 'Clientes Estrella' },
     { href: '/reports/comisiones', label: 'Comisiones por Vendedor' },
-    { href: '/reports/taller', label: 'Taller' },
+    { href: '/reports/servicios', label: 'Servicios' },
     { href: '/reports/vehiculos', label: 'Vehículos' },
     { href: '/reports/date-range', label: 'Ingresos por Fechas' },
     { href: '/reports/receivables', label: 'Cuentas por Cobrar' },
@@ -105,7 +105,7 @@ const adminNavItems: NavItem[] = [
     { href: '/users', icon: Users, label: 'Usuarios', permission: 'users' },
     { href: '/branches', icon: Store, label: 'Sucursales', permission: 'branches' },
     { href: '/roles', icon: Shield, label: 'Roles', permission: 'roles' },
-    { href: '/service-types', icon: PenTool, label: 'Configuración del Taller', module: 'services', permission: 'service-types' },
+    { href: '/service-types', icon: PenTool, label: 'Configuración de Servicios', module: 'services', permission: 'service-types' },
     { href: '/motos/config', icon: Settings2, label: 'Configuración de Motopréstamos', module: 'motoprestamos', permission: 'motos-config' },
     { href: '/settings', icon: Settings, label: 'Ajustes', permission: 'company-profile' },
 ];
@@ -358,7 +358,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
         .sort((a, b) => ordenEnBloqueo(a.href) - ordenEnBloqueo(b.href))
     : [];
   const visibleReportsNavItems = reportsNavItems.filter((item) => {
-    const slug = item.href.split('/').pop()!;
+    const slug = reportSlugForRoute(item.href);
     // El 606 es un reporte fiscal DGII: aplica solo a empresas formalizadas y
     // depende de las facturas del módulo de Cuentas por Pagar.
     if (slug === 'compras-606' && (!profile.isFormalized || !isModuleEnabled('payables'))) return false;
@@ -368,7 +368,7 @@ export default function AppLayoutContent({ children }: { children: React.ReactNo
     if (slug === 'anulados-608' && !profile.isFormalized) return false;
     // Comisiones existe solo con el módulo encendido (Plataforma → Módulos).
     if (slug === 'comisiones' && !isModuleEnabled('commissions')) return false;
-    // El del taller, solo con el módulo encendido.
+    // El de servicios, solo con el módulo encendido.
     if (slug === 'taller' && !isModuleEnabled('services')) return false;
     if ((slug === 'vehiculos' || slug === 'cobranza' || slug === 'cuadres' || slug === 'recuperaciones') && !isModuleEnabled('motoprestamos')) return false;
     return isReportVisible(effectivePermissions, slug);

@@ -7,7 +7,7 @@ import type { CartItem, Service } from '@/lib/types';
 
 export type CobroResult = { ok: true } | { ok: false; error: string };
 
-/** Abre en el POS un carrito con las líneas del caso. Las líneas se leen de la
+/** Abre en el POS un carrito con las líneas de la orden. Las líneas se leen de la
  *  base en este momento (no de la pantalla) para cobrar exactamente lo que hay. */
 export async function abrirCobroDelCaso(service: Service): Promise<CobroResult> {
   const { data, error } = await supabase
@@ -17,13 +17,13 @@ export async function abrirCobroDelCaso(service: Service): Promise<CobroResult> 
     .order('created_at');
   if (error) return { ok: false, error: error.message };
   const lines = (data ?? []).map(rowToServiceItem);
-  if (lines.length === 0) return { ok: false, error: 'El caso no tiene nada que cobrar.' };
+  if (lines.length === 0) return { ok: false, error: 'La orden no tiene nada que cobrar.' };
 
   const items: CartItem[] = lines.map((l) => ({
     cartItemId: `item-${l.id}`,
     product: l.product,
     quantity: l.quantity,
-    // El precio del caso manda sobre el de lista del artículo.
+    // El precio de la orden manda sobre el de lista del artículo.
     ...(l.price !== l.product.price ? { customPrice: l.price } : {}),
     serviceItemId: l.id,
   }));

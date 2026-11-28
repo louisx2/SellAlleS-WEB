@@ -72,9 +72,23 @@ export default function SaleReceiptClient() {
   const pdfContentRef = useRef<HTMLDivElement>(null);
   
   const { toast } = useToast();
-  // Garantía de lo vendido: se ingresa al taller enlazada a esta venta.
+  // Garantía de lo vendido: se ingresa a Servicios enlazada a esta venta. Solo si la
+  // empresa tiene algún tipo de ficha de reparación activo (la garantía es de
+  // reparación): un salón o una peluquería de mascotas no ve el botón.
   const { isModuleEnabled } = useModules();
-  const puedeIngresarAlTaller = usePermission('services', 'create') && isModuleEnabled('services');
+  const puedeCrearServicios = usePermission('services', 'create') && isModuleEnabled('services');
+  const empresaId = appUser?.impersonatedCompanyId ?? appUser?.companyId;
+  const [hayFichaDeReparacion, setHayFichaDeReparacion] = useState(false);
+  useEffect(() => {
+    setHayFichaDeReparacion(false);
+    if (!puedeCrearServicios || !empresaId) return;
+    let cancelado = false;
+    supabase.from('service_equipment_types').select('id')
+      .eq('company_id', empresaId).eq('is_repair', true).eq('is_active', true).limit(1)
+      .then(({ data }) => { if (!cancelado) setHayFichaDeReparacion((data ?? []).length > 0); });
+    return () => { cancelado = true; };
+  }, [puedeCrearServicios, empresaId]);
+  const puedeIngresarAlTaller = puedeCrearServicios && hayFichaDeReparacion;
 
   // No se guarda en la venta: al reimprimir para el chofer se vuelve a marcar.
   const [incluirDatosCliente, setIncluirDatosCliente] = useState(false);
@@ -289,7 +303,7 @@ export default function SaleReceiptClient() {
               <Button asChild variant="outline">
                 <Link href={`/services/nuevo?garantia_venta=${sale.id}`}>
                   <ShieldCheck className="mr-2 h-4 w-4" />
-                  Garantía al taller
+                  Ingresar por garantía
                 </Link>
               </Button>
             )}

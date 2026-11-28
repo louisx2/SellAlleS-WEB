@@ -1,8 +1,11 @@
 import { cn } from '@/lib/utils';
-import { SERVICE_STATUS } from '@/lib/taller';
+import { SERVICE_STATUS, statusLabel, type StatusCtx } from '@/lib/taller';
 import type { ServiceStatus } from '@/lib/types';
 
-export function StatusBadge({ status, className }: { status: ServiceStatus; className?: string }) {
+/** Distintivo del estado con el texto del camino de la orden («Llegó», «En
+ *  proceso», «Terminado»…). El camino es obligatorio: sin él saldría «En
+ *  reparación» en una orden que no es de reparación. */
+export function StatusBadge({ status, ctx, className }: { status: ServiceStatus; ctx: StatusCtx; className?: string }) {
   const meta = SERVICE_STATUS[status];
   return (
     <span
@@ -12,7 +15,7 @@ export function StatusBadge({ status, className }: { status: ServiceStatus; clas
         className,
       )}
     >
-      {meta?.label ?? status}
+      {meta ? statusLabel(status, ctx) : status}
     </span>
   );
 }

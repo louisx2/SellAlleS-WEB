@@ -381,12 +381,12 @@ export default function ReportsDashboardPage() {
           )}
 
           {showTallerReport && (
-            <Link href="/reports/taller">
+            <Link href="/reports/servicios">
               <Card className="hover:bg-muted/30 transition-all cursor-pointer border-muted/50 group">
                 <CardHeader className="p-4 flex flex-row items-center justify-between space-y-0">
                   <div>
-                    <CardTitle className="text-sm font-bold">Taller</CardTitle>
-                    <CardDescription className="text-3xs mt-1">Técnicos, tiempos, piezas y equipos</CardDescription>
+                    <CardTitle className="text-sm font-bold">Servicios</CardTitle>
+                    <CardDescription className="text-3xs mt-1">Personal, tiempos, materiales y fichas</CardDescription>
                   </div>
                   <ArrowRight className="h-4 w-4 text-muted-foreground group-hover:translate-x-1 transition-transform" />
                 </CardHeader>

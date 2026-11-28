@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -16,7 +17,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   ArrowLeft, Ban, CheckCircle2, Eye, EyeOff, HandCoins, Link2, MessageCircle, Pencil, Printer, RotateCcw, ShieldCheck,
-  Trash, UserCheck, Users, Zap,
+  StickyNote, Trash, UserCheck, Users, Zap,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { usePermission } from '@/hooks/use-permission';
@@ -28,10 +29,11 @@ import { formatCurrency } from '@/lib/utils';
 import { formatQuantity } from '@/lib/units';
 import { useRealtimeReload } from '@/lib/use-realtime-reload';
 import {
-  ANSWER_LABEL, caseNumber, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
-  fmtDate, MANUAL_STATUSES, mensajeDeEstado, SERVICE_STATUS, warrantyActive, whatsappPhone,
+  ANSWER_LABEL, camposDeFicha, canClose, caseNumber, closeLabel, daysInShop, equipmentLabel, isLate, isOpen,
+  isReadyToDeliver, fmtDate, manualStatuses, mensajeDeEstado, statusCtx, statusLabel, valorDeFicha, warrantyActive,
+  whatsappPhone,
 } from '@/lib/taller';
-import type { Product, Service, ServiceEvent, ServiceItem, ServiceStatus } from '@/lib/types';
+import type { EquipmentType, Product, Service, ServiceEvent, ServiceItem, ServiceStatus } from '@/lib/types';
 import { StatusBadge } from '@/components/taller/status-badge';
 import { useTallerConfig } from '@/components/taller/use-taller-config';
 import { PartPicker } from '@/components/taller/part-picker';
@@ -40,8 +42,10 @@ import { ReciboRecepcionDialog } from '@/components/taller/recibo-recepcion';
 import { abrirCobroDelCaso } from '@/components/taller/cobrar';
 import { FotosDelCaso } from '@/components/taller/fotos';
 import { useEnlaceSeguimiento } from '@/components/taller/use-enlace-seguimiento';
+import { AsignarDialog, asignarOrden } from '@/components/taller/asignar-dialog';
+import { PersonasLineaDialog } from '@/components/taller/personas-linea-dialog';
+import { AgregarServicioDialog } from '@/components/taller/agregar-servicio-dialog';
 
-const NINGUNO = 'none';
 const fecha = (d?: Date) => (d ? d.toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
 function Dato({ k, v, children }: { k: string; v?: string | null; children?: React.ReactNode }) {
@@ -69,6 +73,7 @@ export default function CasoClient() {
   const [items, setItems] = useState<ServiceItem[]>([]);
   const [events, setEvents] = useState<ServiceEvent[]>([]);
   const [names, setNames] = useState<Record<string, string>>({});
+  const [fichaNotas, setFichaNotas] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -78,11 +83,11 @@ export default function CasoClient() {
   const [statusNote, setStatusNote] = useState('');
   const [statusVisible, setStatusVisible] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
-  const [assignTo, setAssignTo] = useState<string>(NINGUNO);
-  const [assignNote, setAssignNote] = useState('');
-  const [deliverOpen, setDeliverOpen] = useState(false);
+  const [personasDe, setPersonasDe] = useState<ServiceItem | null>(null);
+  const [agregarOpen, setAgregarOpen] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
   const [pickedUpBy, setPickedUpBy] = useState('');
-  const [deliverNote, setDeliverNote] = useState('');
+  const [closeNote, setCloseNote] = useState('');
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelNote, setCancelNote] = useState('');
   const [editOpen, setEditOpen] = useState(false);
@@ -95,7 +100,7 @@ export default function CasoClient() {
     if (!id) { setNotFound(true); setLoading(false); return; }
     const [srv, its, evs] = await Promise.all([
       supabase.from('services').select(SERVICE_SELECT).eq('id', id).maybeSingle(),
-      supabase.from('service_items').select('*, products(*)').eq('service_id', id).order('created_at'),
+      supabase.from('service_items').select('*, products(*), service_item_staff(staff_id)').eq('service_id', id).order('created_at'),
       supabase.from('service_events').select('*').eq('service_id', id).order('created_at'),
     ]);
     setLoading(false);
@@ -106,11 +111,18 @@ export default function CasoClient() {
       const { data: o } = await supabase.from('services').select('id, number').eq('id', s.warrantyOfServiceId).maybeSingle();
       setOrigen(o ? { id: o.id, number: Number(o.number) } : null);
     }
+    // Las notas de la ficha guardada del cliente («muerde», «alérgico a…»).
+    if (s.subjectId) {
+      const { data: f } = await supabase.from('customer_subjects').select('notes').eq('id', s.subjectId).maybeSingle();
+      setFichaNotas(f?.notes?.trim() || null);
+    } else {
+      setFichaNotas(null);
+    }
     setDiagnosis(s.diagnosis ?? '');
     setItems((its.data ?? []).map(rowToServiceItem));
     const evList = (evs.data ?? []).map(rowToServiceEvent);
     setEvents(evList);
-    // Nombres de los usuarios que aparecen en el historial (de/para en asignaciones).
+    // Nombres de los usuarios que aparecen en el historial viejo (de/para en asignaciones).
     const ids = Array.from(new Set(evList.flatMap((e) => [e.fromUser, e.toUser]).filter(Boolean))) as string[];
     if (ids.length) {
       const { data } = await supabase.from('profiles').select('id, name').in('id', ids);
@@ -126,11 +138,27 @@ export default function CasoClient() {
   const equipmentType = config.equipmentTypes.find((t) => t.id === service?.equipmentTypeId);
   const labor = items.filter((i) => i.kind === 'labor');
   const parts = items.filter((i) => i.kind === 'part');
-  const editable = !!service && isOpen(service.status) && service.paymentStatus !== 'paid' && canEdit;
   // Reingreso por garantía: lo que se agrega entra en 0 (se puede cambiar).
   const esGarantia = !!service && !!(service.warrantyOfServiceId || service.warrantySaleId);
-  const isTech = config.technicians.some((t) => t.profileId === appUser?.id);
+
+  // El personal cargado es el de la sucursal activa: sirve si la orden es de ella.
+  const personal = useMemo(
+    () => config.staff.filter((p) => p.branchId === service?.branchId),
+    [config.staff, service?.branchId],
+  );
+  const personalActivo = useMemo(() => personal.filter((p) => p.isActive), [personal]);
+  const otraSucursal = !!service && !!config.branchId && service.branchId !== config.branchId
+    ? (service.branchName || 'de la orden') : undefined;
+  const miPersona = personalActivo.find((p) => config.myStaffIds.includes(p.id));
+  const staffNames = useMemo(() => {
+    const m: Record<string, string> = Object.fromEntries(config.staff.map((p) => [p.id, p.name]));
+    if (service?.staff) m[service.staff.id] = service.staff.name;
+    return m;
+  }, [config.staff, service?.staff]);
+  const nombresDe = (ids: string[]) => ids.map((x) => staffNames[x] ?? 'otra persona').join(', ');
+
   const catalog = config.catalog.filter((s) => s.isActive && s.productId
+    && (!s.branchId || s.branchId === service?.branchId)
     && (!s.equipmentTypeId || !service?.equipmentTypeId || s.equipmentTypeId === service.equipmentTypeId));
   const suggestedCategory = useMemo(() => {
     const ids = new Set(labor.map((l) => l.serviceTypeId));
@@ -139,6 +167,28 @@ export default function CasoClient() {
 
   const fail = (title: string, error?: { message: string } | null) => {
     toast({ title, description: error?.message, variant: 'destructive' });
+  };
+
+  /** Después de cambiar quién atiende: sin «ver todas», quien se la pasa a otro
+   *  deja de verla. Entonces vuelve a la lista, sin error. Si la consulta falla
+   *  (red, sesión) no se sabe si la ve: se avisa del error y se recarga.
+   *  Sin `titulo` (algo salió a medias y ya se avisó) no se dice «Listo». */
+  const recargarOSalir = async (titulo?: string) => {
+    const { data, error } = await supabase.from('services').select('id').eq('id', id).maybeSingle();
+    if (error) {
+      fail('No se pudo volver a cargar la orden', error);
+      load();
+      return;
+    }
+    if (!data) {
+      toast(titulo
+        ? { title: titulo, description: 'Ya no ves esta orden: ahora la atiende otra persona.' }
+        : { title: 'Ya no ves esta orden', description: 'Ahora la atiende otra persona.' });
+      router.push('/services');
+      return;
+    }
+    if (titulo) toast({ title: titulo });
+    load();
   };
 
   // ---- acciones ----
@@ -150,24 +200,35 @@ export default function CasoClient() {
     });
     setBusy(false);
     if (error) return fail('No se pudo cambiar el estado', error);
+    toast({ title: `Ahora: ${statusLabel(statusDialog, statusCtx(service))}` });
     setStatusDialog(null); setStatusNote(''); setStatusVisible(false);
-    toast({ title: `Ahora: ${SERVICE_STATUS[statusDialog].label}` });
     load();
   };
 
-  const assign = async (profileId: string | null, note?: string) => {
+  const tomar = async () => {
+    if (!service || !miPersona) return;
+    setBusy(true);
+    const { error } = await asignarOrden(service.id, miPersona.id, 'Tomó la orden');
+    setBusy(false);
+    if (error) return fail('No se pudo tomar la orden', error);
+    toast({ title: 'La orden es tuya' });
+    load();
+  };
+
+  const onAssigned = (staffId: string | null) => {
+    setAssignOpen(false);
+    const nombre = staffId ? personal.find((p) => p.id === staffId)?.name : undefined;
+    recargarOSalir(staffId ? `Ahora la atiende ${nombre ?? 'otra persona'}` : 'La orden quedó sin asignar');
+  };
+
+  // «El cliente espera» = no se queda en el negocio: se atiende y se termina.
+  const cambiarEspera = async (espera: boolean) => {
     if (!service) return;
     setBusy(true);
-    const { error } = await supabase.rpc('taller_asignar', {
-      p_service_id: service.id, p_profile_id: profileId, p_note: note?.trim() || null,
-    });
+    const { error } = await supabase.from('services').update({ stays_in_shop: !espera }).eq('id', service.id);
     setBusy(false);
-    if (error) return fail('No se pudo asignar', error);
-    setAssignOpen(false); setAssignNote('');
-    toast({ title: profileId ? 'Caso asignado' : 'Caso sin asignar' });
-    // Si se lo pasó a otro y no ve todos, deja de verlo: de vuelta a la lista.
-    const { data } = await supabase.from('services').select('id').eq('id', service.id).maybeSingle();
-    if (!data) { router.push('/services'); return; }
+    if (error) return fail('No se pudo cambiar', error);
+    toast({ title: espera ? 'El cliente espera: se atiende y se termina' : 'Se queda en el negocio hasta que lo retiren' });
     load();
   };
 
@@ -180,16 +241,20 @@ export default function CasoClient() {
     router.push('/pos');
   };
 
-  const deliver = async () => {
+  // Entregar (se queda: pide quién retira) o Terminar (no se queda: no lo pide).
+  const close = async () => {
     if (!service) return;
+    const seQueda = service.staysInShop;
     setBusy(true);
     const { error } = await supabase.rpc('taller_entregar', {
-      p_service_id: service.id, p_picked_up_by: pickedUpBy.trim() || null, p_note: deliverNote.trim() || null,
+      p_service_id: service.id,
+      p_picked_up_by: seQueda ? (pickedUpBy.trim() || null) : null,
+      p_note: closeNote.trim() || null,
     });
     setBusy(false);
-    if (error) return fail('No se pudo entregar', error);
-    setDeliverOpen(false);
-    toast({ title: 'Caso entregado' });
+    if (error) return fail(seQueda ? 'No se pudo entregar' : 'No se pudo terminar', error);
+    setCloseOpen(false);
+    toast({ title: seQueda ? 'Orden entregada' : 'Orden terminada' });
     load();
   };
 
@@ -202,7 +267,10 @@ export default function CasoClient() {
     setBusy(false);
     if (error) return fail('No se pudo cancelar', error);
     setCancelOpen(false);
-    toast({ title: 'Caso cancelado', description: parts.length ? 'Las piezas volvieron al inventario.' : undefined });
+    toast({
+      title: 'Orden cancelada',
+      description: parts.length ? `${service.isRepair ? 'Las piezas' : 'Los materiales'} volvieron al inventario.` : undefined,
+    });
     load();
   };
 
@@ -222,22 +290,12 @@ export default function CasoClient() {
     load();
   };
 
-  const addLabor = async (serviceTypeId: string) => {
-    const st = catalog.find((s) => s.id === serviceTypeId);
-    if (!service || !st?.productId) return;
-    const { error } = await supabase.from('service_items').insert({
-      service_id: service.id, product_id: st.productId, quantity: 1, price: esGarantia ? 0 : st.price, kind: 'labor', service_type_id: st.id,
-    });
-    if (error) return fail('No se pudo agregar el servicio', error);
-    load();
-  };
-
   const addPart = async (p: Product) => {
     if (!service) return;
     const { error } = await supabase.from('service_items').insert({
       service_id: service.id, product_id: p.id, quantity: 1, price: esGarantia ? 0 : p.price, kind: 'part',
     });
-    if (error) return fail('No se pudo agregar la pieza', error);
+    if (error) return fail(service.isRepair ? 'No se pudo agregar la pieza' : 'No se pudo agregar el material', error);
     setAddingPart(false);
     load();
   };
@@ -262,12 +320,16 @@ export default function CasoClient() {
   if (notFound || !service) {
     return (
       <div className="space-y-3">
-        <Button variant="ghost" size="sm" asChild><Link href="/services"><ArrowLeft className="mr-1 h-4 w-4" />Taller</Link></Button>
-        <p className="text-sm text-muted-foreground">No se encontró el caso, o no tienes acceso a él.</p>
+        <Button variant="ghost" size="sm" asChild><Link href="/services"><ArrowLeft className="mr-1 h-4 w-4" />Servicios</Link></Button>
+        <p className="text-sm text-muted-foreground">No se encontró la orden, o no tienes acceso a ella.</p>
       </div>
     );
   }
 
+  const ctx = statusCtx(service);
+  const esReparacion = service.isRepair;
+  const conFicha = !!service.equipmentTypeId || !!equipmentLabel(service) || !!service.equipmentSerial;
+  const campos = camposDeFicha(equipmentType);
   const phone = service.customer?.phone || service.broughtByPhone;
   const contactName = service.customer?.name ?? service.broughtByName;
   const waPhone = whatsappPhone(phone);
@@ -279,30 +341,52 @@ export default function CasoClient() {
   };
   const unpaid = service.total > 0 && service.paymentStatus !== 'paid';
   const open = isOpen(service.status);
+  const cobrada = service.paymentStatus === 'paid' || !!service.saleId;
+  // Líneas: como la base (crear o editar Servicios), con la orden abierta y sin cobrar.
+  const lineasEditables = open && !cobrada && (canEdit || canCreate);
+
+  // Encabezado: «Orden #0142 · {ficha o servicios} · {cliente}».
+  const nombresServicios = labor.map((l) => l.product.name).join(', ');
+  const queSeAtiende = equipmentLabel(service) || (conFicha ? equipmentType?.name : '') || nombresServicios || service.description;
+  const dias = daysInShop(service);
+  const descripcionPorDefecto = nombresServicios || equipmentType?.name || 'Servicio';
+  // Sin reparación, la descripción son las notas; la que se puso sola (los servicios) no se repite.
+  const notas = service.description.trim();
+  const muestraNotas = !esReparacion && !!notas && ![nombresServicios, equipmentType?.name, 'Servicio'].includes(notas);
+
+  const estados = manualStatuses(ctx);
+  if (!estados.includes(service.status)) estados.unshift(service.status);
+  const muestraEspera = open && canEdit && service.status !== 'ready' && !service.atCustomer
+    && (service.staysInShop || !!equipmentType?.staysInShop);
+  const defaultLinea = service.staffId && personalActivo.some((p) => p.id === service.staffId) ? [service.staffId]
+    : labor[labor.length - 1]?.staffIds.length ? labor[labor.length - 1].staffIds
+    : miPersona ? [miPersona.id]
+    : personalActivo.length === 1 ? [personalActivo[0].id] : [];
 
   return (
     <div className="mx-auto max-w-5xl">
       <div className="mb-2">
-        <Button variant="ghost" size="sm" asChild><Link href="/services"><ArrowLeft className="mr-1 h-4 w-4" />Taller</Link></Button>
+        <Button variant="ghost" size="sm" asChild><Link href="/services"><ArrowLeft className="mr-1 h-4 w-4" />Servicios</Link></Button>
       </div>
 
       {/* Cabecera */}
       <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight">Caso {caseNumber(service.number)}</h1>
-            <StatusBadge status={service.status} />
-            {service.isQuick && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Zap className="h-3 w-3" />Rápida</span>}
-            {isLate(service) && <span className="text-xs font-medium text-destructive">Atrasado</span>}
+            <h1 className="text-2xl font-bold tracking-tight">Orden {caseNumber(service.number)}</h1>
+            <StatusBadge status={service.status} ctx={ctx} />
+            {service.isQuick && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Zap className="h-3 w-3" />Atender ahora</span>}
+            {isLate(service) && <span className="text-xs font-medium text-destructive">Atrasada</span>}
           </div>
           <p className="text-sm text-muted-foreground">
-            {equipmentLabel(service) || 'Equipo'} · {contactName ?? 'Consumidor final'} · {daysInShop(service)} días en el taller
+            {[queSeAtiende, contactName ?? 'Consumidor final', ctx.staysInShop ? `${dias} ${dias === 1 ? 'día' : 'días'} aquí` : '']
+              .filter(Boolean).join(' · ')}
           </p>
           {esGarantia && (
             <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-900 dark:bg-sky-900/60 dark:text-sky-100">
               <ShieldCheck className="h-3.5 w-3.5" />
               Reingreso por garantía
-              {origen && <> del <Link className="underline" href={`/services/caso?id=${origen.id}`}>caso {caseNumber(origen.number)}</Link></>}
+              {origen && <> de la <Link className="underline" href={`/services/caso?id=${origen.id}`}>orden {caseNumber(origen.number)}</Link></>}
               {service.warrantySaleId && <> de <Link className="underline" href={`/sales/detail?id=${service.warrantySaleId}`}>una venta</Link></>}
             </p>
           )}
@@ -319,58 +403,72 @@ export default function CasoClient() {
             </Button>
           )}
           {enlace && (
-            <Button variant="outline" size="sm" onClick={copiarEnlace} title="Enlace para que el cliente vea cómo va su equipo">
+            <Button variant="outline" size="sm" onClick={copiarEnlace} title="Enlace para que el cliente vea cómo va su orden">
               <Link2 className="mr-1 h-4 w-4" />Enlace
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={() => setReciboOpen(true)}><Printer className="mr-1 h-4 w-4" />Recibo</Button>
+          {/* El recibo de recepción es para lo que se queda en el negocio. */}
+          {service.staysInShop && (
+            <Button variant="outline" size="sm" onClick={() => setReciboOpen(true)}><Printer className="mr-1 h-4 w-4" />Recibo</Button>
+          )}
           {open && canEdit && unpaid && items.length > 0 && (
             <Button size="sm" onClick={cobrar} disabled={busy}><HandCoins className="mr-1 h-4 w-4" />Cobrar {formatCurrency(service.total)}</Button>
           )}
-          {isReadyToDeliver(service.status) && canEdit && !unpaid && (
-            <Button size="sm" onClick={() => { setPickedUpBy(contactName ?? ''); setDeliverOpen(true); }} disabled={busy}>
-              <CheckCircle2 className="mr-1 h-4 w-4" />Entregar
+          {canClose(service.status, ctx) && canEdit && !unpaid && (
+            <Button size="sm" onClick={() => { setPickedUpBy(contactName ?? ''); setCloseNote(''); setCloseOpen(true); }} disabled={busy}>
+              <CheckCircle2 className="mr-1 h-4 w-4" />{closeLabel(ctx)}
             </Button>
           )}
         </div>
       </div>
 
-      {/* Estado y técnico */}
+      {/* Estado, quién la atiende y si el cliente espera */}
       {open && canEdit && (
         <Card className="mb-4">
-          <CardContent className="flex flex-wrap items-end gap-3 p-4">
+          <CardContent className="flex flex-wrap items-end gap-x-6 gap-y-3 p-4">
             <div className="space-y-1.5">
               <Label htmlFor="st">Estado</Label>
               <Select value={service.status} onValueChange={(v) => { if (v !== service.status) setStatusDialog(v as ServiceStatus); }}>
                 <SelectTrigger id="st" className="w-56"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {MANUAL_STATUSES.map((s) => <SelectItem key={s} value={s}>{SERVICE_STATUS[s].label}</SelectItem>)}
+                  {estados.map((s) => <SelectItem key={s} value={s}>{statusLabel(s, ctx)}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-1.5">
-              <span className="text-sm font-medium">Técnico</span>
+              <span className="text-sm font-medium">Lo atiende</span>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm">{service.assignedUser?.name ?? 'Sin asignar'}</span>
-                {!service.assignedTo && isTech && (
-                  <Button variant="outline" size="sm" onClick={() => assign(appUser!.id, 'Tomó el caso')} disabled={busy}>
-                    <UserCheck className="mr-1 h-4 w-4" />Tomar el caso
+                <span className="text-sm">{service.staff?.name ?? 'Sin asignar'}</span>
+                {!service.staffId && miPersona && (
+                  <Button variant="outline" size="sm" onClick={tomar} disabled={busy}>
+                    <UserCheck className="mr-1 h-4 w-4" />Tomar la orden
                   </Button>
                 )}
-                <Button variant="outline" size="sm" onClick={() => { setAssignTo(service.assignedTo ?? NINGUNO); setAssignOpen(true); }}>
-                  <Users className="mr-1 h-4 w-4" />{service.assignedTo ? 'Pasar a otro técnico' : 'Asignar'}
+                <Button variant="outline" size="sm" onClick={() => setAssignOpen(true)}>
+                  <Users className="mr-1 h-4 w-4" />{service.staffId ? 'Pasar a otra persona' : 'Asignar'}
                 </Button>
               </div>
             </div>
+            {muestraEspera && (
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <Switch id="espera" checked={!service.staysInShop} onCheckedChange={cambiarEspera} disabled={busy} />
+                  <Label htmlFor="espera">El cliente espera</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {service.staysInShop ? 'Se queda en el negocio hasta que lo retiren.' : 'No se queda: se atiende y se termina.'}
+                </p>
+              </div>
+            )}
             {canCancel && !service.saleId && (
               <Button variant="ghost" size="sm" className="ml-auto text-destructive" onClick={() => setCancelOpen(true)}>
-                <Ban className="mr-1 h-4 w-4" />Cancelar caso
+                <Ban className="mr-1 h-4 w-4" />Cancelar orden
               </Button>
             )}
           </CardContent>
         </Card>
       )}
-      {isReadyToDeliver(service.status) && unpaid && (
+      {ctx.staysInShop && isReadyToDeliver(service.status) && unpaid && (
         <p className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
           Está listo, pero falta cobrarlo: {formatCurrency(service.total)}. Después de cobrar en el POS, vuelve aquí para entregarlo.
         </p>
@@ -380,7 +478,9 @@ export default function CasoClient() {
         <div className="space-y-4">
           {/* Líneas */}
           <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-base">Servicios y piezas</CardTitle></CardHeader>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">{esReparacion ? 'Servicios y piezas' : 'Servicios y materiales'}</CardTitle>
+            </CardHeader>
             <CardContent className="space-y-3">
               {items.length === 0 && <p className="text-sm text-muted-foreground">Todavía no hay nada que cobrar.</p>}
               {[...labor, ...parts].map((line) => (
@@ -388,10 +488,20 @@ export default function CasoClient() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium">{line.product.name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {line.kind === 'labor' ? 'Mano de obra' : `Pieza${line.product.tracksStock ? ` · quedan ${formatQuantity(line.product.stock, line.product.unit)}` : ''}`}
+                      {line.kind === 'labor'
+                        ? `${esReparacion ? 'Mano de obra' : 'Servicio'} · ${line.staffIds.length ? `Lo hace ${nombresDe(line.staffIds)}` : 'Sin persona'}`
+                        : `${esReparacion ? 'Pieza' : 'Material'}${line.product.tracksStock ? ` · quedan ${formatQuantity(line.product.stock, line.product.unit)}` : ''}`}
                     </p>
                   </div>
-                  {editable ? (
+                  {line.kind === 'labor' && lineasEditables && !otraSucursal && (
+                    <Button
+                      variant="ghost" size="icon" className="h-8 w-8" title="Quién lo hace"
+                      aria-label={`Quién hace ${line.product.name}`} onClick={() => setPersonasDe(line)}
+                    >
+                      <Users className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {lineasEditables ? (
                     <>
                       {line.kind === 'part' && (
                         <Input
@@ -416,7 +526,7 @@ export default function CasoClient() {
                     <span className="text-sm text-muted-foreground">{line.quantity} × {formatCurrency(line.price)}</span>
                   )}
                   <span className="w-24 text-right text-sm font-medium tabular-nums">{formatCurrency(line.price * line.quantity)}</span>
-                  {editable && (
+                  {lineasEditables && (
                     <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" aria-label={`Quitar ${line.product.name}`} onClick={() => removeLine(line)}>
                       <Trash className="h-4 w-4" />
                     </Button>
@@ -424,16 +534,15 @@ export default function CasoClient() {
                 </div>
               ))}
 
-              {editable && (
+              {lineasEditables && (
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <Select value="" onValueChange={addLabor}>
-                    <SelectTrigger aria-label="Agregar servicio"><SelectValue placeholder="+ Agregar servicio del catálogo" /></SelectTrigger>
-                    <SelectContent>
-                      {catalog.length === 0
-                        ? <div className="p-2 text-sm text-muted-foreground">El catálogo está vacío.</div>
-                        : catalog.map((s) => <SelectItem key={s.id} value={s.id}>{s.name} · {formatCurrency(s.price)}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  {otraSucursal ? (
+                    <p className="text-sm text-muted-foreground">
+                      Para agregar servicios o cambiar quién los hace, cambia a la sucursal {otraSucursal}.
+                    </p>
+                  ) : (
+                    <Button variant="outline" onClick={() => setAgregarOpen(true)}>+ Agregar servicio</Button>
+                  )}
                   {addingPart ? (
                     <PartPicker
                       autoFocus
@@ -441,16 +550,17 @@ export default function CasoClient() {
                       locationId={config.settings?.partsLocationId}
                       suggestedCategoryId={suggestedCategory}
                       onPick={addPart}
+                      material={!esReparacion}
                     />
                   ) : (
-                    <Button variant="outline" onClick={() => setAddingPart(true)}>+ Agregar pieza</Button>
+                    <Button variant="outline" onClick={() => setAddingPart(true)}>+ Agregar {esReparacion ? 'pieza' : 'material'}</Button>
                   )}
                 </div>
               )}
 
               <div className="space-y-1 border-t pt-3 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Mano de obra</span><span className="tabular-nums">{formatCurrency(service.laborPrice)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Piezas</span><span className="tabular-nums">{formatCurrency(service.partsTotal)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{esReparacion ? 'Mano de obra' : 'Servicios'}</span><span className="tabular-nums">{formatCurrency(service.laborPrice)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{esReparacion ? 'Piezas' : 'Materiales'}</span><span className="tabular-nums">{formatCurrency(service.partsTotal)}</span></div>
                 <div className="flex justify-between text-base font-semibold"><span>Total</span><span className="tabular-nums">{formatCurrency(service.total)}</span></div>
                 <p className="text-xs text-muted-foreground">
                   {service.paymentStatus === 'paid' && service.saleId
@@ -462,70 +572,98 @@ export default function CasoClient() {
             </CardContent>
           </Card>
 
-          {/* Diagnóstico */}
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-base">Diagnóstico</CardTitle></CardHeader>
-            <CardContent className="space-y-2">
-              <p className="text-sm"><span className="text-muted-foreground">Falla reportada: </span>{service.description}</p>
-              {canEdit && open ? (
-                <>
-                  <Textarea aria-label="Diagnóstico" rows={3} value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} placeholder="Lo que encontró el técnico" />
-                  {diagnosis !== (service.diagnosis ?? '') && (
-                    <div className="flex justify-end"><Button size="sm" onClick={saveDiagnosis}>Guardar diagnóstico</Button></div>
-                  )}
-                </>
-              ) : (
-                service.diagnosis && <p className="text-sm whitespace-pre-line">{service.diagnosis}</p>
-              )}
-            </CardContent>
-          </Card>
+          {/* Diagnóstico (reparación) o notas */}
+          {esReparacion ? (
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Diagnóstico</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-sm"><span className="text-muted-foreground">Falla reportada: </span>{service.description}</p>
+                {canEdit && open ? (
+                  <>
+                    <Textarea aria-label="Diagnóstico" rows={3} value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} placeholder="Lo que encontró el técnico" />
+                    {diagnosis !== (service.diagnosis ?? '') && (
+                      <div className="flex justify-end"><Button size="sm" onClick={saveDiagnosis}>Guardar diagnóstico</Button></div>
+                    )}
+                  </>
+                ) : (
+                  service.diagnosis && <p className="text-sm whitespace-pre-line">{service.diagnosis}</p>
+                )}
+              </CardContent>
+            </Card>
+          ) : muestraNotas && (
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Notas</CardTitle></CardHeader>
+              <CardContent><p className="text-sm whitespace-pre-line">{notas}</p></CardContent>
+            </Card>
+          )}
 
           {/* Historial */}
           <Card>
             <CardHeader className="pb-3"><CardTitle className="text-base">Historial</CardTitle></CardHeader>
             <CardContent>
-              <Historial events={events} names={names} canNote={canEdit} onNote={addNote} />
+              <Historial events={events} ctx={ctx} names={names} staffNames={staffNames} canNote={canEdit} onNote={addNote} />
             </CardContent>
           </Card>
         </div>
 
         <div className="space-y-4">
-          {/* Ficha */}
+          {/* Ficha (o los datos de la orden, si no tiene) */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-              <CardTitle className="text-base">Ficha</CardTitle>
+              <CardTitle className="text-base">{conFicha ? 'Ficha' : 'Datos'}</CardTitle>
               {canEdit && open && (
-                <Button variant="ghost" size="icon" className="h-8 w-8" aria-label="Editar ficha" onClick={() => setEditOpen(true)}><Pencil className="h-4 w-4" /></Button>
+                <Button
+                  variant="ghost" size="icon" className="h-8 w-8" aria-label={conFicha ? 'Editar ficha' : 'Editar notas'}
+                  onClick={() => setEditOpen(true)}
+                >
+                  <Pencil className="h-4 w-4" />
+                </Button>
               )}
             </CardHeader>
             <CardContent className="space-y-1.5">
+              {fichaNotas && (
+                <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+                  <StickyNote className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p className="whitespace-pre-line"><span className="font-medium">Notas de la ficha: </span>{fichaNotas}</p>
+                </div>
+              )}
               <Dato k="Cliente" v={service.customer?.name ?? 'Consumidor final'} />
               <Dato k="Teléfono" v={phone ?? undefined}>{phone ? <a className="underline" href={`tel:${phone}`}>{phone}</a> : undefined}</Dato>
               <Dato k="Lo trajo" v={service.broughtByName && service.customer ? [service.broughtByName, service.broughtByPhone].filter(Boolean).join(' · ') : undefined} />
-              <Dato k="Equipo" v={[equipmentType?.name, equipmentLabel(service)].filter(Boolean).join(' · ') || undefined} />
-              <Dato k={equipmentType?.serialLabel ?? 'Serie'} v={service.equipmentSerial} />
-              {service.equipmentPassword && (
-                <Dato k="Clave/patrón">
-                  <span className="inline-flex items-center gap-2">
-                    <span className="font-mono">{showPassword ? service.equipmentPassword : '••••••'}</span>
-                    <button type="button" aria-label={showPassword ? 'Ocultar clave' : 'Ver clave'} onClick={() => setShowPassword(!showPassword)}>
-                      {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </button>
-                  </span>
-                </Dato>
+              <Dato k="Lo atiende" v={service.staff?.name ?? 'Sin asignar'} />
+              {service.atCustomer && <Dato k="A domicilio" v={service.serviceAddress || 'Sin dirección'} />}
+              {conFicha && (
+                <>
+                  <div className="my-2 border-t" />
+                  <Dato k={esReparacion ? 'Equipo' : 'Qué se atiende'} v={equipmentType?.name} />
+                  {campos.map((f) => <Dato key={f.key} k={f.label} v={valorDeFicha(service, f.key)} />)}
+                  {service.equipmentPassword && (
+                    <Dato k="Clave/patrón">
+                      <span className="inline-flex items-center gap-2">
+                        <span className="font-mono">{showPassword ? service.equipmentPassword : '••••••'}</span>
+                        <button type="button" aria-label={showPassword ? 'Ocultar clave' : 'Ver clave'} onClick={() => setShowPassword(!showPassword)}>
+                          {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                        </button>
+                      </span>
+                    </Dato>
+                  )}
+                  {equipmentType?.extraFields.map((f) => <Dato key={f.key} k={f.label} v={service.equipmentDetails[f.key]} />)}
+                  <Dato k={esReparacion ? 'Dejó' : 'Lo que dejó'} v={service.accessories} />
+                  <Dato k="Prometido para" v={service.promisedAt?.toLocaleDateString('es-DO')} />
+                </>
               )}
-              {equipmentType?.extraFields.map((f) => <Dato key={f.key} k={f.label} v={service.equipmentDetails[f.key]} />)}
-              <Dato k="Dejó" v={service.accessories} />
-              <Dato k="Prometido para" v={service.promisedAt?.toLocaleDateString('es-DO')} />
               <div className="my-2 border-t" />
               <Dato k="Recibió" v={`${service.receivedByName ?? '—'} · ${fecha(service.createdAt)}`} />
               {service.readyAt && <Dato k="Listo" v={fecha(service.readyAt)} />}
-              {service.deliveredAt && <Dato k="Entregó" v={`${service.deliveredByName ?? '—'} · ${fecha(service.deliveredAt)}`} />}
+              {service.deliveredAt && (
+                <Dato k={ctx.staysInShop ? 'Entregó' : 'Terminó'} v={`${service.deliveredByName ?? '—'} · ${fecha(service.deliveredAt)}`} />
+              )}
               <Dato k="Retiró" v={service.pickedUpByName} />
             </CardContent>
           </Card>
 
-          {service.status === 'delivered' && (service.warrantyUntil || canCreate) && (
+          {/* La garantía es de las órdenes de reparación. */}
+          {esReparacion && service.status === 'delivered' && (service.warrantyUntil || canCreate) && (
             <Card>
               <CardHeader className="pb-3"><CardTitle className="text-base">Garantía</CardTitle></CardHeader>
               <CardContent className="space-y-2">
@@ -535,7 +673,7 @@ export default function CasoClient() {
                     {warrantyActive(service.warrantyUntil) ? 'Vigente' : 'Vencida'} · hasta el {fmtDate(service.warrantyUntil)}
                   </p>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Este caso no quedó con garantía.</p>
+                  <p className="text-sm text-muted-foreground">Esta orden no quedó con garantía.</p>
                 )}
                 {canCreate && (
                   <Button variant="outline" size="sm" asChild>
@@ -546,16 +684,18 @@ export default function CasoClient() {
             </Card>
           )}
 
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-base">Fotos</CardTitle></CardHeader>
-            <CardContent>
-              <FotosDelCaso
-                serviceId={service.id}
-                companyId={appUser?.impersonatedCompanyId ?? appUser?.companyId}
-                canEdit={canEdit && open}
-              />
-            </CardContent>
-          </Card>
+          {conFicha && (
+            <Card>
+              <CardHeader className="pb-3"><CardTitle className="text-base">Fotos</CardTitle></CardHeader>
+              <CardContent>
+                <FotosDelCaso
+                  serviceId={service.id}
+                  companyId={appUser?.impersonatedCompanyId ?? appUser?.companyId}
+                  canEdit={canEdit && open}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {/* Chequeos */}
           {service.intakeChecklist.length > 0 && (
@@ -577,7 +717,7 @@ export default function CasoClient() {
 
       {/* ---- diálogos ---- */}
       <ReciboRecepcionDialog
-        open={reciboOpen}
+        open={reciboOpen && service.staysInShop}
         onOpenChange={(o) => { setReciboOpen(o); if (!o && params.get('recibo')) router.replace(`/services/caso?id=${service.id}`); }}
         service={service}
         equipmentType={equipmentType}
@@ -587,11 +727,14 @@ export default function CasoClient() {
       <Dialog open={!!statusDialog} onOpenChange={(o) => !o && setStatusDialog(null)}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Pasar a «{statusDialog ? SERVICE_STATUS[statusDialog].label : ''}»</DialogTitle>
+            <DialogTitle>Pasar a «{statusDialog ? statusLabel(statusDialog, ctx) : ''}»</DialogTitle>
             <DialogDescription>Queda en el historial con tu nombre y la hora.</DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <Textarea aria-label="Nota del cambio" rows={3} value={statusNote} onChange={(e) => setStatusNote(e.target.value)} placeholder="Nota (opcional): «la pieza llega el jueves»" />
+            <Textarea
+              aria-label="Nota del cambio" rows={3} value={statusNote} onChange={(e) => setStatusNote(e.target.value)}
+              placeholder={esReparacion ? 'Nota (opcional): «la pieza llega el jueves»' : 'Nota (opcional)'}
+            />
             <label className="flex items-center gap-2 text-sm">
               <Checkbox checked={statusVisible} onCheckedChange={(v) => setStatusVisible(v === true)} />
               Que el cliente vea esta nota
@@ -604,58 +747,59 @@ export default function CasoClient() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{service.assignedTo ? 'Pasar a otro técnico' : 'Asignar el caso'}</DialogTitle>
-            <DialogDescription>Queda anotado en el historial, con el motivo si lo escribes.</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            {config.technicians.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No hay técnicos en esta sucursal. Márcalos en <Link className="underline" href="/service-types">Configuración del Taller → Técnicos</Link>.
-              </p>
-            ) : (
-              <Select value={assignTo} onValueChange={setAssignTo}>
-                <SelectTrigger aria-label="Técnico"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NINGUNO}>Sin asignar</SelectItem>
-                  {config.technicians.map((t) => <SelectItem key={t.profileId} value={t.profileId}>{t.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            )}
-            <Input aria-label="Motivo" value={assignNote} onChange={(e) => setAssignNote(e.target.value)} placeholder="Motivo (opcional)" />
-          </div>
-          <DialogFooter>
-            <Button variant="secondary" onClick={() => setAssignOpen(false)}>Cancelar</Button>
-            <Button
-              onClick={() => assign(assignTo === NINGUNO ? null : assignTo, assignNote)}
-              disabled={busy || (assignTo === NINGUNO ? !service.assignedTo : assignTo === service.assignedTo)}
-            >
-              Guardar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {assignOpen && (
+        <AsignarDialog
+          service={service}
+          staff={personalActivo}
+          otraSucursal={otraSucursal}
+          onClose={() => setAssignOpen(false)}
+          onAssigned={onAssigned}
+        />
+      )}
 
-      <Dialog open={deliverOpen} onOpenChange={setDeliverOpen}>
+      {personasDe && (
+        <PersonasLineaDialog
+          line={personasDe}
+          staff={personal}
+          onClose={() => setPersonasDe(null)}
+          onSaved={(ok) => { setPersonasDe(null); recargarOSalir(ok ? 'Listo: quedó quién lo hace' : undefined); }}
+        />
+      )}
+
+      {agregarOpen && (
+        <AgregarServicioDialog
+          serviceId={service.id}
+          catalog={catalog}
+          staff={personal}
+          defaultStaffIds={defaultLinea}
+          enGarantia={esGarantia}
+          onClose={() => setAgregarOpen(false)}
+          onSaved={() => { setAgregarOpen(false); load(); }}
+        />
+      )}
+
+      <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Entregar el caso {caseNumber(service.number)}</DialogTitle>
+            <DialogTitle>{closeLabel(ctx)} la orden {caseNumber(service.number)}</DialogTitle>
             <DialogDescription>
-              {service.status === 'not_repaired' ? 'Se entrega sin reparar.' : 'Se entrega reparado.'} Queda registrado quién lo entregó y quién lo retiró.
+              {ctx.staysInShop
+                ? `${service.status === 'not_repaired' ? 'Se entrega sin reparar. ' : esReparacion ? 'Se entrega reparado. ' : ''}Queda registrado quién lo entregó y quién lo retiró.`
+                : 'La orden queda terminada. Queda registrado quién la terminó.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="picked">Quién lo retira</Label>
-              <Input id="picked" value={pickedUpBy} onChange={(e) => setPickedUpBy(e.target.value)} />
-            </div>
-            <Input aria-label="Nota de la entrega" value={deliverNote} onChange={(e) => setDeliverNote(e.target.value)} placeholder="Nota (opcional)" />
+            {ctx.staysInShop && (
+              <div className="space-y-1.5">
+                <Label htmlFor="picked">Quién lo retira</Label>
+                <Input id="picked" value={pickedUpBy} onChange={(e) => setPickedUpBy(e.target.value)} />
+              </div>
+            )}
+            <Input aria-label="Nota" value={closeNote} onChange={(e) => setCloseNote(e.target.value)} placeholder="Nota (opcional)" />
           </div>
           <DialogFooter>
-            <Button variant="secondary" onClick={() => setDeliverOpen(false)}>Cancelar</Button>
-            <Button onClick={deliver} disabled={busy}>{busy ? 'Guardando…' : 'Entregar'}</Button>
+            <Button variant="secondary" onClick={() => setCloseOpen(false)}>Cancelar</Button>
+            <Button onClick={close} disabled={busy}>{busy ? 'Guardando…' : closeLabel(ctx)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -663,17 +807,19 @@ export default function CasoClient() {
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>¿Cancelar el caso {caseNumber(service.number)}?</DialogTitle>
+            <DialogTitle>¿Cancelar la orden {caseNumber(service.number)}?</DialogTitle>
             <DialogDescription>
               {parts.length > 0
-                ? `Las ${parts.length === 1 ? 'pieza vuelve' : `${parts.length} piezas vuelven`} al inventario. El caso queda en el historial como cancelado.`
-                : 'El caso queda en el historial como cancelado.'}
+                ? `${parts.length === 1
+                  ? (esReparacion ? 'La pieza vuelve' : 'El material vuelve')
+                  : `${esReparacion ? `Las ${parts.length} piezas vuelven` : `Los ${parts.length} materiales vuelven`}`} al inventario. La orden queda en el historial como cancelada.`
+                : 'La orden queda en el historial como cancelada.'}
             </DialogDescription>
           </DialogHeader>
           <Input aria-label="Motivo de la cancelación" value={cancelNote} onChange={(e) => setCancelNote(e.target.value)} placeholder="Motivo (opcional)" />
           <DialogFooter>
             <Button variant="secondary" onClick={() => setCancelOpen(false)}>Volver</Button>
-            <Button variant="destructive" onClick={cancel} disabled={busy}>Cancelar caso</Button>
+            <Button variant="destructive" onClick={cancel} disabled={busy}>Cancelar orden</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -681,9 +827,9 @@ export default function CasoClient() {
       {editOpen && (
         <EditarFicha
           service={service}
-          serialLabel={equipmentType?.serialLabel}
-          asksPassword={!!equipmentType?.asksPassword}
-          extraFields={equipmentType?.extraFields ?? []}
+          equipmentType={equipmentType}
+          conFicha={conFicha}
+          descripcionPorDefecto={descripcionPorDefecto}
           onClose={() => setEditOpen(false)}
           onSaved={() => { setEditOpen(false); load(); }}
         />
@@ -692,18 +838,24 @@ export default function CasoClient() {
   );
 }
 
-function EditarFicha({ service, serialLabel, asksPassword, extraFields, onClose, onSaved }: {
+/** Corrige la copia de la ficha y las notas de esta orden (la ficha guardada del
+ *  cliente no cambia). Los campos y sus nombres son los del tipo de ficha. */
+function EditarFicha({ service, equipmentType, conFicha, descripcionPorDefecto, onClose, onSaved }: {
   service: Service;
-  serialLabel?: string;
-  asksPassword: boolean;
-  extraFields: { key: string; label: string; type: 'text' | 'number' }[];
+  equipmentType?: EquipmentType;
+  conFicha: boolean;
+  /** Lo que queda como descripción si las notas se dejan vacías (sin reparación). */
+  descripcionPorDefecto: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { toast } = useToast();
-  const [brand, setBrand] = useState(service.equipmentBrand ?? '');
-  const [model, setModel] = useState(service.equipmentModel ?? '');
-  const [serial, setSerial] = useState(service.equipmentSerial ?? '');
+  const esReparacion = service.isRepair;
+  const campos = camposDeFicha(equipmentType);
+  const asksPassword = !!equipmentType?.asksPassword;
+  const [valores, setValores] = useState({
+    brand: service.equipmentBrand ?? '', model: service.equipmentModel ?? '', serial: service.equipmentSerial ?? '',
+  });
   const [password, setPassword] = useState(service.equipmentPassword ?? '');
   const [details, setDetails] = useState<Record<string, string>>(service.equipmentDetails);
   const [description, setDescription] = useState(service.description);
@@ -713,22 +865,29 @@ function EditarFicha({ service, serialLabel, asksPassword, extraFields, onClose,
   const [saving, setSaving] = useState(false);
 
   const save = async () => {
-    if (!description.trim()) { toast({ title: 'La falla reportada no puede quedar vacía', variant: 'destructive' }); return; }
+    if (esReparacion && !description.trim()) {
+      toast({ title: 'La falla reportada no puede quedar vacía', variant: 'destructive' });
+      return;
+    }
     setSaving(true);
     const { error } = await supabase.from('services').update({
-      equipment_brand: brand.trim() || null,
-      equipment_model: model.trim() || null,
-      equipment_serial: serial.trim() || null,
-      equipment_password: asksPassword ? (password.trim() || null) : service.equipmentPassword ?? null,
-      equipment_details: Object.fromEntries(Object.entries(details).filter(([, v]) => v.trim() !== '')),
-      description: description.trim(),
-      accessories: accessories.trim() || null,
-      estimate: estimate.trim() ? Math.round(Number(estimate) * 100) / 100 : null,
-      promised_at: promised ? new Date(`${promised}T18:00:00`).toISOString() : null,
+      ...(conFicha ? {
+        equipment_brand: valores.brand.trim() || null,
+        equipment_model: valores.model.trim() || null,
+        equipment_serial: valores.serial.trim() || null,
+        equipment_password: asksPassword ? (password.trim() || null) : service.equipmentPassword ?? null,
+        equipment_details: Object.fromEntries(Object.entries(details).filter(([, v]) => String(v ?? '').trim() !== '')),
+        accessories: accessories.trim() || null,
+      } : {}),
+      description: description.trim() || descripcionPorDefecto,
+      ...(esReparacion ? {
+        estimate: estimate.trim() ? Math.round(Number(estimate) * 100) / 100 : null,
+        promised_at: promised ? new Date(`${promised}T18:00:00`).toISOString() : null,
+      } : {}),
     }).eq('id', service.id);
     setSaving(false);
     if (error) { toast({ title: 'No se pudo guardar', description: error.message, variant: 'destructive' }); return; }
-    toast({ title: 'Ficha actualizada' });
+    toast({ title: conFicha ? 'Ficha actualizada' : 'Notas guardadas' });
     onSaved();
   };
 
@@ -736,30 +895,52 @@ function EditarFicha({ service, serialLabel, asksPassword, extraFields, onClose,
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Editar ficha</DialogTitle>
-          <DialogDescription>Los chequeos de llegada no se cambian: son lo que se anotó al recibirlo.</DialogDescription>
+          <DialogTitle>{conFicha ? 'Editar ficha' : 'Editar notas'}</DialogTitle>
+          <DialogDescription>
+            {conFicha
+              ? 'Cambia solo esta orden, no la ficha guardada del cliente. Los chequeos de llegada no se cambian: son lo que se anotó al recibirlo.'
+              : 'Lo que haya que saber de esta orden.'}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5"><Label htmlFor="ef-brand">Marca</Label><Input id="ef-brand" value={brand} onChange={(e) => setBrand(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label htmlFor="ef-model">Modelo</Label><Input id="ef-model" value={model} onChange={(e) => setModel(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label htmlFor="ef-serial">{serialLabel ?? 'Serie'}</Label><Input id="ef-serial" value={serial} onChange={(e) => setSerial(e.target.value)} /></div>
-            {asksPassword && (
-              <div className="space-y-1.5"><Label htmlFor="ef-pass">Clave o patrón</Label><Input id="ef-pass" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" /></div>
-            )}
-            {extraFields.map((f) => (
-              <div key={f.key} className="space-y-1.5">
-                <Label htmlFor={`ef-${f.key}`}>{f.label}</Label>
-                <Input id={`ef-${f.key}`} value={details[f.key] ?? ''} onChange={(e) => setDetails({ ...details, [f.key]: e.target.value })} />
-              </div>
-            ))}
+          {conFicha && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {campos.map((f) => (
+                <div key={f.key} className="space-y-1.5">
+                  <Label htmlFor={`ef-${f.key}`}>{f.label}</Label>
+                  <Input id={`ef-${f.key}`} value={valores[f.key]} onChange={(e) => setValores({ ...valores, [f.key]: e.target.value })} />
+                </div>
+              ))}
+              {asksPassword && (
+                <div className="space-y-1.5"><Label htmlFor="ef-pass">Clave o patrón</Label><Input id="ef-pass" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off" /></div>
+              )}
+              {(equipmentType?.extraFields ?? []).map((f) => (
+                <div key={f.key} className="space-y-1.5">
+                  <Label htmlFor={`ef-x-${f.key}`}>{f.label}</Label>
+                  <Input
+                    id={`ef-x-${f.key}`} inputMode={f.type === 'number' ? 'decimal' : undefined}
+                    value={details[f.key] ?? ''} onChange={(e) => setDetails({ ...details, [f.key]: e.target.value })}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="ef-desc">{esReparacion ? 'Falla reportada' : 'Notas'}</Label>
+            <Textarea id="ef-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
-          <div className="space-y-1.5"><Label htmlFor="ef-desc">Falla reportada</Label><Textarea id="ef-desc" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
-          <div className="space-y-1.5"><Label htmlFor="ef-acc">Dejó con el equipo</Label><Input id="ef-acc" value={accessories} onChange={(e) => setAccessories(e.target.value)} /></div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5"><Label htmlFor="ef-est">Presupuesto aprox. (RD$)</Label><Input id="ef-est" inputMode="decimal" value={estimate} onChange={(e) => setEstimate(e.target.value.replace(/[^\d.]/g, ''))} /></div>
-            <div className="space-y-1.5"><Label htmlFor="ef-prom">Prometido para</Label><Input id="ef-prom" type="date" value={promised} onChange={(e) => setPromised(e.target.value)} /></div>
-          </div>
+          {conFicha && (
+            <div className="space-y-1.5">
+              <Label htmlFor="ef-acc">{esReparacion ? 'Dejó con el equipo' : 'Lo que dejó'}</Label>
+              <Input id="ef-acc" value={accessories} onChange={(e) => setAccessories(e.target.value)} />
+            </div>
+          )}
+          {esReparacion && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5"><Label htmlFor="ef-est">Presupuesto aprox. (RD$)</Label><Input id="ef-est" inputMode="decimal" value={estimate} onChange={(e) => setEstimate(e.target.value.replace(/[^\d.]/g, ''))} /></div>
+              <div className="space-y-1.5"><Label htmlFor="ef-prom">Prometido para</Label><Input id="ef-prom" type="date" value={promised} onChange={(e) => setPromised(e.target.value)} /></div>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>Cancelar</Button>

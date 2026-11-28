@@ -44,7 +44,7 @@ export function ProductSearch() {
   // Por defecto activado, para no cambiarle el comportamiento a quien ya usa lector.
   const [scannerMode, setScannerMode] = useState(true);
   const { products: catalogo } = useProducts();
-  // Piezas del taller que no se venden en el mostrador (Configuración del Taller).
+  // Materiales de servicios que no se venden en el mostrador (Configuración de Servicios).
   const ubicacionOculta = usePiezasOcultasEnPos();
   const allProducts = useMemo(
     () => (ubicacionOculta ? catalogo.filter((p) => p.locationId !== ubicacionOculta) : catalogo),

@@ -1051,6 +1051,13 @@ export type ServiceType = {
     equipmentTypeId?: string;
     partCategoryId?: string;
     warrantyDays?: number;
+    durationMin?: number;
+    /** Porcentaje de comisión propio del servicio (pisa el de la persona). */
+    commissionRate?: number;
+    /** Monto fijo de comisión (pisa el porcentaje). */
+    commissionAmount?: number;
+    repeatEveryDays?: number;
+    atCustomerDefault: boolean;
     isActive: boolean;
     position: number;
     /** Precio e ITBIS vigentes, del artículo de servicio. */
@@ -1068,8 +1075,12 @@ export type EquipmentExtraField = { key: string; label: string; type: 'text' | '
 export type EquipmentType = {
     id: string;
     name: string;
-    serialLabel: string;
+    brandLabel: string | null;
+    modelLabel: string | null;
+    serialLabel: string | null;
     asksPassword: boolean;
+    staysInShop: boolean;
+    isRepair: boolean;
     extraFields: EquipmentExtraField[];
     position: number;
     isActive: boolean;
@@ -1101,9 +1112,34 @@ export type TallerSettings = {
     hidePartsInPos: boolean;
     terms?: string;
     defaultWarrantyDays?: number;
+    defaultAtCustomer: boolean;
 };
 
-export type Technician = { id: string; profileId: string; name: string };
+/** Persona que atiende (barbero, técnico, estilista...) de una sucursal. */
+export type Staff = {
+    id: string;
+    branchId: string;
+    name: string;
+    phone?: string;
+    color?: string;
+    commissionRate: number;
+    profileId?: string;
+    isActive: boolean;
+    position: number;
+};
+
+/** Ficha de lo que se atiende de un cliente (equipo, mascota, vehículo...). */
+export type CustomerSubject = {
+    id: string;
+    customerId: string;
+    equipmentTypeId?: string;
+    brand?: string;
+    model?: string;
+    serial?: string;
+    details: Record<string, string>;
+    notes?: string;
+    isActive: boolean;
+};
 
 export type ServiceItemKind = 'labor' | 'part';
 
@@ -1116,6 +1152,8 @@ export type ServiceItem = {
     quantity: number;
     price: number;
     cost: number;
+    /** Personas que hicieron esta línea (service_item_staff). */
+    staffIds: string[];
 };
 
 export type ServiceEventKind = 'created' | 'status' | 'assigned' | 'note' | 'charged' | 'charge_voided';
@@ -1126,6 +1164,8 @@ export type ServiceEvent = {
     toStatus?: ServiceStatus;
     fromUser?: string;
     toUser?: string;
+    fromStaff?: string;
+    toStaff?: string;
     note?: string;
     visibleToCustomer: boolean;
     createdBy?: string;
@@ -1143,8 +1183,8 @@ export type Service = {
     customer?: Customer;
     serviceTypeId?: string;
     serviceType?: ServiceType;
-    assignedTo?: string;
-    assignedUser?: User;
+    /** Solo lo que trae el embed; el registro completo sale de useTallerConfig().staff. */
+    staff?: Pick<Staff, 'id' | 'name' | 'profileId'>;
     /** Falla reportada por el cliente. */
     description: string;
     status: ServiceStatus;
@@ -1172,6 +1212,15 @@ export type Service = {
     estimate?: number;
     promisedAt?: Date;
     isQuick: boolean;
+    /** Se queda en el local (si no, se atiende y se termina). */
+    staysInShop: boolean;
+    /** La ficha es de reparación: habilita diagnóstico, piezas y «no se pudo reparar». */
+    isRepair: boolean;
+    /** Se atiende en casa del cliente. */
+    atCustomer: boolean;
+    serviceAddress?: string;
+    staffId?: string;
+    subjectId?: string;
     statusChangedAt: Date;
     readyAt?: Date;
     deliveredAt?: Date;

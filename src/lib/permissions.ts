@@ -17,8 +17,8 @@ export const PERMISSION_RESOURCES: { key: PermissionResource; label: string; act
   { key: 'pos', label: 'Carrito (POS)' },
   { key: 'sales', label: 'Movimientos (Ventas)' },
   { key: 'quotes', label: 'Cotizaciones' },
-  { key: 'services', label: 'Taller' },
-  { key: 'services-all', label: 'Taller: ver todos los casos (sin esto, solo los suyos y los sin asignar)', actions: ['view'] },
+  { key: 'services', label: 'Servicios' },
+  { key: 'services-all', label: 'Servicios: ver todas las órdenes (sin esto, solo las suyas y las sin asignar)', actions: ['view'] },
   { key: 'credit', label: 'Cuentas por Cobrar' },
   { key: 'financing', label: 'Financiamientos' },
   { key: 'prestamos', label: 'Préstamos' },
@@ -34,7 +34,7 @@ export const PERMISSION_RESOURCES: { key: PermissionResource; label: string; act
   { key: 'branches', label: 'Sucursales' },
   { key: 'roles', label: 'Roles' },
   { key: 'suscripcion', label: 'Mi Suscripción' },
-  { key: 'service-types', label: 'Configuración del Taller' },
+  { key: 'service-types', label: 'Configuración de Servicios' },
   { key: 'quick-sales', label: 'Ventas rápidas (fuera de inventario)', actions: ['create'] },
   { key: 'motos', label: 'Motopréstamos: vehículos' },
   { key: 'motos-config', label: 'Motopréstamos: configuración', actions: ['view', 'edit'] },
@@ -79,13 +79,23 @@ export const RESOURCE_MODULE: Partial<Record<PermissionResource, ModuleKey>> = {
 
 // Los reportes individuales (src/app/(app)/reports/*), controlables por
 // separado dentro de un rol vía permissions.reports_visible.
+/** Reportes cuya ruta ya no coincide con su slug de permiso (el slug se queda
+ *  para no tocar los roles guardados). */
+const REPORT_SLUG_POR_RUTA: Record<string, string> = { servicios: 'taller' };
+
+/** Slug de permiso de un reporte a partir de su ruta (/reports/<ruta>). */
+export function reportSlugForRoute(href: string): string {
+  const ruta = href.split('/').pop() ?? '';
+  return REPORT_SLUG_POR_RUTA[ruta] ?? ruta;
+}
+
 export const REPORT_ITEMS: { slug: string; label: string }[] = [
   { slug: 'sales-summary', label: 'Resumen de Ventas' },
   { slug: 'user-sales', label: 'Ventas por Usuario' },
   { slug: 'top-products', label: 'Productos Estrella (más vendidos)' },
   { slug: 'top-customers', label: 'Clientes Estrella' },
   { slug: 'comisiones', label: 'Comisiones por Vendedor' },
-  { slug: 'taller', label: 'Taller (técnicos, tiempos, piezas)' },
+  { slug: 'taller', label: 'Servicios (personal, tiempos, materiales)' },
   { slug: 'vehiculos', label: 'Vehículos (cartera y ventas)' },
   { slug: 'date-range', label: 'Ingresos por Fechas' },
   { slug: 'receivables', label: 'Cuentas por Cobrar' },

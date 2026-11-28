@@ -700,7 +700,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Sin este caso, aquí abajo se hace fallthrough a `children` y el formulario
   // de login remonta de golpe (con su estado en blanco) justo antes de que la
   // navegación termine — se ve como un parpadeo de vuelta al login.
-  if (session && isPublic && !isResetPassword) return <AppSkeleton message="Entrando..." />;
+  // /seguimiento no rebota (ver el efecto de arriba): quien atiende la orden abre
+  // su enlace con la sesión abierta y tiene que ver la página, no este skeleton.
+  if (session && isPublic && !isResetPassword && pathname !== '/seguimiento') {
+    return <AppSkeleton message="Entrando..." />;
+  }
 
   // Cuenta autenticada pero sin empresa: onboarding obligatorio antes de la app.
   if (session && appUser && needsCompany && !isPublic) {

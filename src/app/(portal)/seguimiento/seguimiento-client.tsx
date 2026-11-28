@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { CheckCircle2, Circle, MessageCircle, Phone, ShieldCheck, Wrench } from 'lucide-react';
+import { CheckCircle2, Circle, ClipboardList, Home, MessageCircle, Phone, ShieldCheck, UserRound, Wrench } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { caseNumber, SERVICE_STATUS, whatsappPhone } from '@/lib/taller';
+import { caseNumber, customerText, SERVICE_STATUS, statusLabel, whatsappPhone, type StatusCtx } from '@/lib/taller';
 import { formatCurrency } from '@/lib/utils';
 import type { ServiceStatus } from '@/lib/types';
 
@@ -14,19 +14,44 @@ type Seguimiento = {
     numero: number; estado: ServiceStatus; equipo?: string | null; tipo_equipo?: string | null; cliente?: string;
     ingreso: string; prometido?: string | null; listo?: string | null; entregado?: string | null;
     total: number; cobrado: boolean; garantia_hasta?: string | null;
+    /** El camino de la orden (antes de Servicios no venían: taller de reparación que se queda). */
+    se_queda?: boolean | null; reparacion?: boolean | null; a_domicilio?: boolean | null;
+    /** Marca y modelo de la ficha, o null si no tiene. */
+    ficha?: string | null;
+    /** Primer nombre de quien atiende. */
+    atiende?: string | null;
   };
   avance: { estado: ServiceStatus; nota?: string | null; fecha: string }[];
   notas: { nota: string; fecha: string }[];
 };
 
-// Los pasos que ve el cliente, en orden. Los estados intermedios (diagnóstico,
-// esperando aprobación o pieza) se muestran como "en el taller".
-const PASOS: { clave: string; texto: string; estados: ServiceStatus[] }[] = [
-  { clave: 'recibido', texto: 'Recibido', estados: ['received'] },
-  { clave: 'taller', texto: 'En el taller', estados: ['diagnosing', 'awaiting_approval', 'awaiting_parts', 'in_repair'] },
-  { clave: 'listo', texto: 'Listo', estados: ['ready', 'not_repaired'] },
-  { clave: 'entregado', texto: 'Entregado', estados: ['delivered'] },
-];
+type Paso = { clave: string; texto: string; estados: ServiceStatus[] };
+
+// Los pasos que ve el cliente, según el camino de la orden. Los estados de
+// reparación (diagnóstico, esperando aprobación o pieza) van dentro de «en proceso».
+//   se queda:    Recibido → En proceso → Listo → Entregado
+//   no se queda: Llegó → En proceso → Terminado
+function pasosDe(ctx: StatusCtx): Paso[] {
+  const enProceso: ServiceStatus[] = ctx.isRepair
+    ? ['diagnosing', 'awaiting_approval', 'awaiting_parts', 'in_repair']
+    : ['in_repair'];
+  const inicio: Paso = { clave: 'inicio', texto: statusLabel('received', ctx), estados: ['received'] };
+  const fin: Paso = { clave: 'fin', texto: statusLabel('delivered', ctx), estados: ['delivered'] };
+  if (ctx.staysInShop) {
+    return [
+      inicio,
+      { clave: 'proceso', texto: statusLabel('in_repair', ctx), estados: enProceso },
+      { clave: 'listo', texto: 'Listo', estados: ['ready', 'not_repaired'] },
+      fin,
+    ];
+  }
+  // Sin «Listo»: lo que no se pudo reparar se termina igual.
+  return [
+    inicio,
+    { clave: 'proceso', texto: statusLabel('in_repair', ctx), estados: [...enProceso, 'not_repaired'] },
+    fin,
+  ];
+}
 
 const fecha = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleString('es-DO', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
@@ -51,10 +76,10 @@ export default function SeguimientoClient() {
 
   if (estado !== 'listo' || !data) {
     const [titulo, detalle] = estado === 'cargando'
-      ? ['Buscando tu equipo…', '']
+      ? ['Buscando tu orden…', '']
       : estado === 'error'
         ? ['No se pudo cargar', 'Vuelve a intentarlo en un momento.']
-        : ['Enlace no encontrado', 'Verifica que copiaste el enlace completo, o pídeselo de nuevo al taller.'];
+        : ['Enlace no encontrado', 'Verifica que copiaste el enlace completo, o pídeselo de nuevo al negocio.'];
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6 text-slate-900">
         <div className="max-w-sm text-center">
@@ -66,9 +91,16 @@ export default function SeguimientoClient() {
   }
 
   const { negocio, caso } = data;
-  const meta = SERVICE_STATUS[caso.estado];
+  const ctx: StatusCtx = { staysInShop: caso.se_queda ?? true, isRepair: caso.reparacion ?? true };
+  const conFicha = !!(caso.ficha || caso.tipo_equipo);
   const cancelado = caso.estado === 'cancelled';
-  const pasoActual = PASOS.findIndex((p) => p.estados.includes(caso.estado));
+  // Sin ficha y cerrada: el cliente ya se fue atendido.
+  const textoEstado = !SERVICE_STATUS[caso.estado]
+    ? caso.estado
+    : !conFicha && caso.estado === 'delivered' ? '¡Gracias por visitarnos!' : customerText(caso.estado, ctx);
+  const pasos = pasosDe(ctx);
+  const pasoActual = pasos.findIndex((p) => p.estados.includes(caso.estado));
+  const titulo = (st: ServiceStatus) => (SERVICE_STATUS[st] ? statusLabel(st, ctx) : st);
   const wa = whatsappPhone(negocio.telefono);
   const porCobrar = !caso.cobrado && caso.total > 0;
 
@@ -85,14 +117,28 @@ export default function SeguimientoClient() {
 
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm text-slate-500">
-            {caso.cliente ? `Hola ${caso.cliente}, este es tu ` : 'Tu '}caso {caseNumber(caso.numero)}
+            {caso.cliente ? `Hola ${caso.cliente}, esta es tu ` : 'Tu '}orden {caseNumber(caso.numero)}
           </p>
-          <p className="mt-1 flex items-center gap-2 font-medium">
-            <Wrench className="h-4 w-4 text-slate-400" aria-hidden />
-            {[caso.tipo_equipo, caso.equipo].filter(Boolean).join(' · ') || 'Tu equipo'}
-          </p>
-          <p className={`mt-4 text-2xl font-bold ${cancelado ? 'text-slate-500' : caso.estado === 'ready' ? 'text-emerald-700' : 'text-slate-900'}`}>
-            {meta?.customerText ?? caso.estado}
+          {conFicha && (
+            <p className="mt-1 flex items-center gap-2 font-medium">
+              {ctx.isRepair
+                ? <Wrench className="h-4 w-4 text-slate-400" aria-hidden />
+                : <ClipboardList className="h-4 w-4 text-slate-400" aria-hidden />}
+              {[caso.tipo_equipo, caso.ficha ?? caso.equipo].filter(Boolean).join(' · ')}
+            </p>
+          )}
+          {(caso.a_domicilio || caso.atiende) && (
+            <div className="mt-1 space-y-0.5 text-sm text-slate-600">
+              {caso.a_domicilio && (
+                <p className="flex items-center gap-2"><Home className="h-4 w-4 text-slate-400" aria-hidden />Servicio a domicilio</p>
+              )}
+              {caso.atiende && (
+                <p className="flex items-center gap-2"><UserRound className="h-4 w-4 text-slate-400" aria-hidden />{caso.estado === 'delivered' ? 'Te atendió' : 'Te atiende'} {caso.atiende}</p>
+              )}
+            </div>
+          )}
+          <p className={`mt-4 text-2xl font-bold ${cancelado ? 'text-slate-500' : caso.estado === 'ready' || caso.estado === 'delivered' ? 'text-emerald-700' : 'text-slate-900'}`}>
+            {textoEstado}
           </p>
           {caso.prometido && !caso.listo && !cancelado && (
             <p className="mt-1 text-sm text-slate-600">Fecha estimada: {dia(caso.prometido)}</p>
@@ -100,15 +146,16 @@ export default function SeguimientoClient() {
           {porCobrar && (caso.estado === 'ready' || caso.estado === 'not_repaired') && (
             <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">Total a pagar al retirar: {formatCurrency(caso.total)}</p>
           )}
-          {caso.garantia_hasta && (
+          {/* La garantía es de las reparaciones. */}
+          {ctx.isRepair && caso.garantia_hasta && (
             <p className="mt-2 flex items-center gap-1.5 text-sm text-emerald-800">
               <ShieldCheck className="h-4 w-4" aria-hidden />Garantía hasta el {dia(caso.garantia_hasta)}
             </p>
           )}
 
           {!cancelado && (
-            <ol className="mt-5 grid grid-cols-4 gap-1 text-center text-xs">
-              {PASOS.map((p, i) => {
+            <ol className={`mt-5 grid ${pasos.length === 4 ? 'grid-cols-4' : 'grid-cols-3'} gap-1 text-center text-xs`}>
+              {pasos.map((p, i) => {
                 const hecho = i <= pasoActual;
                 return (
                   <li key={p.clave} className="flex flex-col items-center gap-1">
@@ -127,8 +174,8 @@ export default function SeguimientoClient() {
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Avance</h2>
           <ol className="space-y-3">
             {[
-              ...data.avance.map((a) => ({ fecha: a.fecha, titulo: SERVICE_STATUS[a.estado]?.label ?? a.estado, nota: a.nota })),
-              ...data.notas.map((n) => ({ fecha: n.fecha, titulo: 'Nota del taller', nota: n.nota })),
+              ...data.avance.map((a) => ({ fecha: a.fecha, titulo: titulo(a.estado), nota: a.nota })),
+              ...data.notas.map((n) => ({ fecha: n.fecha, titulo: `Nota de ${negocio.nombre}`, nota: n.nota })),
             ]
               .sort((a, b) => b.fecha.localeCompare(a.fecha))
               .map((e, i) => (
@@ -150,7 +197,7 @@ export default function SeguimientoClient() {
             )}
             {wa && (
               <a
-                href={`https://api.whatsapp.com/send?phone=${wa}&text=${encodeURIComponent(`Hola, pregunto por mi caso ${caseNumber(caso.numero)}.`)}`}
+                href={`https://api.whatsapp.com/send?phone=${wa}&text=${encodeURIComponent(`Hola, pregunto por mi orden ${caseNumber(caso.numero)}.`)}`}
                 target="_blank" rel="noopener noreferrer"
                 className="flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white"
               >
@@ -159,7 +206,7 @@ export default function SeguimientoClient() {
             )}
           </div>
         )}
-        <p className="text-center text-xs text-slate-400">Ingresó el {dia(caso.ingreso)} · SellAlleS</p>
+        <p className="text-center text-xs text-slate-400">Orden del {dia(caso.ingreso)} · SellAlleS</p>
       </div>
     </main>
   );

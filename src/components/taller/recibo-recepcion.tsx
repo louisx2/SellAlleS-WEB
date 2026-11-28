@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { Printer } from 'lucide-react';
 import { useTicketProfile } from '@/hooks/use-ticket-profile';
 import { formatCurrency } from '@/lib/utils';
-import { ANSWER_LABEL, caseNumber, equipmentLabel } from '@/lib/taller';
+import { ANSWER_LABEL, camposDeFicha, caseNumber, valorDeFicha } from '@/lib/taller';
 import { useEnlaceSeguimiento } from './use-enlace-seguimiento';
 import type { EquipmentType, Service, TallerSettings } from '@/lib/types';
 
@@ -28,7 +28,8 @@ function Cuerpo({ service, equipmentType, settings }: {
 }) {
   const profile = useTicketProfile(service.branchName);
   const extra = equipmentType?.extraFields ?? [];
-  // QR con el enlace de seguimiento: el cliente lo escanea y ve cómo va su equipo.
+  const esReparacion = service.isRepair;
+  // QR con el enlace de seguimiento: el cliente lo escanea y ve cómo va su orden.
   const [qr, setQr] = useState<string | null>(null);
   const enlace = useEnlaceSeguimiento()(service.trackingCode);
   useEffect(() => {
@@ -75,17 +76,20 @@ function Cuerpo({ service, equipmentType, settings }: {
       </div>
       <Separator className="my-2" />
       <div className="text-xs space-y-0.5">
-        <Linea k="Equipo" v={[equipmentType?.name, equipmentLabel(service)].filter(Boolean).join(' · ')} />
-        <Linea k={equipmentType?.serialLabel ?? 'Serie'} v={service.equipmentSerial} />
-        {/* La clave nunca se imprime: solo se dice que se anotó. */}
-        {service.equipmentPassword && <Linea k="Clave/patrón" v="anotada" />}
+        {/* Los campos con los nombres de su tipo de ficha («Nombre», «Raza», «Placa»…). */}
+        <Linea k={esReparacion ? 'Equipo' : 'Qué se atiende'} v={equipmentType?.name} />
+        {camposDeFicha(equipmentType).map((f) => <Linea key={f.key} k={f.label} v={valorDeFicha(service, f.key)} />)}
+        {/* La clave nunca se imprime: solo se dice que se anotó, y solo si el tipo la pide. */}
+        {equipmentType?.asksPassword && service.equipmentPassword && <Linea k="Clave/patrón" v="anotada" />}
         {extra.map((f) => <Linea key={f.key} k={f.label} v={service.equipmentDetails[f.key]} />)}
-        <Linea k="Deja" v={service.accessories} />
+        <Linea k={esReparacion ? 'Deja' : 'Lo que deja'} v={service.accessories} />
       </div>
-      <div className="text-xs pt-1">
-        <p className="font-semibold uppercase">Falla reportada</p>
-        <p>{service.description}</p>
-      </div>
+      {service.description.trim() && (
+        <div className="text-xs pt-1">
+          <p className="font-semibold uppercase">{esReparacion ? 'Falla reportada' : 'Detalle'}</p>
+          <p>{service.description}</p>
+        </div>
+      )}
       {service.intakeChecklist.length > 0 && (
         <>
           <Separator className="my-2" />
@@ -104,7 +108,7 @@ function Cuerpo({ service, equipmentType, settings }: {
           <Separator className="my-2" />
           <div className="text-xs space-y-0.5">
             {service.estimate != null && <Linea k="Presupuesto aprox." v={formatCurrency(service.estimate)} />}
-            {service.total > 0 && <Linea k="Total del caso" v={formatCurrency(service.total)} />}
+            {service.total > 0 && <Linea k="Total de la orden" v={formatCurrency(service.total)} />}
           </div>
         </>
       )}
@@ -120,14 +124,18 @@ function Cuerpo({ service, equipmentType, settings }: {
       {qr && (
         <div className="flex flex-col items-center pt-3">
           <img src={qr} alt="" style={{ width: 110, height: 110 }} />
-          <p className="text-[10px] text-center">Escanea para ver cómo va tu equipo</p>
+          <p className="text-[10px] text-center">Escanea para ver cómo va {esReparacion ? 'tu equipo' : 'tu orden'}</p>
         </div>
       )}
-      <p className="pt-2 text-center text-[10px]">Presente este recibo para retirar su equipo.</p>
+      <p className="pt-2 text-center text-[10px]">
+        {esReparacion ? 'Presente este recibo para retirar su equipo.' : 'Presente este recibo al retirar.'}
+      </p>
     </div>
   );
 }
 
+/** Recibo de recepción: solo para órdenes que se quedan en el negocio (quien lo
+ *  abre lo decide con `service.staysInShop`). */
 export function ReciboRecepcionDialog({ open, onOpenChange, service, equipmentType, settings }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;

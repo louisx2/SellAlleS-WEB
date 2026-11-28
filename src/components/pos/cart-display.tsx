@@ -221,9 +221,9 @@ export function CartDisplay() {
                         </div>
                         {cart.serviceId && (
                           <p className="mt-2 rounded-md bg-primary/10 px-2 py-1 text-xs">
-                            Cobrando el caso{' '}
-                            <span className="font-semibold">#{String(cart.serviceNumber ?? '').padStart(4, '0')}</span>{' '}
-                            del taller. Puedes sumar otros artículos.
+                            Cobrando la orden{' '}
+                            <span className="font-semibold">#{String(cart.serviceNumber ?? '').padStart(4, '0')}</span>.
+                            Puedes sumar otros artículos.
                           </p>
                         )}
                         {cart.selectedCustomer?.id !== '0' && cart.selectedCustomer?.creditBalance > 0 && (
@@ -299,7 +299,7 @@ export function CartDisplay() {
                                         {item.presentation && ` · ${presentationLabel(item.presentation, getUnit(item.product.unit).short)}`}
                                       </p>
                                       {item.isQuick && <Badge variant="secondary">Rápida</Badge>}
-                                      {item.serviceItemId && <Badge variant="secondary">Taller</Badge>}
+                                      {item.serviceItemId && <Badge variant="secondary">{cart.serviceNumber ? `Orden #${String(cart.serviceNumber).padStart(4, '0')}` : 'Orden'}</Badge>}
                                       {item.vehicleId && <Badge variant="secondary">Vehículo</Badge>}
                                     </div>
                                     {item.product.isVehicle && !item.vehicleId && (

@@ -739,6 +739,11 @@ export const rowToServiceType = (r: any): import('@/lib/types').ServiceType => (
   equipmentTypeId: r.equipment_type_id ?? undefined,
   partCategoryId: r.part_category_id ?? undefined,
   warrantyDays: r.warranty_days ?? undefined,
+  durationMin: r.duration_min ?? undefined,
+  commissionRate: r.commission_rate != null ? Number(r.commission_rate) : undefined,
+  commissionAmount: r.commission_amount != null ? Number(r.commission_amount) : undefined,
+  repeatEveryDays: r.repeat_every_days ?? undefined,
+  atCustomerDefault: !!r.at_customer_default,
   isActive: r.is_active ?? true,
   position: Number(r.position ?? 0),
   price: Number(r.products?.price ?? r.base_price ?? 0),
@@ -748,8 +753,12 @@ export const rowToServiceType = (r: any): import('@/lib/types').ServiceType => (
 export const rowToEquipmentType = (r: any): import('@/lib/types').EquipmentType => ({
   id: r.id,
   name: r.name,
-  serialLabel: r.serial_label ?? 'Serie',
+  brandLabel: r.brand_label !== undefined ? r.brand_label : 'Marca',
+  modelLabel: r.model_label !== undefined ? r.model_label : 'Modelo',
+  serialLabel: r.serial_label !== undefined ? r.serial_label : 'Serie',
   asksPassword: !!r.asks_password,
+  staysInShop: r.stays_in_shop ?? true,
+  isRepair: r.is_repair ?? true,
   extraFields: Array.isArray(r.extra_fields) ? r.extra_fields : [],
   position: Number(r.position ?? 0),
   isActive: r.is_active ?? true,
@@ -771,6 +780,31 @@ export const rowToTallerSettings = (r: any): import('@/lib/types').TallerSetting
   hidePartsInPos: !!r.hide_parts_in_pos,
   terms: r.terms ?? undefined,
   defaultWarrantyDays: r.default_warranty_days ?? undefined,
+  defaultAtCustomer: !!r.default_at_customer,
+});
+
+export const rowToStaff = (r: any): import('@/lib/types').Staff => ({
+  id: r.id,
+  branchId: r.branch_id,
+  name: r.name,
+  phone: r.phone ?? undefined,
+  color: r.color ?? undefined,
+  commissionRate: Number(r.commission_rate ?? 0),
+  profileId: r.profile_id ?? undefined,
+  isActive: r.is_active ?? true,
+  position: Number(r.position ?? 0),
+});
+
+export const rowToCustomerSubject = (r: any): import('@/lib/types').CustomerSubject => ({
+  id: r.id,
+  customerId: r.customer_id,
+  equipmentTypeId: r.equipment_type_id ?? undefined,
+  brand: r.brand ?? undefined,
+  model: r.model ?? undefined,
+  serial: r.serial ?? undefined,
+  details: r.details && typeof r.details === 'object' ? r.details : {},
+  notes: r.notes ?? undefined,
+  isActive: r.is_active ?? true,
 });
 
 export const rowToServiceItem = (r: any): import('@/lib/types').ServiceItem => ({
@@ -782,6 +816,7 @@ export const rowToServiceItem = (r: any): import('@/lib/types').ServiceItem => (
   quantity: Number(r.quantity),
   price: Number(r.price),
   cost: Number(r.cost ?? 0),
+  staffIds: Array.isArray(r.service_item_staff) ? r.service_item_staff.map((x: any) => x.staff_id) : [],
 });
 
 export const rowToServiceEvent = (r: any): import('@/lib/types').ServiceEvent => ({
@@ -791,6 +826,8 @@ export const rowToServiceEvent = (r: any): import('@/lib/types').ServiceEvent =>
   toStatus: r.to_status ?? undefined,
   fromUser: r.from_user ?? undefined,
   toUser: r.to_user ?? undefined,
+  fromStaff: r.from_staff ?? undefined,
+  toStaff: r.to_staff ?? undefined,
   note: r.note ?? undefined,
   visibleToCustomer: !!r.visible_to_customer,
   createdBy: r.created_by ?? undefined,
@@ -798,11 +835,11 @@ export const rowToServiceEvent = (r: any): import('@/lib/types').ServiceEvent =>
   createdAt: new Date(r.created_at),
 });
 
-/** Columnas para leer un caso con su cliente, técnico y sucursal. `profiles`
- *  va por la FK de `assigned_to`: services tiene tres FK a profiles. */
+/** Columnas para leer un caso con su cliente, persona y sucursal. `service_staff`
+ *  va por su FK: se nombra siempre para que no sea ambiguo. */
 export const SERVICE_SELECT =
   '*, customers(id,name,phone,email,rnc,ncf_type,discount_percentage,credit_balance,loyalty_purchase_count), ' +
-  'profiles!services_assigned_to_fkey(id,name,email,role), branches(name)';
+  'service_staff!services_staff_id_fkey(id,name,profile_id), branches(name)';
 
 export const rowToService = (r: any): import('@/lib/types').Service => ({
   id: r.id,
@@ -813,13 +850,10 @@ export const rowToService = (r: any): import('@/lib/types').Service => ({
   customer: r.customers ? rowToCustomer(r.customers) : undefined,
   serviceTypeId: r.service_type_id ?? undefined,
   serviceType: r.service_types ? rowToServiceType(r.service_types) : undefined,
-  assignedTo: r.assigned_to ?? undefined,
-  assignedUser: r.profiles ? {
-    id: r.profiles.id,
-    name: r.profiles.name,
-    email: r.profiles.email,
-    role: r.profiles.role,
-    branch: ''
+  staff: r.service_staff ? {
+    id: r.service_staff.id,
+    name: r.service_staff.name,
+    profileId: r.service_staff.profile_id ?? undefined,
   } : undefined,
   description: r.description ?? '',
   status: r.status,
@@ -849,6 +883,12 @@ export const rowToService = (r: any): import('@/lib/types').Service => ({
   estimate: r.estimate != null ? Number(r.estimate) : undefined,
   promisedAt: r.promised_at ? new Date(r.promised_at) : undefined,
   isQuick: !!r.is_quick,
+  staysInShop: r.stays_in_shop ?? true,
+  isRepair: r.is_repair ?? true,
+  atCustomer: r.at_customer ?? false,
+  serviceAddress: r.service_address ?? undefined,
+  staffId: r.staff_id ?? undefined,
+  subjectId: r.subject_id ?? undefined,
   statusChangedAt: new Date(r.status_changed_at ?? r.created_at),
   readyAt: r.ready_at ? new Date(r.ready_at) : undefined,
   deliveredAt: r.delivered_at ? new Date(r.delivered_at) : undefined,

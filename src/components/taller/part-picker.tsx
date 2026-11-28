@@ -13,10 +13,11 @@ import type { Product } from '@/lib/types';
 
 const MAX_RESULTADOS = 40;
 
-/** Buscador de piezas del taller: artículos de la sucursal (de la ubicación de
- *  repuestos si está configurada), sin los artículos de servicio. */
+/** Buscador de piezas o materiales: artículos de la sucursal (de la ubicación de
+ *  repuestos si está configurada), sin los artículos de servicio. «Pieza» y
+ *  «taller» solo en órdenes de reparación; en las demás se dice «material». */
 export function PartPicker({
-  branchId, locationId, suggestedCategoryId, onPick, autoFocus,
+  branchId, locationId, suggestedCategoryId, onPick, autoFocus, material = false,
 }: {
   branchId?: string;
   locationId?: string;
@@ -24,6 +25,8 @@ export function PartPicker({
   suggestedCategoryId?: string;
   onPick: (product: Product) => void;
   autoFocus?: boolean;
+  /** La orden no es de reparación: habla de materiales. */
+  material?: boolean;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState('');
@@ -78,17 +81,21 @@ export function PartPicker({
             if (e.key === 'Enter' && results[0]) { e.preventDefault(); pick(results[0]); }
             if (e.key === 'Escape') setOpen(false);
           }}
-          placeholder={locationId ? 'Buscar pieza del taller (nombre o código)' : 'Buscar pieza (nombre o código)'}
+          placeholder={material
+            ? 'Buscar material (nombre o código)'
+            : locationId ? 'Buscar pieza del taller (nombre o código)' : 'Buscar pieza (nombre o código)'}
           className="pl-8"
-          aria-label="Buscar pieza"
+          aria-label={material ? 'Buscar material' : 'Buscar pieza'}
         />
         {open && (
           <div className="absolute z-50 mt-1 max-h-72 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
             {results.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">
                 {products.length === 0
-                  ? (locationId ? 'No hay piezas en la ubicación del taller.' : 'No hay artículos en esta sucursal.')
-                  : 'Ninguna pieza coincide.'}
+                  ? (locationId
+                    ? (material ? 'No hay artículos en la ubicación de repuestos.' : 'No hay piezas en la ubicación del taller.')
+                    : 'No hay artículos en esta sucursal.')
+                  : material ? 'Ningún artículo coincide.' : 'Ninguna pieza coincide.'}
               </p>
             ) : results.map((p) => {
               const agotado = p.tracksStock && p.stock <= 0;

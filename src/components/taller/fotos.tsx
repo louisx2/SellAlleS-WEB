@@ -59,7 +59,7 @@ export function FotosDelCaso({ serviceId, companyId, canEdit }: { serviceId: str
   const subir = async (files: FileList | null) => {
     if (!files?.length || !companyId) return;
     const lista = Array.from(files).slice(0, Math.max(0, MAX_FOTOS - fotos.length));
-    if (lista.length === 0) { toast({ title: `Máximo ${MAX_FOTOS} fotos por caso`, variant: 'destructive' }); return; }
+    if (lista.length === 0) { toast({ title: `Máximo ${MAX_FOTOS} fotos por orden`, variant: 'destructive' }); return; }
     setSubiendo(true);
     for (const f of lista) {
       try { await subirFotoDelCaso(companyId, serviceId, f); }
@@ -80,14 +80,14 @@ export function FotosDelCaso({ serviceId, companyId, canEdit }: { serviceId: str
 
   return (
     <div className="space-y-3">
-      {fotos.length === 0 && <p className="text-sm text-muted-foreground">Sin fotos. Sirven para dejar constancia de cómo llegó el equipo.</p>}
+      {fotos.length === 0 && <p className="text-sm text-muted-foreground">Sin fotos. Sirven para dejar constancia de cómo llegó.</p>}
       {fotos.length > 0 && (
         <div className="grid grid-cols-3 gap-2">
           {fotos.map((f) => (
             <div key={f.id} className="group relative aspect-square overflow-hidden rounded-md border bg-muted">
               {f.url && (
                 <button type="button" className="h-full w-full" onClick={() => setGrande(f.url!)} aria-label="Ver foto">
-                  <img src={f.url} alt="Foto del equipo" className="h-full w-full object-cover" />
+                  <img src={f.url} alt="Foto de la orden" className="h-full w-full object-cover" />
                 </button>
               )}
               {canEdit && (
@@ -128,7 +128,7 @@ export function FotosDelCaso({ serviceId, companyId, canEdit }: { serviceId: str
           onClick={() => setGrande(null)}
           aria-label="Cerrar foto"
         >
-          <img src={grande} alt="Foto del equipo" className="max-h-full max-w-full object-contain" />
+          <img src={grande} alt="Foto de la orden" className="max-h-full max-w-full object-contain" />
         </button>
       )}
     </div>

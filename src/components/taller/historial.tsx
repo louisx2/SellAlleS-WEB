@@ -5,34 +5,44 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Eye } from 'lucide-react';
-import { SERVICE_STATUS } from '@/lib/taller';
-import type { ServiceEvent } from '@/lib/types';
+import { SERVICE_STATUS, statusLabel, type StatusCtx } from '@/lib/taller';
+import type { ServiceEvent, ServiceStatus } from '@/lib/types';
 
 const cuando = (d: Date) => d.toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' });
 
-function texto(e: ServiceEvent, nombre: (id?: string) => string): string {
+function texto(e: ServiceEvent, ctx: StatusCtx, nombre: (id?: string) => string, persona: (id?: string) => string): string {
+  const estado = (st?: ServiceStatus) => (st ? (SERVICE_STATUS[st] ? statusLabel(st, ctx) : st) : '?');
   switch (e.kind) {
     case 'created':
-      return `Ingresó el caso${e.toStatus ? ` (${SERVICE_STATUS[e.toStatus]?.label ?? e.toStatus})` : ''}${e.toUser ? `, asignado a ${nombre(e.toUser)}` : ''}`;
+      return `Creó la orden${e.toStatus ? ` (${estado(e.toStatus)})` : ''}${e.toStaff ? `, la atiende ${persona(e.toStaff)}` : e.toUser ? `, la atiende ${nombre(e.toUser)}` : ''}`;
     case 'status':
-      return `Cambió a «${e.toStatus ? SERVICE_STATUS[e.toStatus]?.label ?? e.toStatus : '?'}»`;
+      return `Cambió a «${estado(e.toStatus)}»`;
     case 'assigned':
-      if (!e.toUser) return `Quitó la asignación${e.fromUser ? ` a ${nombre(e.fromUser)}` : ''}`;
-      if (!e.fromUser) return `Asignó el caso a ${nombre(e.toUser)}`;
-      return `Pasó el caso de ${nombre(e.fromUser)} a ${nombre(e.toUser)}`;
+      if (e.fromStaff || e.toStaff) {
+        if (!e.toStaff) return `Dejó la orden sin asignar (la atendía ${persona(e.fromStaff)})`;
+        if (!e.fromStaff) return `Asignó la orden a ${persona(e.toStaff)}`;
+        return `Pasó de ${persona(e.fromStaff)} a ${persona(e.toStaff)}`;
+      }
+      if (!e.toUser) return `Dejó la orden sin asignar${e.fromUser ? ` (la atendía ${nombre(e.fromUser)})` : ''}`;
+      if (!e.fromUser) return `Asignó la orden a ${nombre(e.toUser)}`;
+      return `Pasó de ${nombre(e.fromUser)} a ${nombre(e.toUser)}`;
     case 'charged':
       return 'Cobrado en el POS';
     case 'charge_voided':
-      return 'Se anuló la venta del cobro: el caso vuelve a quedar por cobrar';
+      return 'Se anuló la venta del cobro: la orden vuelve a quedar por cobrar';
     case 'note':
     default:
       return 'Nota';
   }
 }
 
-export function Historial({ events, names, canNote, onNote }: {
+export function Historial({ events, ctx, names, staffNames = {}, canNote, onNote }: {
   events: ServiceEvent[];
+  /** Camino de la orden: decide cómo se llaman los estados. */
+  ctx: StatusCtx;
   names: Record<string, string>;
+  /** Nombres de las personas (service_staff), también las inactivas. */
+  staffNames?: Record<string, string>;
   canNote: boolean;
   onNote: (note: string, visible: boolean) => Promise<boolean>;
 }) {
@@ -40,6 +50,7 @@ export function Historial({ events, names, canNote, onNote }: {
   const [visible, setVisible] = useState(false);
   const [saving, setSaving] = useState(false);
   const nombre = (id?: string) => (id ? names[id] ?? 'otro usuario' : 'nadie');
+  const persona = (id?: string) => (id ? staffNames[id] ?? 'otra persona' : 'nadie');
 
   const submit = async () => {
     if (!note.trim()) return;
@@ -74,7 +85,7 @@ export function Historial({ events, names, canNote, onNote }: {
           <li key={e.id} className="relative">
             <span className="absolute -left-[1.6rem] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
             <p className="text-sm">
-              <span className="font-medium">{e.kind === 'note' ? e.note : texto(e, nombre)}</span>
+              <span className="font-medium">{e.kind === 'note' ? e.note : texto(e, ctx, nombre, persona)}</span>
             </p>
             {e.kind !== 'note' && e.note && <p className="text-sm text-muted-foreground">«{e.note}»</p>}
             <p className="text-xs text-muted-foreground">

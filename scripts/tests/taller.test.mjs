@@ -6,12 +6,17 @@ import assert from 'node:assert/strict';
 
 import {
   caseNumber, checklistFor, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
-  mensajeDeEstado, missingRequired, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS,
+  mensajeDeEstado, missingRequired, statusLabel, customerText, manualStatuses, canClose, closeLabel,
+  fichaFields, camposDeFicha, valorDeFicha, defaultStaysInShop, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS, tiposQueFaltan,
+  ordenNueva, filasDeAjustes,
 } from '../../src/lib/taller.ts';
 import {
   duracion, fechaDeCobro, porTecnico, resumen, tiempoPorEstado, topEquipos, topLineas,
 } from '../../src/lib/taller-reportes.ts';
 import { baseQtyInCart } from '../../src/lib/presentations.ts';
+import { moduleForRoute, resolveEnabledModules } from '../../src/lib/modules.ts';
+import { BUSINESS_TYPE_PRESETS } from '../../src/lib/business-types.ts';
+import { reportSlugForRoute, REPORT_ITEMS } from '../../src/lib/permissions.ts';
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -71,9 +76,9 @@ test('teléfono para WhatsApp: los 10 dígitos de RD llevan el 1', () => {
 test('enlace de seguimiento y mensaje al cliente', () => {
   assert.equal(trackingUrl('Ab3xYz7kQp', 'delmastechnology'), 'https://sellalles.com/delmastechnology/c/Ab3xYz7kQp');
   assert.equal(trackingUrl('Ab3xYz7kQp', ''), 'https://sellalles.com/taller/c/Ab3xYz7kQp');
-  const s = { number: 42, status: 'ready', equipmentBrand: 'Samsung', equipmentModel: 'A15', total: 1500, paymentStatus: 'pending' };
+  const s = { number: 42, status: 'ready', equipmentBrand: 'Samsung', equipmentModel: 'A15', total: 1500, paymentStatus: 'pending', staysInShop: true, isRepair: true };
   const m = mensajeDeEstado(s, 'Pedro Pérez', 'DelmasTechnology', 'https://x/seguimiento?c=1');
-  assert.match(m, /^Hola Pedro, te escribimos de DelmasTechnology sobre Samsung A15 \(caso #0042\): ¡Ya está listo!/);
+  assert.match(m, /^Hola Pedro, te escribimos de DelmasTechnology sobre Samsung A15 \((orden #0042)\): ¡Ya está listo!/);
   assert.match(m, /El total es RD\$1,500\.00\./);
   assert.match(m, /https:\/\/x\/seguimiento\?c=1$/);
   const pagado = mensajeDeEstado({ ...s, paymentStatus: 'paid' }, undefined, 'X');
@@ -104,6 +109,132 @@ test('plantillas por rubro: nombres únicos y chequeos', () => {
       assert.equal(new Set(keys).size, keys.length, `${e.name}: campos repetidos`);
     }
   }
+  const por = Object.fromEntries(RUBROS.map((r) => [r.key, r]));
+  for (const k of ['mascotas', 'lubricentro', 'salon', 'limpieza']) assert.ok(por[k], k);
+  assert.equal(por.salon.equipos.length, 0);
+  assert.equal(por.limpieza.equipos.length, 0);
+  assert.equal(por.limpieza.aDomicilio, true);
+  for (const e of por.mascotas.equipos) {
+    assert.equal(e.serialLabel, null);
+    assert.equal(e.isRepair, false);
+  }
+  for (const e of por.lubricentro.equipos) {
+    assert.equal(e.isRepair, false);
+    assert.equal(e.staysInShop, true);
+  }
+  for (const e of por.celulares.equipos) assert.deepEqual([e.isRepair, e.staysInShop, e.brandLabel, e.modelLabel], [true, true, 'Marca', 'Modelo']);
+});
+
+const SI = { staysInShop: true, isRepair: false };
+const NO = { staysInShop: false, isRepair: false };
+
+test('estados según el camino', () => {
+  assert.equal(statusLabel('received', NO), 'Llegó');
+  assert.equal(statusLabel('delivered', NO), 'Terminado');
+  assert.equal(statusLabel('in_repair', { staysInShop: true, isRepair: true }), 'En reparación');
+  assert.equal(statusLabel('in_repair', NO), 'En proceso');
+  assert.equal(customerText('received', NO), 'Ya te anotamos');
+  assert.equal(customerText('delivered', NO), '¡Gracias por visitarnos!');
+});
+
+test('estados que se ofrecen a mano', () => {
+  assert.deepEqual(manualStatuses(NO), ['received', 'in_repair']);
+  assert.deepEqual(manualStatuses(SI), ['received', 'in_repair', 'ready']);
+  const full = ['received', 'diagnosing', 'awaiting_approval', 'awaiting_parts', 'in_repair', 'ready', 'not_repaired'];
+  assert.deepEqual(manualStatuses({ staysInShop: true, isRepair: true }), full);
+  assert.deepEqual(manualStatuses({ staysInShop: false, isRepair: true }), full.filter((x) => x !== 'ready'));
+});
+
+test('cerrar la orden', () => {
+  assert.equal(canClose('ready', SI), true);
+  assert.equal(canClose('in_repair', SI), false);
+  assert.equal(canClose('received', NO), true);
+  assert.equal(canClose('in_repair', NO), true);
+  for (const c of [SI, NO]) {
+    assert.equal(canClose('delivered', c), false);
+    assert.equal(canClose('cancelled', c), false);
+  }
+  assert.equal(closeLabel(SI), 'Entregar');
+  assert.equal(closeLabel(NO), 'Terminar');
+});
+
+test('sin reparación no salen palabras de taller', () => {
+  for (const x of [true, false]) {
+    const ctx = { staysInShop: x, isRepair: false };
+    for (const st of [...manualStatuses(ctx), 'delivered', 'cancelled']) {
+      assert.doesNotMatch(statusLabel(st, ctx), /repar|equipo|técnic|taller/i, `${st} label`);
+      assert.doesNotMatch(customerText(st, ctx), /repar|equipo|técnic|taller/i, `${st} texto`);
+    }
+  }
+});
+
+test('campos de la ficha', () => {
+  assert.deepEqual(fichaFields({ brandLabel: 'Nombre', modelLabel: 'Raza', serialLabel: null }),
+    [{ key: 'brand', label: 'Nombre' }, { key: 'model', label: 'Raza' }]);
+  assert.equal(defaultStaysInShop({ staysInShop: true }, true), false);
+  assert.equal(defaultStaysInShop({ staysInShop: true }, false), true);
+  assert.equal(defaultStaysInShop(undefined, false), false);
+  // En la orden: los del tipo, o los tres de siempre si el tipo ya no está.
+  assert.deepEqual(camposDeFicha({ brandLabel: 'Nombre', modelLabel: null, serialLabel: 'Placa' }).map((c) => c.label), ['Nombre', 'Placa']);
+  assert.deepEqual(camposDeFicha(undefined).map((c) => c.key), ['brand', 'model', 'serial']);
+  const orden = { equipmentBrand: 'Max', equipmentModel: 'Poodle', equipmentSerial: undefined };
+  assert.equal(valorDeFicha(orden, 'brand'), 'Max');
+  assert.equal(valorDeFicha(orden, 'model'), 'Poodle');
+  assert.equal(valorDeFicha(orden, 'serial'), undefined);
+});
+
+test('mensaje sin ficha', () => {
+  const m = mensajeDeEstado({ number: 142, status: 'delivered', total: 0, paymentStatus: 'paid', ...NO }, 'Ana Gómez', 'Salón X');
+  assert.match(m, /sobre tu orden #0142/);
+  assert.match(m, /¡Gracias por visitarnos!/);
+});
+
+test('mensaje a domicilio con la dirección', () => {
+  const s = { number: 7, status: 'received', total: 0, paymentStatus: 'pending', ...NO, atCustomer: true, serviceAddress: '  Calle 5 #12, Naco ' };
+  const m = mensajeDeEstado(s, 'Ana', 'Limpia RD', 'https://x/c/1');
+  assert.match(m, /: Ya te anotamos\. Dirección del servicio: Calle 5 #12, Naco\.\n\n/);
+  assert.doesNotMatch(mensajeDeEstado({ ...s, atCustomer: false }, 'Ana', 'Limpia RD'), /Dirección/);
+  assert.doesNotMatch(mensajeDeEstado({ ...s, serviceAddress: ' ' }, 'Ana', 'Limpia RD'), /Dirección/);
+});
+
+test('orden nueva', () => {
+  const base = { ahora: false, clienteEspera: false, atCustomer: false, lineas: [] };
+
+  // Sin ficha, «Atender ahora»: entra en proceso, no se queda y no es reparación.
+  const sinFicha = ordenNueva({ ...base, ahora: true, lineas: [{ staffIds: ['p1', 'p2'] }] });
+  assert.equal(sinFicha.status, 'in_repair');
+  assert.equal(sinFicha.stays_in_shop, false);
+  assert.equal(sinFicha.is_repair, false);
+  assert.equal(sinFicha.at_customer, false);
+  assert.equal(sinFicha.staff_id, 'p1');
+  assert.equal(sinFicha.service_address, null);
+
+  // «Lo atiende» gana sobre la primera persona de la primera línea.
+  assert.equal(ordenNueva({ ...base, lineas: [{ staffIds: ['p1'] }], responsable: 'p9' }).staff_id, 'p9');
+
+  // Tipo que se queda y de reparación, sin «ahora».
+  const rep = { staysInShop: true, isRepair: true };
+  const recibido = ordenNueva({ ...base, tipo: rep });
+  assert.equal(recibido.status, 'received');
+  assert.equal(recibido.stays_in_shop, true);
+  assert.equal(recibido.is_repair, true);
+  assert.equal(ordenNueva({ ...base, tipo: rep, clienteEspera: true }).stays_in_shop, false, 'el cliente espera');
+  assert.equal(ordenNueva({ ...base, tipo: { staysInShop: false, isRepair: false } }).stays_in_shop, false);
+
+  // A domicilio: nunca se queda; la dirección por defecto es la de cobro, después la del cliente.
+  const cliente = { address: 'Calle 1', collectionAddress: 'Calle 2' };
+  const domicilio = ordenNueva({ ...base, tipo: { staysInShop: true, isRepair: false }, atCustomer: true, cliente });
+  assert.equal(domicilio.at_customer, true);
+  assert.equal(domicilio.stays_in_shop, false);
+  assert.equal(domicilio.service_address, 'Calle 2');
+  assert.equal(ordenNueva({ ...base, atCustomer: true, cliente, direccion: ' Calle 3 ' }).service_address, 'Calle 3');
+  assert.equal(ordenNueva({ ...base, atCustomer: true, cliente: { address: 'Calle 1' }, direccion: '  ' }).service_address, 'Calle 1');
+  assert.equal(ordenNueva({ ...base, atCustomer: true }).service_address, null, 'sin cliente ni dirección');
+  assert.equal(ordenNueva({ ...base, cliente, direccion: 'Calle 3' }).service_address, null, 'solo a domicilio lleva dirección');
+
+  // Sin personas: sin responsable.
+  assert.equal(ordenNueva({ ...base, lineas: [{ staffIds: [] }] }).staff_id, null);
+  assert.equal(ordenNueva(base).staff_id, null);
 });
 
 test('POS: las piezas de un caso no cuentan contra el stock', () => {
@@ -180,4 +311,59 @@ test('duración legible', () => {
   assert.equal(duracion(5 * H), '5 h');
   assert.equal(duracion(36 * H), '1.5 días');
   assert.equal(duracion(15 * D), '15 días');
+});
+
+test('plantilla: nombres que faltan', () => {
+  assert.deepEqual(tiposQueFaltan('mascotas', [' perro ']).map((e) => e.name), ['Gato']);
+  assert.equal(tiposQueFaltan('mascotas', ['PERRO', 'gato']).length, 0);
+  assert.equal(tiposQueFaltan('nada', []).length, 0);
+});
+
+test('Servicios apagado por defecto', () => {
+  assert.equal(resolveEnabledModules([]).has('services'), false);
+  assert.equal(resolveEnabledModules([{ module_key: 'services', enabled: true }]).has('services'), true);
+});
+
+test('rubros de servicios', () => {
+  for (const tipo of ['salon', 'mascotas', 'limpieza', 'lubricentro', 'reparaciones']) {
+    const preset = BUSINESS_TYPE_PRESETS[tipo];
+    assert.ok(preset, tipo);
+    assert.ok(preset.modules.includes('services'), tipo);
+    assert.ok(RUBROS.some((r) => r.key === preset.tallerRubro), `${tipo}: rubro ${preset.tallerRubro}`);
+  }
+});
+
+test('plantilla a domicilio: ajustes solo para las sucursales de la empresa', () => {
+  const sucursales = [
+    { id: 'b1', company_id: 'A' },
+    { id: 'b2', company_id: 'B' },
+    { id: 'b3', company_id: 'A' },
+  ];
+  const ahora = new Date('2026-11-27T12:00:00Z');
+  const filas = filasDeAjustes('A', sucursales, ahora);
+  assert.deepEqual(filas.map((f) => f.branch_id), ['b1', 'b3']);
+  for (const f of filas) {
+    assert.equal(f.company_id, 'A');
+    assert.equal(f.default_at_customer, true);
+    assert.equal(f.updated_at, ahora.toISOString());
+  }
+  // Sin empresa no sale ninguna fila (antes tocaba las sucursales de todas).
+  assert.deepEqual(filasDeAjustes('', sucursales), []);
+  assert.deepEqual(filasDeAjustes(undefined, sucursales), []);
+  assert.deepEqual(filasDeAjustes(null, sucursales), []);
+});
+
+test('el rubro de mascotas es peluquería, sin lo clínico', () => {
+  assert.equal(BUSINESS_TYPE_PRESETS.mascotas.label, 'Peluquería de mascotas');
+  assert.doesNotMatch(BUSINESS_TYPE_PRESETS.mascotas.label, /veterinari/i);
+});
+
+test('la ruta del reporte nuevo', () => {
+  assert.equal(moduleForRoute('/reports/servicios'), 'services');
+});
+
+test('el reporte de servicios conserva el slug de permiso taller', () => {
+  assert.equal(reportSlugForRoute('/reports/servicios'), 'taller');
+  assert.equal(reportSlugForRoute('/reports/inventory'), 'inventory');
+  assert.ok(REPORT_ITEMS.some((r) => r.slug === 'taller'));
 });
