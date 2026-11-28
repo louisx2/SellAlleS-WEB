@@ -167,6 +167,15 @@ export default function NuevoIngresoClient() {
   // Otro tipo de ficha: otros chequeos, y fuera los servicios de otro tipo.
   const tipoKey = tipo?.id ?? '';
   useEffect(() => { setAnswers({}); setShowAllChecks(false); }, [tipoKey]);
+
+  // En el teléfono la barra de abajo (total y botones) tapa unos 7rem: al pasar
+  // de campo con Tab, que el navegador no deje el campo enfocado debajo de ella.
+  useEffect(() => {
+    const html = document.documentElement;
+    const antes = html.style.scrollPaddingBottom;
+    html.style.scrollPaddingBottom = '8rem';
+    return () => { html.style.scrollPaddingBottom = antes; };
+  }, []);
   useEffect(() => {
     setLineas((ls) => {
       const quedan = ls.filter((l) => {
@@ -392,20 +401,61 @@ export default function NuevoIngresoClient() {
     );
   }
 
+  // Relleno compacto de las tarjetas de esta pantalla.
+  const CH = 'p-4 pb-2';
+  const CC = 'p-4 pt-0';
+
+  // Total y botones: en el pie del panel (pantalla ancha) y en la barra de abajo
+  // (teléfono). Uno de los dos lugares está siempre oculto (display: none).
+  const acciones = (
+    <div className="space-y-2">
+      {(lineas.length > 0 || pieza) && (
+        <div>
+          <div className="flex justify-between text-base font-semibold">
+            <span>Total</span>
+            <span className="tabular-nums">{formatCurrency(total)}</span>
+          </div>
+          <p className="text-xs text-muted-foreground">El ITBIS, si aplica, se calcula al cobrar en el POS.</p>
+        </div>
+      )}
+      {/* Lo principal a la izquierda; Cancelar en rojo a la derecha. En un
+          teléfono muy angosto Cancelar baja a otra línea, siempre a la derecha. */}
+      <div className="flex flex-wrap gap-2">
+        {ofreceCobro ? (
+          <>
+            <Button type="button" className="flex-1 px-3" disabled={saving} onClick={() => save(true)}>
+              {saving ? 'Guardando…' : 'Cobrar ahora'}
+            </Button>
+            <Button type="submit" variant="outline" className="flex-1 px-3" disabled={saving}>Cobrar al final</Button>
+          </>
+        ) : (
+          <Button type="submit" className="flex-1" disabled={saving}>
+            {saving ? 'Guardando…' : imprimeRecibo ? 'Crear orden e imprimir recibo' : 'Crear orden'}
+          </Button>
+        )}
+        <Button
+          type="button" variant="outline" asChild
+          className="ml-auto border-destructive px-3 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+        >
+          <Link href="/services">Cancelar</Link>
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="mb-2">
+    <div className="mx-auto max-w-6xl">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/services"><ArrowLeft className="mr-1 h-4 w-4" />Servicios</Link>
         </Button>
-      </div>
-      <PageHeader title={ahora ? 'Atender ahora' : 'Nueva orden'}>
-        <Button variant="outline" size="sm" asChild>
+        <h1 className="text-2xl font-bold tracking-tight">{ahora ? 'Atender ahora' : 'Nueva orden'}</h1>
+        <Button variant="outline" size="sm" className="ml-auto" asChild>
           <Link href={ahora ? '/services/nuevo' : '/services/nuevo?modo=ahora'}>
             {ahora ? 'Nueva orden' : <><Zap className="mr-1 h-4 w-4" />Atender ahora</>}
           </Link>
         </Button>
-      </PageHeader>
+      </div>
       {ahora && (
         <p className="mb-4 text-sm text-muted-foreground">
           Para el cliente que ya sabe lo que quiere: la orden entra directo en proceso, con sus servicios.
@@ -437,77 +487,91 @@ export default function NuevoIngresoClient() {
       {config.loading ? (
         <div className="space-y-3"><Skeleton className="h-40 w-full" /><Skeleton className="h-40 w-full" /></div>
       ) : (
-        <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save(false); }}>
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-base">Cliente</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between gap-3 rounded-md border p-3">
-                <div className="min-w-0">
-                  <p className="font-medium">{generic ? 'Consumidor final' : customer!.name}</p>
-                  {!generic && customer!.phone && <p className="text-sm text-muted-foreground">{customer!.phone}</p>}
-                </div>
-                <div className="flex gap-2">
-                  {!generic && (
-                    <Button type="button" variant="ghost" size="sm" onClick={() => elegirCliente(null)}>Quitar</Button>
-                  )}
-                  <Button type="button" variant="outline" size="sm" onClick={() => setSearchOpen(true)}>
-                    <UserSearch className="mr-1 h-4 w-4" />{generic ? 'Elegir cliente' : 'Cambiar'}
-                  </Button>
-                </div>
-              </div>
-              {conFicha && !generic && (
-                <label className="flex items-center gap-2 text-sm">
-                  <Checkbox checked={otherBringer} onCheckedChange={(v) => setOtherBringer(v === true)} />
-                  Lo trae otra persona
-                </label>
-              )}
-              {conFicha && (generic || otherBringer) && (
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="bringer-name">{generic ? 'Nombre de quien lo trae' : 'Quién lo trae'}</Label>
-                    <Input id="bringer-name" value={bringerName} onChange={(e) => setBringerName(e.target.value)} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="bringer-phone">Teléfono (para avisarle)</Label>
-                    <Input id="bringer-phone" inputMode="tel" value={bringerPhone} onChange={(e) => setBringerPhone(e.target.value)} />
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {muestraFicha && (
+        // Pantalla ancha: a la izquierda lo que se recibe, a la derecha el panel
+        // fijo. En el teléfono, una columna en el orden del DOM: cliente y ficha,
+        // servicios, lo demás y la barra de acciones. Filas auto/1fr: si el panel
+        // es más alto que la izquierda, lo que sobra va abajo y no entre tarjetas.
+        <form
+          className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_1fr] lg:items-start"
+          onSubmit={(e) => { e.preventDefault(); save(false); }}
+        >
+          <div className="space-y-4 lg:col-start-1 lg:row-start-1">
             <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-base">Qué se atiende</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                <FichaPicker
-                  customerId={generic ? undefined : customer!.id}
-                  types={pickerTypes}
-                  value={ficha}
-                  onChange={setFicha}
-                  allowNone={!enGarantia}
-                />
-                {tipo?.asksPassword && (
-                  <div className="space-y-1.5 sm:max-w-xs">
-                    <Label htmlFor="password">Clave o patrón</Label>
-                    <Input
-                      id="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off"
-                      placeholder={esReparacion ? 'Para probar el equipo' : undefined}
-                    />
+              <CardContent className="space-y-3 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-xs text-muted-foreground">Cliente</p>
+                    <p className="font-medium">
+                      {generic ? 'Consumidor final' : customer!.name}
+                      {!generic && customer!.phone && <span className="font-normal text-muted-foreground"> · {customer!.phone}</span>}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    {!generic && (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => elegirCliente(null)}>Quitar</Button>
+                    )}
+                    <Button type="button" variant="outline" size="sm" onClick={() => setSearchOpen(true)}>
+                      <UserSearch className="mr-1 h-4 w-4" />{generic ? 'Elegir cliente' : 'Cambiar'}
+                    </Button>
+                  </div>
+                </div>
+                {conFicha && !generic && (
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox checked={otherBringer} onCheckedChange={(v) => setOtherBringer(v === true)} />
+                    Lo trae otra persona
+                  </label>
+                )}
+                {conFicha && (generic || otherBringer) && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="bringer-name">{generic ? 'Nombre de quien lo trae' : 'Quién lo trae'}</Label>
+                      <Input id="bringer-name" value={bringerName} onChange={(e) => setBringerName(e.target.value)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="bringer-phone">Teléfono (para avisarle)</Label>
+                      <Input id="bringer-phone" inputMode="tel" value={bringerPhone} onChange={(e) => setBringerPhone(e.target.value)} />
+                    </div>
                   </div>
                 )}
               </CardContent>
             </Card>
-          )}
 
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Servicios</CardTitle>
-              <CardDescription>
-                {muestraPieza ? 'Lo que se va a hacer, quién lo hace y la pieza que lleva.' : 'Lo que se va a hacer y quién lo hace.'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
+            {muestraFicha && (
+              <Card>
+                <CardHeader className={CH}><CardTitle className="text-base">Qué se atiende</CardTitle></CardHeader>
+                <CardContent className={`space-y-3 ${CC}`}>
+                  <FichaPicker
+                    customerId={generic ? undefined : customer!.id}
+                    types={pickerTypes}
+                    value={ficha}
+                    onChange={setFicha}
+                    allowNone={!enGarantia}
+                  />
+                  {tipo?.asksPassword && (
+                    <div className="space-y-1.5 sm:max-w-xs">
+                      <Label htmlFor="password">Clave o patrón</Label>
+                      <Input
+                        id="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="off"
+                        placeholder={esReparacion ? 'Para probar el equipo' : undefined}
+                      />
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+
+          {/* Panel: fijo bajo el encabezado de la app y nunca más alto que la
+              pantalla. Si no cabe, lo de arriba se desplaza dentro del panel y el
+              total con los botones quedan abajo, a la vista. */}
+          <Card className="lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:flex lg:max-h-[calc(100dvh-7rem)] lg:flex-col">
+            <div className="space-y-4 p-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+              <div className="space-y-1.5">
+                <CardTitle className="text-base">Servicios</CardTitle>
+                <CardDescription>
+                  {muestraPieza ? 'Lo que se va a hacer, quién lo hace y la pieza que lleva.' : 'Lo que se va a hacer y quién lo hace.'}
+                </CardDescription>
+              </div>
               <LineasNuevas
                 catalog={catalog}
                 staff={activeStaff}
@@ -521,7 +585,7 @@ export default function NuevoIngresoClient() {
                   <Link href="/service-types" className="underline">Agrégalo</Link> para saber quién atiende cada orden.
                 </p>
               ) : (
-                <div className="space-y-1.5 sm:max-w-xs">
+                <div className="space-y-1.5">
                   <Label htmlFor="responsable">Lo atiende</Label>
                   <select id="responsable" className={SELECT_CLASS} value={responsable} onChange={(e) => elegirResponsable(e.target.value)}>
                     <option value="">
@@ -558,185 +622,164 @@ export default function NuevoIngresoClient() {
                       locationId={config.settings?.partsLocationId}
                       suggestedCategoryId={catalogById.get(lineas[0]?.serviceTypeId ?? '')?.partCategoryId}
                       onPick={(p) => { setPart(p); setPartQty(1); }}
+                      enLinea
                     />
                   )}
                 </div>
               )}
 
-              {(lineas.length > 0 || pieza) && (
-                <>
-                  <div className="flex justify-between border-t pt-3 text-base font-semibold">
-                    <span>Total</span>
-                    <span className="tabular-nums">{formatCurrency(total)}</span>
+              <div className="space-y-3 border-t pt-3">
+                <p className="text-sm font-medium">Dónde se atiende</p>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox checked={atCustomer} onCheckedChange={(v) => setAtCustomerManual(v === true)} />
+                  A domicilio
+                </label>
+                {atCustomer && (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="direccion">Dirección del servicio</Label>
+                    <Input
+                      id="direccion" value={direccion} onChange={(e) => setDireccion(e.target.value)}
+                      placeholder={dirCliente ?? 'Calle, número, sector'}
+                    />
+                    {dirCliente && !direccion.trim() && (
+                      <p className="text-xs text-muted-foreground">Si la dejas vacía, se usa la del cliente.</p>
+                    )}
                   </div>
-                  <p className="text-xs text-muted-foreground">El ITBIS, si aplica, se calcula al cobrar en el POS.</p>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3"><CardTitle className="text-base">Dónde se atiende</CardTitle></CardHeader>
-            <CardContent className="space-y-3">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox checked={atCustomer} onCheckedChange={(v) => setAtCustomerManual(v === true)} />
-                A domicilio
-              </label>
-              {atCustomer && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="direccion">Dirección del servicio</Label>
-                  <Input
-                    id="direccion" value={direccion} onChange={(e) => setDireccion(e.target.value)}
-                    placeholder={dirCliente ?? 'Calle, número, sector'}
-                  />
-                  {dirCliente && !direccion.trim() && (
-                    <p className="text-xs text-muted-foreground">Si la dejas vacía, se usa la del cliente.</p>
-                  )}
-                </div>
-              )}
-              {tipo?.staysInShop && !atCustomer && (
-                <div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <Checkbox checked={clienteEspera} onCheckedChange={(v) => setClienteEspera(v === true)} />
-                    El cliente espera
-                  </label>
-                  <p className="ml-6 text-xs text-muted-foreground">
-                    {clienteEspera ? 'No se queda en el negocio: se atiende y se termina.' : 'Se queda en el negocio hasta que lo retiren.'}
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">
-                {esReparacion ? (ahora ? 'Detalle (opcional)' : 'Falla reportada') : 'Notas'}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Textarea
-                aria-label={esReparacion ? (ahora ? 'Detalle' : 'Falla reportada') : 'Notas'}
-                rows={3}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder={esReparacion
-                  ? (ahora ? 'Algo que el técnico deba saber' : 'Lo que cuenta el cliente: «se cayó, no da imagen pero vibra»')
-                  : 'Lo que haya que saber: «corte bajito», «tocar el timbre al llegar»'}
-              />
-            </CardContent>
-          </Card>
-
-          {checks.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{esReparacion ? 'Cómo llega el equipo' : 'Cómo llega'}</CardTitle>
-                <CardDescription>Se imprime en el recibo. Los marcados con * son obligatorios.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <ChecklistForm
-                  items={shownChecks}
-                  answers={answers}
-                  onChange={setAnswers}
-                  requiredOf={(i) => (ahora ? i.requiredQuick : i.required)}
-                />
-                {ahora && shownChecks.length < checks.length && (
-                  <Button type="button" variant="link" className="px-0" onClick={() => setShowAllChecks(true)}>
-                    Ver los {checks.length - shownChecks.length} chequeos restantes
-                  </Button>
                 )}
+                {tipo?.staysInShop && !atCustomer && (
+                  <div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox checked={clienteEspera} onCheckedChange={(v) => setClienteEspera(v === true)} />
+                      El cliente espera
+                    </label>
+                    <p className="ml-6 text-xs text-muted-foreground">
+                      {clienteEspera ? 'No se queda en el negocio: se atiende y se termina.' : 'Se queda en el negocio hasta que lo retiren.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+            {/* Pegado abajo también mientras el panel todavía no llegó arriba
+                (al abrir la página puede empezar más abajo de la pantalla). */}
+            <div className="hidden shrink-0 rounded-b-lg border-t bg-card p-4 lg:sticky lg:bottom-0 lg:block">{acciones}</div>
+          </Card>
+
+          <div className="space-y-4 lg:col-start-1 lg:row-start-2">
+            <Card>
+              <CardHeader className={CH}>
+                <CardTitle className="text-base">
+                  {esReparacion ? (ahora ? 'Detalle (opcional)' : 'Falla reportada') : 'Notas'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className={CC}>
+                <Textarea
+                  aria-label={esReparacion ? (ahora ? 'Detalle' : 'Falla reportada') : 'Notas'}
+                  rows={3}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={esReparacion
+                    ? (ahora ? 'Algo que el técnico deba saber' : 'Lo que cuenta el cliente: «se cayó, no da imagen pero vibra»')
+                    : 'Lo que haya que saber: «corte bajito», «tocar el timbre al llegar»'}
+                />
               </CardContent>
             </Card>
-          )}
 
-          {conFicha && (
-            <Card>
-              <CardHeader className="pb-3"><CardTitle className="text-base">Recepción</CardTitle></CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="otros-accesorios">{esReparacion ? 'Deja con el equipo' : 'Lo que deja (opcional)'}</Label>
-                  {esReparacion && (
-                    <div className="flex flex-wrap gap-2">
-                      {ACCESORIOS.map((a) => (
-                        <button
-                          key={a}
-                          type="button"
-                          aria-pressed={accessories.includes(a)}
-                          onClick={() => toggleAccessory(a)}
-                          className={`rounded-full border px-3 py-1 text-sm ${accessories.includes(a) ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
-                        >
-                          {a}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  <Input
-                    id="otros-accesorios" value={otherAccessories} onChange={(e) => setOtherAccessories(e.target.value)}
-                    placeholder={esReparacion ? 'Otro (opcional)' : 'Correa, casco, llaves…'}
+            {checks.length > 0 && (
+              <Card>
+                <CardHeader className={CH}>
+                  <CardTitle className="text-base">{esReparacion ? 'Cómo llega el equipo' : 'Cómo llega'}</CardTitle>
+                  <CardDescription>Se imprime en el recibo. Los marcados con * son obligatorios.</CardDescription>
+                </CardHeader>
+                <CardContent className={`space-y-2 ${CC}`}>
+                  <ChecklistForm
+                    // Otro tipo de ficha = otros chequeos: sin notas abiertas de antes.
+                    key={tipoKey}
+                    items={shownChecks}
+                    answers={answers}
+                    onChange={setAnswers}
+                    requiredOf={(i) => (ahora ? i.requiredQuick : i.required)}
                   />
-                </div>
-                {esReparacion && (
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    {!ahora && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="estimate">Presupuesto aprox. (RD$)</Label>
-                        <Input id="estimate" inputMode="decimal" value={estimate} onChange={(e) => setEstimate(e.target.value.replace(/[^\d.]/g, ''))} />
+                  {ahora && shownChecks.length < checks.length && (
+                    <Button type="button" variant="link" className="px-0" onClick={() => setShowAllChecks(true)}>
+                      Ver los {checks.length - shownChecks.length} chequeos restantes
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {conFicha && (
+              <Card>
+                <CardHeader className={CH}><CardTitle className="text-base">Recepción</CardTitle></CardHeader>
+                <CardContent className={`space-y-4 ${CC}`}>
+                  <div className="space-y-2">
+                    <Label htmlFor="otros-accesorios">{esReparacion ? 'Deja con el equipo' : 'Lo que deja (opcional)'}</Label>
+                    {esReparacion && (
+                      <div className="flex flex-wrap gap-2">
+                        {ACCESORIOS.map((a) => (
+                          <button
+                            key={a}
+                            type="button"
+                            aria-pressed={accessories.includes(a)}
+                            onClick={() => toggleAccessory(a)}
+                            className={`rounded-full border px-3 py-1 text-sm ${accessories.includes(a) ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}
+                          >
+                            {a}
+                          </button>
+                        ))}
                       </div>
                     )}
-                    <div className="space-y-1.5">
-                      <Label htmlFor="promised">Prometido para</Label>
-                      <Input id="promised" type="date" value={promised} onChange={(e) => setPromised(e.target.value)} />
+                    <Input
+                      id="otros-accesorios" value={otherAccessories} onChange={(e) => setOtherAccessories(e.target.value)}
+                      placeholder={esReparacion ? 'Otro (opcional)' : 'Correa, casco, llaves…'}
+                    />
+                  </div>
+                  {esReparacion && (
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      {!ahora && (
+                        <div className="space-y-1.5">
+                          <Label htmlFor="estimate">Presupuesto aprox. (RD$)</Label>
+                          <Input id="estimate" inputMode="decimal" value={estimate} onChange={(e) => setEstimate(e.target.value.replace(/[^\d.]/g, ''))} />
+                        </div>
+                      )}
+                      <div className="space-y-1.5">
+                        <Label htmlFor="promised">Prometido para</Label>
+                        <Input id="promised" type="date" value={promised} onChange={(e) => setPromised(e.target.value)} />
+                      </div>
                     </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {conFicha && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Fotos (opcional)</CardTitle>
-                <CardDescription>
-                  {esReparacion ? 'Para dejar constancia de cómo llegó: golpes, rayones, pantalla.' : 'Para dejar constancia de cómo llegó.'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {fotos.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {fotos.map((f, i) => (
-                      <span key={i} className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs">
-                        {f.name.length > 22 ? `${f.name.slice(0, 20)}…` : f.name}
-                        <button type="button" aria-label="Quitar foto" onClick={() => setFotos(fotos.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button>
+                  )}
+                  <div className="space-y-2">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-muted">
+                        <Camera className="h-4 w-4" />Agregar fotos
+                        <input
+                          type="file" accept="image/*" capture="environment" multiple className="hidden"
+                          onChange={(e) => { setFotos([...fotos, ...Array.from(e.target.files ?? [])].slice(0, 12)); e.target.value = ''; }}
+                        />
+                      </label>
+                      <span className="text-xs text-muted-foreground">
+                        {esReparacion ? 'Opcional. Para dejar constancia de cómo llegó: golpes, rayones, pantalla.' : 'Opcional. Para dejar constancia de cómo llegó.'}
                       </span>
-                    ))}
+                    </div>
+                    {fotos.length > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {fotos.map((f, i) => (
+                          <span key={i} className="inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs">
+                            {f.name.length > 22 ? `${f.name.slice(0, 20)}…` : f.name}
+                            <button type="button" aria-label="Quitar foto" onClick={() => setFotos(fotos.filter((_, j) => j !== i))}><X className="h-3 w-3" /></button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border px-3 py-1.5 text-sm hover:bg-muted">
-                  <Camera className="h-4 w-4" />Agregar fotos
-                  <input
-                    type="file" accept="image/*" capture="environment" multiple className="hidden"
-                    onChange={(e) => { setFotos([...fotos, ...Array.from(e.target.files ?? [])].slice(0, 12)); e.target.value = ''; }}
-                  />
-                </label>
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button type="button" variant="secondary" asChild><Link href="/services">Cancelar</Link></Button>
-            {ofreceCobro ? (
-              <>
-                <Button type="submit" variant="outline" disabled={saving}>Cobrar al final</Button>
-                <Button type="button" disabled={saving} onClick={() => save(true)}>
-                  {saving ? 'Guardando…' : `Cobrar ahora · ${formatCurrency(total)}`}
-                </Button>
-              </>
-            ) : (
-              <Button type="submit" disabled={saving}>
-                {saving ? 'Guardando…' : imprimeRecibo ? 'Crear orden e imprimir recibo' : 'Crear orden'}
-              </Button>
+                </CardContent>
+              </Card>
             )}
+          </div>
+
+          {/* Teléfono y tableta: total y botones pegados abajo de la pantalla. */}
+          <div className="sticky bottom-0 z-10 -mx-4 border-t bg-background px-4 py-3 sm:-mx-6 sm:px-6 lg:hidden">
+            {acciones}
           </div>
         </form>
       )}

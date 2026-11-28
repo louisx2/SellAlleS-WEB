@@ -68,19 +68,28 @@ export function etiquetaDeFicha(s: Campos, tipo?: Pick<EquipmentType, 'name'>): 
   return [s.brand, s.model, s.serial].map((x) => x?.trim()).filter(Boolean).join(' · ') || tipo?.name || 'Ficha sin datos';
 }
 
-function Opcion({ name, checked, onSelect, title, hint }: {
-  name: string; checked: boolean; onSelect: () => void; title: string; hint?: string;
+/** Una opción de «Qué se atiende» como botón redondo; el radio queda oculto pero
+ *  sigue ahí, para el teclado y el lector de pantalla. */
+function Opcion({ name, checked, onSelect, title, notas }: {
+  name: string; checked: boolean; onSelect: () => void; title: string;
+  /** La ficha guardada tiene notas («muerde», «alérgico a…»). */
+  notas?: boolean;
 }) {
   return (
     <label className={cn(
-      'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-sm',
-      checked ? 'border-primary bg-primary/5' : 'hover:bg-muted',
+      'inline-flex max-w-full cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
+      // Anillo solo con el teclado (no tras un clic), sobre el color del fondo.
+      'ring-offset-background has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2',
+      checked ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted',
     )}>
-      <input type="radio" name={name} checked={checked} onChange={onSelect} className="mt-0.5 h-4 w-4 shrink-0 accent-primary" />
-      <span className="min-w-0">
-        <span className="block font-medium">{title}</span>
-        {hint && <span className="block text-muted-foreground">{hint}</span>}
-      </span>
+      <input type="radio" name={name} checked={checked} onChange={onSelect} className="sr-only" />
+      <span className="min-w-0 break-words font-medium">{title}</span>
+      {notas && (
+        <>
+          <StickyNote className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span className="sr-only">(tiene notas)</span>
+        </>
+      )}
     </label>
   );
 }
@@ -150,37 +159,38 @@ export function FichaPicker({ customerId, types, value, onChange, allowNone = tr
     );
   }
 
+  // La ayuda de la opción elegida, en una sola línea debajo de los botones.
+  const ayuda = value.mode === 'none' ? (allowNone ? 'El servicio es a la persona o al lugar' : undefined)
+    : value.mode === 'saved' ? typeById.get(value.subject.equipmentTypeId ?? '')?.name
+    : customerId ? 'Queda guardada en el cliente para la próxima vez' : 'Sin cliente, queda solo en esta orden';
+
   return (
     <div className="space-y-3">
-      <div role="radiogroup" aria-label="Qué se atiende" className="space-y-2">
-        {allowNone && (
-          <Opcion
-            name={name} checked={value.mode === 'none'} onSelect={() => onChange({ mode: 'none' })}
-            title="Nada" hint="El servicio es a la persona o al lugar"
-          />
-        )}
-        {loading && <p className="text-sm text-muted-foreground">Buscando las fichas del cliente…</p>}
-        {error && <p className="text-sm text-destructive">No se pudieron leer las fichas del cliente: {error}</p>}
-        {fichas.map((s) => {
-          const t = typeById.get(s.equipmentTypeId ?? '');
-          return (
+      <div className="space-y-1.5">
+        <div role="radiogroup" aria-label="Qué se atiende" className="flex flex-wrap gap-2">
+          {allowNone && (
+            <Opcion name={name} checked={value.mode === 'none'} onSelect={() => onChange({ mode: 'none' })} title="Nada" />
+          )}
+          {fichas.map((s) => (
             <Opcion
               key={s.id} name={name}
               checked={value.mode === 'saved' && value.subject.id === s.id}
               onSelect={() => onChange({ mode: 'saved', subject: s })}
-              title={etiquetaDeFicha(s, t)}
-              hint={[t?.name, s.notes ? 'tiene notas' : ''].filter(Boolean).join(' · ') || undefined}
+              title={etiquetaDeFicha(s, typeById.get(s.equipmentTypeId ?? ''))}
+              notas={!!s.notes?.trim()}
             />
-          );
-        })}
-        {types.length > 0 && (
-          <Opcion
-            name={name} checked={value.mode === 'new'}
-            onSelect={() => { if (value.mode !== 'new') onChange(fichaNueva(types.length === 1 ? types[0].id : '')); }}
-            title="Nueva ficha"
-            hint={customerId ? 'Queda guardada en el cliente para la próxima vez' : 'Sin cliente, queda solo en esta orden'}
-          />
-        )}
+          ))}
+          {types.length > 0 && (
+            <Opcion
+              name={name} checked={value.mode === 'new'}
+              onSelect={() => { if (value.mode !== 'new') onChange(fichaNueva(types.length === 1 ? types[0].id : '')); }}
+              title="+ Nueva ficha"
+            />
+          )}
+        </div>
+        {ayuda && <p className="text-xs text-muted-foreground">{ayuda}</p>}
+        {loading && <p className="text-sm text-muted-foreground">Buscando las fichas del cliente…</p>}
+        {error && <p className="text-sm text-destructive">No se pudieron leer las fichas del cliente: {error}</p>}
       </div>
 
       {value.mode === 'saved' && value.subject.notes && (

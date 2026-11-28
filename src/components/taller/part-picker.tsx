@@ -17,7 +17,7 @@ const MAX_RESULTADOS = 40;
  *  repuestos si está configurada), sin los artículos de servicio. «Pieza» y
  *  «taller» solo en órdenes de reparación; en las demás se dice «material». */
 export function PartPicker({
-  branchId, locationId, suggestedCategoryId, onPick, autoFocus, material = false,
+  branchId, locationId, suggestedCategoryId, onPick, autoFocus, material = false, enLinea = false,
 }: {
   branchId?: string;
   locationId?: string;
@@ -27,14 +27,23 @@ export function PartPicker({
   autoFocus?: boolean;
   /** La orden no es de reparación: habla de materiales. */
   material?: boolean;
+  /** La lista va en el flujo, no flotando: para un contenedor con desplazamiento
+   *  propio (el panel de Nueva orden), donde una lista flotante quedaría cortada. */
+  enLinea?: boolean;
 }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [q, setQ] = useState('');
   const [onlySuggested, setOnlySuggested] = useState(!!suggestedCategoryId);
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setOnlySuggested(!!suggestedCategoryId); }, [suggestedCategoryId]);
+
+  // En línea, al abrirse la lista se trae a la vista dentro del contenedor.
+  useEffect(() => {
+    if (enLinea && open) listRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [enLinea, open]);
 
   useEffect(() => {
     if (!branchId) return;
@@ -88,7 +97,10 @@ export function PartPicker({
           aria-label={material ? 'Buscar material' : 'Buscar pieza'}
         />
         {open && (
-          <div className="absolute z-50 mt-1 max-h-72 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
+          <div
+            ref={listRef}
+            className={`${enLinea ? '' : 'absolute z-50 shadow-md '}mt-1 max-h-72 w-full overflow-y-auto rounded-md border bg-popover p-1`}
+          >
             {results.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">
                 {products.length === 0

@@ -8,7 +8,7 @@ import {
   caseNumber, checklistFor, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
   mensajeDeEstado, missingRequired, statusLabel, customerText, manualStatuses, canClose, closeLabel,
   fichaFields, camposDeFicha, valorDeFicha, defaultStaysInShop, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS, tiposQueFaltan,
-  ordenNueva, filasDeAjustes,
+  ordenNueva, filasDeAjustes, notaVisible,
 } from '../../src/lib/taller.ts';
 import {
   duracion, fechaDeCobro, porTecnico, resumen, tiempoPorEstado, topEquipos, topLineas,
@@ -64,6 +64,16 @@ test('chequeos por tipo de equipo y obligatorios', () => {
   assert.equal(missingRequired(tel, {}, false)?.id, 'a');
   assert.equal(missingRequired(tel, {}, true)?.id, 'c', 'en rápida mandan los marcados para rápida');
   assert.equal(missingRequired(tel, { a: { itemId: 'a', label: 'Prende', answer: 'si' } }, false), null);
+});
+
+test('la nota del chequeo se ve con «No», con nota escrita o abierta a mano', () => {
+  assert.equal(notaVisible(undefined, false), false);
+  assert.equal(notaVisible(undefined, true), false, 'sin respuesta no hay nota');
+  assert.equal(notaVisible({ itemId: 'a', label: 'Prende', answer: 'si' }, false), false);
+  assert.equal(notaVisible({ itemId: 'a', label: 'Prende', answer: 'no' }, false), true);
+  assert.equal(notaVisible({ itemId: 'a', label: 'Prende', answer: 'si', note: 'raya leve' }, false), true, 'de «No» a «Sí» no esconde lo escrito');
+  assert.equal(notaVisible({ itemId: 'a', label: 'Prende', answer: 'si', note: '   ' }, false), false);
+  assert.equal(notaVisible({ itemId: 'a', label: 'Prende', answer: 'np' }, true), true);
 });
 
 test('teléfono para WhatsApp: los 10 dígitos de RD llevan el 1', () => {

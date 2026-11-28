@@ -196,6 +196,13 @@ export function missingRequired(
   return null;
 }
 
+/** ¿Se muestra la nota de un chequeo? Sin respuesta, no (escribirla contestaría
+ *  «Sí» sin querer). Con «No» o con algo escrito, sí; si no, cuando se abre a mano. */
+export function notaVisible(a: ChecklistAnswer | undefined, abierta: boolean): boolean {
+  if (!a) return false;
+  return a.answer === 'no' || !!a.note?.trim() || abierta;
+}
+
 export const ANSWER_LABEL: Record<ChecklistAnswer['answer'], string> = {
   si: 'Sí',
   no: 'No',
