@@ -105,8 +105,7 @@ begin
     raise exception 'Las ventas a crédito o financiadas no se pueden anular: gestiona sus abonos desde Cuentas por Cobrar.';
   end if;
 
-  -- payment_method es un enum en la base: se compara/almacena como texto aquí.
-  v_refund_method := coalesce(p_refund_method, v_sale.payment_method::text);
+  v_refund_method := coalesce(p_refund_method, v_sale.payment_method);
   if v_refund_method not in ('cash', 'card', 'transfer') then
     raise exception 'Método de devolución no válido.';
   end if;
@@ -184,6 +183,4 @@ end;
 $function$;
 
 revoke all on function public.annul_sale(uuid, text, text) from public;
--- Los default privileges de Supabase dan EXECUTE a anon en funciones nuevas.
-revoke execute on function public.annul_sale(uuid, text, text) from anon;
 grant execute on function public.annul_sale(uuid, text, text) to authenticated;
