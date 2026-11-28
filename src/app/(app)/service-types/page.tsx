@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import { PageHeader } from '@/components/page-header';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -16,17 +17,25 @@ import { StaffTab } from '@/components/taller/config/staff-tab';
 export default function TallerConfigPage() {
   const config = useTallerConfig();
   const canEdit = usePermission('service-types', 'edit');
+  // Cada guardado recarga la configuración. El esqueleto sale solo en la primera
+  // carga: si saliera en cada recarga, las pestañas se desmontarían y la pantalla
+  // volvería sola a «Tipos de ficha».
+  const [cargada, setCargada] = useState(false);
+  useEffect(() => {
+    if (!config.loading) setCargada(true);
+  }, [config.loading]);
+  const [pestana, setPestana] = useState('equipos');
 
   return (
     <div>
       <PageHeader title="Configuración de Servicios" />
-      {config.loading ? (
+      {!cargada ? (
         <div className="space-y-3">
           <Skeleton className="h-10 w-full max-w-xl" />
           <Skeleton className="h-64 w-full" />
         </div>
       ) : (
-        <Tabs defaultValue="equipos">
+        <Tabs value={pestana} onValueChange={setPestana}>
           <div className="overflow-x-auto pb-1">
             <TabsList>
               <TabsTrigger value="equipos">Tipos de ficha</TabsTrigger>
