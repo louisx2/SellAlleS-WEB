@@ -72,8 +72,8 @@ borde de abajo de la pantalla.
 - Las clases exactas, el alto del panel y el `top` del sticky (el encabezado de
   la app mide 56/64 px, más 28 px si hay aviso arriba).
 - Si los chips de ficha y los chequeos compactos viven en sus componentes
-  (`ficha-picker.tsx`, `checklist-form.tsx`) o con una variante. Ojo: el
-  formulario de chequeos y el selector de ficha solo se usan en Nueva orden
-  (verificarlo antes de cambiarlos).
+  (`ficha-picker.tsx`, `checklist-form.tsx`) o con una variante. Verificado:
+  `ChecklistForm`, `FichaPicker` y `LineasNuevas` solo se usan en Nueva orden,
+  así que se pueden cambiar en su sitio.
 - Mantener los textos, ayudas y placeholders actuales salvo donde el diseño los
   cambie.
