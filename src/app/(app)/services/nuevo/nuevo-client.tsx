@@ -409,20 +409,26 @@ export default function NuevoIngresoClient() {
           <p className="text-xs text-muted-foreground">El ITBIS, si aplica, se calcula al cobrar en el POS.</p>
         </div>
       )}
+      {/* Lo principal a la izquierda; Cancelar en rojo a la derecha. */}
       <div className="flex gap-2">
-        <Button type="button" variant="ghost" className="px-3" asChild><Link href="/services">Cancelar</Link></Button>
         {ofreceCobro ? (
           <>
-            <Button type="submit" variant="outline" className="flex-1 px-3" disabled={saving}>Cobrar al final</Button>
             <Button type="button" className="flex-1 px-3" disabled={saving} onClick={() => save(true)}>
               {saving ? 'Guardando…' : 'Cobrar ahora'}
             </Button>
+            <Button type="submit" variant="outline" className="flex-1 px-3" disabled={saving}>Cobrar al final</Button>
           </>
         ) : (
           <Button type="submit" className="flex-1" disabled={saving}>
             {saving ? 'Guardando…' : imprimeRecibo ? 'Crear orden e imprimir recibo' : 'Crear orden'}
           </Button>
         )}
+        <Button
+          type="button" variant="outline" asChild
+          className="border-destructive px-3 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+        >
+          <Link href="/services">Cancelar</Link>
+        </Button>
       </div>
     </div>
   );
