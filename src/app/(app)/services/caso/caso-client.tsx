@@ -170,11 +170,20 @@ export default function CasoClient() {
   };
 
   /** Después de cambiar quién atiende: sin «ver todas», quien se la pasa a otro
-   *  deja de verla. Entonces vuelve a la lista, sin error. */
+   *  deja de verla. Entonces vuelve a la lista, sin error. Si la consulta falla
+   *  (red, sesión) no se sabe si la ve: se avisa del error y se recarga.
+   *  Sin `titulo` (algo salió a medias y ya se avisó) no se dice «Listo». */
   const recargarOSalir = async (titulo?: string) => {
-    const { data } = await supabase.from('services').select('id').eq('id', id).maybeSingle();
+    const { data, error } = await supabase.from('services').select('id').eq('id', id).maybeSingle();
+    if (error) {
+      fail('No se pudo volver a cargar la orden', error);
+      load();
+      return;
+    }
     if (!data) {
-      toast({ title: titulo ?? 'Listo', description: 'Ya no ves esta orden: ahora la atiende otra persona.' });
+      toast(titulo
+        ? { title: titulo, description: 'Ya no ves esta orden: ahora la atiende otra persona.' }
+        : { title: 'Ya no ves esta orden', description: 'Ahora la atiende otra persona.' });
       router.push('/services');
       return;
     }

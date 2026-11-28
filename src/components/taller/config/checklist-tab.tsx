@@ -100,7 +100,7 @@ export function ChecklistTab({ config, canEdit }: { config: TallerConfig; canEdi
         <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto] gap-3 px-3 text-xs font-medium text-muted-foreground">
           <span>Chequeo</span>
           <span className="w-24 text-center">Obligatorio</span>
-          <span className="w-24 text-center">En rápida</span>
+          <span className="w-24 text-center">Atender ahora</span>
           <span className="w-28" />
         </div>
         <div className="space-y-2">
@@ -126,8 +126,8 @@ export function ChecklistTab({ config, canEdit }: { config: TallerConfig; canEdi
                 <Switch checked={item.required} disabled={!canEdit} onCheckedChange={(v) => patch(item, { required: v })} aria-label="Obligatorio al ingresar" />
               </label>
               <label className="flex w-24 items-center justify-between gap-2 text-sm sm:justify-center">
-                <span className="sm:hidden">En rápida</span>
-                <Switch checked={item.requiredQuick} disabled={!canEdit} onCheckedChange={(v) => patch(item, { required_quick: v })} aria-label="Obligatorio en reparación rápida" />
+                <span className="sm:hidden">Obligatorio en Atender ahora</span>
+                <Switch checked={item.requiredQuick} disabled={!canEdit} onCheckedChange={(v) => patch(item, { required_quick: v })} aria-label="Obligatorio en Atender ahora" />
               </label>
               <div className="flex w-28 justify-end gap-1">
                 {canEdit && (

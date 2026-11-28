@@ -56,7 +56,7 @@ export const BUSINESS_TYPE_PRESETS: Record<BusinessType, BusinessTypePreset> = {
     tallerRubro: 'salon',
   },
   mascotas: {
-    label: 'Veterinaria y peluquería de mascotas',
+    label: 'Peluquería de mascotas',
     description: 'Una ficha por mascota, con chequeos de llegada y seguimiento para el dueño.',
     modules: ['services'],
     tallerRubro: 'mascotas',

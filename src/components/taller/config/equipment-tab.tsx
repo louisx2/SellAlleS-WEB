@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Pencil, Plus, Trash, LayoutTemplate } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/context/auth-provider';
 import { supabase } from '@/lib/supabase/client';
 import { RUBROS, fieldKey, tiposQueFaltan } from '@/lib/taller';
 import type { EquipmentExtraField, EquipmentType } from '@/lib/types';
@@ -51,6 +52,9 @@ const DATOS = [
 
 export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdit: boolean }) {
   const { toast } = useToast();
+  const { appUser } = useAuth();
+  // La empresa que se está viendo (también al impersonar): la plantilla solo toca la suya.
+  const companyId = appUser?.impersonatedCompanyId ?? appUser?.companyId;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -109,6 +113,7 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
   // Plantilla por rubro: crea los tipos de ficha que falten (por nombre) con sus chequeos.
   const loadTemplate = async (key: string) => {
     if (!key) return;
+    if (!companyId) { toast({ title: 'Entra a una empresa para cargar la plantilla', variant: 'destructive' }); return; }
     const existentes = config.equipmentTypes.map((t) => t.name);
     const aDomicilio = RUBROS.find((r) => r.key === key)?.aDomicilio;
     if (tiposQueFaltan(key, existentes).length === 0 && !aDomicilio) {
@@ -116,7 +121,7 @@ export function EquipmentTab({ config, canEdit }: { config: TallerConfig; canEdi
       return;
     }
     setSaving(true);
-    const r = await aplicarPlantilla(key, { existentes });
+    const r = await aplicarPlantilla(key, { companyId, existentes });
     setSaving(false);
     if (r.error) toast({ title: 'No se pudo cargar la plantilla', description: r.error, variant: 'destructive' });
     else toast({

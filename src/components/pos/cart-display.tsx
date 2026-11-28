@@ -222,8 +222,8 @@ export function CartDisplay() {
                         {cart.serviceId && (
                           <p className="mt-2 rounded-md bg-primary/10 px-2 py-1 text-xs">
                             Cobrando la orden{' '}
-                            <span className="font-semibold">#{String(cart.serviceNumber ?? '').padStart(4, '0')}</span>{' '}
-                            de la orden. Puedes sumar otros artículos.
+                            <span className="font-semibold">#{String(cart.serviceNumber ?? '').padStart(4, '0')}</span>.
+                            Puedes sumar otros artículos.
                           </p>
                         )}
                         {cart.selectedCustomer?.id !== '0' && cart.selectedCustomer?.creditBalance > 0 && (

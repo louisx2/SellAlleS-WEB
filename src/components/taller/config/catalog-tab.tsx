@@ -25,7 +25,7 @@ const SELECT_CLASS =
   'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
 type Comision = 'persona' | 'porcentaje' | 'monto';
-type Articulo = { id: string; name: string; price: number };
+type Articulo = { id: string; name: string; price: number; esServicio: boolean };
 
 type Draft = {
   id?: string;
@@ -112,12 +112,14 @@ export function CatalogTab({ config, canEdit }: { config: TallerConfig; canEdit:
   useEffect(() => {
     if (!usarExistente || !config.branchId) { setResultados([]); return; }
     const term = busqueda.trim().replace(/[%,()]/g, ' ');
-    let q = supabase.from('products').select('id, name, price')
+    let q = supabase.from('products').select('id, name, price, es_servicio')
       .eq('branch_id', config.branchId).eq('is_active', true).order('name').limit(8);
     if (term) q = q.ilike('name', `%${term}%`);
     q.then(({ data }) => {
       const usados = new Set(config.catalog.map((c) => c.productId));
-      setResultados((data ?? []).filter((r: any) => !usados.has(r.id)).map((r: any) => ({ id: r.id, name: r.name, price: Number(r.price) })));
+      setResultados((data ?? []).filter((r: any) => !usados.has(r.id)).map((r: any) => ({
+        id: r.id, name: r.name, price: Number(r.price), esServicio: r.es_servicio !== false,
+      })));
     });
   }, [usarExistente, busqueda, config.branchId, config.catalog]);
 
@@ -127,6 +129,11 @@ export function CatalogTab({ config, canEdit }: { config: TallerConfig; canEdit:
     if (!draft.name.trim()) { toast({ title: 'Escribe el nombre del servicio', variant: 'destructive' }); return; }
     if (draft.price.trim() === '' || !Number.isFinite(price) || price < 0) {
       toast({ title: 'Escribe el precio del servicio', variant: 'destructive' }); return;
+    }
+    // Sin artículo elegido se crearía uno nuevo, duplicado del que se quería usar.
+    if (usarExistente && !draft.linkProduct) {
+      toast({ title: 'Elige el artículo que quieres usar', description: 'O desmarca «Usar un artículo que ya existe».', variant: 'destructive' });
+      return;
     }
     const cv = Number(draft.comisionValor);
     if (draft.comision !== 'persona') {
@@ -330,6 +337,8 @@ export function CatalogTab({ config, canEdit }: { config: TallerConfig; canEdit:
                               ...draft, linkProduct: a,
                               name: draft.name.trim() ? draft.name : a.name,
                               price: draft.price.trim() ? draft.price : String(a.price),
+                              // «Factura como servicio» arranca con lo que el artículo ya tiene.
+                              esServicio: a.esServicio,
                             })}
                           >
                             <span className="truncate">{a.name}</span><span>{formatCurrency(a.price)}</span>

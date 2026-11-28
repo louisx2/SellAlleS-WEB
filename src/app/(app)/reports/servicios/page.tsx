@@ -14,7 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/lib/supabase/client';
 import { rowToServiceEvent, rowToServiceItem } from '@/lib/supabase/mappers';
 import { formatCurrency } from '@/lib/utils';
-import { caseNumber, SERVICE_STATUS, STATUS_ORDER } from '@/lib/taller';
+import { caseNumber, SERVICE_STATUS, STATUS_ORDER, statusLabel, type StatusCtx } from '@/lib/taller';
 import {
   duracion, enRango, porTecnico, resumen, tiempoPorEstado, topEquipos, topLineas,
   type CasoReporte, type Rango,
@@ -55,6 +55,8 @@ export default function ServiciosReportPage() {
   const [eventos, setEventos] = React.useState<Map<string, ServiceEvent[]>>(new Map());
   const [rapidas, setRapidas] = React.useState<Set<string>>(new Set());
   const [originales, setOriginales] = React.useState<Map<string, { assignedTo?: string }>>(new Map());
+  // El camino de cada orden: de él salen las palabras de sus estados.
+  const [caminos, setCaminos] = React.useState<Map<string, StatusCtx>>(new Map());
 
   const r: Rango | null = rango?.from
     ? { from: startOfDay(rango.from), to: endOfDay(rango.to ?? rango.from) }
@@ -69,7 +71,7 @@ export default function ServiciosReportPage() {
     // todos los que siguen abiertos.
     let q = supabase
       .from('services')
-      .select('id, number, status, staff_id, customer_id, created_at, ready_at, delivered_at, outcome, labor_price, parts_total, total, sale_id, warranty_of_service_id, warranty_sale_id, promised_at, is_quick, equipment_brand, equipment_model, brought_by_name, brought_by_phone, service_staff!services_staff_id_fkey(name), customers(name, phone), service_equipment_types(name)')
+      .select('id, number, status, staff_id, customer_id, created_at, ready_at, delivered_at, outcome, labor_price, parts_total, total, sale_id, warranty_of_service_id, warranty_sale_id, promised_at, is_quick, stays_in_shop, is_repair, equipment_brand, equipment_model, brought_by_name, brought_by_phone, service_staff!services_staff_id_fkey(name), customers(name, phone), service_equipment_types(name)')
       .or([
         `and(created_at.gte.${desde},created_at.lte.${hasta})`,
         `and(ready_at.gte.${desde},ready_at.lte.${hasta})`,
@@ -130,6 +132,7 @@ export default function ServiciosReportPage() {
     setLineas(its.map(rowToServiceItem));
     setEventos(porCaso);
     setRapidas(new Set(rows.filter((s: any) => s.is_quick).map((s: any) => s.id)));
+    setCaminos(new Map(rows.map((s: any) => [s.id, { staysInShop: s.stays_in_shop !== false, isRepair: s.is_repair !== false }])));
     setOriginales(orig);
     setLoading(false);
   }, [desde, hasta, branchId, toast]);
@@ -143,10 +146,24 @@ export default function ServiciosReportPage() {
   const servicios = topLineas(lineas, 'labor', enPeriodo).slice(0, 15);
   const piezas = topLineas(lineas, 'part', enPeriodo).slice(0, 15);
   const equipos = r ? topEquipos(casos, r).slice(0, 15) : [];
+  const caminoDe = (id: string): StatusCtx => caminos.get(id) ?? { staysInShop: true, isRepair: true };
+  // Las palabras de reparación solo cuando hay (o solo hay) órdenes de reparación.
+  const hayReparacion = casos.some((c) => caminoDe(c.id).isRepair);
+  const soloReparacion = casos.length > 0 && casos.every((c) => caminoDe(c.id).isRepair);
+  // Cada estado con el texto del camino de cada orden («En reparación» / «En proceso»).
   const ahoraPorEstado = STATUS_ORDER
     .filter((s) => s !== 'delivered' && s !== 'cancelled')
-    .map((s) => ({ estado: s as ServiceStatus, casos: casos.filter((c) => c.status === s).length }))
-    .filter((x) => x.casos > 0);
+    .flatMap((s) => {
+      const porTexto = new Map<string, number>();
+      for (const c of casos) {
+        if (c.status !== s) continue;
+        const texto = statusLabel(s as ServiceStatus, caminoDe(c.id));
+        porTexto.set(texto, (porTexto.get(texto) ?? 0) + 1);
+      }
+      return Array.from(porTexto, ([texto, n]) => ({ clave: `${s}:${texto}`, texto, casos: n }));
+    });
+  // El tiempo en cada etapa junta órdenes de todos los caminos: texto neutro.
+  const etapaCtx: StatusCtx = { staysInShop: true, isRepair: soloReparacion };
   const sinRetirar = casos
     .filter((c) => (c.status === 'ready' || c.status === 'not_repaired') && c.readyAt)
     .sort((a, b) => a.readyAt!.getTime() - b.readyAt!.getTime());
@@ -163,14 +180,14 @@ export default function ServiciosReportPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <Kpi titulo="Ingresaron" valor={String(res.ingresados)} detalle={`${res.rapidas} rápidas · ${res.garantias} por garantía`} />
-            <Kpi titulo="Entregados" valor={String(res.entregados)} detalle={res.entregados ? `${res.noReparados} sin reparar (${Math.round((res.noReparados / res.entregados) * 100)}%)` : undefined} />
+            <Kpi titulo="Ingresaron" valor={String(res.ingresados)} detalle={`${res.rapidas} de Atender ahora · ${res.garantias} por garantía`} />
+            <Kpi titulo="Entregados" valor={String(res.entregados)} detalle={hayReparacion && res.entregados ? `${res.noReparados} sin reparar (${Math.round((res.noReparados / res.entregados) * 100)}%)` : undefined} />
             <Kpi titulo="En curso ahora" valor={String(res.enTaller)} detalle={res.atrasados ? `${res.atrasados} atrasados` : 'Ninguno atrasado'} />
             <Kpi titulo="Listos sin retirar" valor={String(res.listos)} detalle={res.listosViejos ? `${res.listosViejos} con más de 7 días` : undefined} />
             <Kpi titulo="Cobrado" valor={formatCurrency(res.facturado)} detalle={`${res.cobrados} órdenes cobradas en el período`} />
             <Kpi titulo="Mano de obra" valor={formatCurrency(res.manoDeObra)} />
-            <Kpi titulo="Piezas" valor={formatCurrency(res.piezasVenta)} detalle={`Costo ${formatCurrency(res.piezasCosto)} · ganancia ${formatCurrency(margenPiezas)}`} />
-            <Kpi titulo="Tiempo de reparación" valor={duracion(res.tiempoReparacion)} detalle={`De entrada a listo · entrega: ${duracion(res.tiempoEntrega)}`} />
+            <Kpi titulo="Piezas y materiales" valor={formatCurrency(res.piezasVenta)} detalle={`Costo ${formatCurrency(res.piezasCosto)} · ganancia ${formatCurrency(margenPiezas)}`} />
+            <Kpi titulo="Tiempo de atención" valor={duracion(res.tiempoReparacion)} detalle={`De entrada a listo · entrega: ${duracion(res.tiempoEntrega)}`} />
           </div>
 
           <Card>
@@ -237,8 +254,8 @@ export default function ServiciosReportPage() {
                   <TableBody>
                     {ahoraPorEstado.length === 0 && <TableRow><TableCell className="text-muted-foreground">No hay órdenes abiertas.</TableCell></TableRow>}
                     {ahoraPorEstado.map((x) => (
-                      <TableRow key={x.estado}>
-                        <TableCell>{SERVICE_STATUS[x.estado].label}</TableCell>
+                      <TableRow key={x.clave}>
+                        <TableCell>{x.texto}</TableCell>
                         <TableCell className="text-right font-medium tabular-nums">{x.casos}</TableCell>
                       </TableRow>
                     ))}
@@ -261,7 +278,7 @@ export default function ServiciosReportPage() {
                     {etapas.length === 0 && <TableRow><TableCell colSpan={3} className="text-muted-foreground">Sin cambios de estado en el período.</TableCell></TableRow>}
                     {etapas.map((e) => (
                       <TableRow key={e.estado}>
-                        <TableCell>{SERVICE_STATUS[e.estado]?.label ?? e.estado}</TableCell>
+                        <TableCell>{SERVICE_STATUS[e.estado] ? statusLabel(e.estado, etapaCtx) : e.estado}</TableCell>
                         <TableCell className="text-right">{duracion(e.promedio)}</TableCell>
                         <TableCell className="text-right tabular-nums">{e.veces}</TableCell>
                       </TableRow>
@@ -297,16 +314,16 @@ export default function ServiciosReportPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Piezas más usadas</CardTitle>
+                <CardTitle className="text-base">Piezas y materiales más usados</CardTitle>
                 <CardDescription>Salieron del inventario para las órdenes del período.</CardDescription>
               </CardHeader>
               <CardContent>
                 <Table>
                   <TableHeader>
-                    <TableRow><TableHead>Pieza</TableHead><TableHead className="text-right">Cant.</TableHead><TableHead className="text-right">Costo</TableHead><TableHead className="text-right">Venta</TableHead></TableRow>
+                    <TableRow><TableHead>Artículo</TableHead><TableHead className="text-right">Cant.</TableHead><TableHead className="text-right">Costo</TableHead><TableHead className="text-right">Venta</TableHead></TableRow>
                   </TableHeader>
                   <TableBody>
-                    {piezas.length === 0 && <TableRow><TableCell colSpan={4} className="text-muted-foreground">Sin piezas en el período.</TableCell></TableRow>}
+                    {piezas.length === 0 && <TableRow><TableCell colSpan={4} className="text-muted-foreground">Sin piezas ni materiales en el período.</TableCell></TableRow>}
                     {piezas.map((p) => (
                       <TableRow key={p.nombre}>
                         <TableCell>{p.nombre}</TableCell>
@@ -353,7 +370,7 @@ export default function ServiciosReportPage() {
                     { header: 'Orden', value: (c) => caseNumber(c.number) },
                     { header: 'Cliente', value: (c) => c.customerName ?? '' },
                     { header: 'Telefono', value: (c) => c.customerPhone ?? '' },
-                    { header: 'Equipo', value: (c) => c.equipment ?? '' },
+                    { header: 'Ficha', value: (c) => c.equipment ?? '' },
                     { header: 'Dias esperando', value: (c) => Math.floor((Date.now() - c.readyAt!.getTime()) / DIA) },
                     { header: 'Total', value: (c) => c.total },
                   ]}

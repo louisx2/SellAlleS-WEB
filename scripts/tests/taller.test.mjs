@@ -333,6 +333,11 @@ test('rubros de servicios', () => {
   }
 });
 
+test('el rubro de mascotas es peluquería, sin lo clínico', () => {
+  assert.equal(BUSINESS_TYPE_PRESETS.mascotas.label, 'Peluquería de mascotas');
+  assert.doesNotMatch(BUSINESS_TYPE_PRESETS.mascotas.label, /veterinari/i);
+});
+
 test('la ruta del reporte nuevo', () => {
   assert.equal(moduleForRoute('/reports/servicios'), 'services');
 });

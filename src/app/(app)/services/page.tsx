@@ -135,7 +135,7 @@ export default function ServiciosPage() {
           <div className="flex flex-wrap gap-2">
             {canReports && (
               <Button variant="ghost" asChild>
-                <Link href="/reports/taller"><BarChart3 className="mr-2 h-4 w-4" />Reportes</Link>
+                <Link href="/reports/servicios"><BarChart3 className="mr-2 h-4 w-4" />Reportes</Link>
               </Button>
             )}
             <Button variant="outline" asChild>
