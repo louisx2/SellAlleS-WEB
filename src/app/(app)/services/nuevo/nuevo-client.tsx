@@ -479,9 +479,10 @@ export default function NuevoIngresoClient() {
       ) : (
         // Pantalla ancha: a la izquierda lo que se recibe, a la derecha el panel
         // fijo. En el teléfono, una columna en el orden del DOM: cliente y ficha,
-        // servicios, lo demás y la barra de acciones.
+        // servicios, lo demás y la barra de acciones. Filas auto/1fr: si el panel
+        // es más alto que la izquierda, lo que sobra va abajo y no entre tarjetas.
         <form
-          className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start"
+          className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-[auto_1fr] lg:items-start"
           onSubmit={(e) => { e.preventDefault(); save(false); }}
         >
           <div className="space-y-4 lg:col-start-1 lg:row-start-1">
@@ -550,10 +551,11 @@ export default function NuevoIngresoClient() {
             )}
           </div>
 
-          {/* Panel: fijo bajo el encabezado de la app. Si no cabe, el total y los
-              botones se quedan pegados abajo y lo demás se ve al bajar. */}
-          <Card className="lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-            <div className="space-y-4 p-4">
+          {/* Panel: fijo bajo el encabezado de la app y nunca más alto que la
+              pantalla. Si no cabe, lo de arriba se desplaza dentro del panel y el
+              total con los botones quedan abajo, a la vista. */}
+          <Card className="lg:sticky lg:top-24 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:flex lg:max-h-[calc(100dvh-7rem)] lg:flex-col">
+            <div className="space-y-4 p-4 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
               <div className="space-y-1.5">
                 <CardTitle className="text-base">Servicios</CardTitle>
                 <CardDescription>
@@ -610,6 +612,7 @@ export default function NuevoIngresoClient() {
                       locationId={config.settings?.partsLocationId}
                       suggestedCategoryId={catalogById.get(lineas[0]?.serviceTypeId ?? '')?.partCategoryId}
                       onPick={(p) => { setPart(p); setPartQty(1); }}
+                      enLinea
                     />
                   )}
                 </div>
@@ -646,7 +649,9 @@ export default function NuevoIngresoClient() {
                 )}
               </div>
             </div>
-            <div className="hidden rounded-b-lg border-t bg-card p-4 lg:sticky lg:bottom-0 lg:block">{acciones}</div>
+            {/* Pegado abajo también mientras el panel todavía no llegó arriba
+                (al abrir la página puede empezar más abajo de la pantalla). */}
+            <div className="hidden shrink-0 rounded-b-lg border-t bg-card p-4 lg:sticky lg:bottom-0 lg:block">{acciones}</div>
           </Card>
 
           <div className="space-y-4 lg:col-start-1 lg:row-start-2">
