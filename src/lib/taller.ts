@@ -358,3 +358,25 @@ export function tiposQueFaltan(key: string, existentes: string[]): EquipmentTemp
   const tengo = new Set(existentes.map((n) => n.trim().toLowerCase()));
   return rubro.equipos.filter((e) => !tengo.has(e.name.trim().toLowerCase()));
 }
+
+export type FilaAjustesADomicilio = {
+  company_id: string;
+  branch_id: string;
+  default_at_customer: true;
+  updated_at: string;
+};
+
+/** Filas de `taller_settings` para que las órdenes nuevas salgan a domicilio, al
+ *  cargar un rubro a domicilio: solo las sucursales de ESA empresa, cada una con su
+ *  company_id. Sin empresa, ninguna (quien ve sucursales de varias empresas —un super
+ *  admin, alguien de dos empresas— no tiene que tocar las de otra). */
+export function filasDeAjustes(
+  companyId: string | null | undefined,
+  branches: { id: string; company_id: string }[],
+  ahora: Date = new Date(),
+): FilaAjustesADomicilio[] {
+  if (!companyId) return [];
+  return branches
+    .filter((b) => b.company_id === companyId)
+    .map((b) => ({ company_id: companyId, branch_id: b.id, default_at_customer: true, updated_at: ahora.toISOString() }));
+}

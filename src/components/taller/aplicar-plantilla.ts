@@ -1,5 +1,5 @@
 import { supabase } from '@/lib/supabase/client';
-import { RUBROS, tiposQueFaltan } from '@/lib/taller';
+import { RUBROS, filasDeAjustes, tiposQueFaltan } from '@/lib/taller';
 
 /** Carga la plantilla de un rubro: crea los tipos de ficha que falten (por nombre) con
  *  sus chequeos (los dos primeros obligatorios, también en «Atender ahora»). Si el
@@ -42,16 +42,12 @@ export async function aplicarPlantilla(
     }
   }
   if (rubro.aDomicilio) {
-    const { data: sucs, error: e3 } = await supabase.from('branches').select('id').eq('company_id', opts.companyId);
+    const { data: sucs, error: e3 } = await supabase.from('branches').select('id, company_id').eq('company_id', opts.companyId);
     if (e3) return { creados, error: e3.message };
-    if (sucs && sucs.length > 0) {
-      const { error: e4 } = await supabase.from('taller_settings').upsert(
-        sucs.map((b: { id: string }) => ({
-          company_id: opts.companyId,
-          branch_id: b.id, default_at_customer: true, updated_at: new Date().toISOString(),
-        })),
-        { onConflict: 'branch_id' },
-      );
+    // Solo las de esta empresa, cada una con su company_id (filtro también aquí, no solo en la consulta).
+    const filas = filasDeAjustes(opts.companyId, sucs ?? []);
+    if (filas.length > 0) {
+      const { error: e4 } = await supabase.from('taller_settings').upsert(filas, { onConflict: 'branch_id' });
       if (e4) return { creados, error: e4.message };
     }
   }

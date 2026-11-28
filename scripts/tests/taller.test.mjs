@@ -8,7 +8,7 @@ import {
   caseNumber, checklistFor, daysInShop, equipmentLabel, isLate, isOpen, isReadyToDeliver,
   mensajeDeEstado, missingRequired, statusLabel, customerText, manualStatuses, canClose, closeLabel,
   fichaFields, camposDeFicha, valorDeFicha, defaultStaysInShop, trackingUrl, warrantyActive, whatsappPhone, fieldKey, RUBROS, tiposQueFaltan,
-  ordenNueva,
+  ordenNueva, filasDeAjustes,
 } from '../../src/lib/taller.ts';
 import {
   duracion, fechaDeCobro, porTecnico, resumen, tiempoPorEstado, topEquipos, topLineas,
@@ -331,6 +331,26 @@ test('rubros de servicios', () => {
     assert.ok(preset.modules.includes('services'), tipo);
     assert.ok(RUBROS.some((r) => r.key === preset.tallerRubro), `${tipo}: rubro ${preset.tallerRubro}`);
   }
+});
+
+test('plantilla a domicilio: ajustes solo para las sucursales de la empresa', () => {
+  const sucursales = [
+    { id: 'b1', company_id: 'A' },
+    { id: 'b2', company_id: 'B' },
+    { id: 'b3', company_id: 'A' },
+  ];
+  const ahora = new Date('2026-11-27T12:00:00Z');
+  const filas = filasDeAjustes('A', sucursales, ahora);
+  assert.deepEqual(filas.map((f) => f.branch_id), ['b1', 'b3']);
+  for (const f of filas) {
+    assert.equal(f.company_id, 'A');
+    assert.equal(f.default_at_customer, true);
+    assert.equal(f.updated_at, ahora.toISOString());
+  }
+  // Sin empresa no sale ninguna fila (antes tocaba las sucursales de todas).
+  assert.deepEqual(filasDeAjustes('', sucursales), []);
+  assert.deepEqual(filasDeAjustes(undefined, sucursales), []);
+  assert.deepEqual(filasDeAjustes(null, sucursales), []);
 });
 
 test('el rubro de mascotas es peluquería, sin lo clínico', () => {
