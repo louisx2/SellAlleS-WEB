@@ -6,7 +6,7 @@
 
 **Architecture:** Solo front. Se compactan dos componentes que solo usa Nueva orden (`ChecklistForm`, `FichaPicker`) y se reacomoda `nuevo-client.tsx` en una grilla de dos columnas con un panel derecho `sticky`. Una función pura nueva (`notaVisible`) decide cuándo se ve la nota de un chequeo y se prueba con `node --test`.
 
-**Tech Stack:** Next 15 (export estático), React, Tailwind, componentes shadcn del proyecto.
+**Tech Stack:** Next 14.2 (export estático), React, Tailwind, componentes shadcn del proyecto.
 
 **Spec:** `docs/superpowers/specs/2026-11-28-nueva-orden-dos-columnas-design.md`
 
